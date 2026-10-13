@@ -1,0 +1,64 @@
+"""Build a native PyInstaller sidecar for the current host only.
+
+Usage: python backend/scripts/build_sidecar.py
+Requires pyinstaller, rustc, and an English tessdata file. Run on the target OS.
+"""
+from __future__ import annotations
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+BACKEND = ROOT / 'backend'
+TAURI_BINARIES = ROOT / 'frontend' / 'src-tauri' / 'binaries'
+
+
+def detect_triple():
+    output = subprocess.check_output(['rustc','-vV'], text=True)
+    return next(line.partition(': ')[2].strip() for line in output.splitlines() if line.startswith('host:'))
+
+
+def locate_tessdata():
+    custom = os.getenv('TESSDATA_SOURCE')
+    possibilities = [Path(custom)] if custom else []
+    possibilities += [
+        Path('/usr/share/tesseract-ocr/5/tessdata/eng.traineddata'),
+        Path('/opt/homebrew/share/tessdata/eng.traineddata'),
+        Path('/usr/local/share/tessdata/eng.traineddata'),
+        Path(r'C:\Program Files\Tesseract-OCR\tessdata\eng.traineddata'),
+    ]
+    for path in possibilities:
+        if path.is_dir():
+            path = path / 'eng.traineddata'
+        if path.is_file():
+            return path
+    raise SystemExit('Missing English OCR model. Set TESSDATA_SOURCE=/path/to/eng.traineddata. Without it the installed app cannot OCR offline.')
+
+
+def main():
+    triple = detect_triple()
+    tessdata = locate_tessdata()
+    addition = os.pathsep
+    out = ROOT / '.build-sidecar'
+    build_env = os.environ.copy()
+    build_env['PYINSTALLER_CONFIG_DIR'] = str(out / 'config')
+    cmd = [sys.executable, '-m', 'PyInstaller', '--onefile', '--noconfirm', '--clean',
+           '--name', 'filing-api', '--distpath', str(out / 'dist'), '--workpath', str(out / 'work'),
+           '--specpath', str(out), '--paths', str(BACKEND), '--collect-all', 'pymupdf',
+           '--add-data', f'{BACKEND / "app" / "rules" / "profiles.json"}{addition}app/rules',
+           '--add-data', f'{tessdata}{addition}tessdata', str(BACKEND / 'launcher.py')]
+    print('Building native sidecar for', triple)
+    subprocess.check_call(cmd, cwd=ROOT, env=build_env)
+    extension = '.exe' if sys.platform == 'win32' else ''
+    TAURI_BINARIES.mkdir(parents=True, exist_ok=True)
+    built = out / 'dist' / ('filing-api' + extension)
+    target = TAURI_BINARIES / ('filing-api-' + triple + extension)
+    shutil.copy2(built, target)
+    if sys.platform != 'win32':
+        target.chmod(0o755)
+    print('Created', target)
+
+if __name__ == '__main__':
+    main()

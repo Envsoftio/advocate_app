@@ -1,0 +1,44 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Minimum capability surface for CourtBundle desktop POC",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://www.delhihighcourt.nic.in/web/e-filing"
+        },
+        {
+          "url": "https://delhihighcourt.nic.in/web/no-6rulesdhc-dated-24012026-notification-re-amendment-rule-34-e-filing-rules-high-court-delhi-2021"
+        },
+        {
+          "url": "https://delhihighcourt.nic.in/files/2026-02/notifications-and-practice-directions/12_0.pdf"
+        },
+        {
+          "url": "https://www.delhihighcourt.nic.in/web/online-forms-downloadable-forms"
+        },
+        {
+          "url": "https://www.delhihighcourt.nic.in/web/faqs/list-of-common-objections"
+        },
+        {
+          "url": "https://www.delhihighcourt.nic.in/web/sites/default/files/efiling/PRACTICE_DIRECTIONS.pdf"
+        },
+        {
+          "url": "https://www.delhihighcourt.nic.in/web/sites/default/files/efiling/efilingfaq.pdf"
+        },
+        {
+          "url": "https://dhcefiling.nic.in/DHCGetFile/MEMOformat.xls"
+        },
+        {
+          "url": "https://www.delhihighcourt.nic.in/files/announcements/downloadfile_bf49033x.pdf"
+        },
+        {
+          "url": "https://www.delhihighcourt.nic.in/files/announcements/downloadfile_hfp32gfb.pdf"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,195 @@
+# CourtBundle POC — Indian Court Filing Preparation
+
+**Status:** working PDF/bundling POC. The Vue browser journey, an unsigned Apple Silicon package, native OCR and native Save were exercised locally on 13 October 2026. Clean-device installation, macOS 12 minimum, macOS Intel and Windows x64 remain unverified. See `docs/POC_ACCEPTANCE_TESTS.md` for exact evidence and gaps. Do not use this POC to submit real confidential case files or represent it as court-approved.
+
+This is a local-first desktop application prototype using **Tauri 2 + Vue 3 + TypeScript + Python FastAPI + PyMuPDF + integrated Tesseract OCR**.
+
+The proof-of-concept workflow is:
+
+`Create matter -> Import PDF/images -> Inspect/edit working copies -> OCR -> Classify/group/drag to order -> Configure volumes -> Generate index/bookmarks -> Validate -> Export combined PDF + volumes + CSV + ZIP`
+
+The Delhi High Court profile also includes a source-linked preparation guide,
+official form/template links, explicit handling of the 2026 Rule 3.4 size
+amendment, and a Memo of Parties CSV review helper. The helper does not replace
+the court's official XLS template or an advocate's case-specific review.
+
+## Repository layout
+
+```text
+CourtBundle_POC/
+  backend/
+    app/
+      main.py         # FastAPI endpoints, local bearer token
+      storage.py      # SQLite metadata, filesystem originals and working copies
+      pdf_ops.py      # PDF import/page operations, OCR, draft cover
+      engine.py       # deterministic bundling, index, links, volumes, checks
+      jobs.py         # queued jobs, progress and cancellation
+      rules/profiles.json # source-linked ILLUSTRATIVE court rules
+    launcher.py       # local API / packaged sidecar entry point
+    scripts/
+      generate_demo_docs.py
+      build_demo_output.py
+      build_sidecar.py
+    tests/             # pytest integration coverage
+  frontend/
+    src/               # Vue 3 interface with PDF.js preview
+    src-tauri/         # Rust Tauri desktop shell, native icons, capabilities
+    package.json
+  samples/             # synthetic PDF/JPEG sources and verified output package
+  docs/
+    PROJECT_CONTEXT_AND_HANDOFF.md
+    POC_ACCEPTANCE_TESTS.md
+```
+
+## Requirements
+
+- Approved first-phase targets: Windows 10/11 x64 and macOS 12+ on Intel and Apple Silicon. Each combination still requires native build and device verification.
+- Python 3.11–3.13 with an environment supporting PyMuPDF; Node.js >=20; npm; Rust toolchain (for Tauri); system toolchains required by Tauri.
+- **Development OCR:** Tesseract English traineddata (`eng.traineddata`); install Tesseract/English models as appropriate for your OS.
+- Internet **only for installing development dependencies**; all application processing is local after dependencies are installed.
+
+## Quick start: browser-based frontend development
+
+### Terminal 1 — backend
+
+**macOS / Linux**
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+./dev.sh
+```
+
+**Windows PowerShell**
+
+```powershell
+cd backend
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+$env:COURTBUNDLE_API_TOKEN = 'development-token-change-me'
+python launcher.py --port 8765
+```
+
+The backend listens on `127.0.0.1:8765`, requires a bearer token for every API route, and saves data to `~/.courtbundle-poc` by default. This fixed token is for local *development only*. The Tauri shell creates a random token at launch.
+
+### Terminal 2 — frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open **http://127.0.0.1:1420**. Browser development uses `frontend/.env.development` (local test token). The native Tauri app does **not** use this fixed token.
+
+Create a matter, import the files in `samples/`, run OCR on `04_scanned_annexure.jpg`, set part/type/labels, configure a 6-page volume cap under **Build bundle**, and download the result.
+
+## Automated Python tests
+
+```bash
+cd backend
+python -m pytest -q
+```
+
+The included integration tests cover authentication, matter creation, PDF import, page reordering/rotation/deletion, cover generation, preflight, OCR, volume splitting, export-size failure, original-byte integrity, annotation/link export policy, group contiguity, PDF outlines/index links and ZIP export. Use the current pytest result; the 15-test count was the baseline before QA-02 additions on 13 October 2026.
+
+Browser E2E coverage uses an isolated temporary data directory and synthetic samples:
+
+```bash
+cd frontend
+npm run test:e2e
+```
+
+Set `COURTBUNDLE_TEST_PYTHON` to a Python with backend requirements if neither `backend/.venv312` nor `backend/.venv` exists. The test uses installed Google Chrome and starts local servers on ports 8768 and 1420. It does not verify Tauri native behavior.
+
+To rebuild the demo export from purely synthetic files:
+
+```bash
+cd backend
+python scripts/build_demo_output.py
+```
+
+Results appear in `samples/example_output/`. `combined.pdf` and `filing-package.zip` were generated and inspected; `filing-package.zip` includes all volume PDFs, CSV index, JSON validation report and a warning note.
+
+## Tauri desktop: development and packaging
+
+For native development with Vue, Rust and Python hot reload, run this single
+command from the repository root:
+
+```bash
+./dev.sh
+```
+
+The script uses `backend/.venv312` when available, installs missing development
+dependencies, starts FastAPI from source with Uvicorn reload, and starts Tauri
+with Vite hot module replacement. Development mode deliberately does not build
+or launch the frozen PyInstaller sidecar. Stop both processes with `Ctrl+C`.
+
+The packaged application still requires the platform-specific sidecar below.
+
+Tauri CLI expects `frontend/src-tauri/`. First make a native Python executable for your target host:
+
+```bash
+# backend virtual environment must have requirements-dev.txt installed,
+# including PyInstaller; Rust/rustc must be on PATH.
+python backend/scripts/build_sidecar.py
+```
+
+**Run from the repository root**. The script detects the local Rust host target and copies a correctly suffixed executable into `frontend/src-tauri/binaries/`. It bundles the English Tesseract traineddata alongside the Python API. Set `TESSDATA_SOURCE` to the full path of `eng.traineddata` if it cannot find the model automatically.
+
+Next:
+
+```bash
+cd frontend
+npm install
+npm run tauri:dev
+# To build a distributable for this host:
+npm run tauri:build
+```
+
+The Tauri desktop process starts the bundled sidecar on a random loopback port, passes a random per-session token via environment, stores matter files in the platform-specific app data directory, and stops the child when the app exits. A platform-native sidecar **must be built on that target platform** (or via an appropriate CI runner). Neither a signed/notarized macOS build nor a Windows installer is included in this source ZIP.
+
+### Supported builds need device QA
+
+- **Windows:** test WebView2, PDF.js, native sidecar spawn, OCR traineddata, download/export and installer.
+- **macOS Intel / Apple Silicon:** build the matching Python sidecar for each architecture, test WKWebView canvas/PDF.js, permissions and app termination. Signing/notarization needed for production distribution.
+- **Linux:** Deferred from the approved first-phase targets; no Linux build is verified here.
+
+## API summary
+
+All routes require `Authorization: Bearer <local-token>`.
+
+- `GET /health`, `GET /profiles`
+- `GET|POST /matters`; `GET|PATCH|DELETE /matters/{id}`
+- `GET /matters/{id}/portable`; `POST /matters/restore` (versioned local matter backup/restore)
+- `GET /matters/{id}/history`; `POST /matters/{id}/history/undo|redo`
+- `GET /matters/archived`; `POST /matters/{id}/restore`; `GET /matters/{id}/archived-documents|storage|audit`
+- `GET|POST /matters/{id}/documents`; `POST /matters/{id}/cover`
+- `GET|PUT /matters/{id}/memo-parties` (matter-scoped review data)
+- `POST /matters/{id}/documents/reorder`
+- `PATCH|DELETE /documents/{id}`; `GET /documents/{id}/pdf`
+- `POST /documents/{id}/pages/reorder|rotate|delete`; `POST /documents/{id}/ocr`
+- `GET /matters/{id}/validate`; `POST /matters/{id}/build`
+- `GET /jobs/{id}`; `POST /jobs/{id}/cancel`
+- `GET /matters/{id}/exports`; `GET /matters/{id}/exports/{exportId}/{filename}`
+
+Full request/response examples and architecture notes are in `docs/PROJECT_CONTEXT_AND_HANDOFF.md`.
+
+## POC boundaries — important
+
+- Delhi High Court is represented by an **illustrative technical subset**, not a comprehensive court profile. The configurable page cap is **not** a national court rule. The 2026 Delhi High Court rule concerns **300 MB file size**, not a 300-page maximum.
+- This tool prepares PDFs; it does not e-file documents with courts or establish legal validity, admissibility, certification, signing, translation accuracy, limitation or filing acceptance.
+- Imported originals are preserved. Working-copy changes and export stamps can affect digital signatures or appearance. Do not use this POC as an evidence-preservation tool without review.
+- OCR uses English traineddata and rasterizes image-only pages. OCR is fallible, particularly for handwriting and seals. Non-Latin index titles are not yet properly rendered.
+- PDF and JPG/PNG import only; Word, Excel, PowerPoint and PDF visual text editing are future development.
+- Browser export uses authenticated fetch and browser-style download. Tauri export uses a native Save dialog and streams to a temporary file before replacing the destination. Apple Silicon native Save has local device evidence; validate save and failure behaviour on every target system.
+- Job state and progress persist in SQLite. After a restart, unfinished jobs are shown as interrupted and can be retried from a new job; abandoned build staging is removed. Working-copy revisions and per-matter locks keep app edits out of active builds. Large-job cancellation and native crash recovery still need device testing.
+- Memo of Parties helper rows autosave to the selected local matter and show save failures. Document-detail and bundle-setting forms use explicit Save, show unsaved indicators, and prompt before discarding drafts during navigation or reload. A failed bundle-settings save stops the build.
+- Local data and portable matter backups are **not encrypted at rest**. Matter/document removal archives records and keeps files; there is no in-app permanent delete. See [local security and retention](docs/LOCAL_SECURITY_AND_RETENTION.md). Do not import actual confidential court/client files for a demonstration.
+- Vue build, Vitest, Apple Silicon Rust compile and local package tests passed on 13 October 2026; see the acceptance log for exact runs. Other target builds and clean-device tests are still required.
+- **PyMuPDF licensing:** Determine AGPL/commercial licensing requirements before distributing any proprietary build. Review other dependencies' licenses too.
+
+See [Project Context and Handoff](docs/PROJECT_CONTEXT_AND_HANDOFF.md) and [Acceptance Tests](docs/POC_ACCEPTANCE_TESTS.md).

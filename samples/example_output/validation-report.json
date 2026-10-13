@@ -1,0 +1,41 @@
+{
+  "matter_id": "ddec3dd918244f969eb1ccbc5a21d3ea",
+  "export_id": "0edfad3420414a0390e5f90432855289",
+  "profile": "delhi-hc-illustrative",
+  "profile_status": "NOT_LEGALLY_APPROVED",
+  "created_at": "2026-10-12T14:34:14+00:00",
+  "total_input_documents": 4,
+  "volume_count": 2,
+  "combined_pages": 10,
+  "combined_bytes": 160208,
+  "checks": [
+    {
+      "severity": "info",
+      "code": "PROFILE_NOT_APPROVED",
+      "message": "This is a demo/illustrative profile, not a verified court-compliance determination.",
+      "document_id": null
+    },
+    {
+      "severity": "info",
+      "code": "TECHNICAL_PREFLIGHT",
+      "message": "Basic technical preflight completed. Legal completeness, authenticity, signatures, limitation and registry acceptance are not verified.",
+      "document_id": null
+    },
+    {
+      "severity": "info",
+      "code": "NOT_A_FILING_APPROVAL",
+      "document_id": null,
+      "message": "Technical checks passed or reported. Filing acceptance, legal validity and registry objections need human review."
+    }
+  ],
+  "volumes": [
+    {
+      "name": "volume-01.pdf",
+      "items": 2
+    },
+    {
+      "name": "volume-02.pdf",
+      "items": 2
+    }
+  ]
+}

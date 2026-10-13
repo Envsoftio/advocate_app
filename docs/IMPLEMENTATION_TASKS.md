@@ -1,0 +1,368 @@
+# CourtBundle implementation backlog
+
+Created: 13 October 2026. Based on the client brief, repository handoff documents, and the code audit in this conversation.
+
+## Baseline and scope
+
+[Certain] The current POC implements matter storage, PDF/image import, working-copy reorder/rotate/delete, English searchable OCR, document collation, whole-document volume allocation, generated indexes/bookmarks, pagination, and PDF/CSV/JSON/ZIP export. These foundations should be extended, not rebuilt.
+
+The preceding audit ran 9 passing backend tests, a successful Vue/TypeScript production build, and 4 passing Vitest tests. It did not verify browser interactions, native runtime, installers, Windows/macOS save behaviour, or production performance. Record subsequent verification separately; do not interpret this baseline as release acceptance.
+
+[Likely] The implementation order below provides the shortest path to a reliable filing-preparation MVP. Advanced editor and conversion features remain obligations from the original brief unless explicitly deferred by the product owner/client.
+
+References:
+
+- [README](../README.md)
+- [Project handoff](PROJECT_CONTEXT_AND_HANDOFF.md)
+- [Original root handoff](../CourtBundle_Project_Context_and_Handoff.md)
+- [Acceptance tests](POC_ACCEPTANCE_TESTS.md)
+- [Development instructions](../AGENTS.md)
+
+## How to use this backlog
+
+- Unchecked tasks are pending, including verification tasks for existing functionality.
+- IDs are stable. Record owner, status, implementation/PR reference, and verification evidence under each task as work proceeds.
+- Status values: `TODO`, `IN PROGRESS`, `BLOCKED: <reason>`, `DONE`.
+- Dependencies identify prerequisites; decision tasks block only their dependent features.
+- P0: native proof and integrity. P1: filing MVP. P2: broader client scope. P3: additional product improvements.
+- A task is done only when its acceptance criteria pass; source code presence alone is insufficient.
+- Add pytest coverage for every new volume/index rule. All indexes, CSV ranges, bookmarks and combined offsets must derive from the deterministic page map in `backend/app/engine.py`.
+- Use synthetic fixtures. Preserve imported originals. Never equate OCR text, scanned signatures or technical checks with legal verification.
+- Keep core processing offline and independent of the UI. Do not replace Tauri/Vue as part of this backlog.
+
+## 0. Product decisions
+
+- [x] **DEC-01 — Confirm stack and supported platforms** · P0
+  - Record client acceptance of Tauri/Vue replacing Electron/React and Tauri packaging replacing Electron Builder.
+  - Specify Windows/macOS versions and architectures; explicitly accept or defer Linux from the original build scope.
+  - **Acceptance:** A recorded platform/architecture matrix and stack decision; platform delivery is not implied by configuration alone.
+  - **Status:** DONE · Decision owner: product owner/client · Recorded: 13 October 2026.
+  - **Implementation inspected:** `frontend/package.json` uses Vue 3, TypeScript and Tauri 2; `frontend/src-tauri/tauri.conf.json` enables Tauri bundling with an external Python binary; `backend/scripts/build_sidecar.py` builds for the local Rust host triple. These establish the POC implementation, not delivered platform support.
+  - **Approved stack decision:** Tauri 2 + Vue 3 + TypeScript replaces Electron + React + TypeScript; Tauri packaging replaces Electron Builder. Source: product owner confirmation in this conversation on 13 October 2026.
+  - **Approved target matrix:**
+
+    | Target  | Architecture        | Minimum       | Delivery evidence                                    |
+    | ------- | ------------------- | ------------- | ---------------------------------------------------- |
+    | Windows | x86-64              | Windows 10/11 | Pending native build and device QA                   |
+    | macOS   | Intel x86-64        | macOS 12      | Pending matching sidecar, native build and device QA |
+    | macOS   | Apple Silicon arm64 | macOS 12      | Pending matching sidecar, native build and device QA |
+    | Linux   | Deferred            | —             | Outside the approved first-phase targets             |
+
+  - **Review:** The product owner confirmed the stack, Windows 10/11 x64, macOS 12+ Intel and Apple Silicon, and Linux deferral in this conversation. The matrix records delivery targets, not verified compatibility. Native runtime and packaging evidence remain pending under NAT-01/NAT-02.
+
+- [ ] **DEC-02 — Define the first legal workflow** · P1
+  - Specify court, bench/side, case type, stage, Parts 1–4, required documents and reviewer.
+  - Define group numbering such as 1a/1b/1c, index columns, separators, page/byte limits and oversized-document handling.
+  - **Acceptance:** A synthetic reference matter with reviewer-approved expected outputs and written rules. Treat the approximate 300-page cap as a workflow setting unless a scoped official source establishes otherwise.
+  - **Status:** IN PROGRESS · Product owner chose Delhi High Court as **illustrative only** on 13 October 2026; legal reviewer pending. No case-specific rule pack or filing approval follows from this choice.
+  - **Official-source review (13 October 2026):** The [Delhi High Court Forms & Proformas page](https://delhihighcourt.nic.in/web/online-forms-downloadable-forms?page=1) links an [Index form](https://delhihighcourt.nic.in/files/announcements/downloadfile_we9xyp1u.pdf) with `S.No.`, `Particulars`, `Court Fee`, and `Pages` headings. The form itself bears a 2002 date and covers several jurisdictions; it does not establish the current index schema for an unspecified case type. The same page links a [List of Documents form](https://delhihighcourt.nic.in/files/announcements/downloadfile_44t6cx1t.pdf) framed around a civil suit. The [Forms & Proformas page](https://delhihighcourt.nic.in/web/online-forms-downloadable-forms) also lists a Memo of Parties upload template. These are candidates for case-specific advocate review, not a general required-document checklist. The [e-Filing page](https://delhihighcourt.nic.in/web/e-filing) links rules, FAQs and directions; none of these forms defines this project's Part 1–4 meaning or 1a/1b/1c grouping.
+  - **Engineering reference matter, pending legal review:** `backend/scripts/build_demo_output.py` uses the four synthetic files in `samples/`, `delhi-hc-illustrative`, a fictional case type, a **6-page demonstration cap including indexes**, and no group keys or separators. The 6-page cap is a test setting, not a Delhi High Court rule. The existing `samples/example_output/filing-package.zip` was inspected and contains two volumes and a 10-page combined PDF:
+
+    | Input                     | Demo part | Volume pages  | Combined pages |
+    | ------------------------- | --------- | ------------- | -------------- |
+    | `01_petition.pdf`         | 1         | Volume 1: 2–4 | 2–4            |
+    | `02_impugned_order.pdf`   | 1         | Volume 1: 5–6 | 5–6            |
+    | `03_affidavit.pdf`        | 2         | Volume 2: 2–3 | 8–9            |
+    | `04_scanned_annexure.jpg` | 2         | Volume 2: 4   | 10             |
+
+    Each volume starts with one index page. ZIP inspection found `combined.pdf`, both volume PDFs, `index.csv`, `validation-report.json` and `READ_ME_FIRST.txt`; PDF inspection found links and bookmarks pointing to the listed pages. The generated CSV columns are `volume,part,kind,label,title,start_page,end_page,total_pages`, which differ from the linked court Index form. This is reproducible technical evidence, not reviewer-approved expected filing output.
+
+  - **Open decisions for acceptance:** Identify the bench/side, exact case type, filing stage and filing route; appoint an advocate reviewer; define Parts 1–4 and required versus conditional documents; approve the index columns/template, group numbering, separators/covers, page numbering, page/byte limits and oversized-document policy for that scope. Obtain reviewer approval of a synthetic reference matter and expected PDFs/CSV/ZIP before marking DONE. The profile's 300 MB technical setting must not be confused with the 6-page demonstration cap or treated as approval of any uploadable artifact.
+  - **Provisional engineering review:** At the product owner's request on 13 October 2026, Codex approved the existing synthetic output as a repeatable *technical* fixture in [DEC-02 synthetic engineering reference](DEC02_ENGINEERING_REFERENCE.md). This does not fill the unspecified bench, case type, stage, route or Parts 3–4 and does not substitute for advocate approval. DEC-02 remains IN PROGRESS.
+
+- [ ] **DEC-03 — Define conversion and editable-OCR scope** · P2
+  - List supported input/output pairs for PDF, images, Word, Excel and PowerPoint, including legacy formats if required.
+  - Distinguish searchable OCR, correction of the OCR layer and visual editing/reflow of document text.
+  - **Acceptance:** A conversion matrix, fidelity expectations, unsupported-case behaviour and representative synthetic fixtures for each promised operation.
+  - **Status:** IN PROGRESS · Product owner selected all modern/legacy Word, Excel and PowerPoint formats in both PDF directions, every direct Office pair, PDF-to-PNG/JPEG export, and **visible PDF text/layout editing** for the first release on 13 October 2026. Fidelity is defined best effort with documented unsupported content. These are scope decisions, not implemented capabilities.
+  - **Current implementation review:** `backend/app/main.py` accepts PDF, PNG, JPEG and JPG files (80 MiB per file); `backend/app/pdf_ops.py` makes PDF working copies and applies English searchable OCR only to pages with no extractable text. It rasterizes those pages at 240 DPI and does not offer OCR correction or visible text editing. `backend/app/engine.py` emits combined/volume PDFs, CSV, JSON and ZIP. Unsupported upload suffixes receive HTTP 415. No Office importer/exporter or PDF-to-image export exists. The backend suite passed 9 tests on 13 October 2026; that does not verify conversion fidelity or native packaging.
+  - **Approved first-release format matrix:** A `S` cell is one promised directional operation; `—` is same-format import/save, not a conversion. This is **42** PDF/Office and Office/Office directions, all currently absent. PDF ↔ PNG and PDF ↔ JPEG add four image directions; image → PDF is already implemented, while PDF → image remains absent. Case-insensitive extensions are intended. `DOC`, `XLS` and `PPT` are legacy binary formats, not renamed modern files.
+
+    | Input ↓ / Output → | PDF | DOCX | DOC | XLSX | XLS | PPTX | PPT |
+    | ------------------ | --- | ---- | --- | ---- | --- | ---- | --- |
+    | PDF                | —   | S    | S   | S    | S   | S    | S   |
+    | DOCX               | S   | —    | S   | S    | S   | S    | S   |
+    | DOC                | S   | S    | —   | S    | S   | S    | S   |
+    | XLSX               | S   | S    | S   | —    | S   | S    | S   |
+    | XLS                | S   | S    | S   | S    | —   | S    | S   |
+    | PPTX               | S   | S    | S   | S    | S   | —    | S   |
+    | PPT                | S   | S    | S   | S    | S   | S    | —   |
+
+  - **Image and existing-PDF operations:** PNG/JPEG → PDF working copy (implemented); PDF → PNG/JPEG (promised, one image per selected page, configurable page range and DPI, with output dimensions and orientation reported); PDF → working PDF → combined/volume PDF (implemented). TIFF, GIF, BMP, HEIC, SVG, image-to-image conversion and editable image export are outside this matrix until separately selected. An output file extension alone never proves conversion fidelity.
+  - **Best-effort fidelity contract for every promised direction:** Preserve source originals. Record the input/output format and converter version. Keep readable text, meaningful reading order and supported tables/images where the destination can represent them. For PDF, preserve expected page/slide order and report page count; for Office outputs, content must be genuinely editable where mapped, rather than a whole-page image passed off as conversion. Compare visual output against a reviewed synthetic baseline; record text and element losses by page/sheet/slide. If a required element cannot be represented, either fail clearly or publish a labelled incomplete draft with itemized warnings; never mark it silently ready. No universal pixel-perfect layout or formula/animation/macro equivalence is promised. Precise tolerances and destination mappings must be set in fixture expectations before implementation acceptance.
+  - **Direct Office-family mapping to test:** Word → Excel maps paragraphs and tables to ordered rows/sheets; Excel → Word maps sheets to labelled tables with displayed values and reports formula/interactive loss. Word → PowerPoint uses headings/sections as slide boundaries; PowerPoint → Word uses ordered slide text, tables and notes where available. Excel → PowerPoint maps selected sheet ranges/charts to slides; PowerPoint → Excel maps slide tables and text to sheets. Legacy ↔ modern within each family must preserve basic text/table/slide content and report unsupported macros, embedded objects, tracked changes, charts, animations or other lost features. These mappings are design assumptions for product review, not code behaviour.
+  - **OCR/editing levels:** (1) searchable English text layer on image-only pages exists; OCR mistakes remain unverified. (2) correction of the invisible/searchable OCR layer is absent and separately testable. (3) the selected **visible editing** scope changes rendered text and layout in a working PDF. The acceptance fixture must cover replacing/removing existing glyphs, adding text, font substitution, wrapping/overflow, page geometry and persistence after reopen/export on born-digital, scanned and mixed pages. An overlay alone does not count as replacement or reflow. Unsupported fonts/scripts, complex layouts, signatures, annotations and links must be reported before or after the edit as applicable. Neither OCR nor a scanned signature establishes legal authenticity.
+  - **Fixture inventory still required:** Existing `samples/*.pdf` and `samples/04_scanned_annexure.jpg` cover native PDF/JPEG inputs; `backend/tests/test_ocr.py` generates a PNG OCR fixture. Add _actual_ licensed synthetic DOCX, DOC, XLSX, XLS, PPTX and PPT files plus a mixed native/scanned PDF. Use each source against every `S` destination (42 cases), and add PDF→PNG/JPEG output checks and visible-edit cases. Include multi-page text, a table, formulas/charts, slide graphics/notes, nondefault fonts and at least one deliberately unsupported feature. Record expected editable content, visual comparison, order, pagination and explicit warnings/failures for every pair. The current repo has no Office fixture generator or installed Office conversion dependency; this acceptance evidence is pending.
+
+- [x] **DEC-04 — Define signatures, protection and sharing** · P2
+  - Distinguish signature images from certificate-based signing and provider-backed e-signatures.
+  - Define password workflows and an optional online sharing model with expiry/revocation requirements.
+  - **Acceptance:** Explicit capabilities and trust boundaries; offline processing remains usable without accounts or network access.
+  - **Status:** DONE · Product owner scope decision and engineering review: 13 October 2026. This closes the scope decision, not the dependent feature tasks.
+  - **Current POC:** `backend/app/pdf_ops.py` rejects password-protected PDF import. No signature detection, certificate verification, signing, protected export or share-link service exists. The desktop sidecar is launched on loopback with a random session bearer token in packaged mode; browser development uses a fixed development token. `backend/app/rules/profiles.json` marks the Delhi profile illustrative and disallows PDF encryption as a technical setting, not a reviewed case-specific direction. Imported originals are kept separately from working copies, but local data is not encrypted at rest.
+  - **Trust boundaries to preserve:** A scanned/drawn/typed signature appearance is only visible content; it cannot establish a certificate signature or signer identity. Certificate-based PDF signing requires a credential and separate verification of signed byte ranges, certificate chain, time and revocation status, with `unknown` when validation data or network checks are unavailable. A provider-backed eSign flow is a distinct opt-in online service with signer consent, identity workflow, provider contract, audit trail and data-transfer boundaries. The [Controller of Certifying Authorities' eSign overview](https://cca.gov.in/eSign.html) describes the provider model; [Adobe's signed-PDF limitations](https://helpx.adobe.com/au/acrobat/desktop/e-sign-documents/learn-about-signatures/signed-pdf-limitations.html) explain why edits to signed PDFs need explicit handling. No UI status may equate appearance, successful file generation or OCR with legal validity.
+  - **Approved first-release signing scope:** Detect certificate-signature fields/indicators on PDF input and warn before page edits, OCR, conversion or bundling. Require an explicit acknowledgment before transforming a detected signed input; preserve the original. Detection is not cryptographic validation. If inspection is inconclusive, report `unknown` rather than `unsigned`. A scanned/drawn/typed signature appearance is not treated as a certificate signature. Local certificate signing, certificate-chain/revocation verification and provider-backed eSign are **deferred**. Do not display a legal-validity or signature-preserved claim for transformed output.
+  - **Approved first-release protection scope:** Accept a user-supplied password to open an authorized PDF and allow an optional password-protected **PDF** export. Wrong password and cancellation must fail visibly. Do not store passwords in matter metadata, logs, manifests or exports; do not bypass document permissions. Keep imported encrypted originals byte-for-byte; define decrypted working-copy storage, temporary-file cleanup and recovery under DAT-07 before implementing PDF-09. Protected export must reopen with the supplied password and fail without it. The illustrative profile currently disallows encrypted filing output as an unapproved technical setting; the UI must show that restriction without claiming it is a reviewed court rule. Password-protected ZIPs and automatic password recovery are outside this decision.
+  - **Approved first-release sharing boundary:** No in-app upload, hosted share link, account, provider API or remote storage. SHR-01 is deferred. Users may save local exports through NAT-03 and share them outside the app at their own direction. Core matter preparation, OCR, build and local export stay usable without network access or accounts. Reopening online sharing later requires a separate service, access, expiry, revocation, retention and confidential-data decision.
+
+## 1. Native integration and immediate correctness
+
+- [ ] **NAT-01 — Verify browser and native development journeys** · P0
+  - Exercise create matter → import → preview → rotate/reorder/delete → OCR → build → export → reopen.
+  - Check PDF.js workers, CSP, errors, progress, cancellation and sidecar shutdown on each target platform.
+  - **Acceptance:** Platform-specific evidence in the acceptance document, with failures fixed or recorded as blockers. A successful build alone does not pass this task.
+  - **Status:** IN PROGRESS · Browser journey and Apple Silicon debug compile exercised on 13 October 2026; see Section F of `docs/POC_ACCEPTANCE_TESTS.md`. Native UI/runtime, packaged sidecar shutdown, Windows x64 and macOS Intel remain unverified. Browser file-picker automation is blocked by Chrome's disabled file-URL permission, so import was exercised through the isolated local API.
+
+- [ ] **NAT-02 — Verify packaged sidecar on clean machines** · P0 · Depends: DEC-01
+  - Build matching PyInstaller sidecars and installers; include OCR model and required runtime libraries.
+  - **Acceptance:** Installation and offline OCR work without user-installed Python/Tesseract on each supported architecture; startup, exit and reinstall tested.
+  - **Status:** IN PROGRESS · On 13 October 2026 an Apple Silicon packaged app launched, imported a synthetic scan through its native picker, completed OCR, persisted the matter across relaunch, and stopped both PyInstaller processes and its loopback listener on quit after a shutdown fix. A relocated app copy passed startup/reopen/quit. An unsigned arm64 DMG built and verified; see Sections G–H of `docs/POC_ACCEPTANCE_TESTS.md`. This is local macOS 26.6.2 evidence, not a clean-machine test. macOS 12 minimum compatibility, clean install/reinstall without Python/Tesseract, macOS Intel and Windows x64 remain unverified. Use `docs/NAT02_DEVICE_VERIFICATION.md` for the remaining device run.
+
+- [ ] **NAT-03 — Implement native Save and Save As** · P0
+  - Use scoped native dialogs and backend/native file transfer for PDF and ZIP exports; avoid loading entire large exports into browser blobs.
+  - Define overwrite, cancel, default location, insufficient-space and interrupted-write behaviour.
+  - **Acceptance:** Save, Save As and cancellation work on Windows/macOS; failed writes do not leave a misleading complete destination file.
+  - **Status:** IN PROGRESS · Native command and UI wired on 13 October 2026. Save selects a location on first use and reuses it during the app session; Save As opens the system picker. The picker starts in the last selected directory, otherwise at the OS default. A cancelled picker returns without writing. Exports stream from the authenticated loopback backend into a same-directory temporary file; a completed, synced transfer replaces the destination. Transfer, disk and replace errors remove the temporary file and surface an error, leaving the previous destination in place. macOS arm64 Rust compile, two focused Rust tests (including incomplete transfer), Vue build/four tests, backend eleven tests, and unsigned app packaging passed. A later packaged Apple Silicon native UI run verified Save, Save As, repeat Save, picker cancellation, PDF/ZIP hashes and reopen, and permission-denied failure with the prior destination preserved; see Section J of `docs/POC_ACCEPTANCE_TESTS.md`. Low-disk/interrupted native transfer and Windows/macOS Intel device acceptance remain open.
+
+- [x] **FIX-01 — Verify and fix rotation preview invalidation** · P0
+  - Audit finding: rotation does not update the document timestamp watched by the PDF viewer.
+  - **Acceptance:** Rotating a page refreshes its preview immediately without manual reload, preserves originals and reports failure visibly.
+  - **Status:** DONE · 13 October 2026. The rotation endpoint changes `updated_at`; the viewer reloads when it changes. Browser runtime and the QA-01 Playwright journey confirmed the preview canvas refreshes immediately. The backend regression confirms the source original's bytes remain unchanged; edit failures emit a visible error. Native viewer coverage remains under NAT-01.
+
+- [x] **FIX-02 — Define export-size failure behaviour** · P0
+  - A generated artifact above the selected technical profile cap now fails the build before publication. The cap is checked against the ZIP, combined PDF, every volume PDF, CSV and validation report. There is no override in this POC.
+  - Separate generated drafts from outputs satisfying the selected technical checks; define blocking or explicit override behaviour.
+  - **Acceptance:** An oversized fixture cannot appear unconditionally ready; UI/report agree, and prior valid exports remain intact. Define checks for each uploadable artifact, not just the combined PDF.
+  - **Status:** DONE · 13 October 2026. Staged files are removed on size failure; the job error names oversized artifacts and no new manifest/report is published. The build UI labels a retained package as a previous export after failure. Synthetic backend regression covers both combined-PDF and ZIP-only failures and checks retention of the prior export. Backend: 12 passed; Vue build: passed; Vitest: 4 passed. The cap remains a selected technical setting, not a case-specific filing approval.
+
+- [x] **FIX-03 — Verify original presence and integrity** · P0
+  - Check missing originals and compare source bytes against stored hashes during explicit integrity validation and before release/export as appropriate.
+  - **Acceptance:** Missing or modified source fixtures are reported with document identifiers; no automatic rewriting of originals or baseline hashes.
+  - **Status:** DONE · 13 October 2026. Explicit validation reports `MISSING_ORIGINAL`, `ORIGINAL_UNREADABLE` or `ORIGINAL_HASH_MISMATCH` with document IDs. Build preflight blocks these failures, and a second hash check blocks publication if a source changes during assembly. No original or stored hash is rewritten. Synthetic regression verifies missing and modified originals, a change during build, and retention of a prior valid export. Backend: 14 passed. Checks establish integrity at the times run; build/edit locking was subsequently added under DAT-01.
+
+- [x] **FIX-04 — Make annotation/link export handling explicit** · P0
+  - Policy: volume and combined PDFs omit working-copy PDF annotation objects and source link actions. Generated index links and bookmarks are rebuilt from the deterministic page map. Imported originals are retained. Flattened marks already in page content remain visible; this policy does not inspect or validate signatures.
+  - **Acceptance:** Synthetic annotated/linked PDFs follow the selected policy; output inspection confirms expected content and link targets.
+  - **Status:** DONE · 13 October 2026. Preflight and stored export checks identify affected documents and counts, and the ZIP report/README plus build/export UI explain omissions. A synthetic PDF with a text annotation, internal link and URI link retained those objects in the original; both output PDFs omitted them while the generated index link targeted the correct page. Backend: 15 passed; Vue build and 4 Vitest tests passed. Native UI inspection remains under NAT-01.
+
+- [x] **FIX-05 — Harden backend startup and failure reporting** · P0
+  - Add readiness checks, bounded retry, actionable sidecar crash errors, and safe session reconnection behaviour.
+  - **Acceptance:** Slow startup, unavailable port and sidecar termination do not leave indefinite spinners; packaged sessions retain random credentials and loopback-only access.
+  - **Status:** DONE · 13 October 2026. Health requests have a 1.5-second timeout inside a 12-second browser-development or 30-second native-package readiness window; other fetches have a 30-second timeout. The native window was extended after one cold packaged-sidecar smoke attempt exceeded 12 seconds; three subsequent isolated starts took 7.2–7.6 seconds. Session lookup is bounded and can retry after failure. A periodic health check changes the UI to a visible offline state and permits retry within the same session. Playwright simulated an unavailable engine, observed the bounded browser error and recovered on retry. Packaged mode still generates a random token and binds the Python sidecar to loopback. Actual process-death and port-conflict device evidence remains part of NAT-01/NAT-02.
+
+## 2. Integrity, persistence and recovery
+
+- [x] **DAT-01 — Introduce document revisions and build snapshots** · P0
+  - Add versioned working copies and schema migrations; pin each build/OCR job to consistent inputs or enforce appropriate locks.
+  - **Acceptance:** Concurrent edits cannot change an active build's content or page map; failed migrations/operations preserve recoverable data and originals.
+  - **Status:** DONE · 13 October 2026. SQLite migration adds working-copy revision numbers and a revision catalog. Page edits and OCR create new working files; failed edits remove their candidate and leave the prior revision intact. A per-matter lock serializes edits, OCR and builds, while an OS data-directory lock rejects a second engine process. Export manifests record input revision numbers and hashes. Backend regressions cover migration, unsupported future schema, prior/original byte preservation, failed edit cleanup, a paused build with a concurrent edit, and second-engine rejection. Backend: 23 passed; Vue build and 6 Vitest tests passed; browser E2E: 2 passed. Native package rebuild/device runs remain NAT-01/NAT-02.
+
+- [ ] **DAT-02 — Add undo/redo and persisted editing history** · P1 · Depends: DAT-01
+  - Cover page operations, document replacement, ordering and relevant metadata edits; define history retention.
+  - **Acceptance:** Undo/redo restores expected content/order and marks affected exports stale; history behaves predictably after reopening.
+  - **Status:** IN PROGRESS · 13 October 2026. SQLite now retains up to 100 matter-scoped edit events for page/OCR revisions, document metadata, bundle settings and document order. Undo/redo APIs and workspace buttons replay these changes across engine restarts; a new edit clears the redo branch. Import or archive clears history because document-set changes are not yet reversible. Prior exports are labelled stale after matter edits, including undo/redo, and rebuilding creates a fresh manifest. Backend regressions cover page/metadata/order replay, branching, restart persistence and stale export; a focused browser test verifies metadata Undo/Redo after reload. Still needed for DONE: reversible import/archive/replacement, complete transaction safety across file and history updates, and native undo/redo verification.
+
+- [x] **DAT-03 — Persist jobs and support interruption recovery** · P0 · Depends: DAT-01
+  - Persist job state; define retry/resume/cancel semantics, cleanup and retention rather than assuming every operation can resume midway.
+  - **Acceptance:** Restarted apps identify interrupted jobs, safely retry or resume supported operations, and never expose half-published exports. Cancellation remains responsive on large jobs.
+  - **Status:** DONE · 13 October 2026. Job state/progress is persisted in SQLite. Startup labels queued/running jobs interrupted, removes unpublished `.build-*` staging directories, and retains terminal job records for 90 days. API and build UI expose interrupted jobs; retry creates a new job and the old job records its retry ID. Rendering checks cancellation between document chunks of at most ten pages and while stamping pages; a 60-page synthetic cancellation regression left no published or staged export. Restart/retry/cleanup regression and the browser E2E suite passed; backend: 24 passed. Native process-crash/device behaviour remains a NAT-01/NAT-02 verification gate. PyMuPDF's individual save call cannot be interrupted mid-call.
+
+- [x] **DAT-04 — Add matter backup, portable open and restore** · P1 · Depends: DAT-01
+  - Define a versioned portable matter package containing metadata, originals and required revisions; add Open/Save As for matter copies.
+  - **Acceptance:** A restored package reproduces the matter and verifies hashes; corrupt, unsafe-path and unsupported-version packages fail safely.
+  - **Status:** DONE · 13 October 2026. A versioned `.cbmatter` ZIP contains matter/document metadata, Memo of Parties, imported originals, current working copies and the full retained revision catalog with SHA-256 values. Backup and restore have authenticated local API routes and workspace controls; Tauri backup uses a native Save picker and streamed temporary-file replacement. Restore assigns fresh matter/document IDs, verifies every file hash, rejects unsupported versions, unexpected/duplicate/unsafe paths and oversized members, and cleans failed restores. Backend: 30 passed; Vue build and 6 Vitest tests passed; browser E2E: 5 passed including a separate restored copy. macOS arm64 `cargo check` and 2 focused Rust save-transfer tests passed. Target-device native Save/Open checks remain NAT-01/NAT-03.
+
+- [x] **DAT-05 — Complete autosave and unsaved-change handling** · P1 · Depends: DAT-01
+  - Persist appropriate form/editor state; define save indicators, failures and navigation prompts.
+  - **Acceptance:** Matter changes and Memo of Parties entries survive navigation/restart according to the documented save policy; failed saves are visible.
+  - **Status:** DONE · 13 October 2026. Memo of Parties rows autosave to the selected matter in SQLite after a 600 ms pause, with loading/saving/saved/failed state and Retry. Document details and bundle settings retain explicit Save and now show unsaved indicators; switching document, matter or view and reloading prompts before discarding drafts. A failed bundle-settings save stops the build. Synthetic backend tests verify matter isolation, validation and restart persistence; browser E2E verifies memo autosave/reload/failure/retry and the draft prompt and failed-build path. Backend: 25 passed; Vue build and 6 Vitest tests passed; browser E2E: 4 passed. Native window-close prompting remains under NAT-01.
+
+- [x] **DAT-06 — Build storage, archive and recovery controls** · P1 · Depends: DAT-04
+  - Show matter storage usage, archives, retained/deleted records and recoverable files; define explicit permanent-deletion behaviour.
+  - **Acceptance:** Users can locate, archive and restore matters/documents without orphaning records or silently deleting originals.
+  - **Status:** DONE · 13 October 2026. Matter/document removal now archives SQLite records instead of deleting them. Archived matters and documents are visible and restorable under their original IDs; imported originals, working revisions and Memo data remain in place. Matter storage usage reports originals, working files and exports. Portable backups include archived documents and restore their archived state. There is no in-app permanent-delete operation: users must explicitly manage app data outside this POC if retention must end. Backend: 32 passed; Vue build and 6 Vitest tests passed; focused browser archive/restore case passed. Historical orphan folders from pre-migration destructive record deletion are not imported automatically.
+
+- [ ] **DAT-07 — Add local security and audit controls** · P1 · Depends: DAT-01, DEC-04
+  - Define storage/temporary-file threat model, encryption/key recovery, audit events and sensitive-log policy.
+  - **Acceptance:** Documented security design implemented for the agreed scope; recovery tested; credentials and document text absent from routine logs. Hashes/audit events do not imply legal authenticity.
+  - **Status:** IN PROGRESS · 13 October 2026. `docs/LOCAL_SECURITY_AND_RETENTION.md` records the local data boundary, plaintext storage/backup exposure, temporary-copy paths, archive retention, audit limitations and the encryption/key-recovery gate. SQLite stores metadata-only action events; the authenticated API exposes the latest 500 for an active matter. Packaged Tauri now suppresses raw sidecar stderr, and Uvicorn access logging is disabled. A regression checks that document title text and the test bearer token are absent from audit responses. Backend: 33 passed; macOS arm64 `cargo check` passed. At-rest encryption, key recovery, sensitive temporary-file controls and recovery tests remain outstanding, so this task is not done and PDF-09 remains gated.
+
+## 3. Complete the filing workflow
+
+- [ ] **FIL-01 — Implement Part 1–4 workflow and outputs** · P1 · Depends: DEC-02, DAT-01
+  - Add part-specific structure/checklists and separate part outputs where specified, plus the combined bundle.
+  - **Acceptance:** The reference matter produces the agreed part order, files and directory structure with correct page-map destinations.
+
+- [ ] **FIL-02 — Automate grouped labels and hierarchy** · P1 · Depends: DEC-02, DAT-01
+  - Support parent/child groups, automatic 1a/1b/1c-style labels and predictable renumbering after insertion/removal.
+  - **Acceptance:** Group ordering, labels, index entries and bookmarks agree; indivisible groups and oversized cases follow the chosen policy.
+
+- [ ] **FIL-03 — Add index templates and pagination schemes** · P1 · Depends: DEC-02
+  - Support approved columns, wrapping, variable row heights, covers/separators, page-label schemes and volume/combined numbering choices.
+  - **Acceptance:** Index growth is included in volume planning; multi-page indexes, long titles and boundary cases retain correct links, CSV ranges and bookmarks.
+
+- [ ] **FIL-04 — Add manual bookmark editing** · P1 · Depends: DAT-01
+  - Create, rename, delete, reorder and nest bookmarks with drag/drop; define interaction between manual and regenerated entries.
+  - **Acceptance:** Destinations track revision/page changes or become visibly unresolved; regeneration does not silently discard custom entries.
+
+- [ ] **FIL-05 — Support reviewed index import** · P2 · Depends: FIL-03, FIL-04
+  - Define supported existing index sources and map reviewed rows to document/page destinations.
+  - **Acceptance:** Ambiguous rows require user resolution; accepted rows generate correct bookmarks without treating OCR guesses as verified destinations.
+
+- [ ] **FIL-06 — Detect stale exports and compare revisions** · P1 · Depends: DAT-01
+  - Store build input versions and settings; flag outputs when documents, order, rules or templates change.
+  - **Acceptance:** Every relevant change marks prior outputs stale; rebuilding records a new manifest with traceable inputs.
+
+- [ ] **FIL-07 — Implement scoped category validation and review** · P1 · Depends: DEC-02
+  - Version profiles by court/case/stage; add conditional checklists, provenance, effective/review dates and reviewer status.
+  - **Acceptance:** Missing/conditional document fixtures produce explainable results; technical checks and human legal review remain separate. The illustrative profile never becomes approved merely because tests pass.
+
+- [ ] **FIL-08 — Support multilingual generated output** · P1 · Depends: FIL-03
+  - Bundle suitable licensed fonts and shaping support for agreed languages.
+  - **Acceptance:** Names, titles, labels and index rows render without replacement question marks, overlap or broken destinations in the agreed language fixtures.
+
+## 4. Document generation and workspace
+
+- [ ] **GEN-01 — Create persistent structured matter/party data** · P1 · Depends: DAT-01, DEC-02
+  - Store multiple parties, roles and reusable matter values; migrate the current CSV helper to persisted matter data.
+  - **Acceptance:** Fields survive restart and feed forms/templates/CSV consistently; export escaping is tested.
+
+- [ ] **GEN-02 — Implement category/subcategory dynamic forms** · P1 · Depends: GEN-01, DEC-02
+  - Add schema-driven dropdowns, conditional fields, validation and saved drafts.
+  - **Acceptance:** At least one agreed case workflow shows the correct fields and required values for each branch.
+
+- [ ] **GEN-03 — Add a versioned template generation system** · P1 · Depends: GEN-02, DEC-03
+  - Implement reviewed templates with repeatable party sections and conditional content; generate agreed DOCX/PDF files.
+  - **Acceptance:** Reference inputs yield reviewed outputs; missing fields are explicit, templates carry versions/review status, and generated files enter the working-copy workflow.
+
+- [ ] **GEN-04 — Package generated documents into structured ZIPs** · P1 · Depends: GEN-03, FIL-01
+  - Define folders, filenames, manifests and collision handling for generated documents and bundle outputs.
+  - **Acceptance:** ZIP inventory matches the reference workflow and contains the intended formats without overwrites or unsafe paths.
+
+- [ ] **UX-01 — Add independent matter/document tabs** · P1 · Depends: DAT-05
+  - Preserve selection, page, zoom and unsaved state per tab.
+  - **Acceptance:** Switching/closing tabs cannot apply edits to the wrong matter or silently lose changes.
+
+- [ ] **UX-02 — Add PDF/OCR full-text search and thumbnails** · P1 · Depends: DAT-01
+  - Search document content and optionally the matter; show snippets, page jumps and highlights; add thumbnail navigation.
+  - **Acceptance:** Search returns correct pages on native-text and OCR fixtures and refreshes after revisions. Metadata filtering remains available.
+
+- [ ] **UX-03 — Add themes, UI scaling and keyboard access** · P2
+  - Add persisted appearance/scaling controls, focus behaviour and shortcuts for common actions.
+  - **Acceptance:** Controls remain usable at supported window/scaling sizes and keyboard navigation reaches primary workflows.
+
+## 5. PDF editing, conversion and advanced features
+
+- [ ] **PDF-01 — Add extract/split/merge/insert/replace/crop tools** · P1 · Depends: DAT-01
+  - Support arbitrary page selections and insertion before/after; normalize supported image inputs and later agreed Office inputs.
+  - **Acceptance:** Page order, dimensions and counts match fixtures; originals remain intact; undo/history and stale-output tracking work. General splitting remains distinct from no-break bundle allocation.
+
+- [ ] **PDF-02 — Add configurable compression** · P1 · Depends: DAT-01
+  - Offer explicit quality/size presets, image downsampling and before/after estimates or measurements.
+  - **Acceptance:** Output size and visual quality are measured on fixtures; searchable text/navigation survive as specified; unsuccessful size targets are reported honestly.
+
+- [ ] **PDF-03 — Add text/image overlays, highlights and comments** · P2 · Depends: DAT-01, FIX-04
+  - Add selection, placement, editing and deletion tools; distinguish overlays from editing original text.
+  - **Acceptance:** Saved/reopened/exported content follows the selected annotation policy and remains undoable.
+
+- [ ] **PDF-04 — Add user links, watermarks and timestamps** · P2 · Depends: DAT-01, FIX-04
+  - Support reviewed internal/external links and configurable stamps with placement/date/timezone choices.
+  - **Acceptance:** Destinations survive supported edits; generated marks obey export profiles and do not silently obscure content.
+
+- [ ] **PDF-05 — Add native print workflows** · P1 · Depends: NAT-01
+  - Print selected pages, working documents and generated bundles with range, orientation and scaling controls.
+  - **Acceptance:** Windows/macOS previews and synthetic print/PDF outputs match selected ranges and page dimensions; cancellation is harmless.
+
+- [ ] **PDF-06 — Add scanner acquisition and expanded OCR** · P2 · Depends: DEC-01, DAT-01, DEC-03
+  - Define supported scanner integration, batch scanning, rotation/deskew, OCR languages and mixed scanned/native page behaviour.
+  - **Acceptance:** Target devices/import paths are tested; mixed-content fixtures do not skip image text merely because a page contains a text header; originals and reviewable OCR copies remain separate.
+
+- [ ] **PDF-07 — Implement OCR correction / visual text editing** · P2 · Depends: DEC-03, DAT-01, PDF-06
+  - Implement only the explicitly agreed editing level, with confidence/review indicators and layout handling.
+  - **Acceptance:** Corrections persist and render as specified; searchable-layer changes are distinguishable from visual content changes and original evidence.
+
+- [ ] **PDF-08 — Implement agreed Office/image conversion matrix** · P2 · Depends: DEC-03, DAT-01
+  - Select/package local conversion engines; include PDF-to-image and agreed Word/Excel/PowerPoint directions. Track each matrix pair separately during implementation.
+  - **Acceptance:** Each promised pair passes fidelity fixtures offline on supported platforms; unsupported constructs are reported. PDF output or CSV alone does not satisfy editable Office output.
+
+- [ ] **PDF-09 — Add password-protected PDF workflows** · P2 · Depends: DEC-04, DAT-01, DAT-07
+  - Add authorized password opening and protected PDF export with profile-specific restrictions; keep passwords out of logs and persisted metadata. Encrypted ZIP is outside scope.
+  - **Acceptance:** Correct/wrong-password, cancellation and export-reopen tests pass; any decrypted working copy follows the agreed storage security policy.
+
+- [ ] **PDF-10 — Add permanent redaction** · P2 · Depends: DAT-01, DAT-07
+  - Provide mark/review/apply stages and define treatment of text, images, metadata, annotations and embedded content.
+  - **Acceptance:** Targeted content is absent from rendered output and supported extraction/inspection paths; black overlays alone never count as redaction. Originals stay separately preserved.
+
+- [ ] **PDF-11 — Detect signed inputs and warn before transformations** · P2 · Depends: DEC-04, DAT-01
+  - Detect PDF certificate-signature indicators before transformations, preserve originals and require explicit acknowledgment; report inconclusive inspection as unknown. Signing and cryptographic validation are deferred.
+  - **Acceptance:** Signed, unsigned, scanned-signature and inconclusive fixtures receive distinct statuses; edits/OCR/build warn before changing a detected signed input; no claim of certificate validity or signature preservation is made.
+
+- [ ] **SHR-01 — Add optional share-link generation** · P2 · Depends: DEC-04, DAT-07
+  - **Release scope:** Deferred from first release by DEC-04; no online sharing service selected.
+  - Implement explicit artifact selection and upload only under the agreed sharing model, with access, expiry and revocation controls.
+  - **Acceptance:** No automatic confidential-data upload; shared artifact/version is identifiable; revocation works; all core workflows still function offline.
+
+## 6. Testing, performance and distribution
+
+- [x] **QA-01 — Add browser E2E coverage with Playwright** · P0
+  - Cover the primary synthetic journey, errors, save-state behaviour and regression cases discovered during implementation.
+  - **Acceptance:** Repeatable isolated test data, deterministic checks of downloaded artifacts, and a documented execution command. Browser tests do not substitute for native tests.
+  - **Status:** DONE · 13 October 2026. `cd frontend && npm run test:e2e` starts isolated loopback services and a temporary matter store, then removes it. Two Chrome/Playwright cases passed: unavailable engine/retry and a synthetic import, preview, rotate/reorder/delete, OCR, saved metadata/reload, build, ZIP SHA-256 match and retained-export failure journey. Native acceptance remains NAT-01/NAT-03.
+
+- [ ] **QA-02 — Expand backend and UI regression coverage** · P0 · Ongoing with feature work
+  - Cover authentication, malformed files, integrity failures, cancellation, crash recovery and concurrent edits; add meaningful component tests where needed.
+  - **Acceptance:** Every new volume/index rule has pytest cases, including boundary/index-growth cases and agreement of PDF links, outlines, CSV and combined offsets.
+  - **Status:** IN PROGRESS · 13 October 2026. Added malformed-PDF cleanup and queued-job cancellation regressions, plus frontend request-timeout/retry checks. Backend 17 passed, Vitest 6 passed. Concurrent edit/revision and crash-recovery behavior awaits DAT-01/DAT-03; this ongoing task is not closed.
+
+- [ ] **QA-03 — Benchmark large matters and remove bottlenecks** · P1 · Depends: DAT-01, DAT-03
+  - Measure imports, OCR, preview, builds and exports on synthetic 1,000+ page matters, large scans and files above the current 80 MB cap.
+  - Set hardware-specific time, memory, disk and cancellation targets before optimizing; revise limits based on measurements.
+  - **Acceptance:** Published repeatable benchmark results meet agreed budgets without UI freezes or integrity loss; no unsupported high-performance claims.
+
+- [ ] **REL-01 — Add CI and platform build validation** · P1 · Depends: DEC-01
+  - Run Python/frontend tests and produce architecture-matched native artifacts on target runners; add supported-platform smoke checks.
+  - **Acceptance:** Reproducible build instructions and artifact provenance; missing platform verification stays explicitly pending.
+
+- [ ] **REL-02 — Complete distribution licensing and signing** · P1 · Depends: NAT-02
+  - Record dependency/model/font license review, including the chosen PyMuPDF distribution arrangement; configure installer signing and macOS notarization as applicable.
+  - **Acceptance:** Distributable artifacts and review records exist for the agreed targets; clean-machine install/uninstall works.
+
+- [ ] **REL-03 — Add update and rollback strategy** · P1 · Depends: DAT-04, REL-02
+  - Define signed updates, optional offline update packages, schema compatibility and recovery.
+  - **Acceptance:** Upgrade and failed-upgrade tests preserve matters and provide a documented recovery path.
+
+- [x] **DOC-01 — Synchronize handoffs and acceptance evidence** · P0
+  - Choose one canonical handoff and link the duplicate or keep it deliberately synchronized.
+  - Update frontend build evidence, source-integrity claims, development versus packaged startup instructions and feature status.
+  - **Acceptance:** Documentation distinguishes code, automated verification, native QA and legal review; completed tasks link to evidence rather than inferred success.
+  - **Status:** DONE · 13 October 2026. `docs/PROJECT_CONTEXT_AND_HANDOFF.md` is canonical; the root handoff now points to it. README and the canonical handoff distinguish browser/automated checks, Apple Silicon native evidence, remaining Windows/macOS Intel and clean-device gates, source-hash checks and illustrative legal status. Current runs are recorded in `docs/POC_ACCEPTANCE_TESTS.md`.
+
+## 7. Additional improvements beyond the original brief
+
+- [ ] **EXT-01 — Add objection/refiling tracking** · P3 · Depends: FIL-07, GEN-01
+  - Track reviewer/registry observations, correction tasks, artifact versions and externally supplied acknowledgments.
+  - **Acceptance:** Status is traceable and never implies submission or acceptance without the relevant evidence.
+
+Court portal submission, legal research AI, automated legal advice and nationwide compliance are not implicitly authorized by this backlog. Define separate scope and acceptance criteria before adding them.
+
+## Suggested first implementation batch
+
+1. **DOC-01:** establish accurate current status and canonical documentation.
+2. **NAT-01 + QA-01:** prove the synthetic runtime journey and capture regressions.
+3. **FIX-01 through FIX-05:** address the audit findings and startup/export behaviour.
+4. **NAT-03:** provide reliable native saving.
+5. **DAT-01 + DAT-03:** protect builds/edits and recover interrupted work.
+6. **NAT-02:** verify packaged offline operation on available target machines.
+
+Resolve DEC-01 and DEC-02 while this independent engineering work proceeds. Do not start unspecified legal templates or promise conversion/signature scope by assumption.
+
+## Release acceptance gate
+
+- [ ] All tasks selected for the release have passing acceptance evidence; deferred client requirements are explicitly recorded.
+- [ ] Backend tests, frontend build and Vitest pass; browser E2E passes.
+- [ ] Required native platform/architecture journeys and offline installation pass.
+- [ ] Exported PDFs, links, bookmarks, ranges, ZIP inventory and original hashes match synthetic expected outputs.
+- [ ] Recovery, concurrency and performance meet the agreed release criteria.
+- [ ] Any legal profiles/templates shipped as reviewed have scoped sources and the required reviewer approval; illustrative material remains clearly labelled.
+
+The proposal's experience, portfolio, timeline, monthly retainer and fixed-price questions are commercial deliverables, not application features. Prepare estimates only after release scope and blocking decisions are resolved; this backlog does not claim an agreed timeline or price.

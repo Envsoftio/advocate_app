@@ -1,0 +1,11 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"],
+  "exclude": ["src/**/__tests__/*"],
+  "compilerOptions": {
+    "composite": true,
+    "types": ["vite/client", "vitest/globals"],
+    "noUncheckedIndexedAccess": false,
+    "paths": {"@/*": ["./src/*"]}
+  }
+}

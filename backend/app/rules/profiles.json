@@ -1,0 +1,106 @@
+[
+  {
+    "id": "delhi-hc-illustrative",
+    "name": "Delhi High Court (illustrative technical checks)",
+    "status": "NOT_LEGALLY_APPROVED",
+    "effective_from": "2026-01-27",
+    "last_checked": "2026-10-12",
+    "max_file_mb": 300,
+    "require_searchable_text": true,
+    "require_bookmarks": true,
+    "disallow_pdf_encryption": true,
+    "description": "Technical subset only. Does not establish admissibility, case-type completeness, signature validity or filing acceptance.",
+    "sources": [
+      {
+        "title": "Delhi High Court e-Filing rules and directions hub",
+        "url": "https://www.delhihighcourt.nic.in/web/e-filing"
+      },
+      {
+        "title": "Delhi High Court notification no. 6/Rules/DHC (24 Jan 2026; Gazette publication 27 Jan 2026)",
+        "url": "https://delhihighcourt.nic.in/files/2026-02/notifications-and-practice-directions/12_0.pdf"
+      },
+      {
+        "title": "Delhi High Court Forms & Proformas",
+        "url": "https://www.delhihighcourt.nic.in/web/online-forms-downloadable-forms"
+      },
+      {
+        "title": "Delhi High Court List of Common Objections",
+        "url": "https://www.delhihighcourt.nic.in/web/faqs/list-of-common-objections"
+      }
+    ],
+    "filing_guidance": {
+      "title": "Delhi High Court filing preparation",
+      "scope": "High Court of Delhi e-filing preparation only. Case type, filing stage, jurisdiction and current registry directions still require advocate review.",
+      "status": "SOURCE_LINKED_DRAFT_REQUIRES_ADVOCATE_REVIEW",
+      "reviewed_through": "2026-10-12",
+      "requirements": [
+        {
+          "title": "High Court e-file size",
+          "detail": "Maximum 300 MB. Above 300 MB, the notification directs the advocate or litigant to a Designated Centre for intranet e-filing.",
+          "source_label": "Notification No. 6/Rules/DHC dated 24 January 2026",
+          "source_url": "https://delhihighcourt.nic.in/files/2026-02/notifications-and-practice-directions/12_0.pdf",
+          "effective_from": "2026-01-27"
+        },
+        {
+          "title": "Draft document format",
+          "detail": "A4; Times New Roman 14; 1.5 line spacing; quotations and indents at 12 with single spacing; 4 cm left and right margins; 2 cm top and bottom.",
+          "source_label": "Practice Directions No. 74/Rules/DHC dated 16 March 2021",
+          "source_url": "https://www.delhihighcourt.nic.in/web/sites/default/files/efiling/PRACTICE_DIRECTIONS.pdf",
+          "effective_from": "2021-04-01"
+        },
+        {
+          "title": "Searchability and bookmarks",
+          "detail": "The court-hosted FAQ says bookmarking is compulsory and recommends 300 DPI scanning with OCR. OCR output still requires visual and legal review.",
+          "source_label": "Delhi High Court Online e-Filing FAQ",
+          "source_url": "https://www.delhihighcourt.nic.in/web/sites/default/files/efiling/efilingfaq.pdf",
+          "effective_from": null
+        },
+        {
+          "title": "Party details",
+          "detail": "The court-hosted FAQ says details of every petitioner and respondent are mandatory in the fresh-case workflow.",
+          "source_label": "Delhi High Court Online e-Filing FAQ, Q18-Q19",
+          "source_url": "https://www.delhihighcourt.nic.in/web/sites/default/files/efiling/efilingfaq.pdf",
+          "effective_from": null
+        }
+      ],
+      "templates": [
+        {
+          "title": "Memo of Parties upload template",
+          "format": "XLS",
+          "purpose": "Court-provided spreadsheet for party data used by the e-filing facility.",
+          "url": "https://dhcefiling.nic.in/DHCGetFile/MEMOformat.xls"
+        },
+        {
+          "title": "Urgent listing / accommodation form",
+          "format": "PDF",
+          "purpose": "Official form for urgent mentioning cases; applicability and current process must be confirmed.",
+          "url": "https://www.delhihighcourt.nic.in/files/announcements/downloadfile_bf49033x.pdf"
+        },
+        {
+          "title": "Interlocutory applications form",
+          "format": "PDF",
+          "purpose": "Official interlocutory-application form published on the Forms & Proformas page.",
+          "url": "https://www.delhihighcourt.nic.in/files/announcements/downloadfile_hfp32gfb.pdf"
+        }
+      ],
+      "source_conflicts": [
+        "The older FAQ states a 50 MB online limit. The later 2026 amendment substitutes Rule 3.4 and sets the High Court maximum e-file size at 300 MB.",
+        "The common-objections page contains older paper-format references, including foolscap. Do not use those references to override the later A4 Practice Directions without advocate and registry confirmation.",
+        "Common objections help prevent defects but are not a complete required-document checklist for every case type or filing stage."
+      ]
+    }
+  },
+  {
+    "id": "general-demo",
+    "name": "General demonstration (no court rules)",
+    "status": "DEMO_ONLY",
+    "effective_from": null,
+    "last_checked": "2026-10-12",
+    "max_file_mb": null,
+    "require_searchable_text": false,
+    "require_bookmarks": false,
+    "disallow_pdf_encryption": false,
+    "description": "Generic PDF bundling mode without any claim of court-specific rules.",
+    "sources": []
+  }
+]

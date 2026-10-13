@@ -1,0 +1,178 @@
+"""Versioned, local-only matter backup and restore. No export is a legal certification."""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sqlite3
+import zipfile
+from pathlib import Path, PurePosixPath
+
+from .storage import Store, new_id, utcnow
+from .schemas import MatterCreate, DocumentPatch, MemoPartiesUpdate
+from .engine import load_profiles
+
+PACKAGE_VERSION = 1
+MAX_FILE_BYTES = 1024 * 1024 * 1024
+MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
+
+
+class PortableMatterError(ValueError):
+    pass
+
+
+def _safe_relpath(value: str) -> str:
+    path = PurePosixPath(value)
+    if (not value or path.is_absolute() or len(path.parts) < 2 or
+            path.parts[0] not in ('originals', 'working') or
+            any(part in ('.', '..') or part.startswith('.') for part in path.parts)):
+        raise PortableMatterError('Unsafe matter file path')
+    return value
+
+
+def create_package(store: Store, matter_id: str, destination: Path) -> None:
+    matter = store.get_matter(matter_id)
+    if matter is None:
+        raise PortableMatterError('Matter not found')
+    documents = store.get_documents(matter_id) + store.list_archived_documents(matter_id)
+    with store.connect() as con:
+        revisions = [dict(row) for row in con.execute('''SELECT r.* FROM document_revisions r
+            JOIN documents d ON d.id=r.document_id WHERE d.matter_id=?
+            ORDER BY r.document_id,r.revision''', (matter_id,))]
+    paths = {doc['source_relpath'] for doc in documents}
+    paths.update(rev['working_relpath'] for rev in revisions)
+    paths.update(doc['working_relpath'] for doc in documents)
+    files = []
+    for rel in sorted(paths):
+        _safe_relpath(rel)
+        path = store.matter_dir(matter_id) / rel
+        if not path.is_file() or path.is_symlink():
+            raise PortableMatterError(f'Matter file missing or unsafe: {rel}')
+        size = path.stat().st_size
+        if size > MAX_FILE_BYTES:
+            raise PortableMatterError(f'Matter file exceeds portable package limit: {rel}')
+        files.append({'path': rel, 'bytes': size, 'sha256': store.sha256(path)})
+    by_path = {item['path']: item for item in files}
+    for doc in documents:
+        if by_path[doc['source_relpath']]['sha256'] != doc['source_sha256']:
+            raise PortableMatterError(f'Original hash mismatch for document {doc["id"]}')
+    manifest = {'format': 'courtbundle-matter', 'version': PACKAGE_VERSION,
+                'created_at': utcnow(), 'matter': matter, 'documents': documents,
+                'revisions': revisions, 'memo_parties': store.get_memo_parties(matter_id),
+                'files': files}
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    candidate = destination.with_name(destination.name + '.partial-' + new_id())
+    try:
+        with zipfile.ZipFile(candidate, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False))
+            for item in files:
+                archive.write(store.matter_dir(matter_id) / item['path'], 'files/' + item['path'])
+        os.replace(candidate, destination)
+        store.audit('matter_backed_up', matter_id)
+    finally:
+        candidate.unlink(missing_ok=True)
+
+
+def restore_package(store: Store, package: Path) -> dict:
+    matter_id = new_id()
+    final = store.matter_dir(matter_id)
+    stage = final.with_name('.restore-' + matter_id)
+    if stage.exists() or final.exists():
+        raise PortableMatterError('Restore path collision')
+    try:
+        with zipfile.ZipFile(package) as archive:
+            entries = archive.infolist()
+            names = [entry.filename for entry in entries]
+            if len(names) != len(set(names)) or 'manifest.json' not in names:
+                raise PortableMatterError('Duplicate or missing package entries')
+            if archive.getinfo('manifest.json').file_size > 10 * 1024 * 1024:
+                raise PortableMatterError('Manifest is too large')
+            manifest = json.loads(archive.read('manifest.json'))
+            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') != PACKAGE_VERSION:
+                raise PortableMatterError('Unsupported portable matter package')
+            files = manifest.get('files')
+            if not isinstance(files, list):
+                raise PortableMatterError('Invalid package file list')
+            expected = {'manifest.json'}
+            total = 0
+            for item in files:
+                rel = _safe_relpath(item['path'])
+                entry_name = 'files/' + rel
+                expected.add(entry_name)
+                entry = archive.getinfo(entry_name)
+                total += entry.file_size
+                if (entry.is_dir() or entry.file_size != item['bytes'] or
+                        entry.file_size > MAX_FILE_BYTES or total > MAX_PACKAGE_BYTES or
+                        (entry.external_attr >> 16) & 0o170000 == 0o120000):
+                    raise PortableMatterError('Invalid package member size or type')
+            if set(names) != expected:
+                raise PortableMatterError('Unexpected or missing package entries')
+            stage.mkdir(parents=True)
+            for item in files:
+                rel = item['path']
+                target = stage / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open('files/' + rel) as source, target.open('xb') as output:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+                if store.sha256(target) != item['sha256']:
+                    raise PortableMatterError(f'Hash mismatch in package: {rel}')
+
+        matter = manifest['matter']
+        documents = manifest['documents']
+        revisions = manifest['revisions']
+        validated_matter = MatterCreate.model_validate(matter)
+        if matter['court_profile'] not in load_profiles():
+            raise PortableMatterError('Unknown court profile in package')
+        if manifest['memo_parties']:
+            MemoPartiesUpdate.model_validate({'parties': manifest['memo_parties']})
+        by_path = {item['path']: item for item in files}
+        for doc in documents:
+            DocumentPatch.model_validate({key: doc[key] for key in
+                ('title', 'kind', 'part', 'label', 'group_key')})
+            if any(type(doc[key]) is not int for key in ('page_count', 'revision', 'position')) or \
+                    doc['page_count'] < 1 or doc['revision'] < 1 or doc['position'] < 0:
+                raise PortableMatterError('Invalid document counts in package')
+            if (_safe_relpath(doc['source_relpath']) not in by_path or
+                    _safe_relpath(doc['working_relpath']) not in by_path or
+                    by_path[doc['source_relpath']]['sha256'] != doc['source_sha256']):
+                raise PortableMatterError('Document source or working copy is invalid')
+        for rev in revisions:
+            if any(type(rev[key]) is not int for key in ('revision', 'page_count')) or \
+                    rev['revision'] < 1 or rev['page_count'] < 1:
+                raise PortableMatterError('Invalid revision counts in package')
+            if _safe_relpath(rev['working_relpath']) not in by_path:
+                raise PortableMatterError('Document revision file is missing')
+        old_ids = {doc['id'] for doc in documents}
+        if len(old_ids) != len(documents) or any(rev['document_id'] not in old_ids for rev in revisions):
+            raise PortableMatterError('Invalid document revision references')
+        id_map = {old: new_id() for old in old_ids}
+        os.replace(stage, final)
+        with store.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            matter_fields = validated_matter.model_dump()
+            matter_fields['created_at'] = matter['created_at']
+            matter_fields.update(id=matter_id, updated_at=utcnow())
+            con.execute('INSERT INTO matters (' + ','.join(matter_fields) + ') VALUES (' +
+                        ','.join('?' for _ in matter_fields) + ')', tuple(matter_fields.values()))
+            for doc in documents:
+                fields = {key: doc[key] for key in (
+                    'title', 'kind', 'part', 'label', 'group_key', 'position', 'page_count',
+                    'ocr_status', 'original_name', 'source_sha256', 'source_relpath',
+                    'working_relpath', 'created_at', 'updated_at', 'revision', 'archived_at')}
+                fields.update(id=id_map[doc['id']], matter_id=matter_id)
+                con.execute('INSERT INTO documents (' + ','.join(fields) + ') VALUES (' +
+                            ','.join('?' for _ in fields) + ')', tuple(fields.values()))
+            for rev in revisions:
+                con.execute('''INSERT INTO document_revisions
+                    (document_id,revision,working_relpath,page_count,ocr_status,created_at)
+                    VALUES (?,?,?,?,?,?)''', (id_map[rev['document_id']], rev['revision'],
+                    rev['working_relpath'], rev['page_count'], rev['ocr_status'], rev['created_at']))
+            if manifest['memo_parties']:
+                con.execute('INSERT INTO memo_parties (matter_id,payload_json,updated_at) VALUES (?,?,?)',
+                            (matter_id, json.dumps(manifest['memo_parties'], ensure_ascii=False), utcnow()))
+            store._audit(con, 'matter_restored_from_package', matter_id)
+    except (KeyError, TypeError, ValueError, zipfile.BadZipFile, sqlite3.Error, OSError) as exc:
+        shutil.rmtree(stage, ignore_errors=True)
+        shutil.rmtree(final, ignore_errors=True)
+        raise PortableMatterError(f'Cannot restore matter: {exc}') from exc
+    return store.get_matter(matter_id)
