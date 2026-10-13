@@ -5,6 +5,8 @@ use rand::RngCore;
 use serde::Serialize;
 #[cfg(not(debug_assertions))]
 use std::net::TcpListener;
+#[cfg(target_os = "macos")]
+use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
 use tauri::{Manager, State};
 use tauri_plugin_shell::process::CommandChild;
 #[cfg(not(debug_assertions))]
@@ -41,6 +43,22 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                // Keep only the standard macOS application menu. CourtBundle actions
+                // live in the app UI rather than the default desktop menus.
+                let app_menu = Submenu::with_items(
+                    app,
+                    app.package_info().name.clone(),
+                    true,
+                    &[
+                        &PredefinedMenuItem::about(app, None, None)?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &PredefinedMenuItem::quit(app, None)?,
+                    ],
+                )?;
+                app.set_menu(Menu::with_items(app, &[&app_menu])?)?;
+            }
             app.manage(native_save::SaveState::default());
             #[cfg(debug_assertions)]
             {
@@ -88,7 +106,9 @@ pub fn run() {
                     while let Some(event) = receiver.recv().await {
                         match event {
                             tauri_plugin_shell::process::CommandEvent::Stderr(_data) => {
-                                eprintln!("Filing engine reported a diagnostic; contents suppressed");
+                                eprintln!(
+                                    "Filing engine reported a diagnostic; contents suppressed"
+                                );
                             }
                             tauri_plugin_shell::process::CommandEvent::Terminated(payload) => {
                                 eprintln!("Filing engine exited: {:?}", payload.code);
@@ -111,7 +131,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_backend_connection,
             native_save::save_export,
-            native_save::save_matter
+            native_save::save_matter,
+            native_save::save_page_output
         ])
         .build(tauri::generate_context!())
         .expect("Failed to initialize CourtBundle")

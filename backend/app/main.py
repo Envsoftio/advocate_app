@@ -18,8 +18,11 @@ import pymupdf
 from .engine import load_profiles, preflight, build_bundle
 from .jobs import JobManager
 from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
-                      rotate_page, delete_page, ocr_pdf, make_cover_pdf)
-from .schemas import MatterCreate, MatterPatch, DocumentPatch, MemoPartiesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage
+                      rotate_page, delete_page, insert_pages, replace_pages, crop_pages,
+                      extract_pages, split_pages, add_text_overlay, editable_text_runs,
+                      replace_text_run,
+                      ocr_pdf, make_cover_pdf)
+from .schemas import MatterCreate, MatterPatch, DocumentPatch, MemoPartiesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, CropPages, TextOverlay, ReplaceTextRun
 from .storage import Store, new_id
 from .portable import create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES
 
@@ -51,10 +54,14 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
                   redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.store = store
     app.state.jobs = jobs
+    allowed_origins = ['http://localhost:1420', 'http://127.0.0.1:1420',
+                       'http://localhost:5173', 'http://127.0.0.1:5173',
+                       'tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost']
+    if os.environ.get('COURTBUNDLE_E2E_VITE_PORT'):
+        port = int(os.environ['COURTBUNDLE_E2E_VITE_PORT'])
+        allowed_origins.append(f'http://127.0.0.1:{port}')
     app.add_middleware(CORSMiddleware,
-                       allow_origins=['http://localhost:1420', 'http://127.0.0.1:1420',
-                                      'http://localhost:5173', 'http://127.0.0.1:5173',
-                                      'tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost'],
+                       allow_origins=allowed_origins,
                        allow_methods=['GET','POST','PUT','PATCH','DELETE'],
                        allow_headers=['Authorization','Content-Type'])
 
@@ -155,7 +162,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
     @app.get('/matters/{matter_id}/portable')
     def backup_matter(matter_id: str, _: None = Depends(auth)):
         matter_or_404(matter_id)
-        with tempfile.NamedTemporaryFile(dir=store.root, suffix='.cbmatter', delete=False) as temp:
+        with tempfile.NamedTemporaryFile(dir=store.root, prefix='.portable-',
+                                         suffix='.cbmatter', delete=False) as temp:
             path = Path(temp.name)
         try:
             with store.matter_lock(matter_id):
@@ -171,7 +179,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
 
     @app.post('/matters/restore', status_code=201)
     async def restore_matter(file: UploadFile = File(...), _: None = Depends(auth)):
-        with tempfile.NamedTemporaryFile(dir=store.root, suffix='.cbmatter', delete=False) as temp:
+        with tempfile.NamedTemporaryFile(dir=store.root, prefix='.portable-',
+                                         suffix='.cbmatter', delete=False) as temp:
             path = Path(temp.name)
         try:
             size = 0
@@ -193,6 +202,35 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
     def get_documents(matter_id: str, _: None = Depends(auth)):
         matter_or_404(matter_id)
         return store.get_documents(matter_id)
+
+    @app.get('/matters/{matter_id}/search')
+    def search_matter(matter_id: str, q: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        query = q.strip()
+        if not 2 <= len(query) <= 120:
+            raise HTTPException(status_code=422, detail='Search for 2 to 120 characters')
+        matches = []
+        with store.matter_lock(matter_id):
+            for document in store.get_documents(matter_id):
+                try:
+                    with pymupdf.open(store.working_path(document)) as pdf:
+                        for page_index, page in enumerate(pdf):
+                            text = ' '.join(page.get_text('text').split())
+                            position = text.casefold().find(query.casefold())
+                            if position < 0:
+                                continue
+                            start = max(0, position - 70)
+                            end = min(len(text), position + len(query) + 100)
+                            matches.append({
+                                'document_id': document['id'], 'title': document['title'],
+                                'revision': document['revision'], 'page': page_index + 1,
+                                'snippet': ('…' if start else '') + text[start:end] + ('…' if end < len(text) else ''),
+                            })
+                            if len(matches) >= 100:
+                                return {'matches': matches, 'truncated': True}
+                except Exception as exc:
+                    raise HTTPException(status_code=409, detail=f'Cannot search working copy of {document["title"]}: {exc}') from exc
+        return {'matches': matches, 'truncated': False}
 
     @app.get('/matters/{matter_id}/memo-parties')
     def get_memo_parties(matter_id: str, _: None = Depends(auth)):
@@ -367,6 +405,108 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         try:
             return edit_working_copy(doc_id, lambda path, doc: {
                 'page_count': delete_page(path, payload.page_index)})
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def source_for_edit(doc: dict, source_id: str):
+        source = doc_or_404(source_id)
+        if source['matter_id'] != doc['matter_id']:
+            raise HTTPException(status_code=422, detail='Source must be in the same matter')
+        return store.working_path(source)
+
+    @app.post('/documents/{doc_id}/pages/insert')
+    def page_insert(doc_id: str, payload: InsertPages, _: None = Depends(auth)):
+        try:
+            return edit_working_copy(doc_id, lambda path, doc: {
+                'page_count': insert_pages(path, source_for_edit(doc, payload.source_document_id),
+                                           payload.source_pages, payload.before_index),
+                'ocr_status': 'modified'})
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/replace')
+    def page_replace(doc_id: str, payload: ReplacePages, _: None = Depends(auth)):
+        try:
+            return edit_working_copy(doc_id, lambda path, doc: {
+                'page_count': replace_pages(path, source_for_edit(doc, payload.source_document_id),
+                                            payload.target_pages, payload.source_pages),
+                'ocr_status': 'modified'})
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/crop')
+    def page_crop(doc_id: str, payload: CropPages, _: None = Depends(auth)):
+        try:
+            return edit_working_copy(doc_id, lambda path, doc: {
+                'page_count': crop_pages(path, payload.pages, payload.left, payload.top,
+                                         payload.right, payload.bottom),
+                'ocr_status': 'modified'})
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/text-overlay')
+    def page_text_overlay(doc_id: str, payload: TextOverlay, _: None = Depends(auth)):
+        try:
+            def place(path, doc):
+                add_text_overlay(path, payload.page_index, payload.x, payload.y,
+                                 payload.text, payload.font_size)
+                return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
+            return edit_working_copy(doc_id, place)
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get('/documents/{doc_id}/pages/{page_index}/text-runs')
+    def page_text_runs(doc_id: str, page_index: int, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        try:
+            with store.matter_lock(doc['matter_id']):
+                current = doc_or_404(doc_id)
+                return {'revision': current['revision'],
+                        'runs': editable_text_runs(store.working_path(current), page_index)}
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/replace-text-run')
+    def page_replace_text_run(doc_id: str, payload: ReplaceTextRun, _: None = Depends(auth)):
+        try:
+            edit_layout = {}
+            def replace(path, doc):
+                if doc['revision'] != payload.expected_revision:
+                    raise HTTPException(status_code=409, detail='Document changed; reload and select text again')
+                edit_layout.update(replace_text_run(path, payload.page_index, payload.span_index,
+                                                    payload.expected_text, payload.replacement))
+                return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
+            return dict(edit_working_copy(doc_id, replace), edit_layout=edit_layout)
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    def page_selection(value: str) -> list[int]:
+        if not value or len(value) > 10000 or any(piece == '' or not piece.isdecimal()
+                                                   for piece in value.split(',')):
+            raise HTTPException(status_code=422, detail='Use comma-separated zero-based page indexes')
+        return [int(piece) for piece in value.split(',')]
+
+    @app.get('/documents/{doc_id}/pages/extract')
+    def page_extract(doc_id: str, selection: str, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        try:
+            with store.matter_lock(doc['matter_id']):
+                current = doc_or_404(doc_id)
+                data = extract_pages(store.working_path(current), page_selection(selection))
+            return Response(data, media_type='application/pdf', headers={
+                'Content-Disposition': 'attachment; filename="extracted-pages.pdf"'})
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get('/documents/{doc_id}/pages/split')
+    def page_split(doc_id: str, after: str, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        try:
+            with store.matter_lock(doc['matter_id']):
+                current = doc_or_404(doc_id)
+                data = split_pages(store.working_path(current), page_selection(after))
+            return Response(data, media_type='application/zip', headers={
+                'Content-Disposition': 'attachment; filename="split-pages.zip"'})
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

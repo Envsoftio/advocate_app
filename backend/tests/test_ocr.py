@@ -27,3 +27,10 @@ def test_ocr_scanned_image(client, auth, matter):
     assert done['status'] == 'completed', done['error']
     with pymupdf.open(stream=client.get(f'/documents/{doc_id}/pdf', headers=auth).content,filetype='pdf') as pdf:
         assert 'FILING' in pdf[0].get_text().upper()
+    selectable = client.get(f'/documents/{doc_id}/pages/0/text-runs', headers=auth)
+    assert selectable.status_code == 200, selectable.text
+    assert selectable.json()['runs'] == []
+    matches = client.get(f'/matters/{matter["id"]}/search', headers=auth,
+                         params={'q': 'FILING'}).json()['matches']
+    assert len(matches) == 1
+    assert matches[0]['document_id'] == doc_id and matches[0]['page'] == 1

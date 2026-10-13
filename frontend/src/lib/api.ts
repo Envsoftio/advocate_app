@@ -97,6 +97,22 @@ export async function downloadMatter(matterId: string): Promise<boolean> {
   return true
 }
 
+export async function downloadPageOutput(documentId: string, operation: 'extract' | 'split', indexes: number[]): Promise<boolean> {
+  const selection = indexes.join(',')
+  if (inTauri()) return invoke<boolean>('save_page_output', { documentId, operation, selection })
+  const query = operation === 'extract' ? 'selection' : 'after'
+  const response = await request(`/documents/${documentId}/pages/${operation}?${query}=${selection}`)
+  const url = URL.createObjectURL(await response.blob())
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = operation === 'extract' ? 'extracted-pages.pdf' : 'split-pages.zip'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
+  return true
+}
+
 export async function pdfBytes(docId: string): Promise<Uint8Array> {
   const response = await request(`/documents/${docId}/pdf`)
   return new Uint8Array(await response.arrayBuffer())

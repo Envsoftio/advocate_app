@@ -1,6 +1,6 @@
 # Local security and retention state
 
-**Status:** engineering draft, 13 October 2026. This POC must use synthetic matters only. The local data directory and portable backups are **not encrypted at rest**. Do not infer legal authenticity from hashes, OCR, audit events or a successful export.
+**Status:** engineering draft, 14 October 2026. This POC must use synthetic matters only. The local data directory and portable backups are **not encrypted at rest**. Do not infer legal authenticity from hashes, OCR, audit events or a successful export.
 
 ## Data boundary and threat model
 
@@ -8,12 +8,14 @@ The Tauri app starts a Python sidecar on loopback with a random session bearer t
 
 Imported originals stay byte-for-byte separate from working revisions. Page edits, OCR, bundle builds, backups and native Save can create additional readable copies. Build staging is removed on normal failure and startup recovery, but an operating-system crash may leave temporary data until the next launch or external cleanup. Portable restore validates paths, member sizes and SHA-256 values before publishing a new matter. These checks detect accidental or deliberate byte changes relative to the package manifest; they do not authenticate the package's author. Native Save streams into a same-directory temporary file and replaces the destination after a complete transfer.
 
+On POSIX systems, the engine creates and tightens its data-root directory to owner-only mode (`0700`). This limits other ordinary OS accounts from traversing the matter store; it does not protect against the same account, administrators, backup software or copied exports. Windows ACL behavior remains to be verified on device. Portable transfer files use a dedicated hidden name and are removed after normal completion or on next engine startup after a crash. PDF edit scratch files use another dedicated name and are removed on normal completion or startup. An uncommitted revision candidate is quarantined rather than discarded so the last committed working copy remains available. An export or backup explicitly saved outside the data root inherits the destination's access controls and is not covered by the root mode.
+
 ## Retention and recovery policy in this POC
 
 - Matter and document removal archives their SQLite records. Originals, working revisions, exports and Memo data remain on disk. Users can restore archived records from the workspace.
 - There is no in-app permanent-delete action. Removing app data outside CourtBundle requires the user's separate decision and a verified backup. Historical orphan folders from earlier record-deletion behavior are not automatically adopted.
 - Portable `.cbmatter` packages include active and archived documents, originals, retained working revisions and metadata. They do not include generated exports or job history. Restore creates new matter/document IDs and preserves archive state. Users should verify a restored synthetic matter before relying on any backup procedure.
-- Edit history retains the newest 100 events per matter; importing or archiving a document clears replay history because the document set changed. Job records have a separate 90-day terminal-state policy. Audit events are currently retained without automatic deletion; a release retention policy remains to be decided.
+- Edit history retains the newest 100 events per matter. Import, archive and restore now add reversible entries; a new edit clears the redo branch. Job records have a separate 90-day terminal-state policy. Audit events are currently retained without automatic deletion; a release retention policy remains to be decided.
 
 ## Audit and routine logs
 

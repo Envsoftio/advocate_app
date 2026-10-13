@@ -2,6 +2,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import threading
@@ -23,7 +24,11 @@ class Store:
     HISTORY_LIMIT = 100
     def __init__(self, root: Path):
         self.root = Path(root).expanduser().resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if os.name != 'nt':
+            # The data root is an application-owned trust boundary. Existing stores
+            # may predate this setting, so tighten them when the engine opens.
+            self.root.chmod(0o700)
         self._lock_file = (self.root / '.sidecar.lock').open('a+b')
         try:
             if os.name == 'nt':
@@ -46,6 +51,8 @@ class Store:
         self._matter_locks: dict[str, threading.Lock] = {}
         try:
             self._initialize()
+            self.recover_temporary_packages()
+            self.recover_orphan_working_revisions()
         except BaseException:
             self.close()
             raise
@@ -157,6 +164,47 @@ class Store:
     def matter_dir(self, matter_id: str) -> Path:
         # Never accept caller-controlled paths. All ids must have been found in DB.
         return self.root / 'matters' / matter_id
+
+    def recover_temporary_packages(self) -> int:
+        """Remove incomplete portable transfer files after an interrupted process."""
+        removed = 0
+        for path in self.root.glob('.portable-*.cbmatter*'):
+            if path.is_file() and not path.is_symlink():
+                path.unlink()
+                removed += 1
+        return removed
+
+    def recover_orphan_working_revisions(self) -> int:
+        """Quarantine revision candidates left before their SQLite commit."""
+        with self.connect() as con:
+            matters = [row[0] for row in con.execute('SELECT id FROM matters')]
+            referenced = {row[0] for row in con.execute(
+                'SELECT working_relpath FROM documents UNION SELECT working_relpath FROM document_revisions')}
+        recovered = 0
+        for matter_id in matters:
+            working = self.matter_dir(matter_id) / 'working'
+            if not working.is_dir() or working.is_symlink():
+                continue
+            for candidate in working.iterdir():
+                if (candidate.is_file() and not candidate.is_symlink() and
+                        re.fullmatch(r'\.pdf-edit-[A-Za-z0-9_]+\.pdf', candidate.name)):
+                    candidate.unlink()
+                    recovered += 1
+                    self.audit('interrupted_pdf_edit_temporary_removed', matter_id)
+                    continue
+                if (not candidate.is_file() or candidate.is_symlink() or
+                        not re.fullmatch(r'[0-9a-f]{32}-r[1-9][0-9]*\.pdf', candidate.name) or
+                        f'working/{candidate.name}' in referenced):
+                    continue
+                quarantine = self.matter_dir(matter_id) / 'quarantine' / 'working'
+                quarantine.mkdir(parents=True, exist_ok=True)
+                destination = quarantine / candidate.name
+                if destination.exists():
+                    destination = quarantine / f'{candidate.stem}-{new_id()}.pdf'
+                candidate.replace(destination)
+                recovered += 1
+                self.audit('orphan_working_revision_quarantined', matter_id)
+        return recovered
 
     def create_matter(self, fields: dict) -> dict:
         matter_id = new_id()
@@ -306,8 +354,9 @@ class Store:
                 (document_id,revision,working_relpath,page_count,ocr_status,created_at)
                 VALUES (?,?,?,?,?,?)''',
                 (item['id'], 1, item['working_relpath'], item['page_count'], item['ocr_status'], item['updated_at']))
-            # Import changes the document set; earlier order snapshots cannot be replayed safely.
-            con.execute('DELETE FROM edit_history WHERE matter_id=?', (data['matter_id'],))
+            self._record_edit(con, data['matter_id'], 'document_presence',
+                              {'id': data['id'], 'archived_at': item['created_at'], 'position': pos},
+                              {'id': data['id'], 'archived_at': None, 'position': pos})
             self._audit(con, 'document_imported', data['matter_id'], data['id'])
         self.touch(data['matter_id'])
         return self.get_document(data['id'])
@@ -346,17 +395,22 @@ class Store:
 
     def delete_document(self, doc_id: str):
         with self.connect() as con:
-            row = con.execute('SELECT matter_id FROM documents WHERE id=?', (doc_id,)).fetchone()
+            row = con.execute('SELECT matter_id,position FROM documents WHERE id=? AND archived_at IS NULL', (doc_id,)).fetchone()
             if row:
+                archived_at = utcnow()
                 con.execute('UPDATE documents SET archived_at=?,updated_at=? WHERE id=?',
-                            (utcnow(), utcnow(), doc_id))
-                con.execute('DELETE FROM edit_history WHERE matter_id=?', (row['matter_id'],))
+                            (archived_at, archived_at, doc_id))
+                self._record_edit(con, row['matter_id'], 'document_presence',
+                                  {'id': doc_id, 'archived_at': None, 'position': row['position']},
+                                  {'id': doc_id, 'archived_at': archived_at, 'position': row['position']})
                 self._audit(con, 'document_archived', row['matter_id'], doc_id)
         if row:
             self.touch(row['matter_id'])
 
     def restore_document(self, matter_id: str, doc_id: str) -> dict | None:
         with self.connect() as con:
+            previous = con.execute('''SELECT archived_at,position FROM documents
+                WHERE id=? AND matter_id=? AND archived_at IS NOT NULL''', (doc_id, matter_id)).fetchone()
             position = con.execute('''SELECT COALESCE(MAX(position),-1)+1 FROM documents
                 WHERE matter_id=? AND archived_at IS NULL''', (matter_id,)).fetchone()[0]
             con.execute('''UPDATE documents SET archived_at=NULL,position=?,updated_at=?
@@ -364,7 +418,9 @@ class Store:
                 (position, utcnow(), doc_id, matter_id))
             changed = con.execute('SELECT changes()').fetchone()[0]
             if changed:
-                con.execute('DELETE FROM edit_history WHERE matter_id=?', (matter_id,))
+                self._record_edit(con, matter_id, 'document_presence',
+                                  {'id': doc_id, 'archived_at': previous['archived_at'], 'position': previous['position']},
+                                  {'id': doc_id, 'archived_at': None, 'position': position})
                 self._audit(con, 'document_restored', matter_id, doc_id)
         if changed:
             self.touch(matter_id)
@@ -400,21 +456,56 @@ class Store:
             row = con.execute('''SELECT * FROM edit_history WHERE matter_id=? AND applied=?
                 ORDER BY id ''' + ('ASC' if redo else 'DESC') + ' LIMIT 1',
                 (matter_id, 0 if redo else 1)).fetchone()
-        if row is None:
-            raise ValueError('No edit to ' + ('redo' if redo else 'undo'))
-        state = json.loads(row['after_json'] if redo else row['before_json'])
-        if row['kind'] == 'document':
-            doc = self.get_document(state['id'])
-            if not doc or doc['matter_id'] != matter_id:
-                raise ValueError('Document was removed; this edit cannot be restored')
-            self.update_document(state['id'], state['fields'], record_history=False)
-        elif row['kind'] == 'matter':
-            self.update_matter(matter_id, state, record_history=False)
-        elif row['kind'] == 'order':
-            self.reorder(matter_id, state['ids'], record_history=False)
-        else:
-            raise ValueError('Unsupported edit history entry')
-        with self.connect() as con:
+            if row is None:
+                raise ValueError('No edit to ' + ('redo' if redo else 'undo'))
+            state = json.loads(row['after_json'] if redo else row['before_json'])
+            now = utcnow()
+            if row['kind'] == 'document_presence':
+                doc = con.execute('SELECT * FROM documents WHERE id=? AND matter_id=?',
+                                  (state['id'], matter_id)).fetchone()
+                if doc is None:
+                    raise ValueError('Document is missing; this edit cannot be restored')
+                if state['archived_at'] is None:
+                    folder = self.matter_dir(matter_id)
+                    if not (folder / doc['source_relpath']).is_file() or not (folder / doc['working_relpath']).is_file():
+                        raise ValueError('Document files are missing; this edit cannot be restored')
+                con.execute('''UPDATE documents SET archived_at=?,position=?,updated_at=? WHERE id=?''',
+                            (state['archived_at'], state['position'], now, state['id']))
+            elif row['kind'] == 'document':
+                doc = con.execute('''SELECT * FROM documents WHERE id=? AND matter_id=?
+                    AND archived_at IS NULL''', (state['id'], matter_id)).fetchone()
+                if doc is None:
+                    raise ValueError('Document was removed; this edit cannot be restored')
+                fields = state['fields']
+                if 'working_relpath' in fields:
+                    if not (self.matter_dir(matter_id) / fields['working_relpath']).is_file():
+                        raise ValueError('Working copy is missing; this edit cannot be restored')
+                    revision = doc['revision'] + 1
+                    con.execute('''INSERT INTO document_revisions
+                        (document_id,revision,working_relpath,page_count,ocr_status,created_at)
+                        VALUES (?,?,?,?,?,?)''',
+                        (state['id'], revision, fields['working_relpath'],
+                         fields.get('page_count', doc['page_count']),
+                         fields.get('ocr_status', doc['ocr_status']), now))
+                    fields = dict(fields, revision=revision)
+                changes = dict(fields, updated_at=now)
+                con.execute('UPDATE documents SET ' + ','.join(f'{key}=?' for key in changes) +
+                            ' WHERE id=?', (*changes.values(), state['id']))
+            elif row['kind'] == 'matter':
+                changes = dict(state, updated_at=now)
+                con.execute('UPDATE matters SET ' + ','.join(f'{key}=?' for key in changes) +
+                            ' WHERE id=?', (*changes.values(), matter_id))
+            elif row['kind'] == 'order':
+                actual = [r[0] for r in con.execute('''SELECT id FROM documents WHERE matter_id=?
+                    AND archived_at IS NULL ORDER BY position,created_at''', (matter_id,))]
+                if len(actual) != len(state['ids']) or set(actual) != set(state['ids']):
+                    raise ValueError('Document set changed; order cannot be restored')
+                for position, doc_id in enumerate(state['ids']):
+                    con.execute('UPDATE documents SET position=?,updated_at=? WHERE id=?',
+                                (position, now, doc_id))
+            else:
+                raise ValueError('Unsupported edit history entry')
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (now, matter_id))
             con.execute('UPDATE edit_history SET applied=? WHERE id=?', (int(redo), row['id']))
             self._audit(con, 'edit_redone' if redo else 'edit_undone', matter_id)
         return self.history_state(matter_id)

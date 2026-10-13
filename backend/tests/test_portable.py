@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import zipfile
 
 
@@ -49,6 +50,26 @@ def test_portable_matter_round_trip_preserves_originals_and_revisions(client, au
     with store.connect() as con:
         assert con.execute('SELECT COUNT(*) FROM document_revisions WHERE document_id=?',
                            (new_doc['id'],)).fetchone()[0] == 2
+    assert list(store.root.glob('.portable-*.cbmatter*')) == []
+
+
+def test_startup_cleans_interrupted_portable_files_and_restricts_store(tmp_path):
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+
+    root = tmp_path / 'matter-store'
+    root.mkdir(mode=0o755)
+    abandoned = root / '.portable-abandoned.cbmatter'
+    partial = root / '.portable-abandoned.cbmatter.partial-123'
+    unrelated = root / 'user-backup.cbmatter'
+    for path in (abandoned, partial, unrelated):
+        path.write_bytes(b'synthetic package bytes')
+    with TestClient(create_app(data_dir=root, token='unit-test-secret')):
+        assert not abandoned.exists()
+        assert not partial.exists()
+        assert unrelated.read_bytes() == b'synthetic package bytes'
+        if os.name != 'nt':
+            assert root.stat().st_mode & 0o777 == 0o700
 
 
 def test_portable_restore_rejects_unsafe_corrupt_and_future_packages(client, auth, make_pdf):

@@ -75,14 +75,14 @@ def test_undo_redo_page_metadata_order_and_branch(client, auth, matter, make_pdf
     first = upload(client, auth, matter, make_pdf, name='first.pdf', pages=2)
     second = upload(client, auth, matter, make_pdf, name='second.pdf', pages=1)
     base = f'/matters/{matter["id"]}/history'
-    assert client.get(base, headers=auth).json()['can_undo'] is False
+    assert client.get(base, headers=auth).json()['undo_count'] == 2
     rotated = client.post(f'/documents/{first["id"]}/pages/rotate', headers=auth,
                           json={'page_index': 0, 'degrees': 90}).json()
     assert rotated['revision'] == 2
     client.patch(f'/documents/{first["id"]}', headers=auth, json={'title': 'Renamed synthetic file'})
     client.post(f'/matters/{matter["id"]}/documents/reorder', headers=auth,
                 json={'ids': [second['id'], first['id']]})
-    assert client.get(base, headers=auth).json()['undo_count'] == 3
+    assert client.get(base, headers=auth).json()['undo_count'] == 5
     assert client.post(base + '/undo', headers=auth).json()['redo_count'] == 1
     assert [d['id'] for d in client.get(f'/matters/{matter["id"]}/documents', headers=auth).json()] == [first['id'], second['id']]
     client.post(base + '/undo', headers=auth)
@@ -104,6 +104,67 @@ def test_undo_redo_page_metadata_order_and_branch(client, auth, matter, make_pdf
     assert client.app.state.store.sha256(client.app.state.store.original_path(first)) == first['source_sha256']
 
 
+def test_import_and_archive_undo_redo_preserve_files_and_order(client, auth, matter, make_pdf):
+    store = client.app.state.store
+    base = f'/matters/{matter["id"]}'
+    history = base + '/history'
+    first = upload(client, auth, matter, make_pdf, name='first.pdf', pages=1)
+    client.patch(f'/documents/{first["id"]}', headers=auth, json={'title': 'Reviewed first'})
+    second = upload(client, auth, matter, make_pdf, name='second.pdf', pages=1)
+    assert client.get(history, headers=auth).json()['undo_count'] == 3
+    assert client.post(history + '/undo', headers=auth).status_code == 200
+    assert [d['id'] for d in client.get(base + '/documents', headers=auth).json()] == [first['id']]
+    assert store.original_path(second).is_file()
+    assert store.working_path(second).is_file()
+    assert client.post(history + '/redo', headers=auth).status_code == 200
+    assert [d['id'] for d in client.get(base + '/documents', headers=auth).json()] == [first['id'], second['id']]
+
+    assert client.delete(f'/documents/{first["id"]}', headers=auth).status_code == 200
+    assert [d['id'] for d in client.get(base + '/documents', headers=auth).json()] == [second['id']]
+    assert client.post(history + '/undo', headers=auth).status_code == 200
+    assert [d['id'] for d in client.get(base + '/documents', headers=auth).json()] == [first['id'], second['id']]
+    assert store.get_document(first['id'])['title'] == 'Reviewed first'
+    assert client.post(history + '/redo', headers=auth).status_code == 200
+    assert store.get_document(first['id']) is None
+    assert client.post(history + '/undo', headers=auth).status_code == 200
+    client.patch(f'/documents/{first["id"]}', headers=auth, json={'label': 'P-1'})
+    assert client.get(history, headers=auth).json()['can_redo'] is False
+    assert store.sha256(store.original_path(first)) == first['source_sha256']
+
+
+def test_history_restore_requires_files_and_keeps_cursor_on_failure(client, auth, matter, make_pdf):
+    store = client.app.state.store
+    doc = upload(client, auth, matter, make_pdf, pages=1)
+    history = f'/matters/{matter["id"]}/history'
+    assert client.post(history + '/undo', headers=auth).status_code == 200
+    working = store.working_path(doc)
+    missing = working.with_suffix('.missing')
+    working.rename(missing)
+    try:
+        failed = client.post(history + '/redo', headers=auth)
+        assert failed.status_code == 409
+        assert 'files are missing' in failed.json()['detail']
+        assert client.get(history, headers=auth).json()['redo_count'] == 1
+        assert store.get_document(doc['id']) is None
+    finally:
+        missing.rename(working)
+    assert client.post(history + '/redo', headers=auth).status_code == 200
+    assert store.get_document(doc['id']) is not None
+
+
+def test_manual_archive_restore_can_be_undone(client, auth, matter, make_pdf):
+    doc = upload(client, auth, matter, make_pdf, pages=1)
+    base = f'/matters/{matter["id"]}'
+    assert client.delete(f'/documents/{doc["id"]}', headers=auth).status_code == 200
+    restored = client.post(base + f'/archived-documents/{doc["id"]}/restore', headers=auth)
+    assert restored.status_code == 200
+    assert client.app.state.store.get_document(doc['id']) is not None
+    assert client.post(base + '/history/undo', headers=auth).status_code == 200
+    assert client.app.state.store.get_document(doc['id']) is None
+    assert client.post(base + '/history/redo', headers=auth).status_code == 200
+    assert client.app.state.store.get_document(doc['id']) is not None
+
+
 def test_edit_history_survives_engine_restart(tmp_path, auth, make_pdf):
     from fastapi.testclient import TestClient
     from app.main import create_app
@@ -123,6 +184,36 @@ def test_edit_history_survives_engine_restart(tmp_path, auth, make_pdf):
         assert reopened.app.state.store.get_document(doc['id'])['title'] == doc['title']
         assert reopened.post(base + '/redo', headers=auth).status_code == 200
         assert reopened.app.state.store.get_document(doc['id'])['title'] == 'After restart'
+
+
+def test_startup_quarantines_uncommitted_working_revision(tmp_path, auth, make_pdf):
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    root = tmp_path / 'orphan-revision-test'
+    with TestClient(create_app(data_dir=root, token='unit-test-secret')) as first_client:
+        created = first_client.post('/matters', headers=auth, json={
+            'name': 'Recovery fixture', 'court_profile': 'delhi-hc-illustrative',
+            'case_type': 'Synthetic', 'max_pages_per_volume': 10}).json()
+        doc = upload(first_client, auth, created, make_pdf, pages=1)
+        store = first_client.app.state.store
+        current = first_client.post(f'/documents/{doc["id"]}/pages/rotate', headers=auth,
+                                    json={'page_index': 0, 'degrees': 90}).json()
+        committed = store.working_path(current)
+        candidate = store.matter_dir(created['id']) / f'working/{doc["id"]}-r3.pdf'
+        candidate.write_bytes(committed.read_bytes())  # Simulate a crash before the DB update.
+        interrupted_edit = candidate.parent / '.pdf-edit-synthetic.pdf'
+        interrupted_edit.write_bytes(b'incomplete synthetic PDF')
+    with TestClient(create_app(data_dir=root, token='unit-test-secret')) as reopened:
+        store = reopened.app.state.store
+        assert not candidate.exists()
+        assert not interrupted_edit.exists()
+        quarantined = store.matter_dir(created['id']) / 'quarantine' / 'working' / candidate.name
+        assert quarantined.is_file()
+        assert committed.is_file()
+        assert store.get_document(doc['id'])['revision'] == 2
+        assert any(event['action'] == 'orphan_working_revision_quarantined'
+                   for event in store.list_audit(created['id']))
+        assert reopened.post(f'/matters/{created["id"]}/history/undo', headers=auth).status_code == 200
 
 
 def test_undo_marks_prior_export_stale(client, auth, matter, make_pdf):

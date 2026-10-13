@@ -33,6 +33,17 @@ export interface MatterDocument {
   updated_at: string
   archived_at?: string | null
 }
+export interface PageSearchMatch {
+  document_id: string
+  title: string
+  revision: number
+  page: number
+  snippet: string
+}
+export interface PageSearchResult {
+  matches: PageSearchMatch[]
+  truncated: boolean
+}
 export interface Check {
   severity: 'error' | 'warning' | 'info'
   code: string

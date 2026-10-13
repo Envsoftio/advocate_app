@@ -1,20 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   Archive, ArrowDownToLine, ArrowLeft, ArrowRight, BookMarked, BookOpen, BriefcaseBusiness,
   Check, CheckCircle2, ChevronRight, CircleAlert, CircleHelp, CloudOff,
-  FileCheck2, FilePlus2, FileStack, FileText, FolderOpen, GripVertical, Info,
-  Layers3, LockKeyhole, Plus, RefreshCw,
-  ScanText, Search, Settings2, ShieldAlert, ShieldCheck,
-  UploadCloud, WandSparkles, X
+  Ellipsis, FileCheck2, FilePenLine, FilePlus2, FileStack, FileText, FolderOpen, GripVertical, Info,
+  Layers3, LockKeyhole, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw,
+  Redo2, ScanText, Search, Settings2, ShieldAlert, ShieldCheck,
+  Undo2, UploadCloud, WandSparkles, X
 } from 'lucide-vue-next'
 import PdfViewer from './components/PdfViewer.vue'
+import PageTools from './components/PageTools.vue'
 import MatterForm from './components/MatterForm.vue'
 import DelhiFilingGuide from './components/DelhiFilingGuide.vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { api, downloadExport, downloadMatter, inTauri, restoreMatter, uploadDocuments } from './lib/api'
 import { bytesLabel, friendlyError, prettyDate } from './lib/format'
-import type { Check as PreflightCheck, CourtProfile, DocKind, ExportManifest, Job, Matter, MatterDocument, MatterNew } from './lib/types'
+import { applyAppearance, readAppearance, type Theme, type UiScale } from './lib/appearance'
+import type { Check as PreflightCheck, CourtProfile, DocKind, ExportManifest, Job, Matter, MatterDocument, MatterNew, PageSearchResult } from './lib/types'
 
 type View = 'documents' | 'build' | 'validation' | 'rules' | 'about'
 const matterList = ref<Matter[]>([])
@@ -31,10 +33,30 @@ const history = ref({can_undo:false,can_redo:false,undo_count:0,redo_count:0})
 const checks = ref<PreflightCheck[]>([])
 const selectedDocId = ref<string | null>(null)
 const selectedDoc = computed(() => docs.value.find(d => d.id === selectedDocId.value) || null)
+const inspectorTab = ref<'details' | 'tools'>('details')
+const detailsTabButton = ref<HTMLButtonElement | null>(null)
+const toolsTabButton = ref<HTMLButtonElement | null>(null)
+const pageToolsOpen = ref(false)
+const pageToolsDialog = ref<HTMLDialogElement | null>(null)
+const documentsWorkspace = ref<HTMLElement | null>(null)
+const documentsWorkspaceHeight = ref<number | null>(null)
 const activeView = ref<View>('documents')
+const sidebarCollapsed = ref(false)
+const smallScreen = ref(window.matchMedia('(max-width: 900px)').matches)
+const mobileNavOpen = ref(false)
 const searching = ref('')
+const pageQuery = ref('')
+const pageSearch = ref<PageSearchResult | null>(null)
+const pageSearchBusy = ref(false)
+const pageSearchError = ref('')
+const pageTarget = ref<{documentId:string, page:number, sequence:number}>({documentId:'', page:1, sequence:0})
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchSequence = 0
 const creating = ref(false)
 const modalOpen = ref(false)
+const appearance = readAppearance()
+const theme = ref<Theme>(appearance.theme)
+const uiScale = ref<UiScale>(appearance.scale)
 const busy = ref(false)
 const draggingDocId = ref<string | null>(null)
 const hoverUpload = ref(false)
@@ -88,18 +110,77 @@ function confirmDiscardDrafts() {
 }
 function selectDocument(id: string) {
   if (selectedDocId.value === id || !confirmDiscardDrafts()) return
+  pageTarget.value = {documentId:'', page:1, sequence:pageTarget.value.sequence + 1}
   selectedDocId.value = id
 }
+watch(selectedDocId, () => { inspectorTab.value = 'details'; pageToolsOpen.value = false })
+function fitDocumentsWorkspace() {
+  const workspace = documentsWorkspace.value
+  if (!workspace || window.innerWidth <= 1120) {
+    documentsWorkspaceHeight.value = null
+    return
+  }
+  const scale = uiScale.value / 100
+  documentsWorkspaceHeight.value = Math.max(320, Math.floor((window.innerHeight - workspace.getBoundingClientRect().top - 8) / scale))
+}
+watch([uiScale, activeView, currentMatterId], async () => {
+  await nextTick()
+  window.requestAnimationFrame(fitDocumentsWorkspace)
+})
+watch(pageToolsOpen, async open => {
+  await nextTick()
+  const dialog = pageToolsDialog.value
+  if (open && dialog && !dialog.open) dialog.showModal()
+  if (!open && dialog?.open) dialog.close()
+})
+function onInspectorTabKeydown(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  inspectorTab.value = event.key === 'ArrowLeft' || event.key === 'Home' ? 'details' : 'tools'
+  nextTick(() => (inspectorTab.value === 'details' ? detailsTabButton.value : toolsTabButton.value)?.focus())
+}
 function showView(view: View) {
-  if (activeView.value === view || !confirmDiscardDrafts()) return
+  if (activeView.value === view) { mobileNavOpen.value = false; return }
+  if (!confirmDiscardDrafts()) return
   activeView.value = view
+  mobileNavOpen.value = false
   if (view === 'validation') void validate()
+}
+function toggleNavigation() {
+  if (smallScreen.value) mobileNavOpen.value = !mobileNavOpen.value
+  else sidebarCollapsed.value = !sidebarCollapsed.value
+  void nextTick(() => window.requestAnimationFrame(fitDocumentsWorkspace))
+}
+function onResize() {
+  const narrow = window.matchMedia('(max-width: 900px)').matches
+  if (smallScreen.value !== narrow) mobileNavOpen.value = false
+  smallScreen.value = narrow
+  fitDocumentsWorkspace()
 }
 function beforeUnload(event: BeforeUnloadEvent) {
   if (!documentDirty.value && !settingsDirty.value) return
   event.preventDefault()
   event.returnValue = ''
 }
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && mobileNavOpen.value) { mobileNavOpen.value = false; return }
+  if (event.defaultPrevented || modalOpen.value || event.altKey) return
+  const target = event.target as HTMLElement | null
+  const editingField = target?.isContentEditable || !!target?.closest('input, textarea, select, [contenteditable="true"]')
+  if (event.key === 'Escape' && toast.value) { toast.value = null; return }
+  if (editingField) return
+  if (event.key === '/' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k')) {
+    event.preventDefault()
+    if (activeView.value !== 'documents') showView('documents')
+    if (activeView.value === 'documents') void nextTick(() => document.querySelector<HTMLInputElement>('input[aria-label="Search documents"]')?.focus())
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && currentMatter.value && !busy.value) {
+    event.preventDefault()
+    if (event.shiftKey && history.value.can_redo) void traverseHistory('redo')
+    else if (!event.shiftKey && history.value.can_undo) void traverseHistory('undo')
+  }
+}
+watch([theme, uiScale], () => applyAppearance(theme.value, uiScale.value), { immediate: true })
 
 watch(selectedDoc, (doc, previous) => {
   if (doc && previous?.id === doc.id && (
@@ -119,7 +200,52 @@ watch(currentMatter, (item, previous) => {
   matterEditor.max_pages_per_volume = item?.max_pages_per_volume || 300
   matterEditor.keep_groups_intact = item?.keep_groups_intact ?? true
 }, {immediate:true})
-watch(currentMatterId, () => { if (currentMatterId.value) void loadMatterResources() })
+watch(currentMatterId, () => {
+  pageQuery.value = ''
+  pageSearch.value = null
+  searchSequence++
+  if (currentMatterId.value) void loadMatterResources()
+})
+watch(pageQuery, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (pageQuery.value.trim().length < 2) {
+    pageSearch.value = null
+    pageSearchError.value = ''
+    pageSearchBusy.value = false
+    searchSequence++
+    return
+  }
+  searchTimer = setTimeout(() => void searchPages(), 350)
+})
+
+async function searchPages() {
+  const id = currentMatterId.value
+  const q = pageQuery.value.trim()
+  const sequence = ++searchSequence
+  if (!id || q.length < 2) return
+  pageSearchBusy.value = true
+  pageSearchError.value = ''
+  try {
+    const result = await api<PageSearchResult>(`/matters/${id}/search?q=${encodeURIComponent(q)}`, 'GET', undefined, 5 * 60_000)
+    if (sequence === searchSequence && id === currentMatterId.value) pageSearch.value = result
+  } catch (err) {
+    if (sequence === searchSequence) pageSearchError.value = friendlyError(err)
+  } finally {
+    if (sequence === searchSequence) pageSearchBusy.value = false
+  }
+}
+function openSearchMatch(documentId: string, page: number) {
+  if (!confirmDiscardDrafts()) return
+  selectedDocId.value = documentId
+  pageTarget.value = {documentId, page, sequence:pageTarget.value.sequence + 1}
+}
+function highlightedSnippet(snippet: string, query: string) {
+  const index = snippet.toLocaleLowerCase().indexOf(query.toLocaleLowerCase())
+  return index < 0 ? {before:snippet, match:'', after:''} : {
+    before:snippet.slice(0, index), match:snippet.slice(index, index + query.length),
+    after:snippet.slice(index + query.length),
+  }
+}
 
 function notify(message:string, kind:'success'|'error'|'info'='info') {
   toast.value={message,kind}
@@ -203,6 +329,7 @@ async function loadMatterResources() {
     ])
     if (currentMatterId.value !== id) return
     docs.value=d; checks.value=c; exportsList.value=e; recentJobs.value=j; history.value=h
+    if (pageQuery.value.trim().length >= 2) void searchPages()
     archivedDocs.value=archived; storageUsage.value=usage
     const ongoing = j.find(job => job.status === 'queued' || job.status === 'running')
     if (ongoing && (!activeJob.value || activeJob.value.id !== ongoing.id)) watchJob(ongoing)
@@ -408,8 +535,10 @@ async function download(exportId:string, filename:string, saveAs=false){
   finally{savingExport.value = false}
 }
 function selectMatter(id:string){
-  if (currentMatterId.value === id || !confirmDiscardDrafts()) return
+  if (currentMatterId.value === id) { mobileNavOpen.value = false; return }
+  if (!confirmDiscardDrafts()) return
   currentMatterId.value=id;selectedDocId.value=null;activeView.value='documents'
+  mobileNavOpen.value = false
 }
 async function removeMatter(){
   if(!currentMatter.value || !confirmDiscardDrafts() || !window.confirm('Archive this matter? Its records, originals and working files remain available for restore.'))return
@@ -434,28 +563,31 @@ async function restoreArchivedDocument(id: string) {
   } catch (err) { issue(err) }
 }
 const iconsBySeverity = {error:CircleAlert,warning:ShieldAlert,info:Info}
-onMounted(()=>{void init(); healthTimer=setInterval(()=>void checkHealth(),5_000);window.addEventListener('beforeunload',beforeUnload)})
-onUnmounted(()=>{if(jobTimer)clearInterval(jobTimer);if(toastTimer)clearTimeout(toastTimer);if(healthTimer)clearInterval(healthTimer);window.removeEventListener('beforeunload',beforeUnload)})
+onMounted(()=>{try { sidebarCollapsed.value = localStorage.getItem('courtbundle.sidebarCollapsed.v1') === 'true' } catch { /* Storage may be unavailable. */ } void init(); healthTimer=setInterval(()=>void checkHealth(),5_000);window.addEventListener('beforeunload',beforeUnload);window.addEventListener('keydown',onKeydown);window.addEventListener('resize',onResize)})
+onUnmounted(()=>{if(jobTimer)clearInterval(jobTimer);if(toastTimer)clearTimeout(toastTimer);if(healthTimer)clearInterval(healthTimer);window.removeEventListener('beforeunload',beforeUnload);window.removeEventListener('keydown',onKeydown);window.removeEventListener('resize',onResize)})
+watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.sidebarCollapsed.v1', String(collapsed)) } catch { /* Storage may be unavailable. */ } })
 </script>
 
 <template>
   <div class="app-shell">
-    <aside class="sidebar">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <button v-if="smallScreen && mobileNavOpen" class="sidebar-backdrop" aria-label="Close navigation" @click="mobileNavOpen=false"></button>
+    <aside class="sidebar" :class="{collapsed:sidebarCollapsed && !smallScreen, 'mobile-open':mobileNavOpen}" :inert="smallScreen && !mobileNavOpen">
       <div class="brand-area">
         <div class="brand-mark"><Layers3 :size="22" :stroke-width="2.3"/></div>
-        <div><div class="brand-name">CourtBundle<span class="brand-plus">.</span></div><div class="brand-sub">LEGAL WORKSPACE / POC</div></div>
+        <div class="brand-copy"><div class="brand-name">CourtBundle<span class="brand-plus">.</span></div><div class="brand-sub">LEGAL WORKSPACE / POC</div></div>
       </div>
       <div class="side-label">WORKSPACE</div>
       <nav class="side-nav">
-        <button class="side-link" :class="{active:activeView!=='rules'&&activeView!=='about'}" @click="showView('documents')"><BriefcaseBusiness :size="18"/> Matters <span class="side-count">{{matterList.length}}</span></button>
-        <button class="side-link" :class="{active:activeView==='rules'}" @click="showView('rules')"><BookOpen :size="18"/> Court rules</button>
-        <button class="side-link" :class="{active:activeView==='about'}" @click="showView('about')"><CircleHelp :size="18"/> About POC</button>
+        <button class="side-link" aria-label="Matters" title="Matters" :class="{active:activeView!=='rules'&&activeView!=='about'}" @click="showView('documents')"><BriefcaseBusiness :size="18"/><span class="nav-label">Matters</span><span class="side-count">{{matterList.length}}</span></button>
+        <button class="side-link" aria-label="Court rules" title="Court rules" :class="{active:activeView==='rules'}" @click="showView('rules')"><BookOpen :size="18"/><span class="nav-label">Court rules</span></button>
+        <button class="side-link" aria-label="About POC" title="About POC" :class="{active:activeView==='about'}" @click="showView('about')"><CircleHelp :size="18"/><span class="nav-label">About POC</span></button>
       </nav>
       <input ref="matterFileInput" type="file" accept=".cbmatter" hidden @change="e=>importMatterPackage((e.target as HTMLInputElement).files)"/>
-      <button class="side-link" :disabled="busy" @click="matterFileInput?.click()"><FolderOpen :size="18"/> Restore matter</button>
-      <div class="side-label matter-section-label">YOUR MATTERS <button title="New matter" class="side-plus" @click="modalOpen=true"><Plus :size="17"/></button></div>
+      <button class="side-link" aria-label="Restore matter" title="Restore matter" :disabled="busy" @click="matterFileInput?.click()"><FolderOpen :size="18"/><span class="nav-label">Restore matter</span></button>
+      <div class="side-label matter-section-label"><span class="nav-label">YOUR MATTERS</span><button aria-label="New matter" title="New matter" class="side-plus" @click="modalOpen=true"><Plus :size="17"/></button></div>
       <div class="matter-list">
-        <button v-for="m in matterList" :key="m.id" class="matter-link" :class="{active:currentMatterId===m.id&&activeView!=='rules'&&activeView!=='about'}" @click="selectMatter(m.id)">
+        <button v-for="m in matterList" :key="m.id" class="matter-link" :aria-label="m.name" :title="m.name" :class="{active:currentMatterId===m.id&&activeView!=='rules'&&activeView!=='about'}" @click="selectMatter(m.id)">
           <div class="matter-initial">{{m.name.slice(0,1).toUpperCase()}}</div>
           <div class="matter-link-label"><span>{{m.name}}</span><small>{{m.case_type}}</small></div>
         </button>
@@ -463,23 +595,28 @@ onUnmounted(()=>{if(jobTimer)clearInterval(jobTimer);if(toastTimer)clearTimeout(
       </div>
       <div v-if="archivedMatters.length" class="side-label">ARCHIVED MATTERS</div>
       <div v-if="archivedMatters.length" class="matter-list">
-        <button v-for="m in archivedMatters" :key="m.id" class="matter-link" :title="'Restore '+m.name" @click="restoreArchivedMatter(m.id)"><Archive :size="17"/><span>{{m.name}}</span></button>
+        <button v-for="m in archivedMatters" :key="m.id" class="matter-link" :aria-label="'Restore '+m.name" :title="'Restore '+m.name" @click="restoreArchivedMatter(m.id)"><Archive :size="17"/><span>{{m.name}}</span></button>
       </div>
       <div class="sidebar-bottom">
+        <div class="appearance-controls">
+          <label>Theme<select v-model="theme" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+          <label>Interface size<select v-model.number="uiScale" aria-label="Interface size"><option :value="90">90%</option><option :value="100">100%</option><option :value="110">110%</option><option :value="125">125%</option></select></label>
+          <small>/ search · ⌘/Ctrl+Z undo · Shift+⌘/Ctrl+Z redo</small>
+        </div>
         <div class="offline-status"><CloudOff :size="17"/><div><strong>Offline-first</strong><small>Files stay on this computer</small></div></div>
         <div class="version-chip"><span :class="['status-dot',apiStatus]"></span> {{apiStatus==='online'?'Local engine connected':apiStatus==='offline'?'Engine disconnected':'Connecting…'}} <span class="version-text">v0.1</span></div>
       </div>
     </aside>
 
-    <div class="app-main">
+    <div class="app-main" :class="{'workspace-main':currentMatter && activeView!=='rules' && activeView!=='about'}">
       <header class="topbar">
-        <div class="breadcrumb"><span>Workspace</span><ChevronRight :size="14"/><strong>{{activeView==='rules'?'Court rules':activeView==='about'?'About POC':(currentMatter?.name||'Matters')}}</strong></div>
+        <div class="topbar-left"><button class="icon-btn nav-toggle" :aria-label="smallScreen ? (mobileNavOpen ? 'Close navigation' : 'Open navigation') : (sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar')" :aria-expanded="smallScreen ? mobileNavOpen : !sidebarCollapsed" @click="toggleNavigation"><Menu v-if="smallScreen" :size="20"/><PanelLeftOpen v-else-if="sidebarCollapsed" :size="20"/><PanelLeftClose v-else :size="20"/></button><div class="breadcrumb"><span>Workspace</span><ChevronRight :size="14"/><strong>{{activeView==='rules'?'Court rules':activeView==='about'?'About POC':(currentMatter?.name||'Matters')}}</strong></div></div>
         <div class="topbar-right"><span class="desktop-tag">DESKTOP POC</span><span class="user-badge">CB</span></div>
       </header>
 
       <div v-if="apiStatus==='offline'" class="backend-error"><CircleAlert :size="19"/><div><strong>Python engine unavailable</strong><p v-if="inTauri()">Quit and reopen CourtBundle to start a new local engine session. If it still fails, inspect the packaged sidecar and local port.</p><p v-else>Run <code>cd backend && ./dev.sh</code>, then retry. The browser development token is for local testing only.</p></div><button class="btn secondary" @click="init">Retry connection</button></div>
 
-      <main v-if="activeView==='rules'" class="page-content rules-page">
+      <main v-if="activeView==='rules'" id="main-content" tabindex="-1" class="page-content rules-page">
         <div class="page-eyebrow">LEGAL KNOWLEDGE</div><h1>Court rules & technical profiles</h1><p class="page-description">Source-linked preparation checks. These do not replace registry instructions or an advocate's review.</p>
         <div class="rules-grid"><div v-for="profile in profileList" :key="profile.id" class="card rule-card">
           <div class="rule-icon"><BookMarked :size="24" /></div><div class="badge muted">{{profile.status==='DEMO_ONLY'?'DEMO ONLY':'NOT LEGALLY APPROVED'}}</div>
@@ -491,32 +628,50 @@ onUnmounted(()=>{if(jobTimer)clearInterval(jobTimer);if(toastTimer)clearTimeout(
         <div class="notice amber"><ShieldAlert :size="19"/> These rules are only a selected technical subset. Case-type documents, notarisation, signatures, fees, limitation and court acceptance are outside the POC's validation scope.</div>
       </main>
 
-      <main v-else-if="activeView==='about'" class="page-content about-page">
+      <main v-else-if="activeView==='about'" id="main-content" tabindex="-1" class="page-content about-page">
         <div class="page-eyebrow">PRODUCT DEMONSTRATION</div><h1>Built for structured legal filing preparation.</h1>
         <p class="page-description">A local-first proof of concept connecting Tauri, Vue and Python to convert source documents into indexed legal bundles.</p>
         <div class="feature-strip"><div><FileStack :size="23"/><h3>Preserve originals</h3><p>Working copies are edited separately from imported source documents.</p></div><div><WandSparkles :size="23"/><h3>Deterministic assembly</h3><p>Volume splitting, bookmarks and indexes share the same page map.</p></div><div><ShieldCheck :size="23"/><h3>Visible limitations</h3><p>Illustrative rules and a validation report, not a filing approval.</p></div></div>
         <div class="card about-card"><h2>What is included?</h2><p>Matters, PDF/JPEG/PNG import, working-copy page operations, English OCR, drag-drop ordering, annexure/part metadata, auto index, volume splitting, linked bookmarks, technical validation and ZIP export.</p><h2>What is not included?</h2><p>Actual court submission, legally approved templates, digital signing, Word/Excel/PPT conversion, comprehensive PDF text editing, cloud sharing or guaranteed legal compliance.</p></div>
       </main>
 
-      <main v-else-if="!currentMatter" class="page-content welcome-page">
+      <main v-else-if="!currentMatter" id="main-content" tabindex="-1" class="page-content welcome-page">
         <div class="welcome-icon"><FolderOpen :size="32"/></div><div class="page-eyebrow">YOUR FIRST MATTER</div><h1>From scattered files to<br/>a structured court bundle.</h1>
         <p>Create a matter to import documents, organise annexures, generate indexes and prepare a complete PDF package—offline.</p>
         <button class="btn primary large" @click="modalOpen=true"><Plus :size="18"/> Create your first matter</button>
         <div class="welcome-steps"><span>01 &nbsp; Add documents</span><ArrowRight :size="18"/><span>02 &nbsp; Collate & OCR</span><ArrowRight :size="18"/><span>03 &nbsp; Build bundle</span></div>
       </main>
 
-      <main v-else class="page-content workspace-page">
+      <main v-else id="main-content" tabindex="-1" class="page-content workspace-page">
         <div class="matter-heading">
-          <div><div class="page-eyebrow">MATTER / {{currentMatter.case_number||'DRAFT'}}</div><h1>{{currentMatter.name}}</h1><p class="matter-description">{{currentMatter.case_type}} <span class="dot-sep">·</span> {{selectedProfile?.name}}</p></div>
-          <div class="matter-heading-actions"><button class="btn secondary" :disabled="busy" @click="backupCurrentMatter">Back up matter</button><button class="btn secondary" :disabled="busy" @click="removeMatter">Archive matter</button><button class="btn secondary" :disabled="busy || !history.can_undo" @click="traverseHistory('undo')">Undo</button><button class="btn secondary" :disabled="busy || !history.can_redo" @click="traverseHistory('redo')">Redo</button><button class="btn secondary" @click="confirmDiscardDrafts() && void loadMatterResources()"><RefreshCw :size="16"/> Refresh</button><button class="btn primary" @click="showView('build')"><FileStack :size="17"/> Build filing bundle</button></div>
+          <div class="matter-heading-copy"><h1>{{currentMatter.name}}</h1><p class="matter-description"><span>{{currentMatter.case_number||'Draft'}}</span><span class="dot-sep">·</span>{{currentMatter.case_type}} <span class="dot-sep">·</span> {{selectedProfile?.name}}</p></div>
+          <div class="matter-heading-actions">
+            <button class="btn secondary small matter-icon-action" aria-label="Undo" title="Undo" :disabled="busy || !history.can_undo" @click="traverseHistory('undo')"><Undo2 :size="16"/></button>
+            <button class="btn secondary small matter-icon-action" aria-label="Redo" title="Redo" :disabled="busy || !history.can_redo" @click="traverseHistory('redo')"><Redo2 :size="16"/></button>
+            <details class="matter-more"><summary class="btn secondary small matter-icon-action" aria-label="More actions" title="More actions"><Ellipsis :size="17"/></summary><div class="matter-more-menu">
+              <button :disabled="busy" @click="backupCurrentMatter">Back up matter</button>
+              <button @click="confirmDiscardDrafts() && void loadMatterResources()"><RefreshCw :size="15"/> Refresh</button>
+              <button :disabled="busy" @click="removeMatter">Archive matter</button>
+            </div></details>
+            <button class="btn primary" @click="showView('build')"><FileStack :size="17"/> Build filing bundle</button>
+          </div>
         </div>
-        <div class="stats-row"><div class="stat"><div class="stat-icon blue"><FileText :size="19"/></div><div><strong>{{docs.length}}</strong><span>Documents</span></div></div><div class="stat"><div class="stat-icon purple"><BookOpen :size="19"/></div><div><strong>{{totalPages}}</strong><span>Source pages</span></div></div><div class="stat"><div class="stat-icon orange"><CircleAlert :size="19"/></div><div><strong>{{warningChecks.length+errorChecks.length}}</strong><span>Review flags</span></div></div><div class="stat"><div class="stat-icon green"><Archive :size="19"/></div><div><strong>{{exportsList.length}}</strong><span>Prepared packages</span></div></div></div>
+        <div class="matter-summary" aria-label="Matter summary"><span><strong>{{docs.length}}</strong> documents</span><span><strong>{{totalPages}}</strong> source pages</span><span><strong>{{warningChecks.length+errorChecks.length}}</strong> review flags</span><span><strong>{{exportsList.length}}</strong> prepared packages</span></div>
         <div class="workspace-tabs"><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></div>
 
-        <div v-if="activeView==='documents'" class="documents-workspace">
+        <div v-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
           <section class="panel docs-panel">
             <div class="panel-header"><div><h2>Source documents</h2><span>Reorder documents by dragging</span></div><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div>
             <div class="docs-search"><Search :size="16"/><input v-model="searching" placeholder="Search documents..." aria-label="Search documents"/></div>
+            <div class="docs-search"><Search :size="16"/><input v-model="pageQuery" placeholder="Find text on pages..." aria-label="Find text on pages"/></div>
+            <div v-if="pageQuery.trim().length >= 2" class="page-search-results" aria-live="polite">
+              <small v-if="pageSearchBusy">Searching working PDFs…</small>
+              <small v-else-if="pageSearchError" class="error-msg">{{pageSearchError}}</small>
+              <template v-else-if="pageSearch">
+                <small>{{pageSearch.matches.length}} matching page(s){{pageSearch.truncated ? ' · first 100 shown' : ''}}</small>
+                <button v-for="match in pageSearch.matches" :key="match.document_id+'-'+match.page" class="page-search-hit" @click="openSearchMatch(match.document_id, match.page)"><strong>{{match.title}} · page {{match.page}}</strong><span>{{highlightedSnippet(match.snippet, pageQuery.trim()).before}}<mark>{{highlightedSnippet(match.snippet, pageQuery.trim()).match}}</mark>{{highlightedSnippet(match.snippet, pageQuery.trim()).after}}</span></button>
+              </template>
+            </div>
             <div v-if="docs.length" class="docs-list">
               <div v-for="doc in filteredDocs" :key="doc.id" class="doc-item" :class="{selected:selectedDocId===doc.id,dragging:draggingDocId===doc.id}" :draggable="!busy" @dragstart="onDragStart(doc.id)" @dragend="draggingDocId=null" @dragover.prevent @drop.prevent="onDropOn(doc.id)" @click="selectDocument(doc.id)">
                 <GripVertical :size="16" class="grip"/>
@@ -533,12 +688,16 @@ onUnmounted(()=>{if(jobTimer)clearInterval(jobTimer);if(toastTimer)clearTimeout(
             <div class="docs-help"><LockKeyhole :size="14"/> Original files are never overwritten.</div>
           </section>
 
-          <section class="panel preview-panel"><PdfViewer :document="selectedDoc" @modified="refreshDocument" @error="issue"/></section>
+          <section class="panel preview-panel"><PdfViewer :document="selectedDoc" :disabled="busy || isJobActive || documentDirty" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true"/></section>
 
           <section class="panel inspector-panel">
-            <div class="panel-header"><div><h2>Document details</h2><span>Metadata for collation</span></div><Settings2 :size="18" class="muted-icon"/></div>
+            <div class="panel-header"><div><h2>{{inspectorTab==='tools'?'Document tools':'Document details'}}</h2><span>{{inspectorTab==='tools'?'OCR and page editing':'Metadata for collation'}}</span></div><Settings2 :size="18" class="muted-icon"/></div>
             <template v-if="selectedDoc">
-              <div class="inspector-content">
+              <div class="inspector-tabs" role="tablist" aria-label="Document panel" @keydown="onInspectorTabKeydown">
+                <button ref="detailsTabButton" id="document-details-tab" role="tab" aria-controls="document-details-panel" :aria-selected="inspectorTab==='details'" :tabindex="inspectorTab==='details'?0:-1" :class="{active:inspectorTab==='details'}" @click="inspectorTab='details'">Details</button>
+                <button ref="toolsTabButton" id="document-tools-tab" role="tab" aria-controls="document-tools-panel" :aria-selected="inspectorTab==='tools'" :tabindex="inspectorTab==='tools'?0:-1" :class="{active:inspectorTab==='tools'}" @click="inspectorTab='tools'">Tools</button>
+              </div>
+              <div v-if="inspectorTab==='details'" id="document-details-panel" class="inspector-content" role="tabpanel" aria-labelledby="document-details-tab">
                 <div class="inspector-heading"><div class="doc-icon big"><FileText :size="22"/></div><div><strong>{{selectedDoc.original_name}}</strong><small>{{selectedDoc.page_count}} pages · {{selectedDoc.ocr_status.split('_').join(' ')}}</small></div></div>
                 <label class="field">Display title<input v-model="docEditor.title" maxlength="250"/></label>
                 <label class="field">Document type<select v-model="docEditor.kind"><option v-for="kind in documentKindOptions" :key="kind" :value="kind">{{kind[0].toUpperCase()+kind.slice(1)}}</option></select></label>
@@ -546,12 +705,15 @@ onUnmounted(()=>{if(jobTimer)clearInterval(jobTimer);if(toastTimer)clearTimeout(
                 <label class="field">Keep-together group<input v-model="docEditor.group_key" placeholder="Optional: annexures-a"/><span class="hint">Adjacent documents with the same group stay together when enabled.</span></label>
                 <p v-if="documentDirty" role="status" class="hint">Unsaved document changes</p>
                 <button class="btn primary block" :disabled="busy || !docEditor.title.trim()" @click="saveDocument"><Check :size="16"/> Save document details</button>
-                <div class="divider-line"></div>
+              </div>
+              <div v-else id="document-tools-panel" class="inspector-content" role="tabpanel" aria-labelledby="document-tools-tab">
+                <p v-if="documentDirty" class="hint">Save document details before editing pages.</p>
                 <div class="action-caption">DOCUMENT TOOLS</div>
                 <button class="action-row" :disabled="isJobActive" @click="startOcr"><ScanText :size="17"/><div><strong>Run English OCR</strong><small>Make scanned pages searchable</small></div><ChevronRight :size="16"/></button>
                 <button class="action-row" :disabled="busy" @click="moveDocument(-1)"><ArrowLeft :size="17"/><div><strong>Move document up</strong><small>Adjust bundle order</small></div></button>
                 <button class="action-row" :disabled="busy" @click="moveDocument(1)"><ArrowRight :size="17"/><div><strong>Move document down</strong><small>Adjust bundle order</small></div></button>
                 <button class="action-row danger" :disabled="busy" @click="deleteDocument"><Archive :size="17"/><div><strong>Archive document</strong><small>Restore it from this matter</small></div></button>
+                <button class="action-row" :disabled="busy || isJobActive" @click="pageToolsOpen=true"><FilePenLine :size="17"/><div><strong>Insert, merge, replace or crop pages</strong><small>Opens tools for this document</small></div><ChevronRight :size="16"/></button>
               </div>
             </template>
             <div v-else class="inspector-empty">Select a document to manage its details and OCR.</div>
@@ -590,6 +752,11 @@ onUnmounted(()=>{if(jobTimer)clearInterval(jobTimer);if(toastTimer)clearTimeout(
         </div><div class="panel review-panel"><h3>Human review remains essential</h3><p>These items are not certified by this application:</p><div><Check :size="16"/> Court-specific case-type requirements</div><div><Check :size="16"/> Signature and attestation validity</div><div><Check :size="16"/> Evidence authenticity and translations</div><div><Check :size="16"/> Limitation, fees and registry acceptance</div></div></div>
       </main>
     </div>
+    <dialog v-if="selectedDoc" ref="pageToolsDialog" class="page-tools-dialog" aria-labelledby="page-tools-title" @close="pageToolsOpen=false" @click.self="pageToolsOpen=false">
+      <div class="page-tools-dialog-head"><div><h2 id="page-tools-title">Page tools</h2><p>{{selectedDoc.title}} · Working copy</p></div><button class="icon-btn" aria-label="Close page tools" @click="pageToolsOpen=false"><X :size="18"/></button></div>
+      <p v-if="documentDirty" class="notice amber">Save document details before editing pages.</p>
+      <PageTools :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" expanded @modified="refreshDocument"/>
+    </dialog>
     <MatterForm v-if="modalOpen" :profiles="profileList" :working="creating" @close="modalOpen=false" @create="createMatter"/>
     <div v-if="toast" :class="['toast',toast.kind]"><CheckCircle2 v-if="toast.kind==='success'" :size="19"/><CircleAlert v-else-if="toast.kind==='error'" :size="19"/><Info v-else :size="19"/><span>{{toast.message}}</span><button class="icon-btn small" @click="toast=null"><X :size="15"/></button></div>
   </div>

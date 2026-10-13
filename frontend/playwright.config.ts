@@ -9,6 +9,7 @@ const python = process.env.COURTBUNDLE_TEST_PYTHON || [
   resolve(root, 'backend/.venv/bin/python'),
 ].find(existsSync) || 'python3'
 const dataDir = mkdtempSync(resolve(tmpdir(), 'courtbundle-e2e-'))
+const vitePort = Number(process.env.COURTBUNDLE_E2E_VITE_PORT || 1420)
 process.env.COURTBUNDLE_E2E_DATA_DIR = dataDir
 
 export default defineConfig({
@@ -19,7 +20,7 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   globalTeardown: './e2e/teardown.ts',
-  use: { baseURL: 'http://127.0.0.1:1420', browserName: 'chromium', channel: 'chrome', acceptDownloads: true },
+  use: { baseURL: `http://127.0.0.1:${vitePort}`, browserName: 'chromium', channel: 'chrome', acceptDownloads: true },
   webServer: [
     {
       command: `"${python}" launcher.py --port 8768 --data-dir "${dataDir}"`,
@@ -27,14 +28,14 @@ export default defineConfig({
       url: 'http://127.0.0.1:8768/health',
       reuseExistingServer: false,
       timeout: 30_000,
-      env: { COURTBUNDLE_API_TOKEN: 'e2e-isolated-token' },
+      env: { COURTBUNDLE_API_TOKEN: 'e2e-isolated-token', COURTBUNDLE_E2E_VITE_PORT: String(vitePort) },
       // Authenticated health returns 401 until the test supplies its token.
       ignoreHTTPSErrors: false,
     },
     {
-      command: 'npm run dev',
+      command: `npm run dev -- --port ${vitePort}`,
       cwd: resolve(root, 'frontend'),
-      url: 'http://127.0.0.1:1420',
+      url: `http://127.0.0.1:${vitePort}`,
       reuseExistingServer: false,
       timeout: 30_000,
       env: { VITE_API_BASE: 'http://127.0.0.1:8768', VITE_DEV_TOKEN: 'e2e-isolated-token' },

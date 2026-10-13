@@ -69,6 +69,44 @@ class DeletePage(BaseModel):
     page_index: int = Field(ge=0)
 
 
+class InsertPages(BaseModel):
+    source_document_id: str
+    source_pages: list[int] = Field(min_length=1, max_length=2000)
+    before_index: int = Field(ge=0)
+
+
+class ReplacePages(BaseModel):
+    source_document_id: str
+    target_pages: list[int] = Field(min_length=1, max_length=2000)
+    source_pages: list[int] = Field(min_length=1, max_length=2000)
+
+
+class CropPages(BaseModel):
+    pages: list[int] = Field(min_length=1, max_length=2000)
+    left: float = Field(ge=0, le=1)
+    top: float = Field(ge=0, le=1)
+    right: float = Field(ge=0, le=1)
+    bottom: float = Field(ge=0, le=1)
+
+
+class TextOverlay(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    page_index: int = Field(ge=0)
+    x: float = Field(ge=0, lt=1)
+    y: float = Field(ge=0, lt=1)
+    text: str = Field(min_length=1, max_length=1000)
+    font_size: float = Field(default=12, ge=6, le=36)
+
+
+class ReplaceTextRun(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    page_index: int = Field(ge=0)
+    span_index: int = Field(ge=0)
+    expected_revision: int = Field(ge=1)
+    expected_text: str = Field(min_length=1, max_length=2000)
+    replacement: str = Field(min_length=1, max_length=2000)
+
+
 class JobView(BaseModel):
     id: str
     matter_id: str

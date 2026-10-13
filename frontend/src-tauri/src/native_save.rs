@@ -108,9 +108,7 @@ async fn transfer(
     path: &str,
     destination: &Path,
 ) -> Result<(), String> {
-    let url = format!(
-        "{}{}", connection.base_url.trim_end_matches('/'), path
-    );
+    let url = format!("{}{}", connection.base_url.trim_end_matches('/'), path);
     let client = reqwest::Client::builder()
         .no_proxy()
         .build()
@@ -236,20 +234,103 @@ pub(crate) async fn save_matter(
     if !valid_id(&matter_id) {
         return Err("Invalid matter selection".into());
     }
-    let mut dialog = app.dialog().file()
+    let mut dialog = app
+        .dialog()
+        .file()
         .set_title("Back up CourtBundle matter")
         .set_file_name("court-matter.cbmatter")
         .add_filter("CourtBundle matter", &["cbmatter"]);
-    if let Some(directory) = saves.last_directory.lock().map_err(|e| e.to_string())?.clone() {
+    if let Some(directory) = saves
+        .last_directory
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+    {
         dialog = dialog.set_directory(directory);
     }
-    let Some(path) = dialog.blocking_save_file() else { return Ok(false); };
-    let destination = path.into_path().map_err(|e| format!("Unsupported save location: {e}"))?;
+    let Some(path) = dialog.blocking_save_file() else {
+        return Ok(false);
+    };
+    let destination = path
+        .into_path()
+        .map_err(|e| format!("Unsupported save location: {e}"))?;
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     if destination.is_dir() || destination.starts_with(&app_data) {
         return Err("Choose a file outside CourtBundle's internal data folder".into());
     }
-    transfer(&backend.connection, &format!("/matters/{matter_id}/portable"), &destination).await?;
+    transfer(
+        &backend.connection,
+        &format!("/matters/{matter_id}/portable"),
+        &destination,
+    )
+    .await?;
+    *saves.last_directory.lock().map_err(|e| e.to_string())? =
+        destination.parent().map(Path::to_path_buf);
+    Ok(true)
+}
+
+#[tauri::command]
+pub(crate) async fn save_page_output(
+    app: AppHandle,
+    backend: State<'_, BackendState>,
+    saves: State<'_, SaveState>,
+    document_id: String,
+    operation: String,
+    selection: String,
+) -> Result<bool, String> {
+    if !valid_id(&document_id)
+        || !matches!(operation.as_str(), "extract" | "split")
+        || selection.is_empty()
+        || selection.len() > 10000
+        || selection
+            .split(',')
+            .any(|piece| piece.is_empty() || !piece.bytes().all(|c| c.is_ascii_digit()))
+    {
+        return Err("Invalid page selection".into());
+    }
+    let filename = if operation == "extract" {
+        "extracted-pages.pdf"
+    } else {
+        "split-pages.zip"
+    };
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Save selected pages")
+        .set_file_name(filename)
+        .add_filter(
+            "Page output",
+            &[if operation == "extract" { "pdf" } else { "zip" }],
+        );
+    if let Some(directory) = saves
+        .last_directory
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+    {
+        dialog = dialog.set_directory(directory);
+    }
+    let Some(path) = dialog.blocking_save_file() else {
+        return Ok(false);
+    };
+    let destination = path
+        .into_path()
+        .map_err(|e| format!("Unsupported save location: {e}"))?;
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if destination.is_dir() || destination.starts_with(&app_data) {
+        return Err("Choose a file outside CourtBundle's internal data folder".into());
+    }
+    let query = if operation == "extract" {
+        "selection"
+    } else {
+        "after"
+    };
+    transfer(
+        &backend.connection,
+        &format!("/documents/{document_id}/pages/{operation}?{query}={selection}"),
+        &destination,
+    )
+    .await?;
     *saves.last_directory.lock().map_err(|e| e.to_string())? =
         destination.parent().map(Path::to_path_buf);
     Ok(true)
@@ -305,21 +386,11 @@ mod tests {
         let path = "/synthetic-export";
 
         let complete = test_response(b"new export", 10);
-        tauri::async_runtime::block_on(transfer(
-            &complete,
-            path,
-            &destination,
-        ))
-        .unwrap();
+        tauri::async_runtime::block_on(transfer(&complete, path, &destination)).unwrap();
         assert_eq!(fs::read(&destination).unwrap(), b"new export");
 
         let incomplete = test_response(b"partial", 99);
-        assert!(tauri::async_runtime::block_on(transfer(
-            &incomplete,
-            path,
-            &destination
-        ))
-        .is_err());
+        assert!(tauri::async_runtime::block_on(transfer(&incomplete, path, &destination)).is_err());
         assert_eq!(fs::read(&destination).unwrap(), b"new export");
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
         fs::remove_dir_all(directory).unwrap();
