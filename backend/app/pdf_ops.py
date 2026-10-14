@@ -1,6 +1,8 @@
 from __future__ import annotations
 import io
+import math
 import os
+import re
 from pathlib import Path
 import tempfile
 import zipfile
@@ -42,9 +44,67 @@ def replace_pdf_atomically(path: Path, doc: pymupdf.Document):
     os.close(fd)
     try:
         doc.save(candidate, garbage=4, deflate=True)
+        validate_pdf(Path(candidate), doc.page_count)
+        with open(candidate, 'rb') as stream:
+            os.fsync(stream.fileno())
         os.replace(candidate, path)
     finally:
         Path(candidate).unlink(missing_ok=True)
+
+
+def validate_pdf(path: Path, expected_pages: int) -> None:
+    """Reopen a completed candidate before publishing it as a revision."""
+    with pymupdf.open(path) as check:
+        if check.needs_pass or check.page_count != expected_pages or expected_pages < 1:
+            raise ProcessingError('Written PDF failed page-count or encryption validation')
+        for page in check:
+            if page.rect.is_empty or not all(math.isfinite(v) for v in page.rect):
+                raise ProcessingError('Written PDF contains invalid page dimensions')
+            # Parse content and annotations without allocating a full-page bitmap.
+            page.get_displaylist()
+            for link in page.get_links():
+                if link['kind'] == pymupdf.LINK_GOTO and not 0 <= link.get('page', -1) < expected_pages:
+                    raise ProcessingError('Written PDF contains an invalid internal link')
+
+
+def assemble_pages(output: pymupdf.Document, selections: list[tuple]) -> None:
+    """Copy pages, then remap navigation after every destination exists.
+
+    For duplicated targets, links resolve to the first selected occurrence (or
+    the same occurrence for a self-link). Links to excluded pages are omitted.
+    """
+    destinations = {}
+    sources = {}
+    for position, (source, index) in enumerate(selections):
+        sources[id(source)] = source
+        destinations.setdefault((id(source), index), position)
+        output.insert_pdf(source, from_page=index, to_page=index, annots=True, links=False)
+    for position, (source, index) in enumerate(selections):
+        for original in source[index].get_links():
+            link = {key: value for key, value in original.items() if key not in ('xref', 'id')}
+            link['from'] = link['from'] * source[index].derotation_matrix
+            if link['kind'] == pymupdf.LINK_GOTO:
+                target = link.get('page', -1)
+                mapped = position if target == index else destinations.get((id(source), target))
+                if mapped is None:
+                    continue
+                if 'to' in link:
+                    link['to'] = link['to'] * source[target].derotation_matrix
+                link['page'] = mapped
+            output[position].insert_link(link)
+    toc = []
+    for source in sources.values():
+        previous_level = 0
+        for level, title, page in source.get_toc():
+            mapped = destinations.get((id(source), page - 1))
+            if mapped is not None:
+                level = min(level, previous_level + 1)
+                toc.append([level, title, mapped + 1])
+                previous_level = level
+    if toc:
+        output.set_toc(toc)
+    if sources:
+        output.set_metadata(next(iter(sources.values())).metadata)
 
 
 def reorder_pages(path: Path, order: list[int]):
@@ -52,8 +112,7 @@ def reorder_pages(path: Path, order: list[int]):
         if len(order) != src.page_count or sorted(order) != list(range(src.page_count)):
             raise ProcessingError('Page order must be a permutation of every page index')
         with pymupdf.open() as output:
-            for index in order:
-                output.insert_pdf(src, from_page=index, to_page=index, annots=True, links=True)
+            assemble_pages(output, [(src, index) for index in order])
             replace_pdf_atomically(path, output)
     return len(order)
 
@@ -95,12 +154,9 @@ def insert_pages(path: Path, source_path: Path, source_pages: list[int], before_
         if not 0 <= before_index <= target.page_count:
             raise ProcessingError('Invalid insertion position')
         with pymupdf.open() as output:
-            for index in range(before_index):
-                output.insert_pdf(target, from_page=index, to_page=index, annots=True, links=True)
-            for index in source_pages:
-                output.insert_pdf(source, from_page=index, to_page=index, annots=True, links=True)
-            for index in range(before_index, target.page_count):
-                output.insert_pdf(target, from_page=index, to_page=index, annots=True, links=True)
+            assemble_pages(output, [(target, index) for index in range(before_index)] +
+                           [(source, index) for index in source_pages] +
+                           [(target, index) for index in range(before_index, target.page_count)])
             count = output.page_count
             replace_pdf_atomically(path, output)
             return count
@@ -115,11 +171,19 @@ def replace_pages(path: Path, source_path: Path, target_pages: list[int], source
             raise ProcessingError('Replacement needs one source page for each distinct target page')
         replacements = dict(zip(target_pages, source_pages))
         with pymupdf.open() as output:
-            for index in range(target.page_count):
-                selected = source if index in replacements else target
-                page_index = replacements.get(index, index)
-                output.insert_pdf(selected, from_page=page_index, to_page=page_index,
-                                  annots=True, links=True)
+            assemble_pages(output, [(source, replacements[index]) if index in replacements
+                           else (target, index) for index in range(target.page_count)])
+            replace_pdf_atomically(path, output)
+            return output.page_count
+
+
+def replace_document(path: Path, source_path: Path) -> int:
+    """Replace all working pages with another document's current working pages."""
+    with pymupdf.open(source_path) as source:
+        if source.needs_pass or source.page_count < 1:
+            raise ProcessingError('Replacement source must be an open PDF with pages')
+        with pymupdf.open() as output:
+            assemble_pages(output, [(source, index) for index in range(source.page_count)])
             replace_pdf_atomically(path, output)
             return output.page_count
 
@@ -151,15 +215,14 @@ def add_text_overlay(path: Path, page_index: int, x: float, y: float,
         if not 0 <= page_index < doc.page_count:
             raise ProcessingError('Invalid page number')
         page = doc[page_index]
-        if page.rotation:
-            raise ProcessingError('Text placement on rotated pages is not supported yet')
         rect = page.rect
         left = rect.x0 + rect.width * x
         top = rect.y0 + rect.height * y
         box = pymupdf.Rect(left, top, rect.x1 - 12, rect.y1 - 12)
         if box.width < font_size * 2 or box.height < font_size * 1.5:
             raise ProcessingError('Choose a point farther from the right or bottom edge')
-        remaining = page.insert_textbox(box, text, fontsize=font_size, fontname='helv',
+        box = box * page.derotation_matrix
+        remaining = page.insert_textbox(box, text, fontsize=font_size, fontname='helv', rotate=page.rotation,
                                         color=(0, 0, 0), overlay=True)
         if remaining < 0:
             raise ProcessingError('Text does not fit from this point; move it or reduce the font size')
@@ -224,6 +287,13 @@ def replace_text_run(path: Path, page_index: int, span_index: int,
                 else 'heit' if 'italic' in font or 'oblique' in font else 'helv')
     with pymupdf.open(path) as doc:
         page = doc[page_index]
+        if any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
+            raise ProcessingError('This page has pending redaction marks. Text replacement would apply them; review them outside this tool first.')
+        overlaps = [span for block in page.get_text('dict')['blocks'] if block.get('type') == 0
+                    for line in block['lines'] for span in line['spans']
+                    if span['text'].strip() and box.intersects(pymupdf.Rect(span['bbox']))]
+        if len(overlaps) != 1:
+            raise ProcessingError('Selected text overlaps other text, including a non-editable layer; cannot replace it safely')
         unrotated_rect = page.rect * page.derotation_matrix
         if any(box.intersects(pymupdf.Rect(link['from'])) for link in page.get_links()):
             raise ProcessingError('Selected text contains a link; edit it outside this tool')
@@ -299,8 +369,7 @@ def extract_pages(path: Path, pages: list[int]) -> bytes:
     """Return a separate PDF in the requested order without changing the working copy."""
     with pymupdf.open(path) as source, pymupdf.open() as output:
         _checked_pages(pages, source.page_count)
-        for index in pages:
-            output.insert_pdf(source, from_page=index, to_page=index, annots=True, links=True)
+        assemble_pages(output, [(source, index) for index in pages])
         return output.tobytes(garbage=4, deflate=True)
 
 
@@ -318,40 +387,156 @@ def split_pages(path: Path, after_pages: list[int]) -> bytes:
         with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
             for part, (start, end) in enumerate(zip(starts, ends), 1):
                 with pymupdf.open() as result:
-                    result.insert_pdf(source, from_page=start, to_page=end,
-                                      annots=True, links=True)
+                    assemble_pages(result, [(source, index) for index in range(start, end + 1)])
                     archive.writestr(f'part-{part:03}.pdf', result.tobytes(garbage=4, deflate=True))
         return output.getvalue()
 
 
-def ocr_pdf(path: Path, *, language: str='eng', progress=None, cancelled=None) -> tuple[int, int]:
-    """OCR image-only pages; render 240 DPI, preserving a distinct untouched original.
+COMPRESSION_PRESETS = {'lossless': None, 'balanced': (240, 85), 'small': (150, 70)}
 
-    WARNING: rasterizing an image-only page may alter appearance/metadata. Signature
-    validation is outside this POC. POC does not OCR handwriting reliably.
+
+def compress_pdf(path: Path, preset: str, progress=None, cancelled=None) -> dict:
+    """Reduce image resolution explicitly; never publish a larger result.
+
+    Transparent/masked and bitonal images are retained. Text, outlines, page
+    geometry and annotations are not rasterized. No target size is promised.
     """
-    with pymupdf.open(path) as source, pymupdf.open() as result:
+    if preset not in COMPRESSION_PRESETS:
+        raise ProcessingError('Unknown compression preset')
+    before = path.stat().st_size
+    fd, name = tempfile.mkstemp(prefix='.pdf-edit-', suffix='.pdf', dir=path.parent)
+    os.close(fd)
+    candidate = Path(name)
+    rewritten = 0
+    skipped = 0
+    try:
+        with pymupdf.open(path) as doc:
+            images = {}
+            for page in doc:
+                if cancelled and cancelled():
+                    raise ProcessingError('Operation cancelled')
+                for info in page.get_images(full=True):
+                    xref, mask, width, height, bpc = info[:5]
+                    if xref not in images:
+                        images[xref] = {'page': page.number, 'mask': mask, 'width': width,
+                                        'height': height, 'bpc': bpc, 'placements': []}
+                    images[xref]['placements'].extend(page.get_image_rects(xref))
+            if COMPRESSION_PRESETS[preset]:
+                dpi, quality = COMPRESSION_PRESETS[preset]
+                for number, (xref, info) in enumerate(images.items()):
+                    if cancelled and cancelled():
+                        raise ProcessingError('Operation cancelled')
+                    placements = [rect for rect in info['placements'] if not rect.is_empty]
+                    if (info['mask'] or info['bpc'] == 1 or not placements or
+                            info['width'] * info['height'] > 40_000_000):
+                        skipped += 1
+                        continue
+                    # A shared image must remain adequate at its largest placement.
+                    ratio = min(1.0, max(max(rect.width * dpi / 72 / info['width'],
+                                             rect.height * dpi / 72 / info['height'])
+                                         for rect in placements))
+                    pix = pymupdf.Pixmap(doc, xref)
+                    if pix.alpha or pix.colorspace is None:
+                        skipped += 1
+                        continue
+                    if pix.colorspace.n not in (1, 3):
+                        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                    if ratio < .95:
+                        pix = pymupdf.Pixmap(pix, max(1, int(pix.width * ratio)),
+                                             max(1, int(pix.height * ratio)), None)
+                    data = pix.tobytes('jpeg', jpg_quality=quality)
+                    if len(data) < len(doc.xref_stream_raw(xref)):
+                        doc[info['page']].replace_image(xref, stream=data)
+                        rewritten += 1
+                    if progress:
+                        progress(int((number + 1) / max(1, len(images)) * 90),
+                                 f'Compressing image {number + 1} of {len(images)}')
+            doc.save(candidate, garbage=4, deflate=True)
+            validate_pdf(candidate, doc.page_count)
+        after = candidate.stat().st_size
+        if cancelled and cancelled():
+            raise ProcessingError('Operation cancelled')
+        changed = after < before
+        if changed:
+            with candidate.open('rb') as stream:
+                os.fsync(stream.fileno())
+            os.replace(candidate, path)
+        return {'preset': preset, 'before_bytes': before, 'after_bytes': after if changed else before,
+                'changed': changed, 'images_rewritten': rewritten if changed else 0,
+                'images_skipped': skipped,
+                'message': 'Compressed working copy; review visual quality.' if changed
+                           else 'No smaller result; working copy retained.'}
+    finally:
+        candidate.unlink(missing_ok=True)
+
+
+def ocr_pdf(path: Path, *, language: str='eng', progress=None, cancelled=None) -> tuple[int, int]:
+    """Add an invisible OCR layer while retaining original page content/navigation.
+
+    Mixed pages are recognized too. Existing text regions are removed from the
+    generated layer to avoid duplicate searchable text. OCR remains unverified.
+    """
+    with pymupdf.open(path) as source:
         changed = 0
         total = source.page_count
         for index in range(total):
             if cancelled and cancelled():
                 raise ProcessingError('Operation cancelled')
             page = source[index]
-            if page.get_text('text').strip():
-                result.insert_pdf(source, from_page=index, to_page=index, annots=True, links=True)
-            else:
+            blocks = page.get_text('dict')['blocks']
+            text_blocks = [block for block in blocks if block.get('type') == 0]
+            has_ocr = any('glyphless' in span['font'].lower()
+                          for block in text_blocks for line in block['lines'] for span in line['spans'])
+            needs_ocr = not has_ocr and (not page.get_text().strip() or bool(page.get_images()))
+            if needs_ocr:
+                rotation = page.rotation
                 try:
-                    pix = page.get_pixmap(matrix=pymupdf.Matrix(240 / 72, 240 / 72), colorspace=pymupdf.csRGB, alpha=False)
+                    page.set_rotation(0)
+                    # Refuse pathological page sizes before allocating hundreds of MB.
+                    pixels = math.ceil(page.rect.width * 240 / 72) * math.ceil(page.rect.height * 240 / 72)
+                    if pixels > 40_000_000:
+                        raise ProcessingError('OCR page exceeds the 40-megapixel processing limit; crop or resize a working copy first')
+                    pix = page.get_pixmap(dpi=240, colorspace=pymupdf.csRGB, alpha=False, annots=False)
                     ocr_bytes = pix.pdfocr_tobytes(language=language)
-                    with pymupdf.open(stream=ocr_bytes, filetype='pdf') as new_page:
-                        result.insert_pdf(new_page)
-                    changed += 1
+                    if cancelled and cancelled():
+                        raise ProcessingError('Operation cancelled')
+                    with pymupdf.open(stream=ocr_bytes, filetype='pdf') as layer:
+                        layer_page = layer[0]
+                        # This is our freshly generated OCR PDF, whose image
+                        # invocations are simple named XObjects. Remove drawing
+                        # commands rather than substituting a transparent pixel:
+                        # even that pixel can change compositing/rounding below.
+                        names = [image[7] for image in layer_page.get_images()]
+                        for xref in layer_page.get_contents():
+                            content = layer.xref_stream(xref)
+                            for name in names:
+                                content = re.sub(rb'/' + re.escape(name.encode()) + rb'\s+Do\b',
+                                                 b'', content)
+                            layer.update_stream(xref, content)
+                        transform = page.rect.torect(layer_page.rect)
+                        for block in text_blocks:
+                            for line in block['lines']:
+                                for span in line['spans']:
+                                    layer_page.add_redact_annot(pymupdf.Rect(span['bbox']) * transform,
+                                                               fill=False, cross_out=False)
+                        if text_blocks:
+                            layer_page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
+                                                        graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+                        if layer_page.get_text().strip():
+                            page.show_pdf_page(page.rect, layer, 0)
+                            changed += 1
+                except ProcessingError:
+                    raise
                 except Exception as exc:
-                    raise ProcessingError('OCR failed. Check that Tesseract and English traineddata are installed. ' + str(exc)) from exc
+                    raise ProcessingError('OCR failed; check the installed language data. No working revision was published. ' + str(exc)) from exc
+                finally:
+                    page.set_rotation(rotation)
             if progress:
                 progress(int((index + 1) / total * 95), f'OCR page {index + 1} of {total}')
+        if cancelled and cancelled():
+            raise ProcessingError('Operation cancelled')
         if changed:
-            replace_pdf_atomically(path, result)
+            replace_pdf_atomically(path, source)
         return total, changed
 
 

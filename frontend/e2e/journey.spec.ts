@@ -7,6 +7,31 @@ const samples = resolve(import.meta.dirname, '../../samples')
 const backend = 'http://127.0.0.1:8768'
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 
+test('compression exposes measured results and retains a usable PDF', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Compression', court_profile: 'general-demo', max_pages_per_volume: 300,
+  } })
+  const id = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${id}/documents`, { headers,
+    multipart: { files: { name: '04_scanned_annexure.jpg', mimeType: 'image/jpeg',
+      buffer: await readFile(resolve(samples, '04_scanned_annexure.jpg')) } },
+  })
+  expect(uploaded.ok()).toBeTruthy()
+  const doc = (await uploaded.json())[0]
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Compression' })).toBeVisible()
+  await page.getByRole('button', { name: 'Page tools', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Page tools' })
+  await dialog.getByRole('combobox', { name: 'Compression quality' }).selectOption('small')
+  await dialog.getByRole('button', { name: 'Compress working PDF' }).click()
+  await expect(dialog.getByRole('status')).toContainText('bytes.')
+  await expect(dialog.getByRole('status')).toContainText('Completed')
+  await expect(dialog.getByRole('button', { name: 'Compress working PDF' })).toBeEnabled()
+  const pdf = await request.get(`${backend}/documents/${doc.id}/pdf`, { headers })
+  expect(pdf.ok()).toBeTruthy()
+  expect((await pdf.body()).subarray(0, 5).toString()).toBe('%PDF-')
+})
+
 test('document import undo and redo refresh the workspace list', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Import History', court_profile: 'delhi-hc-illustrative',
@@ -27,6 +52,36 @@ test('document import undo and redo refresh the workspace list', async ({ page, 
   await expect(page.getByRole('button', { name: 'Redo', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Redo', exact: true }).click()
   await expect(page.locator('.doc-item')).toHaveCount(1)
+})
+
+test('manual bookmark survives reload and shows revision review', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Bookmark Matter', court_profile: 'delhi-hc-illustrative',
+    case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
+      buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
+  })
+  const docId = (await uploaded.json())[0].id as string
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.getByRole('textbox', { name: 'New bookmark title' }).fill('Reviewed synthetic page')
+  await page.getByRole('combobox', { name: 'Bookmark document' }).selectOption(docId)
+  await page.getByRole('button', { name: 'Add bookmark' }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Reviewed synthetic page')
+  await page.reload()
+  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Reviewed synthetic page')
+  const rotated = await request.post(`${backend}/documents/${docId}/pages/rotate`,
+    { headers, data: { page_index: 0, degrees: 90 } })
+  expect(rotated.ok()).toBeTruthy()
+  await page.reload()
+  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await expect(page.getByText('Needs review')).toBeVisible()
+  await page.getByRole('button', { name: 'Resolve to current page' }).click()
+  await expect(page.getByText('Needs review')).toBeHidden()
 })
 
 test('text editing works on a page already marked as rotated', async ({ page, request }) => {
@@ -174,8 +229,8 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   const pageToolsDialog = page.getByRole('dialog', { name: 'Page tools' })
   await expect(pageToolsDialog).toBeVisible()
   await expect(pageToolsDialog).toContainText('01_petition')
-  await expect(pageToolsDialog.locator('.page-tools select')).toHaveCSS('color-scheme', 'dark')
-  await expect(pageToolsDialog.locator('.page-tools select')).toHaveCSS('height', '44px')
+  await expect(pageToolsDialog.getByRole('combobox', { name: 'Source document' })).toHaveCSS('color-scheme', 'dark')
+  await expect(pageToolsDialog.getByRole('combobox', { name: 'Source document' })).toHaveCSS('height', '44px')
   await expect(pageToolsDialog.locator('.page-tools input').first()).toHaveCSS('height', '44px')
   await pageToolsDialog.getByRole('button', { name: 'Close page tools' }).click()
   await expect(pageToolsDialog).toBeHidden()
@@ -380,7 +435,7 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await expect(page.locator('.inspector-heading')).toContainText('processed')
 
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
-  await page.getByRole('spinbutton').fill('6')
+  await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('6')
   await page.locator('.build-panel').getByRole('button', { name: 'Build filing bundle' }).click()
   await expect(page.getByText('Latest filing package')).toBeVisible({ timeout: 90_000 })
 
@@ -400,7 +455,7 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   expect(createHash('sha256').update(bytes).digest('hex'))
     .toBe(createHash('sha256').update(await stored.body()).digest('hex'))
 
-  await page.getByRole('spinbutton').fill('2')
+  await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('2')
   await page.locator('.build-panel').getByRole('button', { name: 'Build filing bundle' }).click()
   await expect(page.getByText('Previous filing package')).toBeVisible({ timeout: 90_000 })
   await expect(page.locator('.notice.error')).toContainText('exceeds', { timeout: 90_000 })
@@ -462,7 +517,7 @@ test('unsaved details are guarded and a failed settings save stops a build', asy
   page.once('dialog', dialog => void dialog.accept())
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
   await expect(page.getByText('Unsaved document changes')).toBeHidden()
-  await page.getByRole('spinbutton').fill('6')
+  await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('6')
   await expect(page.getByText('Unsaved bundle settings.')).toBeVisible()
   await page.route(`**/matters/${id}`, route =>
     route.request().method() === 'PATCH' ? route.abort() : route.continue())

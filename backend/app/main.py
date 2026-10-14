@@ -1,6 +1,7 @@
 """Local FastAPI service for the desktop POC. Always bind to loopback."""
 from __future__ import annotations
 import asyncio
+import errno
 from contextlib import asynccontextmanager
 import json
 import os
@@ -11,19 +12,20 @@ import tempfile
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, JSONResponse
 from starlette.background import BackgroundTask
 import pymupdf
 
 from .engine import load_profiles, preflight, build_bundle
 from .jobs import JobManager
 from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
-                      rotate_page, delete_page, insert_pages, replace_pages, crop_pages,
+                      rotate_page, delete_page, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
-                      replace_text_run,
+                      replace_text_run, compress_pdf,
                       ocr_pdf, make_cover_pdf)
-from .schemas import MatterCreate, MatterPatch, DocumentPatch, MemoPartiesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, CropPages, TextOverlay, ReplaceTextRun
+from .schemas import MatterCreate, MatterPatch, DocumentPatch, MemoPartiesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, CropPages, TextOverlay, ReplaceTextRun
 from .storage import Store, new_id
+from .schemas import CompressionRequest
 from .portable import create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES
 
 FILE_LIMIT_BYTES = 80 * 1024 * 1024
@@ -54,6 +56,14 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
                   redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.store = store
     app.state.jobs = jobs
+
+    @app.exception_handler(OSError)
+    async def storage_error(_request, exc):
+        if exc.errno in (errno.ENOSPC, errno.EDQUOT):
+            return JSONResponse(status_code=507, content={'detail': 'Not enough disk space. Free space and retry; the previous working revision is retained.'})
+        if exc.errno in (errno.EACCES, errno.EPERM):
+            return JSONResponse(status_code=403, content={'detail': 'The local data folder is not writable or readable. Check its permissions and retry.'})
+        return JSONResponse(status_code=409, content={'detail': 'Local file access failed. Check available storage and file access, then reload before retrying.'})
     allowed_origins = ['http://localhost:1420', 'http://127.0.0.1:1420',
                        'http://localhost:5173', 'http://127.0.0.1:5173',
                        'tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost']
@@ -266,7 +276,16 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
                     if size > FILE_LIMIT_BYTES:
                         raise HTTPException(status_code=413, detail='POC import limit is 80 MB per file')
                     stream.write(chunk)
-            pages = normalize_to_pdf(source, target)
+            conversion = asyncio.create_task(asyncio.to_thread(normalize_to_pdf, source, target))
+            try:
+                pages = await asyncio.shield(conversion)
+            except asyncio.CancelledError:
+                # Finish native work before releasing the process lock or
+                # removing files which the conversion thread still has open.
+                try:
+                    await conversion
+                finally:
+                    raise
             name = Path(file.filename or '').name or 'Untitled'
             item = dict(id=doc_id, matter_id=matter_id, title=Path(name).stem[:250],
                         kind='other', part=1, label='', group_key='', page_count=pages,
@@ -290,7 +309,10 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         if not 1 <= len(files) <= 20:
             raise HTTPException(status_code=422, detail='Import 1-20 files per request')
         lock = store.matter_lock(matter_id)
-        await asyncio.to_thread(lock.acquire)
+        # A cancelled to_thread(lock.acquire) can acquire later with nobody left
+        # to release it. Poll nonblocking so disconnects cannot strand the lock.
+        while not lock.acquire(blocking=False):
+            await asyncio.sleep(.05)
         try:
             records = []
             for f in files:
@@ -333,6 +355,22 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         matter_or_404(matter_id)
         return store.history_state(matter_id)
 
+    @app.get('/matters/{matter_id}/bookmarks')
+    def manual_bookmarks(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        return store.list_manual_bookmarks(matter_id)
+
+    @app.put('/matters/{matter_id}/bookmarks')
+    def update_manual_bookmarks(matter_id: str, payload: ManualBookmarksUpdate,
+                                _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                return store.set_manual_bookmarks(matter_id,
+                    [entry.model_dump() for entry in payload.entries])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.post('/matters/{matter_id}/history/{direction}')
     def traverse_history(matter_id: str, direction: str, _: None = Depends(auth)):
         matter_or_404(matter_id)
@@ -374,12 +412,12 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         with store.matter_lock(doc['matter_id']):
             doc = doc_or_404(doc_id)
             rel, candidate = store.next_working_path(doc)
-            shutil.copy2(store.working_path(doc), candidate)
             try:
+                shutil.copy2(store.working_path(doc), candidate)
                 changes = operation(candidate, doc) or {}
                 return store.update_document(doc_id, dict(changes, working_relpath=rel))
             except BaseException:
-                candidate.unlink(missing_ok=True)
+                store.discard_uncommitted_working(doc_id, rel, candidate)
                 raise
 
     @app.post('/documents/{doc_id}/pages/reorder')
@@ -431,6 +469,19 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
                 'page_count': replace_pages(path, source_for_edit(doc, payload.source_document_id),
                                             payload.target_pages, payload.source_pages),
                 'ocr_status': 'modified'})
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/replace')
+    def document_replace(doc_id: str, payload: ReplaceDocument, _: None = Depends(auth)):
+        try:
+            def replace(path, doc):
+                if payload.source_document_id == doc_id:
+                    raise ProcessingError('Choose a different document as the replacement source')
+                return {'page_count': replace_document(
+                    path, source_for_edit(doc, payload.source_document_id)),
+                    'ocr_status': 'modified'}
+            return edit_working_copy(doc_id, replace)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -518,20 +569,21 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
                 if current is None:
                     raise ProcessingError('Document was removed before OCR started')
                 rel, candidate = store.next_working_path(current)
-                shutil.copy2(store.working_path(current), candidate)
                 committed = False
                 try:
+                    shutil.copy2(store.working_path(current), candidate)
                     total, changed = ocr_pdf(candidate, progress=progress, cancelled=cancelled)
-                    if not cancelled():
-                        if changed:
-                            store.update_document(doc_id, {'working_relpath': rel,
-                                                           'ocr_status': 'processed', 'page_count': total})
-                            committed = True
-                        else:
-                            store.update_document(doc_id, {'ocr_status': 'already_searchable', 'page_count': total})
+                    if cancelled():
+                        raise ProcessingError('Operation cancelled')
+                    if changed:
+                        store.update_document(doc_id, {'working_relpath': rel,
+                                                       'ocr_status': 'processed', 'page_count': total})
+                        committed = True
+                    else:
+                        store.update_document(doc_id, {'ocr_status': 'no_new_text', 'page_count': total})
                 finally:
                     if not committed:
-                        candidate.unlink(missing_ok=True)
+                        store.discard_uncommitted_working(doc_id, rel, candidate)
                 return {'document_id': doc_id, 'pages_checked': total, 'pages_ocr_applied': changed}
         return jobs.submit(doc['matter_id'], 'ocr', task, target_id=doc_id, job_id=job_id)
 
@@ -539,10 +591,35 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
     def start_ocr(doc_id: str, _: None = Depends(auth)):
         return submit_ocr(doc_or_404(doc_id))
 
+    @app.post('/documents/{doc_id}/compress', status_code=202)
+    def start_compression(doc_id: str, payload: CompressionRequest, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        def task(job_id, progress, cancelled):
+            with store.matter_lock(doc['matter_id']):
+                current = doc_or_404(doc_id)
+                if current['revision'] != payload.expected_revision:
+                    raise ProcessingError('Document changed before compression; reload and try again')
+                rel, candidate = store.next_working_path(current)
+                committed = False
+                try:
+                    shutil.copy2(store.working_path(current), candidate)
+                    result = compress_pdf(candidate, payload.preset, progress, cancelled)
+                    if cancelled():
+                        raise ProcessingError('Operation cancelled')
+                    if result['changed']:
+                        store.update_document(doc_id, {'working_relpath': rel})
+                        committed = True
+                    return dict(result, document_id=doc_id)
+                finally:
+                    if not committed:
+                        store.discard_uncommitted_working(doc_id, rel, candidate)
+        return jobs.submit(doc['matter_id'], 'compress', task, target_id=doc_id)
+
     @app.get('/matters/{matter_id}/validate')
     def validate_matter(matter_id: str, _: None = Depends(auth)):
-        matter = matter_or_404(matter_id)
-        return preflight(store, matter_id, profiles[matter['court_profile']])
+        with store.matter_lock(matter_id):
+            matter = matter_or_404(matter_id)
+            return preflight(store, matter_id, profiles[matter['court_profile']])
 
     def submit_build(matter_id: str, job_id: str | None = None):
         def task(job_id, progress, cancelled):

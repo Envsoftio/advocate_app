@@ -48,10 +48,10 @@ class JobManager:
             try:
                 result = task(job_id, progress, cancelled.is_set)
                 with self._lock:
-                    job.update(status='cancelled' if cancelled.is_set() else 'completed',
-                               result=None if cancelled.is_set() else result,
-                               progress=100 if not cancelled.is_set() else job['progress'],
-                               message='Cancelled' if cancelled.is_set() else 'Completed')
+                    # Tasks must raise when cancellation prevents their commit.
+                    # A late request cannot undo a successfully published result.
+                    job.update(status='completed', result=result,
+                               progress=100, message='Completed')
                     if self._store:
                         self._store.save_job(job)
             except Exception as exc:
@@ -74,7 +74,8 @@ class JobManager:
             item = self._jobs.get(job_id)
             if not item:
                 return None
-            item[1].set()
+            if item[0]['status'] in ('queued', 'running'):
+                item[1].set()
             return dict(item[0])
 
     def claim_retry(self, job_id: str, retry_job_id: str) -> dict | None:

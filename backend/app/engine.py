@@ -16,7 +16,7 @@ import zipfile
 
 import pymupdf
 
-from .pdf_ops import ProcessingError
+from .pdf_ops import ProcessingError, validate_pdf
 from .storage import Store, utcnow
 
 INDEX_ROWS_PER_PAGE = 23
@@ -185,7 +185,37 @@ def check_export_sizes(staging: Path, filenames: list[str], max_file_mb: float |
         )
 
 
-def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: int, cancelled=None):
+def manual_toc(bookmarks: list[dict], destinations: dict[str, int]) -> list[list]:
+    """Resolve manual targets against the same document page map as index rows."""
+    resolved_levels: dict[str, int] = {}
+    entries = []
+    for bookmark in bookmarks:
+        start = destinations.get(bookmark['document_id'])
+        if not bookmark['resolved'] or start is None:
+            continue
+        parent_level = resolved_levels.get(bookmark['parent_id'], 1)
+        level = parent_level + 1
+        resolved_levels[bookmark['id']] = level
+        entries.append([level, bookmark['title'],
+                        start + bookmark['page_index']])
+    return [[1, 'Manual bookmarks', entries[0][2]], *entries] if entries else []
+
+
+def validate_navigation(path: Path, pages: int, toc: list, links: dict[int, list[int]]) -> None:
+    """Check actual serialized destinations, not merely outline/link counts."""
+    validate_pdf(path, pages)
+    with pymupdf.open(path) as pdf:
+        if pdf.get_toc() != toc:
+            raise ProcessingError('Written PDF outline differs from the deterministic page map')
+        for index, page in enumerate(pdf):
+            actual = [link.get('page') for link in page.get_links()
+                      if link['kind'] == pymupdf.LINK_GOTO]
+            if actual != links.get(index, []):
+                raise ProcessingError('Written PDF index destinations differ from the deterministic page map')
+
+
+def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: int,
+                  cancelled=None, bookmarks: list[dict] | None = None):
     """Create an indexed, paginated, bookmarked volume and return page-map records."""
     index_count = index_pages_for(len(documents))
     rows = []
@@ -243,7 +273,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                 current_part = row['part']
                 toc.append([1, f'Part {current_part}', row['start_page']])
             title = (row['label'] + ' - ' if row['label'] else '') + row['title']
-            toc.append([2, clean_title(title, 130), row['start_page']])
+            toc.append([2, title, row['start_page']])
 
         # Stamp consistent 1-based physical page number at the foot of each volume page.
         for i in range(output.page_count):
@@ -264,11 +294,17 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                 page.insert_link({'kind': pymupdf.LINK_GOTO,
                                   'from': pymupdf.Rect(90, ypos - 14, 545, ypos + 8),
                                   'page': row['start_page'] - 1, 'to': pymupdf.Point(0, 0)})
+        toc.extend(manual_toc(bookmarks or [], {row['id']: row['start_page'] for row in rows}))
         output.set_toc(toc)
         output.set_metadata({'title': f'{matter["name"]} - Volume {volume_no}',
                              'subject': 'DRAFT CourtBundle POC - not court certified',
                              'creator': 'CourtBundle POC'})
         output.save(path, garbage=4, deflate=True)
+
+    expected_links = {}
+    for index, row in enumerate(rows):
+        expected_links.setdefault(index // INDEX_ROWS_PER_PAGE, []).append(row['start_page'] - 1)
+    validate_navigation(path, index_count + sum(d['page_count'] for d in documents), toc, expected_links)
 
     with pymupdf.open(path) as check:
         if check.page_count > matter['max_pages_per_volume']:
@@ -285,10 +321,18 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
     profiles = load_profiles()
     profile = profiles[matter['court_profile']]
     documents = store.get_documents(matter_id)
+    bookmarks = store.list_manual_bookmarks(matter_id)
     progress(5, 'Checking source documents')
     problems = preflight(store, matter_id, profile)
     if any(x['severity'] == 'error' for x in problems):
         raise ProcessingError('Preflight failed: ' + '; '.join(x['message'] for x in problems if x['severity']=='error'))
+    build_input_digest = store.build_input_digest(matter_id)
+    build_settings = {'max_pages_per_volume': matter['max_pages_per_volume'],
+                      'keep_groups_intact': matter['keep_groups_intact'],
+                      'court_profile': matter['court_profile']}
+    bookmark_inputs = [{key: item[key] for key in ('id', 'title', 'document_id',
+                        'page_index', 'target_revision', 'parent_id', 'position')}
+                       for item in bookmarks]
     input_revisions = [{'document_id': d['id'], 'revision': d['revision'],
                         'working_sha256': store.sha256(store.working_path(d))}
                        for d in documents]
@@ -307,7 +351,8 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                 raise ProcessingError('Operation cancelled')
             progress(10 + int((vno - 1) / len(plans) * 55), f'Building volume {vno} of {len(plans)}')
             filename = f'volume-{vno:02}.pdf'
-            rows, index_count = render_volume(group, matter, staging / filename, vno, cancelled)
+            rows, index_count = render_volume(group, matter, staging / filename, vno,
+                                               cancelled, bookmarks)
             volume_rows.append(dict(filename=filename, rows=rows, index_count=index_count))
             all_rows.extend(rows)
 
@@ -315,6 +360,8 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         combined_file = staging / 'combined.pdf'
         with pymupdf.open() as combined:
             global_toc = []
+            global_links = {}
+            combined_destinations = {}
             offset = 0
             for vno, volume in enumerate(volume_rows, start=1):
                 with pymupdf.open(staging / volume['filename']) as part:
@@ -330,21 +377,26 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                 current_part = None
                 for rno, row in enumerate(volume['rows']):
                     destination = offset + row['start_page'] - 1
+                    combined_destinations[row['id']] = destination + 1
                     if current_part != row['part']:
                         current_part = row['part']
                         global_toc.append([2, f'Part {current_part}', destination + 1])
-                    global_toc.append([3, clean_title((row['label'] + ' - ' if row['label'] else '') + row['title'], 130), destination + 1])
+                    global_toc.append([3, (row['label'] + ' - ' if row['label'] else '') + row['title'], destination + 1])
                     idx_page = offset + rno // INDEX_ROWS_PER_PAGE
+                    global_links.setdefault(idx_page, []).append(destination)
                     ypos = 187 + (rno % INDEX_ROWS_PER_PAGE) * 25
                     combined[idx_page].insert_link({'kind': pymupdf.LINK_GOTO,
                         'from': pymupdf.Rect(90, ypos-14, 545, ypos+8),
                         'page': destination, 'to': pymupdf.Point(0, 0)})
                 offset += count
+            global_toc.extend(manual_toc(bookmarks, combined_destinations))
             combined.set_toc(global_toc)
             combined.set_metadata({'title': f'{matter["name"]} - Combined Filing Bundle',
                                    'subject': 'DRAFT CourtBundle POC - not court certified',
                                    'creator': 'CourtBundle POC'})
             combined.save(combined_file, garbage=4, deflate=True)
+
+        validate_navigation(combined_file, offset, global_toc, global_links)
 
         progress(83, 'Checking bookmarks and generating index CSV')
         with pymupdf.open(combined_file) as final:
@@ -362,12 +414,19 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         file_bytes = combined_file.stat().st_size
         if any(any(ord(c)>126 for c in row['title']+row['label']) for row in all_rows):
             problems.append(dict(severity='warning', code='NON_LATIN_INDEX', document_id=None,
-                                 message='Index/outline currently use built-in Latin PDF fonts; non-Latin title glyphs may be replaced by ?.'))
+                                 message='Printed index uses built-in Latin PDF fonts; non-Latin title glyphs may be replaced by ?. PDF outlines retain Unicode titles.'))
+        unresolved = [bookmark for bookmark in bookmarks if not bookmark['resolved']]
+        if unresolved:
+            problems.append(dict(severity='warning', code='UNRESOLVED_MANUAL_BOOKMARKS',
+                                 document_id=None,
+                                 message=f'{len(unresolved)} manual bookmark(s) target an older revision, removed document, or missing page and were omitted from this export. Resolve them before use.'))
         problems.append(dict(severity='info', code='NOT_A_FILING_APPROVAL', document_id=None,
                              message='Technical checks passed or reported. Filing acceptance, legal validity and registry objections need human review.'))
         report = {'matter_id': matter_id, 'export_id': export_id, 'profile': profile['id'],
                   'profile_status': profile['status'], 'created_at': utcnow(),
                   'matter_updated_at': matter['updated_at'], 'input_revisions': input_revisions,
+                  'build_input_digest': build_input_digest,
+                  'build_settings': build_settings, 'manual_bookmark_inputs': bookmark_inputs,
                   'interactive_content_policy': EXPORT_INTERACTIVE_CONTENT_POLICY,
                   'total_input_documents': len(documents), 'volume_count': len(plans),
                   'combined_pages': combined_pages, 'combined_bytes': file_bytes,
@@ -387,7 +446,12 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         zip_file = staging / 'filing-package.zip'
         with zipfile.ZipFile(zip_file, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
             for filename in ['combined.pdf', *[v['filename'] for v in volume_rows], 'index.csv', 'validation-report.json', 'READ_ME_FIRST.txt']:
+                if cancelled():
+                    raise ProcessingError('Operation cancelled')
                 z.write(staging / filename, arcname=filename)
+        with zipfile.ZipFile(zip_file) as archive:
+            if archive.testzip() is not None:
+                raise ProcessingError('Export ZIP integrity verification failed')
         filenames = ['filing-package.zip', 'combined.pdf', *[v['filename'] for v in volume_rows], 'index.csv', 'validation-report.json']
         # The ZIP may exceed the cap even when each PDF fits. Check everything offered
         # for download before the staging directory can be published as an export.
@@ -395,8 +459,11 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         export_manifest = dict(id=export_id, created_at=report['created_at'], matter_id=matter_id,
                                pages=combined_pages, volumes=len(plans),
                                matter_updated_at=matter['updated_at'], input_revisions=input_revisions,
+                               build_input_digest=build_input_digest,
+                               build_settings=build_settings, manual_bookmark_inputs=bookmark_inputs,
                                interactive_content_policy=EXPORT_INTERACTIVE_CONTENT_POLICY,
-                               files=[{'name':name,'bytes':(staging/name).stat().st_size} for name in filenames],
+                               files=[{'name':name,'bytes':(staging/name).stat().st_size,
+                                       'sha256':store.sha256(staging/name)} for name in filenames],
                                checks=problems)
         (staging / 'export_manifest.json').write_text(json.dumps(export_manifest, indent=2), encoding='utf-8')
         if cancelled():
@@ -405,9 +472,14 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         if source_errors:
             raise ProcessingError('Source integrity check failed before export: ' +
                                   '; '.join(issue['message'] for issue in source_errors))
+        if store.build_input_digest(matter_id) != build_input_digest:
+            raise ProcessingError('Build inputs or profile changed during assembly; no export was published')
         final_dir = export_root / export_id
         if final_dir.exists():
             raise ProcessingError('Export id collision')
+        for artifact in staging.iterdir():
+            with artifact.open('rb') as stream:
+                os.fsync(stream.fileno())
         # Atomic publish on the same filesystem; staged files vanish on failures.
         os.replace(staging, final_dir)
     progress(100, 'Bundle ready to download')

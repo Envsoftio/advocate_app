@@ -10,6 +10,7 @@ import {
 } from 'lucide-vue-next'
 import PdfViewer from './components/PdfViewer.vue'
 import PageTools from './components/PageTools.vue'
+import ManualBookmarks from './components/ManualBookmarks.vue'
 import MatterForm from './components/MatterForm.vue'
 import DelhiFilingGuide from './components/DelhiFilingGuide.vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -467,7 +468,7 @@ async function startOcr() {
   try {
     const job=await api<Job>(`/documents/${selectedDoc.value.id}/ocr`,'POST')
     watchJob(job)
-    notify('OCR started on pages without selectable text.', 'info')
+    notify('OCR started on scanned and mixed-content pages.', 'info')
   } catch(err){issue(err)}
 }
 async function validate() {
@@ -508,7 +509,7 @@ function watchJob(job:Job) {
         if(jobTimer)clearInterval(jobTimer)
         jobTimer=null
         if(next.status==='failed')notify(next.error || 'Job failed', 'error')
-        if(next.status==='completed')notify(next.kind==='ocr'?'OCR processing finished.':'Filing bundle generated successfully.','success')
+        if(next.status==='completed')notify(next.kind==='ocr'?'OCR processing finished.':next.kind==='compress'?'PDF compression finished. Review the size and quality.':'Filing bundle generated successfully.','success')
         if(next.status==='cancelled')notify('Processing cancelled.','info')
         await loadMatterResources()
       }
@@ -732,9 +733,10 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <button class="btn primary large" :disabled="!docs.length || isJobActive" @click="startBuild"><Layers3 :size="19"/> {{isJobActive?'Processing…':'Build filing bundle'}}</button>
                 <div v-if="isJobActive && activeJob" class="job-progress"><div class="job-progress-line"><span>{{activeJob.message}}</span><strong>{{activeJob.progress}}%</strong></div><div class="progress-track"><div :style="{width:activeJob.progress+'%'}"></div></div><button class="text-tool danger" @click="cancelJob">Cancel operation</button></div>
                 <div v-else-if="activeJob?.status==='failed'" class="notice error"><CircleAlert :size="18"/> {{activeJob.error}}</div>
-                <div v-for="job in interruptedJobs" :key="job.id" class="notice amber"><CircleAlert :size="18"/><span>{{job.kind === 'ocr' ? 'OCR' : 'Bundle build'}} was interrupted by an engine restart. No completed output was published from that job.</span><button class="text-tool" :disabled="isJobActive" @click="retryInterrupted(job)">Retry</button></div>
+                <div v-for="job in interruptedJobs" :key="job.id" class="notice amber"><CircleAlert :size="18"/><span>{{job.kind === 'ocr' ? 'OCR' : job.kind === 'compress' ? 'Compression' : 'Bundle build'}} was interrupted by an engine restart. Review the current revision and exports before retrying.</span><span v-if="job.kind === 'compress'">Choose compression again in page tools.</span><button v-else class="text-tool" :disabled="isJobActive" @click="retryInterrupted(job)">Retry</button></div>
               </div>
             </div>
+            <ManualBookmarks :key="`${currentMatterId}-${history.undo_count}-${history.redo_count}`" :matter-id="currentMatterId!" :documents="docs" :disabled="busy || isJobActive" @modified="loadMatterResources"/>
             <div class="panel exports-panel"><div class="panel-header"><div><h2>Generated exports</h2><span>Stored locally for repeat downloads</span></div><Archive :size="18" class="muted-icon"/></div>
               <div v-if="activeExport" class="export-body"><div v-if="activeExport.stale" class="notice amber"><ShieldAlert :size="18"/> Matter inputs changed since this export. Rebuild before using it.</div><div v-if="activeJob?.kind==='build' && activeJob.status==='failed'" class="notice amber"><ShieldAlert :size="18"/> The latest build failed. These files are from an earlier completed export; review them before use.</div><div class="export-summary"><div class="export-icon"><FileCheck2 :size="25"/></div><div><strong>{{activeJob?.kind==='build' && activeJob.status==='failed' ? 'Previous filing package' : 'Latest filing package'}}</strong><span>{{prettyDate(activeExport.created_at)}} · {{activeExport.volumes}} volume(s) · {{activeExport.pages}} pages</span></div></div><div v-if="activeExport.checks.some(check => check.code==='SOURCE_ANNOTATIONS_OMITTED' || check.code==='SOURCE_LINKS_OMITTED')" class="notice amber"><ShieldAlert :size="18"/> This export omitted source annotations or links. See validation-report.json for affected documents; generated index links remain.</div>
                 <div v-for="file in activeExport.files" :key="file.name" class="export-file"><FileText :size="18"/><div><strong>{{file.name}}</strong><small>{{bytesLabel(file.bytes)}}</small></div><button class="icon-btn" :disabled="savingExport" :title="inTauri() ? 'Save '+file.name : 'Download '+file.name" :aria-label="inTauri() ? 'Save '+file.name : 'Download '+file.name" @click="download(activeExport.id,file.name)"><ArrowDownToLine :size="18"/></button><button v-if="inTauri()" class="text-tool" :disabled="savingExport" :title="'Save '+file.name+' as'" @click="download(activeExport.id,file.name,true)">Save As</button></div>
@@ -755,7 +757,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
     <dialog v-if="selectedDoc" ref="pageToolsDialog" class="page-tools-dialog" aria-labelledby="page-tools-title" @close="pageToolsOpen=false" @click.self="pageToolsOpen=false">
       <div class="page-tools-dialog-head"><div><h2 id="page-tools-title">Page tools</h2><p>{{selectedDoc.title}} · Working copy</p></div><button class="icon-btn" aria-label="Close page tools" @click="pageToolsOpen=false"><X :size="18"/></button></div>
       <p v-if="documentDirty" class="notice amber">Save document details before editing pages.</p>
-      <PageTools :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" expanded @modified="refreshDocument"/>
+      <PageTools :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :job="activeJob" expanded @modified="refreshDocument" @job-started="watchJob" @cancel="cancelJob"/>
     </dialog>
     <MatterForm v-if="modalOpen" :profiles="profileList" :working="creating" @close="modalOpen=false" @create="createMatter"/>
     <div v-if="toast" :class="['toast',toast.kind]"><CheckCircle2 v-if="toast.kind==='success'" :size="19"/><CircleAlert v-else-if="toast.kind==='error'" :size="19"/><Info v-else :size="19"/><span>{{toast.message}}</span><button class="icon-btn small" @click="toast=null"><X :size="15"/></button></div>

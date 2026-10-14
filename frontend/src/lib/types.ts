@@ -95,7 +95,7 @@ export interface ExportManifest {
 export interface Job {
   id: string
   matter_id: string
-  kind: 'build' | 'ocr'
+  kind: 'build' | 'ocr' | 'compress'
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
   target_id?: string | null
   retry_job_id?: string | null

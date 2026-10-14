@@ -166,12 +166,14 @@ All routes require `Authorization: Bearer <local-token>`.
 - `GET|POST /matters`; `GET|PATCH|DELETE /matters/{id}`
 - `GET /matters/{id}/portable`; `POST /matters/restore` (versioned local matter backup/restore)
 - `GET /matters/{id}/history`; `POST /matters/{id}/history/undo|redo`
+- `GET|PUT /matters/{id}/bookmarks` (revision-aware manual outline entries)
 - `GET /matters/archived`; `POST /matters/{id}/restore`; `GET /matters/{id}/archived-documents|storage|audit`
 - `GET|POST /matters/{id}/documents`; `POST /matters/{id}/cover`
 - `GET|PUT /matters/{id}/memo-parties` (matter-scoped review data)
 - `POST /matters/{id}/documents/reorder`
 - `PATCH|DELETE /documents/{id}`; `GET /documents/{id}/pdf`
 - `POST /documents/{id}/pages/reorder|rotate|delete`; `POST /documents/{id}/ocr`
+- `POST /documents/{id}/replace` (whole working-copy replacement from another matter document)
 - `GET /matters/{id}/validate`; `POST /matters/{id}/build`
 - `GET /jobs/{id}`; `POST /jobs/{id}/cancel`
 - `GET /matters/{id}/exports`; `GET /matters/{id}/exports/{exportId}/{filename}`
@@ -183,13 +185,22 @@ Full request/response examples and architecture notes are in `docs/PROJECT_CONTE
 - Delhi High Court is represented by an **illustrative technical subset**, not a comprehensive court profile. The configurable page cap is **not** a national court rule. The 2026 Delhi High Court rule concerns **300 MB file size**, not a 300-page maximum.
 - This tool prepares PDFs; it does not e-file documents with courts or establish legal validity, admissibility, certification, signing, translation accuracy, limitation or filing acceptance.
 - Imported originals are preserved. Working-copy changes and export stamps can affect digital signatures or appearance. Do not use this POC as an evidence-preservation tool without review.
-- OCR uses English traineddata and rasterizes image-only pages. OCR is fallible, particularly for handwriting and seals. Non-Latin index titles are not yet properly rendered.
-- PDF and JPG/PNG import only; Word, Excel and PowerPoint conversion remain future development. On unrotated working-copy pages, the preview can add visible ASCII text. It can replace one selectable horizontal text run even when the PDF page has a 90°, 180° or 270° rotation setting. Replacement can use clear space to the right and wrap into clear space below, reducing font size by at most 25% if needed; it does not move surrounding page content, preserve arbitrary fonts or correct scanned pixels. Unfittable text is rejected with a specific error. Review the result and use matter Undo to revert it. This is not a confidential redaction tool.
+- OCR uses English traineddata and adds an invisible layer to image-only and mixed native/scanned pages while retaining visible source content, geometry and navigation. Pages with an existing GlyphLessFont OCR layer are skipped; OCR rendering is bounded to 40 megapixels per page. OCR is fallible, particularly for handwriting and seals. Non-Latin index titles are not yet properly rendered.
+- PDF and JPG/PNG import only; Word, Excel and PowerPoint conversion remain future development. On working-copy pages, including pages rotated by 90°, 180° or 270°, the preview can add visible ASCII text. It can replace one selectable horizontal text run even when the PDF page has a 90°, 180° or 270° rotation setting. Replacement can use clear space to the right and wrap into clear space below, reducing font size by at most 25% if needed; it does not move surrounding page content, preserve arbitrary fonts or correct scanned pixels. Unfittable text is rejected with a specific error. Review the result and use matter Undo to revert it. This is not a confidential redaction tool.
 - Browser export uses authenticated fetch and browser-style download. Tauri export uses a native Save dialog and streams to a temporary file before replacing the destination. Apple Silicon native Save has local device evidence; validate save and failure behaviour on every target system.
-- Job state and progress persist in SQLite. After a restart, unfinished jobs are shown as interrupted and can be retried from a new job; abandoned build staging is removed. Working-copy revisions and per-matter locks keep app edits out of active builds. Large-job cancellation and native crash recovery still need device testing.
+- Job state and progress persist in SQLite. After a restart, unfinished jobs are shown as interrupted and can be retried from a new job; abandoned build staging is removed. Working-copy revisions and a process-wide processing lock keep PDF requests and jobs from running concurrently. Late cancellation cannot relabel a committed output as cancelled. Restart recovery recognizes a published build only after verifying its artifact hashes. Large-job cancellation and native crash recovery still need device testing.
+- Manual bookmarks persist with document/page/revision targets. A later edit or archive leaves an affected bookmark visible as unresolved until reviewed; unresolved entries are omitted from generated outlines with a report warning. The v2 portable matter package includes bookmarks and accepts legacy v1 packages. Build manifests fingerprint matter inputs, current working-copy hashes, manual bookmarks and the selected profile; older manifests are conservatively marked stale.
 - Memo of Parties helper rows autosave to the selected local matter and show save failures. Document-detail and bundle-setting forms use explicit Save, show unsaved indicators, and prompt before discarding drafts during navigation or reload. A failed bundle-settings save stops the build.
 - Local data and portable matter backups are **not encrypted at rest**. Matter/document removal archives records and keeps files; there is no in-app permanent delete. See [local security and retention](docs/LOCAL_SECURITY_AND_RETENTION.md). Do not import actual confidential court/client files for a demonstration.
 - Vue build, Vitest, Apple Silicon Rust compile and local package tests passed on 13 October 2026; see the acceptance log for exact runs. Other target builds and clean-device tests are still required.
 - **PyMuPDF licensing:** Determine AGPL/commercial licensing requirements before distributing any proprietary build. Review other dependencies' licenses too.
 
 See [Project Context and Handoff](docs/PROJECT_CONTEXT_AND_HANDOFF.md) and [Acceptance Tests](docs/POC_ACCEPTANCE_TESTS.md).
+
+### PDF reliability hardening — 14 October 2026
+
+Page assembly remaps retained internal links and outlines, including rotated link rectangles/destinations; links to excluded pages are omitted. Generated PDF outlines retain full Unicode titles, while printed index multilingual fonts remain unfinished. Export checks verify exact outline/link destinations against the shared page map, ZIP CRCs and per-artifact SHA-256 values. Downloads reject hash-mismatched new exports.
+
+Page tools offer lossless cleanup, Balanced (240 DPI/JPEG 85), and Smaller (150 DPI/JPEG 70) compression. They report measured sizes, preserve native text and navigation, and create an undoable working revision only if the file gets smaller. Masked, bitonal and images above 40 megapixels are retained. Review lossy results; no size or fidelity guarantee is made. Compression jobs interrupted by restart must be restarted explicitly from page tools with a selected preset.
+
+New regression coverage includes write/validation/sync/rename failures, partial-copy cleanup, pending redaction protection, mixed-page OCR, rotated overlays and links, late cancellation, verified build recovery, Unicode/nested bookmarks and index-growth boundaries. See the acceptance log for results and release limitations.

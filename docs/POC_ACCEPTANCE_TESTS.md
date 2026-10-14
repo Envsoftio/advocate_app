@@ -253,3 +253,63 @@ Text-run listing now checks unrotated bounds and maps each selection rectangle t
 The backend data root is created or tightened to POSIX mode `0700` at startup. Portable backup/restore transfer files and PDF-edit scratch files now have dedicated hidden prefixes. Normal completion removes them; the next startup removes leftovers from an interrupted process. It leaves unrelated `.cbmatter` files alone. The previous DAT-02 orphan-revision quarantine still preserves an uncommitted working candidate for inspection.
 
 A synthetic restart test began with a `0755` data root, an abandoned portable package, an abandoned partial package and an unrelated package. Startup tightened the root, removed only the app-named temporary files and retained the unrelated file. The portable round-trip test found no transfer leftovers; a simulated interrupted PDF-edit scratch file was removed on restart. Backend suite: **51 passed**. Windows ACL behavior, encrypted storage/key recovery and clean-device security review remain open; this is not evidence that local data is encrypted.
+
+## AA. DAT-02, FIL-04 and FIL-06 implementation review — 14 October 2026
+
+Whole-document replacement copies another active document's current working PDF into a new revision of the target document, retaining the target's imported original and prior revisions. Undo/Redo restore the expected page content. The UI exposes this in page tools; it refuses using the target document as its own source. Synthetic tests confirmed page counts/content, source-byte retention and history replay. Packaged native replacement and history still need target-device inspection.
+
+Manual bookmarks use SQLite schema v5. Each entry records a document ID, zero-based page index and revision, title, parent and order. The Build UI supports adding, renaming, deleting, nesting and drag/drop or button reordering. Export resolution uses the same document page map as the index, CSV and generated outlines. An edited or archived document leaves affected bookmarks stored and visibly unresolved; the export omits those manual entries and records `UNRESOLVED_MANUAL_BOOKMARKS`. The v2 portable matter package carries bookmarks and remaps their IDs on restore; v1 packages remain accepted. Nested multi-volume synthetic tests inspected both volume and combined PDF outlines and the ZIP report. Browser E2E verified a bookmark across reload, stale revision display and explicit resolution. Packaged Windows/macOS PDF viewer, keyboard and drag/drop checks remain open.
+
+Export manifests and reports carry `build_input_digest`, a SHA-256 fingerprint of relevant matter settings, ordered document metadata, current original/working-copy bytes and revisions, manual bookmarks and the selected profile contents. A timestamp check keeps exports stale after Undo even if values return to an earlier state. Old manifests without the digest are conservatively stale. Before atomic publication, the build recomputes the digest and rejects changed inputs. This is a technical freshness indicator, not proof of legal validity or authenticity.
+
+Review found a stale-export regression after Undo when fingerprint comparison alone was used; combining the edit timestamp and fingerprint corrected it. Browser E2E initially found ambiguous generic number-input locators after the bookmark page field was added; those tests now select the named volume cap. An original-byte check initially ran before preflight and masked detailed integrity errors; moving it after preflight preserved those diagnostics. Final verification: `backend/.venv312/bin/python -m pytest -q` **58 passed**; `npm run build` passed; `npm run test` **6 passed**; full isolated Chrome `npm run test:e2e` **15 passed** after local loopback permission. The export journey passed again after the original-byte fingerprint was added (**1 focused E2E passed**). Native build/device checks were not run in this pass. DAT-07 and DEC-02 dependent filing tasks remain open as recorded in `docs/IMPLEMENTATION_TASKS.md`.
+
+## AB. PDF core reliability hardening — 14 October 2026
+
+This is implemented hardening with synthetic evidence, **not a claim of production readiness or error-free PDF processing**. Existing uncommitted project work was retained.
+
+### Implemented changes
+
+- **Page assembly:** reorder/insert/replace/extract/split preserve copied annotations and explicitly reconstruct retained internal links and outlines. Rotated click rectangles and destination points are transformed correctly. Links to excluded pages are omitted. Duplicate destination pages resolve to their first selected occurrence, except self-links which stay with the copied occurrence. Source metadata follows the first source. These tools do not promise preservation of every PDF catalog feature, attachment, script, form or signature.
+- **Bundle navigation:** serialized outline entries and index destinations must exactly match the shared deterministic page map before publication. Unicode/full-length outline titles are retained. Manual bookmark lists are normalized to depth-first order so children cannot silently acquire another parent. Index-growth boundary regressions cover 23/24 and 46/47 document transitions. Printed index fonts/templates remain limited.
+- **OCR:** mixed native/scanned pages receive an invisible layer; duplicated native text is removed from the new layer. The original visible page, rotation, annotations, links and outline remain. Synthetic 0/90/180/270-degree fixtures retained identical rendered pixel buffers and acquired searchable scanned text without duplicating the native header. Existing GlyphLessFont layers are skipped; partial/poor old OCR therefore still requires review. A 40-megapixel rendering limit prevents pathological OCR page allocations. Cancellation is checked before publication. A no-change result is labelled `no_new_text`, not proof that a document is fully searchable.
+- **Editing:** text overlays now accept rotated pages using display-relative coordinates. Text replacement refuses pending redaction annotations and overlapping non-editable text instead of potentially applying unrelated marks or removing another layer. These checks do not constitute a secure redaction implementation.
+- **Compression:** Page Tools exposes lossless cleanup, Balanced (240 DPI/JPEG 85) and Smaller (150 DPI/JPEG 70) as background jobs. Results show measured sizes. Only smaller files become new undoable revisions. Largest placement controls shared-image resolution; masks, bitonal and images above 40 megapixels are skipped. Native text, navigation and original bytes are covered. Lossy scan/seal fidelity still needs representative visual fixtures and device review. Interrupted compression is restarted explicitly from page tools.
+- **Failure handling:** PDF candidates are reopened, page/content/navigation checked and synced before replacement. Failed writes/validation/sync/rename preserve previous bytes. Partial candidate copies are cleaned. Cleanup consults the revision catalog and never deletes a committed revision after an exception; an unavailable database leaves uncertain files for startup reconciliation. Document revision and matter timestamp changes share a transaction. Disk-space/permission failures have actionable API errors.
+- **Concurrency/cancellation:** PDF work is serialized process-wide across request and worker threads. Cancelling an upload while it waits for a lock cannot strand the lock; ongoing native conversion finishes before cancellation releases it. A successful task return means committed completion even if a cancellation request arrived too late. This prevents reporting a published artifact as cancelled. It does not interrupt an individual native-library call or isolate native process crashes.
+- **Export recovery:** artifacts have SHA-256 values, ZIP CRC validation and synced files before atomic publication. Downloads verify sizes/hashes for new manifests. On startup, a build interrupted between publish and status update becomes completed only if its manifest and every artifact verify. Same-length corruption is rejected. Unpublished staging stays hidden and is cleaned. Actual power-loss/filesystem durability still needs device testing.
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| Backend `.venv312/bin/python -m pytest -q` | **88 passed**, 6 dependency deprecation warnings |
+| Vue production build | **Passed**; existing >500 kB bundle warning remains |
+| Vitest | **6 passed** |
+| Full isolated Chrome/Playwright | **16 passed (46.0 seconds)** on Vite 1448/API 8768, synthetic data |
+| PyInstaller Apple Silicon sidecar | **Built successfully** with bundled English OCR data |
+| Unsigned Apple Silicon Tauri `.app` | **Built successfully**, 58.23 MiB; not signed/notarized |
+| Frozen sidecar synthetic smoke | **Passed**: compression, bundled mixed-page OCR, manual outline/index destinations and original SHA-256; system Tesseract removed from PATH, TESSDATA_PREFIX unset |
+
+The first browser run found a strict selector that assumed Page Tools had only one dropdown; it now selects the named source-document control. A subsequent run timed out in the pre-existing unavailable-engine test, though its failure snapshot showed the offline UI. The final unchanged connection test passed in 13.2 seconds. This intermittent timing observation remains recorded; tests were not relaxed to hide it. Initial loopback binding was denied by the sandbox; permitted runs used isolated local services.
+
+### Repeatable scale baseline
+
+Command: `cd backend && .venv312/bin/python scripts/benchmark_pdf_core.py`. Environment: macOS 26.6.2 arm64, Python 3.12.13, PyMuPDF 1.28.2. Fixture: 100 generated native-text PDFs of 10 A4 pages each. Data is temporary and removed afterward.
+
+| Measurement | Result |
+| --- | --- |
+| Generate and import 1,000 pages | 1.226 seconds |
+| Build, verify navigation and package ZIP | 1.516 seconds |
+| Full-matter search for an absent term | 0.533 seconds |
+| Peak process RSS | 99.70 MiB |
+| Output | 4 volumes, 1,007 combined pages including indexes |
+| Combined PDF / ZIP bytes | 477,827 / 155,269 |
+
+This is a local baseline for native text, not a scan-heavy benchmark, throughput guarantee or agreed release budget. The script reports no RSS value on Windows, where Python's `resource` module is unavailable.
+
+### Remaining release gates
+
+Windows x64, Intel Mac, minimum macOS 12, clean-machine install, native WebView interaction, native Save failure scenarios, power loss and large scan stress remain unverified for these changes. Native crash isolation/supervision is not implemented. Multilingual printed indexes/fonts, Office conversion, full layout/OCR correction, scanner/deskew, annotation/image authoring, password/security workflows, permanent redaction, signed-input review/acknowledgment and legal workflow specifications remain incomplete as listed in IMPLEMENTATION_TASKS.md. No task is closed merely because this hardening suite passes.
+
+Packaged smoke command: `backend/.venv312/bin/python backend/scripts/smoke_packaged_pdf.py frontend/src-tauri/binaries/filing-api-aarch64-apple-darwin`. Local frozen-engine startup took **23.52 seconds**; compression reduced the synthetic mixed PDF from **18,454 to 15,409 bytes**. This is within the current 30-second native readiness window on this run, but shows cold-start performance still needs target-device measurements. The smoke exercises an isolated sidecar API with temporary data; it does not establish packaged WebView/Save dialog behavior or a clean-device install.

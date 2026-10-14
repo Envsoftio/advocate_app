@@ -122,7 +122,7 @@ A rules update should NOT silently mutate already completed export artifacts.
 | Matter CRUD | Implemented/tested | Name, profile, parties, case type, advocate, case number, volume policy. |
 | PDFs and images | Implemented/tested | PDF/JPG/PNG; 80 MB per-file POC cap; preserve original. |
 | Working copy page operations | Implemented/tested | Rotate current page, delete and reorder pages. |
-| OCR | Implemented/tested | English OCR on pages with no extractable text. |
+| OCR | Implemented/tested on synthetic fixtures | English OCR on image-only/mixed pages; visible content retained. Existing GlyphLessFont OCR pages are skipped. |
 | PDF viewer | Browser journey tested; native coverage incomplete | PDF.js canvas, navigation, zoom and page operations. |
 | Document ordering | Vue + API code provided | HTML drag/drop and explicit up/down. |
 | Document metadata | Implemented/tested | Part 1–4, doc kind, annexure label, keep-together group key. |
@@ -197,7 +197,7 @@ For each selected volume, the engine:
 
 Build and OCR operations are queued through one Python thread executor. Progress is polled via `/jobs/{id}` and persisted in SQLite. On restart, queued/running jobs are marked interrupted, unpublished build staging is removed, and the UI offers a new-job retry. Jobs do not resume midway. Terminal job records are retained for 90 days. Cancellation checks occur between volumes and OCR pages; responsiveness during large single-volume work remains unverified under DAT-03.
 
-A production build should snapshot and lock document versions; currently simultaneous editing while building is a known concurrency gap. Do not extend to multiple workers until thread/process safety and document integrity are addressed.
+Document revisions and a process-wide PDF processing lock now serialize API PDF operations and builds/OCR/compression across matters. This prevents concurrent native-library use; it is not crash isolation. Moving native PDF work to supervised worker processes remains a release-hardening consideration. Do not add concurrent native calls without validating the library execution model.
 
 ### 6.4 Versioned court profiles
 
@@ -318,7 +318,7 @@ Run: `cd backend && python scripts/build_demo_output.py`; outputs are in `sample
 1. **Licensing:** PyMuPDF offers AGPL/commercial licensing routes; obtain an appropriate license/assessment before proprietary distribution.
 2. **Local data security:** The SQLite DB and original/working files are plain on disk; production legal work needs threat modeling, optional storage encryption and safe temporary-file/wipe policies.
 3. **No product-grade PDF signature handling:** Reordering, rasterizing, stamping and combining may invalidate or disturb signed material; signed PDFs should be detected/blocked or handled through an approved workflow.
-4. **OCR fidelity:** OCR may misrecognise text; image-only pages are rendered at 240 DPI and rebuilt as searchable PDFs. It is NOT safe to treat OCR output as the authoritative document text.
+4. **OCR fidelity:** OCR may misrecognise text; image-only and mixed pages are rendered at 240 DPI for recognition, but only the invisible recognition layer is added to the existing page; existing GlyphLessFont layers are skipped. It is NOT safe to treat OCR output as the authoritative document text.
 5. **English-only text generation:** The PDF index uses built-in Latin fonts. Hindi and other scripts require bundled, properly licensed fonts and comprehensive text shaping tests. UI strings may be Unicode but PDF index rendering is not yet complete.
 6. **Single fixed index layout:** 23 entries per A4 index page, simple columns. Real cases require court/category-specific index templates, sometimes hyperlink conventions and paragraph-level references.
 7. **No complete document QA:** Signature validity, legal sufficiency, translation certification, chain-of-custody and proper execution are unassessed.
@@ -398,8 +398,16 @@ Run: `cd backend && python scripts/build_demo_output.py`; outputs are in `sample
 
 ## 14. Handoff request for the next coding agent
 
+**14 October 2026 implementation note:** SQLite schema v5 adds revision-aware manual bookmarks. `GET|PUT /matters/{id}/bookmarks` manages an ordered, nested list; older revision targets remain visible but are omitted from generated outlines with an explicit report warning. PDF volume and combined outline destinations derive from the same document page map as indexes and CSV. Whole-document replacement uses `POST /documents/{id}/replace` with another active matter document as the source, writes a new working revision, and supports Undo/Redo. Portable matter packages are now v2 to carry bookmarks; v1 restore remains supported. Build manifests have a digest of relevant matter settings, ordered document metadata, original/working bytes, bookmarks and profile content; old manifests are treated as stale. The 14 October evidence and remaining human/legal gates are in `docs/POC_ACCEPTANCE_TESTS.md` and `docs/IMPLEMENTATION_TASKS.md`. These additions do not approve the illustrative court profile.
+
 > Continue this CourtBundle POC **without replacing its core architecture**. Start by installing the frontend dependencies and running the Vue/Tauri application on a real machine, resolve compile/runtime issues, execute the Python test suite, and validate one complete synthetic matter. Preserve the deterministic page-map model and keep original files immutable. The existing Delhi court profile is illustrative and must never be described as an approved court rules pack. Do not begin nationwide legal logic or complete Office document conversion until actual case workflows and supported courts are confirmed. Maintain backward compatibility of API endpoints or document migration steps, and expand tests with each change.
 
 ---
 
 **Decision summary:** Tauri 2 + Vue 3 + TypeScript frontend; Python FastAPI local backend; PyMuPDF/Tesseract PDF engine; SQLite/local files; deterministic matter, document, volume and index pipeline. Build the court-rule knowledge layer only from verifiable scoped sources and advocate-reviewed templates. The present output is an engineering POC and development starting point, not a production legal compliance platform.
+
+## PDF core hardening update — 14 October 2026
+
+See acceptance section AB and the PDF reliability regression suite. This pass adds navigation-preserving page assembly, exact serialized bundle destination checks, Unicode outlines, canonical bookmark hierarchy, additive mixed-page OCR, rotated text placement, measured compression, validated/synced PDF replacement, partial-copy cleanup, honest cancellation outcomes and hash-verified committed-build recovery. Existing imported originals and all retained revisions remain untouched.
+
+Production qualification remains incomplete: native-device coverage, complex scan/font/form/signature fixtures, process crash isolation, full durability under actual power loss, multilingual printed indexes, legal workflow approval, security and distribution gates are not established by these automated tests. The 1,000-page benchmark uses native-text synthetic pages; it does not establish scanned-matter throughput or memory ceilings.

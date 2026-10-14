@@ -2,10 +2,25 @@
 import { computed, ref, watch } from 'vue'
 import { api, downloadPageOutput } from '../lib/api'
 import { friendlyError } from '../lib/format'
-import type { MatterDocument } from '../lib/types'
+import type { Job, MatterDocument } from '../lib/types'
 
-const props = defineProps<{ document: MatterDocument, documents: MatterDocument[], disabled: boolean, expanded?: boolean }>()
-const emit = defineEmits<{ modified: [] }>()
+const props = defineProps<{ document: MatterDocument, documents: MatterDocument[], disabled: boolean, expanded?: boolean, job?: Job | null }>()
+const emit = defineEmits<{ modified: [], jobStarted: [job: Job], cancel: [] }>()
+const compressionPreset = ref('lossless')
+const compressionJob = computed(() => props.job?.kind === 'compress' && props.job.target_id === props.document.id ? props.job : null)
+const compressionResult = computed(() => compressionJob.value?.result as Record<string, unknown> | null)
+async function compress() {
+  if (props.disabled || working.value) return
+  working.value = true
+  error.value = ''
+  try {
+    const job = await api<Job>(`/documents/${props.document.id}/compress`, 'POST', {
+      preset: compressionPreset.value, expected_revision: props.document.revision,
+    })
+    emit('jobStarted', job)
+  } catch (err) { error.value = friendlyError(err) }
+  finally { working.value = false }
+}
 const sourceId = ref('')
 const sourceRange = ref('1')
 const targetRange = ref('1')
@@ -42,7 +57,7 @@ function parsePages(value: string, count: number) {
   }
   return result
 }
-async function run(action: 'insert' | 'insertAfter' | 'replace' | 'crop' | 'append') {
+async function run(action: 'insert' | 'insertAfter' | 'replace' | 'replaceDocument' | 'crop' | 'append') {
   if (props.disabled || working.value) return
   error.value = ''
   working.value = true
@@ -55,10 +70,14 @@ async function run(action: 'insert' | 'insertAfter' | 'replace' | 'crop' | 'appe
         right: crop.value.right / 100, bottom: crop.value.bottom / 100 }
     } else {
       if (!source.value) throw new Error('Choose a source document in this matter.')
+      if (action === 'replaceDocument' && source.value.id === props.document.id)
+        throw new Error('Choose a different document as the replacement source.')
       const sourcePages = action === 'append'
         ? Array.from({ length: source.value.page_count }, (_, index) => index)
-        : parsePages(sourceRange.value, source.value.page_count)
-      if (action === 'replace') {
+        : action === 'replaceDocument' ? [] : parsePages(sourceRange.value, source.value.page_count)
+      if (action === 'replaceDocument') {
+        payload = { source_document_id: source.value.id }
+      } else if (action === 'replace') {
         payload = { source_document_id: source.value.id, source_pages: sourcePages,
           target_pages: parsePages(targetRange.value, props.document.page_count) }
       } else {
@@ -72,7 +91,8 @@ async function run(action: 'insert' | 'insertAfter' | 'replace' | 'crop' | 'appe
         payload = { source_document_id: source.value.id, source_pages: sourcePages, before_index: before - 1 }
       }
     }
-    await api(`/documents/${props.document.id}/pages/${operation}`, 'POST', payload)
+    await api(action === 'replaceDocument' ? `/documents/${props.document.id}/replace`
+      : `/documents/${props.document.id}/pages/${operation}`, 'POST', payload)
     emit('modified')
   } catch (err) { error.value = friendlyError(err) }
   finally { working.value = false }
@@ -111,6 +131,8 @@ async function savePages(operation: 'extract' | 'split') {
     </div>
     <label class="field">Target pages to replace <input v-model="targetRange" placeholder="1,3-5" :disabled="disabled || working"/></label>
     <button class="btn secondary small" :disabled="disabled || working" @click="run('replace')">Replace one-for-one</button>
+    <p>Replace every page with the selected source document's current working pages. The imported original and prior revision remain available through Undo.</p>
+    <button class="btn secondary small" :disabled="disabled || working || !sourceId || sourceId === document.id" @click="run('replaceDocument')">Replace entire working document</button>
     <div class="divider-line"></div>
     <label class="field">Pages to crop <input v-model="cropRange" placeholder="1,3-5" :disabled="disabled || working"/></label>
     <div class="crop-grid">
@@ -125,6 +147,25 @@ async function savePages(operation: 'extract' | 'split') {
     <button class="btn secondary small" :disabled="disabled || working" @click="savePages('extract')">Save extracted PDF</button>
     <label class="field">Split after pages <input v-model="splitAfter" placeholder="2,5" :disabled="disabled || working"/></label>
     <button class="btn secondary small" :disabled="disabled || working" @click="savePages('split')">Save split ZIP</button>
+    <div class="divider-line"></div>
+    <label class="field">Compression quality
+      <select v-model="compressionPreset" :disabled="disabled || working">
+        <option value="lossless">Lossless cleanup — retain image quality</option>
+        <option value="balanced">Balanced — 240 DPI, JPEG quality 85</option>
+        <option value="small">Smaller — 150 DPI, JPEG quality 70</option>
+      </select>
+    </label>
+    <p>Balanced and Smaller can reduce scan quality. Review small text and seals afterward; Undo restores the previous revision. A larger result is discarded.</p>
+    <button class="btn secondary small" :disabled="disabled || working" @click="compress">Compress working PDF</button>
+    <div v-if="compressionJob" role="status">
+      <p>{{compressionJob.message}} · {{compressionJob.progress}}%</p>
+      <button v-if="['queued', 'running'].includes(compressionJob.status)" class="text-tool danger" @click="emit('cancel')">Cancel compression</button>
+      <p v-if="compressionJob.error" class="error-msg">{{compressionJob.error}}</p>
+      <p v-if="compressionJob.status === 'completed' && compressionResult">
+        {{compressionResult.before_bytes}} → {{compressionResult.after_bytes}} bytes.
+        {{compressionResult.message}}
+      </p>
+    </div>
     <p v-if="error" class="error-msg" role="alert">{{error}}</p>
   </details>
 </template>

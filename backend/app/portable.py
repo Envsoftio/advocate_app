@@ -9,10 +9,10 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from .storage import Store, new_id, utcnow
-from .schemas import MatterCreate, DocumentPatch, MemoPartiesUpdate
+from .schemas import MatterCreate, DocumentPatch, MemoPartiesUpdate, ManualBookmark
 from .engine import load_profiles
 
-PACKAGE_VERSION = 1
+PACKAGE_VERSION = 2
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
 
@@ -59,6 +59,9 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
     manifest = {'format': 'courtbundle-matter', 'version': PACKAGE_VERSION,
                 'created_at': utcnow(), 'matter': matter, 'documents': documents,
                 'revisions': revisions, 'memo_parties': store.get_memo_parties(matter_id),
+                'manual_bookmarks': [{key: item[key] for key in ('id', 'title',
+                    'document_id', 'page_index', 'target_revision', 'parent_id', 'position')}
+                    for item in store.list_manual_bookmarks(matter_id)],
                 'files': files}
     destination.parent.mkdir(parents=True, exist_ok=True)
     candidate = destination.with_name(destination.name + '.partial-' + new_id())
@@ -88,7 +91,7 @@ def restore_package(store: Store, package: Path) -> dict:
             if archive.getinfo('manifest.json').file_size > 10 * 1024 * 1024:
                 raise PortableMatterError('Manifest is too large')
             manifest = json.loads(archive.read('manifest.json'))
-            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') != PACKAGE_VERSION:
+            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, PACKAGE_VERSION):
                 raise PortableMatterError('Unsupported portable matter package')
             files = manifest.get('files')
             if not isinstance(files, list):
@@ -146,6 +149,26 @@ def restore_package(store: Store, package: Path) -> dict:
         if len(old_ids) != len(documents) or any(rev['document_id'] not in old_ids for rev in revisions):
             raise PortableMatterError('Invalid document revision references')
         id_map = {old: new_id() for old in old_ids}
+        bookmarks = manifest.get('manual_bookmarks', [])
+        if manifest['version'] >= 2 and 'manual_bookmarks' not in manifest:
+            raise PortableMatterError('Missing manual bookmarks in v2 package')
+        if not isinstance(bookmarks, list) or len(bookmarks) > 500:
+            raise PortableMatterError('Invalid manual bookmarks')
+        bookmark_ids = [item['id'] for item in bookmarks]
+        if len(set(bookmark_ids)) != len(bookmark_ids):
+            raise PortableMatterError('Duplicate manual bookmark IDs')
+        revision_pages = {(rev['document_id'], rev['revision']): rev['page_count']
+                          for rev in revisions}
+        for index, item in enumerate(bookmarks):
+            ManualBookmark.model_validate({key: item[key] for key in ('id', 'title',
+                'document_id', 'page_index', 'target_revision', 'parent_id')})
+            if (item['document_id'] not in old_ids or item.get('position') != index or
+                    item['page_index'] >= revision_pages.get(
+                        (item['document_id'], item['target_revision']), 0) or
+                    (item['parent_id'] is not None and
+                     item['parent_id'] not in bookmark_ids[:index])):
+                raise PortableMatterError('Invalid manual bookmark target or hierarchy')
+        bookmark_id_map = {old: new_id() for old in bookmark_ids}
         os.replace(stage, final)
         with store.connect() as con:
             con.execute('BEGIN IMMEDIATE')
@@ -170,6 +193,13 @@ def restore_package(store: Store, package: Path) -> dict:
             if manifest['memo_parties']:
                 con.execute('INSERT INTO memo_parties (matter_id,payload_json,updated_at) VALUES (?,?,?)',
                             (matter_id, json.dumps(manifest['memo_parties'], ensure_ascii=False), utcnow()))
+            for item in bookmarks:
+                con.execute('''INSERT INTO manual_bookmarks
+                    (id,matter_id,title,document_id,page_index,target_revision,parent_id,position)
+                    VALUES (?,?,?,?,?,?,?,?)''',
+                    (bookmark_id_map[item['id']], matter_id, item['title'],
+                     id_map[item['document_id']], item['page_index'], item['target_revision'],
+                     bookmark_id_map.get(item['parent_id']), item['position']))
             store._audit(con, 'matter_restored_from_package', matter_id)
     except (KeyError, TypeError, ValueError, zipfile.BadZipFile, sqlite3.Error, OSError) as exc:
         shutil.rmtree(stage, ignore_errors=True)

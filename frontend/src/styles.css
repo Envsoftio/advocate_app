@@ -205,3 +205,8 @@
   .breadcrumb{gap:6px}
   .breadcrumb strong{max-width:calc(100vw - 155px)}
 }
+/* Manual bookmark rows wrap at small native window sizes. */
+.manual-bookmark-row{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.65rem 0}
+.manual-bookmark-row input,.manual-bookmark-row select{max-width:15rem;min-width:7rem}
+.manual-bookmark-row input,.manual-bookmark-row select{min-height:2.5rem;padding:.45rem;border:1px solid var(--border,#ccd8e6);border-radius:6px;background:var(--panel,#fff);color:var(--text,#19283c)}
+.manual-bookmark-row input[type=number]{max-width:5rem;min-width:4rem}

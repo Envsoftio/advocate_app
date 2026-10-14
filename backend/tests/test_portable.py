@@ -53,6 +53,22 @@ def test_portable_matter_round_trip_preserves_originals_and_revisions(client, au
     assert list(store.root.glob('.portable-*.cbmatter*')) == []
 
 
+def test_legacy_v1_portable_package_still_restores(client, auth, make_pdf):
+    matter = _matter(client, auth)
+    imported = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+        files=[('files', ('synthetic.pdf', make_pdf(1), 'application/pdf'))])
+    assert imported.status_code == 201
+    raw = client.get(f'/matters/{matter["id"]}/portable', headers=auth).content
+    def as_v1(manifest):
+        manifest['version'] = 1
+        manifest.pop('manual_bookmarks')
+    legacy = _package_with_manifest_change(raw, as_v1)
+    restored = client.post('/matters/restore', headers=auth,
+        files={'file': ('legacy.cbmatter', legacy, 'application/zip')})
+    assert restored.status_code == 201, restored.text
+    assert client.get(f'/matters/{restored.json()["id"]}/bookmarks', headers=auth).json() == []
+
+
 def test_startup_cleans_interrupted_portable_files_and_restricts_store(tmp_path):
     from fastapi.testclient import TestClient
     from app.main import create_app
@@ -79,6 +95,7 @@ def test_portable_restore_rejects_unsafe_corrupt_and_future_packages(client, aut
     raw = client.get(f'/matters/{matter["id"]}/portable', headers=auth).content
     variants = [
         _package_with_manifest_change(raw, lambda m: m.update(version=99)),
+        _package_with_manifest_change(raw, lambda m: m.pop('manual_bookmarks')),
         _package_with_manifest_change(raw, lambda m: m['files'][0].update(path='../escape.pdf')),
         _package_with_manifest_change(raw, lambda m: m['files'][0].update(sha256='0' * 64)),
         _package_with_manifest_change(raw, lambda m: m['matter'].update(court_profile='unreviewed-missing-profile')),

@@ -57,8 +57,7 @@ def test_invalid_overlay_does_not_publish_revision(client, auth, matter, make_pd
     rotated = client.post(f'/documents/{doc["id"]}/pages/rotate', headers=auth,
                           json={'page_index': 0, 'degrees': 90})
     assert rotated.status_code == 200, rotated.text
-    rejected = client.post(url, headers=auth, json={
+    accepted = client.post(url, headers=auth, json={
         'page_index': 0, 'x': .2, 'y': .2, 'text': 'TEST', 'font_size': 12})
-    assert rejected.status_code == 422, rejected.text
-    assert 'rotated' in rejected.json()['detail']
-    assert client.app.state.store.get_document(doc['id'])['revision'] == 2
+    assert accepted.status_code == 200, accepted.text
+    assert client.app.state.store.get_document(doc['id'])['revision'] == 3

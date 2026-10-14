@@ -81,6 +81,30 @@ class ReplacePages(BaseModel):
     source_pages: list[int] = Field(min_length=1, max_length=2000)
 
 
+class ReplaceDocument(BaseModel):
+    source_document_id: str
+
+
+class CompressionRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    preset: Literal['lossless', 'balanced', 'small'] = 'lossless'
+    expected_revision: int = Field(ge=1)
+
+
+class ManualBookmark(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    title: str = Field(min_length=1, max_length=200)
+    document_id: str
+    page_index: int = Field(ge=0)
+    target_revision: int = Field(ge=1)
+    parent_id: str | None = None
+
+
+class ManualBookmarksUpdate(BaseModel):
+    entries: list[ManualBookmark] = Field(max_length=500)
+
+
 class CropPages(BaseModel):
     pages: list[int] = Field(min_length=1, max_length=2000)
     left: float = Field(ge=0, le=1)

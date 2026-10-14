@@ -11,6 +11,9 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+# PyMuPDF's shared native state must not be used concurrently by request and
+# background threads, including requests for different matters or stores.
+PDF_PROCESSING_LOCK = threading.Lock()
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec='microseconds')
@@ -47,8 +50,6 @@ class Store:
             self._lock_file.close()
             raise RuntimeError('Matter data is already open in another CourtBundle engine') from exc
         self.dbpath = self.root / 'court_bundle.sqlite3'
-        self._matter_locks_guard = threading.Lock()
-        self._matter_locks: dict[str, threading.Lock] = {}
         try:
             self._initialize()
             self.recover_temporary_packages()
@@ -69,9 +70,8 @@ class Store:
             self._lock_file.close()
 
     def matter_lock(self, matter_id: str) -> threading.Lock:
-        """Serialize edits and jobs for one matter within the local sidecar."""
-        with self._matter_locks_guard:
-            return self._matter_locks.setdefault(matter_id, threading.Lock())
+        """Serialize PDF work process-wide as well as protecting matter revisions."""
+        return PDF_PROCESSING_LOCK
 
     @contextmanager
     def connect(self):
@@ -91,7 +91,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 4:
+            if version > 5:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -151,6 +151,13 @@ class Store:
                 matter_id TEXT, document_id TEXT, action TEXT NOT NULL, created_at TEXT NOT NULL
             )''')
             con.execute('CREATE INDEX IF NOT EXISTS idx_audit_matter ON audit_events(matter_id,id)')
+            con.execute('''CREATE TABLE IF NOT EXISTS manual_bookmarks (
+                id TEXT PRIMARY KEY, matter_id TEXT NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
+                title TEXT NOT NULL, document_id TEXT NOT NULL REFERENCES documents(id),
+                page_index INTEGER NOT NULL, target_revision INTEGER NOT NULL,
+                parent_id TEXT, position INTEGER NOT NULL
+            )''')
+            con.execute('CREATE INDEX IF NOT EXISTS idx_bookmarks_matter ON manual_bookmarks(matter_id,position)')
             if version < 3:
                 matter_columns = {row['name'] for row in con.execute('PRAGMA table_info(matters)')}
                 document_columns = {row['name'] for row in con.execute('PRAGMA table_info(documents)')}
@@ -158,8 +165,8 @@ class Store:
                     con.execute('ALTER TABLE matters ADD COLUMN archived_at TEXT')
                 if 'archived_at' not in document_columns:
                     con.execute('ALTER TABLE documents ADD COLUMN archived_at TEXT')
-            if version < 4:
-                con.execute('PRAGMA user_version=4')
+            if version < 5:
+                con.execute('PRAGMA user_version=5')
 
     def matter_dir(self, matter_id: str) -> Path:
         # Never accept caller-controlled paths. All ids must have been found in DB.
@@ -310,6 +317,94 @@ class Store:
                 ORDER BY position,created_at''', (matter_id,)).fetchall()
         return [dict(row) for row in rows]
 
+    def list_manual_bookmarks(self, matter_id: str) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute('''SELECT b.*, d.revision AS current_revision,
+                d.page_count AS current_page_count, d.archived_at AS document_archived_at
+                FROM manual_bookmarks b LEFT JOIN documents d ON d.id=b.document_id
+                WHERE b.matter_id=? ORDER BY b.position''', (matter_id,)).fetchall()
+        entries = []
+        for row in rows:
+            entry = {key: row[key] for key in ('id', 'title', 'document_id', 'page_index',
+                                               'target_revision', 'parent_id', 'position')}
+            entry['resolved'] = (row['current_revision'] == row['target_revision'] and
+                                 row['document_archived_at'] is None and
+                                 row['current_page_count'] is not None and
+                                 row['page_index'] < row['current_page_count'])
+            entries.append(entry)
+        return entries
+
+    def set_manual_bookmarks(self, matter_id: str, entries: list[dict]) -> list[dict]:
+        if len(entries) > 500:
+            raise ValueError('At most 500 manual bookmarks are supported')
+        ids = [entry['id'] for entry in entries]
+        if len(ids) != len(set(ids)):
+            raise ValueError('Manual bookmark IDs must be unique')
+        positions = {item_id: index for index, item_id in enumerate(ids)}
+        with self.connect() as con:
+            current = [dict(row) for row in con.execute('''SELECT id,title,document_id,
+                page_index,target_revision,parent_id,position FROM manual_bookmarks
+                WHERE matter_id=? ORDER BY position''', (matter_id,))]
+            docs = {row['id']: row for row in con.execute(
+                'SELECT id,revision,page_count,archived_at FROM documents WHERE matter_id=?',
+                (matter_id,))}
+            old = {entry['id']: entry for entry in current}
+            foreign_ids = set(ids) - set(old)
+            if foreign_ids and con.execute(
+                'SELECT 1 FROM manual_bookmarks WHERE id IN (' +
+                ','.join('?' for _ in foreign_ids) + ') LIMIT 1', tuple(foreign_ids)).fetchone():
+                raise ValueError('Bookmark ID already belongs to another matter')
+            for index, entry in enumerate(entries):
+                doc = docs.get(entry['document_id'])
+                previous = old.get(entry['id'])
+                unchanged_target = previous and all(previous[key] == entry[key] for key in
+                                                    ('document_id', 'page_index', 'target_revision'))
+                if not doc or (not unchanged_target and
+                               (doc['archived_at'] is not None or
+                                entry['page_index'] >= doc['page_count'] or
+                                entry['target_revision'] != doc['revision'])):
+                    raise ValueError('Choose a current page in an active document')
+                parent = entry['parent_id']
+                if parent is not None and (parent not in positions or positions[parent] >= index):
+                    raise ValueError('Bookmark parent must precede its child')
+                if not entry['title'].strip():
+                    raise ValueError('Bookmark title must contain visible text')
+                entry['position'] = index
+            # A PDF outline is a depth-first sequence. Canonicalize scattered
+            # children so they cannot silently appear under a different parent.
+            children = {}
+            for entry in entries:
+                children.setdefault(entry['parent_id'], []).append(entry)
+            ordered = []
+            def visit(parent):
+                for entry in children.get(parent, []):
+                    entry['position'] = len(ordered)
+                    ordered.append(entry)
+                    visit(entry['id'])
+            visit(None)
+            normalized = [{key: item[key] for key in ('id', 'title', 'document_id',
+                          'page_index', 'target_revision', 'parent_id', 'position')}
+                          for item in ordered]
+            if current == normalized:
+                return self.list_manual_bookmarks(matter_id)
+            con.execute('DELETE FROM manual_bookmarks WHERE matter_id=?', (matter_id,))
+            self._write_manual_bookmarks(con, matter_id, normalized)
+            self._record_edit(con, matter_id, 'bookmarks', {'entries': current},
+                              {'entries': normalized})
+            self._audit(con, 'manual_bookmarks_updated', matter_id)
+        self.touch(matter_id)
+        return self.list_manual_bookmarks(matter_id)
+
+    @staticmethod
+    def _write_manual_bookmarks(con, matter_id: str, entries: list[dict]):
+        for entry in entries:
+            con.execute('''INSERT INTO manual_bookmarks
+                (id,matter_id,title,document_id,page_index,target_revision,parent_id,position)
+                VALUES (?,?,?,?,?,?,?,?)''',
+                (entry['id'], matter_id, entry['title'], entry['document_id'],
+                 entry['page_index'], entry['target_revision'], entry['parent_id'],
+                 entry['position']))
+
     def list_archived_documents(self, matter_id: str) -> list[dict]:
         with self.connect() as con:
             rows = con.execute('''SELECT * FROM documents WHERE matter_id=? AND archived_at IS NOT NULL
@@ -390,8 +485,9 @@ class Store:
                                   {'id': doc_id, 'fields': {key: current[key] for key in tracked}},
                                   {'id': doc_id, 'fields': tracked})
             self._audit(con, 'document_updated', matter_id, doc_id)
-        self.touch(matter_id)
-        return self.get_document(doc_id)
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (changes['updated_at'], matter_id))
+            result = dict(con.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone())
+        return result
 
     def delete_document(self, doc_id: str):
         with self.connect() as con:
@@ -503,6 +599,9 @@ class Store:
                 for position, doc_id in enumerate(state['ids']):
                     con.execute('UPDATE documents SET position=?,updated_at=? WHERE id=?',
                                 (position, now, doc_id))
+            elif row['kind'] == 'bookmarks':
+                con.execute('DELETE FROM manual_bookmarks WHERE matter_id=?', (matter_id,))
+                self._write_manual_bookmarks(con, matter_id, state['entries'])
             else:
                 raise ValueError('Unsupported edit history entry')
             con.execute('UPDATE matters SET updated_at=? WHERE id=?', (now, matter_id))
@@ -532,8 +631,52 @@ class Store:
         rel = f'working/{doc["id"]}-r{doc["revision"] + 1}.pdf'
         return rel, self.matter_dir(doc['matter_id']) / rel
 
+    def discard_uncommitted_working(self, doc_id: str, rel: str, candidate: Path):
+        """Never delete a committed revision after an ambiguous commit failure.
+
+        If SQLite itself is unavailable, leave the file for startup reconciliation.
+        Keeping an orphan is safer than deleting a potentially committed revision.
+        """
+        try:
+            with self.connect() as con:
+                referenced = con.execute('''SELECT 1 FROM document_revisions
+                    WHERE document_id=? AND working_relpath=? LIMIT 1''', (doc_id, rel)).fetchone()
+        except (sqlite3.Error, OSError):
+            return
+        if not referenced:
+            candidate.unlink(missing_ok=True)
+
     def exports_root(self, matter_id: str) -> Path:
         return self.matter_dir(matter_id) / 'exports'
+
+    def build_input_digest(self, matter_id: str) -> str:
+        """Fingerprint inputs that determine a generated bundle, including profile rules."""
+        matter = self.get_matter(matter_id)
+        if matter is None:
+            raise ValueError('Matter not found')
+        fields = ('name', 'court_profile', 'case_type', 'petitioner', 'respondent',
+                  'advocate', 'case_number', 'max_pages_per_volume', 'keep_groups_intact')
+        documents = []
+        for doc in self.get_documents(matter_id):
+            documents.append({
+                key: doc[key] for key in ('id', 'position', 'title', 'kind', 'part',
+                                           'label', 'group_key', 'page_count',
+                                           'revision', 'source_sha256')
+            } | {'working_sha256': self.sha256(self.working_path(doc)),
+                 'original_sha256': self.sha256(self.original_path(doc))})
+        profiles_path = Path(__file__).resolve().parent / 'rules' / 'profiles.json'
+        profiles = json.loads(profiles_path.read_text(encoding='utf-8'))
+        profile = next((p for p in profiles if p['id'] == matter['court_profile']), None)
+        if profile is None:
+            raise ValueError('Court profile is missing')
+        payload = {'schema': 1, 'matter': {key: matter[key] for key in fields},
+                   'documents': documents, 'profile': profile,
+                   'manual_bookmarks': [{key: entry[key] for key in ('id', 'title',
+                       'document_id', 'page_index', 'target_revision', 'parent_id', 'position')}
+                       for entry in self.list_manual_bookmarks(matter_id)]}
+        encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'),
+                             ensure_ascii=False).encode('utf-8')
+        return hashlib.sha256(encoded).hexdigest()
 
     def list_exports(self, matter_id: str) -> list[dict]:
         root = self.exports_root(matter_id)
@@ -541,10 +684,19 @@ class Store:
             return []
         matter = self.get_matter(matter_id)
         exports = []
+        try:
+            current_digest = self.build_input_digest(matter_id)
+        except (OSError, ValueError):
+            current_digest = None
         for manifest in root.glob('*/export_manifest.json'):
+            if manifest.parent.name.startswith('.'):
+                continue
             try:
                 info = json.loads(manifest.read_text(encoding='utf-8'))
-                info['stale'] = not matter or info.get('matter_updated_at') != matter['updated_at']
+                recorded_digest = info.get('build_input_digest')
+                info['stale'] = (not recorded_digest or not matter or
+                                 info.get('matter_updated_at') != matter['updated_at'] or
+                                 recorded_digest != current_digest)
                 exports.append(info)
             except (ValueError, OSError):
                 continue
@@ -557,8 +709,17 @@ class Store:
         if Path(filename).name != filename or filename.startswith('.'):
             return None
         path = self.exports_root(matter_id) / export_id / filename
-        if path.is_file() and path.parent.resolve() == (self.exports_root(matter_id) / export_id).resolve():
-            return path
+        if (path.is_file() and not path.is_symlink() and not path.parent.is_symlink()
+                and path.parent.resolve() == (self.exports_root(matter_id) / export_id).resolve()):
+            try:
+                manifest = json.loads((path.parent / 'export_manifest.json').read_text())
+                artifact = next((item for item in manifest['files'] if item['name'] == filename), None)
+                if artifact and artifact['bytes'] == path.stat().st_size:
+                    if artifact.get('sha256') and self.sha256(path) != artifact['sha256']:
+                        return None
+                    return path
+            except (OSError, ValueError, KeyError, TypeError):
+                return None
         return None
 
     def save_job(self, job: dict):
@@ -615,3 +776,24 @@ class Store:
                 for staging in root.glob('.build-*'):
                     if staging.is_dir() and not staging.is_symlink():
                         shutil.rmtree(staging)
+            # An engine can stop after the atomic export rename but before its
+            # completed job status reaches SQLite. Recover only fully hashed
+            # packages; legacy/partial manifests remain interrupted for review.
+            for job in self.list_jobs(matter_id):
+                if job['status'] != 'interrupted' or job['kind'] != 'build':
+                    continue
+                if not re.fullmatch(r'[0-9a-f]{32}', job['id']):
+                    continue
+                try:
+                    manifest = json.loads((root / job['id'] / 'export_manifest.json').read_text())
+                    if (manifest['id'] != job['id'] or manifest['matter_id'] != matter_id
+                            or not manifest['files']):
+                        continue
+                    if not all(item.get('sha256') and self.get_export_file(matter_id, job['id'], item['name'])
+                               for item in manifest['files']):
+                        continue
+                    job.update(status='completed', progress=100, error=None,
+                               message='Recovered verified completed export after restart', result=manifest)
+                    self.save_job(job)
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
