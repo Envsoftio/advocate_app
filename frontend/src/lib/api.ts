@@ -118,6 +118,11 @@ export async function pdfBytes(docId: string, revision: number): Promise<Uint8Ar
   return new Uint8Array(await response.arrayBuffer())
 }
 
+export async function exportPdfBytes(matterId: string, exportId: string, filename: string): Promise<Uint8Array> {
+  const response = await request(`/matters/${matterId}/exports/${exportId}/${encodeURIComponent(filename)}`, { cache: 'no-store' }, 5 * 60_000)
+  return new Uint8Array(await response.arrayBuffer())
+}
+
 export async function downloadExport(matterId: string, exportId: string, filename: string, saveAs = false): Promise<boolean> {
   if (inTauri()) {
     return invoke<boolean>('save_export', { matterId, exportId, filename, saveAs })

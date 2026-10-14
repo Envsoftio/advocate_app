@@ -14,7 +14,7 @@ interface Bookmark {
   position: number
   resolved: boolean
 }
-const props = defineProps<{ matterId: string, documents: MatterDocument[], disabled: boolean }>()
+const props = defineProps<{ matterId: string, documents: MatterDocument[], refreshKey?: number, disabled: boolean }>()
 const emit = defineEmits<{ modified: [] }>()
 const entries = ref<Bookmark[]>([])
 const title = ref('')
@@ -34,6 +34,9 @@ watch(() => props.matterId, async id => {
 }, { immediate: true })
 watch(() => props.documents.map(doc => `${doc.id}:${doc.revision}:${doc.page_count}`).join('|'),
   async () => { entries.value = await api<Bookmark[]>(`/matters/${props.matterId}/bookmarks`).catch(() => entries.value) })
+watch(() => props.refreshKey, async () => {
+  if (!busy.value) entries.value = await api<Bookmark[]>(`/matters/${props.matterId}/bookmarks`).catch(() => entries.value)
+})
 
 function serialise(values: Bookmark[]) {
   return values.map(({id, title, document_id, page_index, target_revision, parent_id}) =>

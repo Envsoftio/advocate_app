@@ -16,14 +16,14 @@ from fastapi.responses import FileResponse, Response, JSONResponse
 from starlette.background import BackgroundTask
 import pymupdf
 
-from .engine import load_profiles, preflight, build_bundle
+from .engine import load_profiles, preflight, build_bundle, bundle_preview
 from .jobs import JobManager
 from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
                       rotate_page, delete_page, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
                       replace_text_run, move_text_run, compress_pdf,
                       ocr_pdf, make_cover_pdf)
-from .schemas import MatterCreate, MatterPatch, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun
 from .storage import Store, new_id
 from .schemas import CompressionRequest
 from .portable import create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES
@@ -645,6 +645,17 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         with store.matter_lock(matter_id):
             matter = matter_or_404(matter_id)
             return preflight(store, matter_id, profiles[matter['court_profile']])
+
+    @app.post('/matters/{matter_id}/bundle-preview')
+    def preview_bundle(matter_id: str, payload: BundlePreviewRequest,
+                       _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return bundle_preview(store, matter_id, payload.max_pages_per_volume,
+                                      payload.keep_groups_intact)
+            except ProcessingError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     def submit_build(matter_id: str, job_id: str | None = None):
         def task(job_id, progress, cancelled):

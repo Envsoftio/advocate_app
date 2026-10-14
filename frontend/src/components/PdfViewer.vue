@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Archive, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose } from 'lucide-vue-next'
+import { Archive, ArrowDown, ArrowUp, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose } from 'lucide-vue-next'
 import * as pdfjs from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
@@ -9,7 +9,7 @@ import { api, pdfBytes } from '../lib/api'
 import { friendlyError } from '../lib/format'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
-const props = defineProps<{ document: MatterDocument | null, disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, documentPosition?: number, documentCount?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
+const props = defineProps<{ document: MatterDocument | null, disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, documentPosition?: number, documentCount?: number, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
 const emit = defineEmits<{ modified: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [], moveDocument: [direction: number], archiveDocument: [] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const canvasWrap = ref<HTMLDivElement | null>(null)
@@ -22,6 +22,16 @@ const rotatingPage = ref(false)
 const viewerError = ref('')
 const scalePct = ref(100)
 const showThumbnails = ref(false)
+type ManualBookmark = {id:string,title:string,document_id:string,page_index:number,target_revision:number,parent_id:string|null,resolved:boolean}
+const manualBookmarks = ref<ManualBookmark[]>([])
+const bookmarkOpen = ref(false)
+const bookmarkTitle = ref('')
+const bookmarkSaving = ref(false)
+const bookmarkError = ref('')
+const bookmarkNotice = ref('')
+let bookmarkLoadSequence = 0
+const pageBookmarks = computed(() => manualBookmarks.value.filter(item =>
+  item.document_id === props.document?.id && item.page_index === current.value - 1))
 const loadedPageCount = ref(0)
 const textMode = ref(false)
 const editTextMode = ref(false)
@@ -56,6 +66,8 @@ const inlineEditorStyle = computed(() => {
 let runsSequence = 0
 let pdf: PDFDocumentProxy | null = null
 let renderTask: RenderTask | null = null
+let renderQueue: Promise<void> = Promise.resolve()
+let renderRequest = 0
 let thumbnailTasks: RenderTask[] = []
 let thumbnailSequence = 0
 let epoch = 0
@@ -97,7 +109,17 @@ async function renderThumbnails() {
   }
 }
 
-async function render() {
+function render(): Promise<void> {
+  const request = ++renderRequest
+  renderTask?.cancel()
+  const queued = renderQueue.catch(() => {}).then(async () => {
+    if (request === renderRequest) await renderPage()
+  })
+  renderQueue = queued
+  return queued
+}
+
+async function renderPage() {
   if (!pdf || !canvas.value || !canvasWrap.value) return
   const currentPdf = pdf
   const pageNum = current.value
@@ -108,7 +130,7 @@ async function render() {
       renderTask = null
     }
     const page = await currentPdf.getPage(pageNum)
-    if (pdf !== currentPdf) return
+    if (pdf !== currentPdf || pageNum !== current.value) return
     const base = page.getViewport({ scale: 1 })
     const limit = Math.max(320, canvasWrap.value.clientWidth - 45)
     const zoom = Math.min(2.2, Math.max(.35, limit / base.width)) * scalePct.value / 100
@@ -207,7 +229,44 @@ watch([current, () => props.document?.id, () => props.document?.revision, editTe
 })
 watch([current, () => props.document?.id, editTextMode], () => { editNotice.value = '' })
 watch(showThumbnails, () => void renderThumbnails())
+watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}`, () => {
+  bookmarkOpen.value = false
+  bookmarkTitle.value = ''
+  bookmarkNotice.value = ''
+})
+watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}|${props.bookmarkRefreshKey || 0}`, async () => {
+  const sequence = ++bookmarkLoadSequence
+  const doc = props.document
+  if (!doc) { manualBookmarks.value = []; return }
+  try {
+    const entries = await api<ManualBookmark[]>(`/matters/${doc.matter_id}/bookmarks`)
+    if (sequence === bookmarkLoadSequence) manualBookmarks.value = entries
+  } catch { if (sequence === bookmarkLoadSequence) manualBookmarks.value = [] }
+}, {immediate:true})
+watch(current, () => { bookmarkOpen.value = false; bookmarkError.value = ''; bookmarkNotice.value = '' })
 onBeforeUnmount(() => { epoch++; resizeObserver?.disconnect(); thumbnailSequence++; renderTask?.cancel(); thumbnailTasks.forEach(task => task.cancel()); if (pdf) void pdf.destroy() })
+
+async function addPageBookmark() {
+  const doc = props.document
+  const title = bookmarkTitle.value.trim()
+  const pageIndex = current.value - 1
+  if (!doc || !title || bookmarkSaving.value || props.disabled) return
+  bookmarkSaving.value = true
+  bookmarkError.value = ''
+  try {
+    const existing = await api<ManualBookmark[]>(`/matters/${doc.matter_id}/bookmarks`)
+    const entries = existing.map(({id,title,document_id,page_index,target_revision,parent_id}) =>
+      ({id,title,document_id,page_index,target_revision,parent_id}))
+    entries.push({id:crypto.randomUUID().replace(/-/g,''),title,
+      document_id:doc.id,page_index:pageIndex,target_revision:doc.revision,parent_id:null})
+    manualBookmarks.value = await api<ManualBookmark[]>(`/matters/${doc.matter_id}/bookmarks`, 'PUT', {entries})
+    bookmarkOpen.value = false
+    bookmarkTitle.value = ''
+    bookmarkNotice.value = `Bookmarked page ${pageIndex + 1}. Review its destination under Index & bookmarks.`
+    emit('modified')
+  } catch (err) { bookmarkError.value = friendlyError(err) }
+  finally { bookmarkSaving.value = false }
+}
 
 async function edit(action: 'rotate' | 'delete' | 'reorder', params: unknown) {
   if (!props.document || editing.value) return
@@ -380,6 +439,7 @@ async function applyReplacement() {
       </div>
       <div class="page-editbar">
         <button class="text-tool" :disabled="editing || loading || disabled" title="Open page tools for this document" @click="emit('pageTools')"><FilePenLine :size="15"/> Page tools</button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-expanded="bookmarkOpen" @click="bookmarkOpen=!bookmarkOpen;bookmarkTitle=document?.title+' — page '+current;bookmarkError=''"><BookMarked :size="15"/> Bookmark page<span v-if="pageBookmarks.length" class="page-bookmark-count">{{pageBookmarks.length}}</span></button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="textMode=!textMode; editTextMode=false; placement=null"><Type :size="15"/> Add text</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="editTextMode=!editTextMode; textMode=false; placement=null"><Pencil :size="15"/> Edit text</button>
         <button class="text-tool" :disabled="editing || loading || disabled" title="Rotate this page 90° counterclockwise in the working PDF" @click="edit('rotate', {page_index:current-1,degrees:270})"><RotateCcw :size="16"/> Rotate left</button>
@@ -395,6 +455,18 @@ async function applyReplacement() {
         <span class="page-editbar-divider" aria-hidden="true"></span>
         <button class="text-tool" :aria-expanded="!!detailsOpen" @click="emit('toggleDetails')"><PanelRightClose v-if="detailsOpen" :size="15"/><PanelRightOpen v-else :size="15"/> Document details<span v-if="detailsDirty" class="details-unsaved-indicator">Unsaved</span></button>
       </div>
+      <div v-if="pageBookmarks.length" class="page-bookmarks-present" role="region" :aria-label="`Bookmarks on page ${current}`">
+        <BookMarked :size="15" aria-hidden="true"/>
+        <strong>Page {{current}} bookmarks</strong>
+        <span v-for="item in pageBookmarks" :key="item.id" class="page-bookmark-chip">{{item.title}}<span v-if="!item.resolved" class="page-bookmark-review"> · needs review</span></span>
+      </div>
+      <div v-if="bookmarkOpen" class="page-bookmark-editor" aria-label="Bookmark current page">
+        <strong>Bookmark {{document.title}}, page {{current}}</strong>
+        <label>Bookmark title<input v-model="bookmarkTitle" maxlength="200" :disabled="bookmarkSaving || disabled" @keydown.enter.prevent="addPageBookmark"/></label>
+        <button class="btn primary small" :disabled="bookmarkSaving || disabled || !bookmarkTitle.trim()" @click="addPageBookmark">{{bookmarkSaving ? 'Saving…' : 'Add bookmark'}}</button>
+        <p v-if="bookmarkError" class="error-msg" role="alert">{{bookmarkError}}</p>
+      </div>
+      <p v-if="bookmarkNotice" class="page-bookmark-notice" role="status">{{bookmarkNotice}}</p>
       <Transition name="soft"><div v-if="detailsDirty" class="preview-draft-warning" role="status">Save document details to use PDF tools.<button v-if="!detailsOpen" class="text-tool" @click="emit('toggleDetails')">Open details</button></div></Transition>
       <Transition name="soft"><div v-if="textMode" class="text-overlay-panel">
         <strong>Visible text overlay</strong>

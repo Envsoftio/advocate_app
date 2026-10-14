@@ -41,6 +41,42 @@ def test_manual_bookmarks_map_to_volume_and_combined_pages(client, auth, matter,
         assert report['build_input_digest'] == manifest['build_input_digest']
 
 
+def test_bundle_preview_matches_built_ranges_and_bookmarks(client, auth, matter, make_pdf):
+    first = upload(client, auth, matter, make_pdf, pages=2)
+    second = upload(client, auth, matter, make_pdf, name='second.pdf', pages=2)
+    base = f'/matters/{matter["id"]}'
+    entry = bookmark('e', 'Reviewed page', second, page=1)
+    assert client.put(base + '/bookmarks', headers=auth,
+                      json={'entries': [entry]}).status_code == 200
+    request = {'max_pages_per_volume': 3, 'keep_groups_intact': True}
+    assert client.post(base + '/bundle-preview', json=request).status_code == 401
+    impossible = client.post(base + '/bundle-preview', headers=auth,
+                             json={'max_pages_per_volume': 2, 'keep_groups_intact': True})
+    assert impossible.status_code == 422
+    assert 'exceeds 2-page volume cap' in impossible.json()['detail']
+    preview_response = client.post(base + '/bundle-preview', headers=auth, json=request)
+    assert preview_response.status_code == 200, preview_response.text
+    preview = preview_response.json()
+    assert [(volume['index_pages'], volume['page_count']) for volume in preview['volumes']] == [(1, 3), (1, 3)]
+    assert [(row['start_page'], row['end_page'], row['combined_start_page'], row['combined_end_page'])
+            for volume in preview['volumes'] for row in volume['rows']] == [(2, 3, 2, 3), (2, 3, 5, 6)]
+    assert preview['manual_bookmarks'][0]['volume_page'] == 3
+    assert preview['manual_bookmarks'][0]['combined_page'] == 6
+    assert client.get(base, headers=auth).json()['max_pages_per_volume'] != 3  # preview did not save the draft
+    assert client.patch(base, headers=auth, json=request).status_code == 200
+    job = wait_for_job(client, auth, client.post(base + '/build', headers=auth).json()['id'])
+    assert job['status'] == 'completed', job
+    folder = client.app.state.store.exports_root(matter['id']) / job['result']['id']
+    with pymupdf.open(folder / 'combined.pdf') as pdf:
+        assert pdf.page_count == preview['combined_pages']
+        assert [item[2] for item in pdf.get_toc() if item[1] in (first['title'], second['title'])] == [2, 5]
+        assert [item[2] for item in pdf.get_toc() if item[1] == 'Reviewed page'] == [6]
+    with (folder / 'index.csv').open(encoding='utf-8-sig') as stream:
+        import csv
+        rows = list(csv.DictReader(stream))
+    assert [(int(row['start_page']), int(row['end_page'])) for row in rows] == [(2, 3), (2, 3)]
+
+
 def test_bookmark_revision_review_undo_and_portable_restore(client, auth, matter, make_pdf):
     doc = upload(client, auth, matter, make_pdf, pages=2)
     base = f'/matters/{matter["id"]}'

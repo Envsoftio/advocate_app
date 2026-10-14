@@ -110,6 +110,53 @@ def index_pages_for(doc_count: int) -> int:
     return max(1, math.ceil(doc_count / INDEX_ROWS_PER_PAGE))
 
 
+def volume_rows(documents: list[dict], volume_no: int) -> tuple[list[dict], int]:
+    """The single page map used by preview, PDF rendering, links and CSV."""
+    index_count = index_pages_for(len(documents))
+    position = index_count
+    rows = []
+    for doc in documents:
+        start = position + 1
+        end = position + doc['page_count']
+        rows.append(dict(id=doc['id'], part=doc['part'], kind=doc['kind'],
+                         label=doc['label'], title=doc['title'], start_page=start,
+                         end_page=end, volume=volume_no, total_pages=doc['page_count']))
+        position = end
+    return rows, index_count
+
+
+def bundle_preview(store: Store, matter_id: str, max_pages: int,
+                   keep_groups: bool) -> dict:
+    """Read-only view of the exact current volume/index/page-number plan."""
+    documents = store.get_documents(matter_id)
+    bookmarks = store.list_manual_bookmarks(matter_id)
+    plans = volume_plan(documents, max_pages, keep_groups) if documents else []
+    volumes = []
+    destinations = {}
+    combined_offset = 0
+    for number, group in enumerate(plans, start=1):
+        rows, index_count = volume_rows(group, number)
+        page_count = index_count + sum(doc['page_count'] for doc in group)
+        for row in rows:
+            destinations[row['id']] = (number, row['start_page'], combined_offset)
+            row['combined_start_page'] = combined_offset + row['start_page']
+            row['combined_end_page'] = combined_offset + row['end_page']
+        volumes.append(dict(number=number, index_pages=index_count,
+                            page_count=page_count, combined_start_page=combined_offset + 1,
+                            rows=rows))
+        combined_offset += page_count
+    manual = []
+    for item in bookmarks:
+        destination = destinations.get(item['document_id'])
+        resolved = bool(item['resolved'] and destination)
+        manual.append(dict(id=item['id'], title=item['title'], resolved=resolved,
+                           volume=destination[0] if resolved else None,
+                           volume_page=destination[1] + item['page_index'] if resolved else None,
+                           combined_page=destination[2] + destination[1] + item['page_index'] if resolved else None))
+    return dict(volumes=volumes, combined_pages=combined_offset, manual_bookmarks=manual,
+                numbering='Physical page numbers restart at 1 in each volume; the combined PDF retains those printed numbers.')
+
+
 def make_units(docs: list[dict], keep_groups: bool) -> list[list[dict]]:
     units = []
     # A group must occupy a contiguous run. Reject accidental non-contiguous repeats.
@@ -217,16 +264,7 @@ def validate_navigation(path: Path, pages: int, toc: list, links: dict[int, list
 def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: int,
                   cancelled=None, bookmarks: list[dict] | None = None):
     """Create an indexed, paginated, bookmarked volume and return page-map records."""
-    index_count = index_pages_for(len(documents))
-    rows = []
-    position = index_count
-    for d in documents:
-        start = position + 1  # 1-based PDF page including index
-        end = position + d['page_count']
-        rows.append(dict(id=d['id'], part=d['part'], kind=d['kind'], label=d['label'],
-                         title=d['title'], start_page=start, end_page=end, volume=volume_no,
-                         total_pages=d['page_count']))
-        position = end
+    rows, index_count = volume_rows(documents, volume_no)
 
     with pymupdf.open() as output:
         for i in range(index_count):

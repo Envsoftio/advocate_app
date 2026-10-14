@@ -78,22 +78,133 @@ test('manual bookmark survives reload and shows revision review', async ({ page,
   })
   const docId = (await uploaded.json())[0].id as string
   await page.goto('/')
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await page.getByRole('textbox', { name: 'New bookmark title' }).fill('Reviewed synthetic page')
   await page.getByRole('combobox', { name: 'Bookmark document' }).selectOption(docId)
   await page.getByRole('button', { name: 'Add bookmark' }).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Reviewed synthetic page')
+  await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('Reviewed synthetic page')
+  await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('combined page 2')
   await page.reload()
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Reviewed synthetic page')
   const rotated = await request.post(`${backend}/documents/${docId}/pages/rotate`,
     { headers, data: { page_index: 0, degrees: 90 } })
   expect(rotated.ok()).toBeTruthy()
   await page.reload()
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
-  await expect(page.getByText('Needs review')).toBeVisible()
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
+  await expect(page.getByText('Needs review', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Resolve to current page' }).click()
-  await expect(page.getByText('Needs review')).toBeHidden()
+  await expect(page.getByText('Needs review', { exact: true })).toBeHidden()
+})
+
+test('index preview updates with draft volume cap and opens the source document', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Index Preview', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  for (const name of ['01_petition.pdf', '02_impugned_order.pdf']) {
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+      multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
+    })
+    expect(uploaded.ok()).toBeTruthy()
+  }
+  await page.goto('/')
+  await expect(page.locator('.matter-index-overview')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
+  await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('1 volume(s)')
+  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  const preview = page.getByRole('region', { name: 'Index and page number preview' })
+  await expect(preview).toContainText('1 volume(s)')
+  await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('4')
+  await expect(preview).toContainText('2 volume(s)')
+  await expect(preview).toContainText('combined starts at page 5')
+  page.once('dialog', dialog => void dialog.accept())
+  await preview.getByRole('button', { name: 'Open 02_impugned_order working copy' }).click()
+  await expect(page.locator('.doc-item.selected')).toContainText('02_impugned_order')
+  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.locator('.build-panel').getByRole('button', { name: 'Build filing bundle' }).click()
+  await expect(page.getByText('Latest filing package')).toBeVisible({timeout:90_000})
+  await page.getByRole('button', { name: 'Review combined.pdf' }).click()
+  const review = page.getByRole('dialog', { name: 'Review generated PDF' })
+  await expect(review.getByText('PDF bookmarks')).toBeVisible()
+  await expect(review.getByRole('button', { name: /02_impugned_order/ })).toBeVisible()
+  await expect.poll(() => review.locator('canvas').evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0)
+  await review.getByRole('button', { name: /02_impugned_order/ }).click()
+  await expect(review.getByRole('spinbutton', { name: 'PDF page number' })).not.toHaveValue('1')
+  await review.getByRole('button', { name: 'Close review' }).click()
+  await expect(review).toBeHidden()
+})
+
+test('bookmark the current PDF page while preparing a matter', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, {headers, data: {
+    name:'E2E Page Bookmark', court_profile:'general-demo', max_pages_per_volume:10,
+  }})
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, {headers,
+    multipart:{files:{name:'01_petition.pdf',mimeType:'application/pdf',
+      buffer:await readFile(resolve(samples,'01_petition.pdf'))}},
+  })
+  expect(uploaded.ok()).toBeTruthy()
+  await page.setViewportSize({width:1024,height:800})
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name:'E2E Page Bookmark'})).toBeVisible()
+  await expect.poll(() => page.locator('.preview-panel').evaluate(node => {
+    const gap = window.innerHeight - node.getBoundingClientRect().bottom
+    return gap >= -20 && gap <= 60
+  })).toBe(true)
+  const bottomGap = await page.locator('.preview-panel').evaluate(node =>
+    window.innerHeight - node.getBoundingClientRect().bottom)
+  expect(bottomGap).toBeGreaterThanOrEqual(-20)
+  expect(bottomGap).toBeLessThanOrEqual(60)
+  await page.setViewportSize({width:1440,height:800})
+  await page.getByRole('button', {name:'Document details',exact:true}).click()
+  await expect(page.locator('.inspector-panel')).toBeVisible()
+  await expect.poll(() => page.locator('.inspector-panel').evaluate(node => {
+    const gap = window.innerHeight - node.getBoundingClientRect().bottom
+    return gap >= -20 && gap <= 60
+  })).toBe(true)
+  const inspectorGap = await page.locator('.inspector-panel').evaluate(node =>
+    window.innerHeight - node.getBoundingClientRect().bottom)
+  expect(inspectorGap).toBeGreaterThanOrEqual(-20)
+  expect(inspectorGap).toBeLessThanOrEqual(60)
+  await page.getByRole('button', {name:'Document details',exact:true}).click()
+  await page.getByRole('button', {name:'Next page'}).click()
+  await page.getByRole('combobox', {name:'Theme'}).selectOption('dark')
+  await page.getByRole('button', {name:'Bookmark page'}).click()
+  await expect(page.locator('.page-bookmark-editor')).toBeVisible()
+  await page.getByRole('textbox', {name:'Bookmark title'}).fill('Reviewed second page')
+  await page.getByRole('button', {name:'Add bookmark'}).click()
+  await expect(page.getByRole('status')).toContainText('Bookmarked page 2')
+  const noticeContrast = await page.locator('.page-bookmark-notice').evaluate(node => {
+    const channel = (value:number) => {
+      const normalized = value / 255
+      return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4
+    }
+    const luminance = (value:string) => {
+      const channels = value.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? []
+      return 0.2126 * channel(channels[0]) + 0.7152 * channel(channels[1]) + 0.0722 * channel(channels[2])
+    }
+    const style = getComputedStyle(node)
+    const foreground = luminance(style.color)
+    const background = luminance(style.backgroundColor)
+    return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)
+  })
+  expect(noticeContrast).toBeGreaterThanOrEqual(4.5)
+  const savedOnPage = page.getByRole('region', {name:'Bookmarks on page 2'})
+  await expect(savedOnPage).toContainText('Reviewed second page')
+  await page.getByRole('button', {name:'Next page'}).click()
+  await expect(savedOnPage).toBeHidden()
+  await page.getByRole('button', {name:'Previous page'}).click()
+  await expect(savedOnPage).toContainText('Reviewed second page')
+  await expect(page.locator('.preview-status.error-msg')).toHaveCount(0)
+  await expect(page.locator('.pdf-paper')).toHaveCSS('visibility', 'visible')
+  await page.reload()
+  await page.getByRole('button', {name:'Next page'}).click()
+  await expect(savedOnPage).toContainText('Reviewed second page')
+  await page.getByRole('button', {name:'Index & bookmarks'}).click()
+  await expect(page.getByRole('textbox', {name:'Bookmark title 1'})).toHaveValue('Reviewed second page')
+  await expect(page.getByRole('region', {name:'Index and page number preview'})).toContainText('combined page 3')
 })
 
 test('manual bookmark order is keyboard accessible and persists', async ({ page, request }) => {
@@ -108,7 +219,7 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
   })
   const docId = (await uploaded.json())[0].id as string
   await page.goto('/')
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await page.getByRole('combobox', { name: 'Bookmark document' }).selectOption(docId)
   await page.getByRole('textbox', { name: 'New bookmark title' }).fill('First')
   await page.getByRole('button', { name: 'Add bookmark' }).click()
@@ -121,7 +232,7 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
   await page.keyboard.press('Enter')
   await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Second')
   await page.reload()
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Second')
 })
 

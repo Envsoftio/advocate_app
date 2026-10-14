@@ -8,6 +8,8 @@ The proof-of-concept workflow is:
 
 `Create matter -> Import PDF/images -> Inspect/edit working copies -> OCR -> Classify/group/drag to order -> Configure volumes -> Generate index/bookmarks -> Validate -> Export combined PDF + volumes + CSV + ZIP`
 
+On the matter's **Documents** page, use **Bookmark page** in the PDF viewer to mark the page you are reading. The adjacent **Index & bookmarks** tab shows the index plan and lets you rename, nest, reorder or resolve manual bookmarks before building. Build retains a read-only page plan beside its settings. The plan shows each volume's index rows, physical page ranges, combined PDF offsets and bookmark destinations. After building, **Review PDF** opens a generated PDF (up to 25 MiB) inside the app with page and bookmark navigation. Larger files should be saved and reviewed in a PDF viewer. The fixed index layout and per-volume printed numbering are technical POC choices, not reviewed filing rules.
+
 The Delhi High Court profile also includes a source-linked preparation guide,
 official form/template links, explicit handling of the 2026 Rule 3.4 size
 amendment, and a Memo of Parties CSV review helper. The helper does not replace
@@ -175,7 +177,7 @@ All routes require `Authorization: Bearer <local-token>`.
 - `PATCH|DELETE /documents/{id}`; `GET /documents/{id}/pdf`
 - `POST /documents/{id}/pages/reorder|rotate|delete`; `POST /documents/{id}/ocr`
 - `POST /documents/{id}/replace` (whole working-copy replacement from another matter document)
-- `GET /matters/{id}/validate`; `POST /matters/{id}/build`
+- `GET /matters/{id}/validate`; `POST /matters/{id}/bundle-preview`; `POST /matters/{id}/build`
 - `GET /jobs/{id}`; `POST /jobs/{id}/cancel`
 - `GET /matters/{id}/exports`; `GET /matters/{id}/exports/{exportId}/{filename}`
 

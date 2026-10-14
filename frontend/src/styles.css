@@ -230,6 +230,62 @@
 .manual-bookmark-row input,.manual-bookmark-row select{max-width:15rem;min-width:7rem}
 .manual-bookmark-row input,.manual-bookmark-row select{min-height:2.5rem;padding:.45rem;border:1px solid var(--border,#ccd8e6);border-radius:6px;background:var(--panel,#fff);color:var(--text,#19283c)}
 .manual-bookmark-row input[type=number]{max-width:5rem;min-width:4rem}
+.bundle-preview-body{padding:1rem 1.25rem}
+.bundle-preview-summary{font-weight:750;color:#28588b;margin:1rem 0}
+.bundle-preview-volume{border-top:1px solid #e5eaf1;padding:1rem 0}
+.bundle-preview-volume h3,.bundle-preview-manual h3{font-size:14px;margin:0 0 .35rem}
+.bundle-preview-volume h3 small{font-size:11px;font-weight:500;color:#71869a;margin-left:.5rem}
+.bundle-preview-scroll{overflow-x:auto}
+.bundle-preview table{width:100%;border-collapse:collapse;font-size:12px;min-width:460px}
+.bundle-preview th,.bundle-preview td{text-align:left;padding:.6rem .5rem;border-bottom:1px solid #e9edf2;vertical-align:top}
+.bundle-preview th{color:#71869a;font-size:11px}
+.bundle-preview td:nth-child(n+2){white-space:nowrap;font-variant-numeric:tabular-nums}
+.bundle-preview-doc{background:none;border:0;padding:0;color:#2168ad;text-align:left;text-decoration:underline}
+.bundle-preview-manual{border-top:1px solid #e5eaf1;padding-top:1rem}
+.bundle-preview-manual ul{margin:.5rem 0 1rem;padding-left:1.2rem;font-size:12px;line-height:1.8}
+.bundle-preview-manual strong{color:#b8642c}
+:root[data-effective-theme="dark"] .bundle-preview-volume,:root[data-effective-theme="dark"] .bundle-preview-manual,:root[data-effective-theme="dark"] .bundle-preview th,:root[data-effective-theme="dark"] .bundle-preview td{border-color:#40516a}
+:root[data-effective-theme="dark"] .bundle-preview-doc{color:#9dcbff}
+.index-preparation{max-width:1100px;display:flex;flex-direction:column;gap:1rem}
+.index-preparation>.btn{align-self:flex-start}
+.workspace-tabs{flex-wrap:wrap}
+.page-bookmark-count{font-size:10px;border-radius:9px;background:#e4eefb;color:#225d9a;padding:1px 6px}
+.page-bookmarks-present{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem;padding:.5rem 1rem;max-height:112px;overflow:auto;border-bottom:1px solid #d5e6f8;background:#eef6ff;color:#315c87;font-size:11px}
+.page-bookmarks-present>strong{margin-right:.15rem;color:#274d76}
+.page-bookmark-chip{max-width:100%;overflow-wrap:anywhere;padding:.2rem .5rem;border:1px solid #c6ddf5;border-radius:6px;background:#fff;color:#243f5d}
+.page-bookmark-review{color:#9d5725}
+.page-bookmark-editor{display:flex;align-items:end;flex-wrap:wrap;gap:.75rem;padding:.75rem 1rem;border-bottom:1px solid #dce4ee;border-left:3px solid #4e8ed0;background:#f7faff;font-size:12px}
+.page-bookmark-editor>strong{width:100%}
+.page-bookmark-editor label{display:flex;flex-direction:column;gap:.25rem;min-width:min(230px,100%);flex:1}
+.page-bookmark-editor input{padding:.5rem;border:1px solid #ccd8e6;border-radius:6px;background:#fff;color:#19283c}
+.page-bookmark-editor p{width:100%;margin:0}
+.page-bookmark-notice{margin:0;padding:.5rem 1rem;font-size:11px;color:#246b60;background:#e6f7ee}
+:root[data-effective-theme="dark"] .page-bookmark-editor{background:#24374d;border-bottom-color:#4e6380;border-left-color:#79b5f4;color:#eaf3ff}
+:root[data-effective-theme="dark"] .page-bookmark-editor input{background:#172639;color:#f3f7fc;border-color:#7185a2}
+:root[data-effective-theme="dark"] .page-bookmark-editor .hint{color:#c7d6e9}
+:root[data-effective-theme="dark"] .page-bookmark-count{background:#355779;color:#f3f8ff}
+:root[data-effective-theme="dark"] .page-bookmarks-present{background:#20364e;border-bottom-color:#4b6686;color:#c4e1ff}
+:root[data-effective-theme="dark"] .page-bookmarks-present>strong{color:#e6f2ff}
+:root[data-effective-theme="dark"] .page-bookmark-chip{background:#14283d;border-color:#4e7095;color:#e8f3ff}
+:root[data-effective-theme="dark"] .page-bookmark-review{color:#ffd295}
+:root[data-effective-theme="dark"] .page-bookmark-notice{background:#173b35;color:#c8f5df;border-bottom:1px solid #376b5d}
+@media(min-width:701px) and (max-width:1120px){.workspace-page .documents-workspace{min-height:0;align-items:stretch}.workspace-page .docs-panel,.workspace-page .preview-panel{height:auto;min-height:0}}
+.export-review-backdrop{position:fixed;inset:0;z-index:75;background:#0b1727b8;display:grid;place-items:center;padding:1.2rem}
+.export-review{width:min(1150px,98vw);height:min(92vh,1000px);background:#fff;color:#19283c;border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 70px #0006}
+.export-review>header{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.25rem;border-bottom:1px solid #dce4ee}
+.export-review h2{margin:0;font-size:18px}.export-review header p{margin:.25rem 0 0;font-size:12px;color:#71869a}
+.export-review>p{padding:1rem 1.25rem}
+.export-review-content{min-height:0;flex:1;display:grid;grid-template-columns:minmax(180px,250px) minmax(0,1fr)}
+.export-review-content aside{overflow:auto;padding:1rem;border-right:1px solid #dce4ee}
+.export-review-content aside h3{font-size:13px;margin:0 0 .8rem}
+.export-review-content aside button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:.5rem;border-radius:5px;color:#28588b;font-size:12px;line-height:1.4}
+.export-review-content aside button:hover{background:#edf3fc}.export-review-content aside small{display:block;color:#71869a}
+.export-review-document{min-width:0;min-height:0;display:flex;flex-direction:column}.export-review-controls{display:flex;align-items:center;justify-content:center;gap:1rem;padding:.55rem;border-bottom:1px solid #dce4ee;font-size:12px}.export-review-controls input{width:4.5rem;padding:.35rem}
+.export-review-canvas{min-height:0;flex:1;overflow:auto;background:#dce4ee;padding:1rem;text-align:center}.export-review-canvas canvas{background:#fff;box-shadow:0 2px 18px #0002;max-width:none}
+:root[data-effective-theme="dark"] .export-review{background:#1d2b3e;color:#e6f0fb}
+:root[data-effective-theme="dark"] .export-review>header,:root[data-effective-theme="dark"] .export-review-content aside,:root[data-effective-theme="dark"] .export-review-controls{border-color:#40516a}
+:root[data-effective-theme="dark"] .export-review-content aside button{color:#9dcbff}
+@media(max-width:700px){.export-review-content{grid-template-columns:1fr}.export-review-content aside{max-height:130px;border-right:0;border-bottom:1px solid #dce4ee}.export-review>header{align-items:flex-start}}
 
 /* Calm, short feedback for navigation and working-copy actions. */
 .sidebar{transition:width .24s cubic-bezier(.2,.7,.2,1),flex-basis .24s cubic-bezier(.2,.7,.2,1)}

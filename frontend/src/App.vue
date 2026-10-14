@@ -11,6 +11,8 @@ import {
 import PdfViewer from './components/PdfViewer.vue'
 import PageTools from './components/PageTools.vue'
 import ManualBookmarks from './components/ManualBookmarks.vue'
+import BundlePreview from './components/BundlePreview.vue'
+import ExportPdfReview from './components/ExportPdfReview.vue'
 import MatterForm from './components/MatterForm.vue'
 import DelhiFilingGuide from './components/DelhiFilingGuide.vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -19,7 +21,7 @@ import { bytesLabel, friendlyError, prettyDate } from './lib/format'
 import { applyAppearance, readAppearance, type Theme, type UiScale } from './lib/appearance'
 import type { Check as PreflightCheck, CourtProfile, DocKind, ExportManifest, Job, Matter, MatterDocument, MatterNew, PageSearchResult } from './lib/types'
 
-type View = 'documents' | 'build' | 'validation' | 'rules' | 'about'
+type View = 'documents' | 'index' | 'build' | 'validation' | 'rules' | 'about'
 const matterList = ref<Matter[]>([])
 const archivedMatters = ref<Matter[]>([])
 const currentMatterId = ref<string | null>(null)
@@ -30,6 +32,7 @@ const storageUsage = ref({bytes:0,by_category:{originals:0,working:0,exports:0,o
 const profileList = ref<CourtProfile[]>([])
 const exportsList = ref<ExportManifest[]>([])
 const recentJobs = ref<Job[]>([])
+const previewRefreshKey = ref(0)
 const history = ref({can_undo:false,can_redo:false,undo_count:0,redo_count:0})
 const guideReloadKey = ref(0)
 const filingGuide = ref<InstanceType<typeof DelhiFilingGuide> | null>(null)
@@ -66,6 +69,7 @@ const apiStatus = ref<'connecting'|'online'|'offline'>('connecting')
 const toast = ref<{message:string, kind:'success'|'error'|'info'} | null>(null)
 const activeJob = ref<Job | null>(null)
 const savingExport = ref(false)
+const reviewingPdf = ref<{exportId:string,filename:string} | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const matterFileInput = ref<HTMLInputElement | null>(null)
 const docEditor = reactive({ title: '', kind: 'other' as DocKind, part: 1, label: '', group_key: '' })
@@ -115,15 +119,21 @@ function selectDocument(id: string) {
   pageTarget.value = {documentId:'', page:1, sequence:pageTarget.value.sequence + 1}
   selectedDocId.value = id
 }
+function openPreviewDocument(id: string) {
+  if (!confirmDiscardDrafts()) return
+  selectedDocId.value = id
+  activeView.value = 'documents'
+}
 watch(selectedDocId, () => { pageToolsOpen.value = false })
 function fitDocumentsWorkspace() {
   const workspace = documentsWorkspace.value
-  if (!workspace || window.innerWidth <= 1120) {
+  if (!workspace || window.innerWidth <= 700) {
     documentsWorkspaceHeight.value = null
     return
   }
   const scale = uiScale.value / 100
-  documentsWorkspaceHeight.value = Math.max(320, Math.floor((window.innerHeight - workspace.getBoundingClientRect().top - 8) / scale))
+  const minimum = window.innerWidth <= 1120 ? 240 : 320
+  documentsWorkspaceHeight.value = Math.max(minimum, Math.floor((window.innerHeight - workspace.getBoundingClientRect().top - 8) / scale))
 }
 watch([uiScale, activeView, currentMatterId], async () => {
   await nextTick()
@@ -159,6 +169,7 @@ function beforeUnload(event: BeforeUnloadEvent) {
   event.returnValue = ''
 }
 function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && reviewingPdf.value) { reviewingPdf.value = null; return }
   if (event.key === 'Escape' && mobileNavOpen.value) { mobileNavOpen.value = false; return }
   if (event.defaultPrevented || modalOpen.value || event.altKey) return
   const target = event.target as HTMLElement | null
@@ -326,6 +337,7 @@ async function loadMatterResources() {
     ])
     if (currentMatterId.value !== id) return
     docs.value=d; checks.value=c; exportsList.value=e; recentJobs.value=j; history.value=h
+    previewRefreshKey.value += 1
     if (pageQuery.value.trim().length >= 2) void searchPages()
     archivedDocs.value=archived; storageUsage.value=usage
     const ongoing = j.find(job => job.status === 'queued' || job.status === 'running')
@@ -536,6 +548,13 @@ async function download(exportId:string, filename:string, saveAs=false){
   }catch(err){issue(err)}
   finally{savingExport.value = false}
 }
+function reviewGeneratedPdf(exportId:string, filename:string, bytes:number) {
+  if (bytes > 25 * 1024 * 1024) {
+    notify('This PDF exceeds the 25 MB in-app review limit. Save it and inspect it in a PDF viewer.', 'info')
+    return
+  }
+  reviewingPdf.value = {exportId,filename}
+}
 function selectMatter(id:string){
   if (currentMatterId.value === id) { mobileNavOpen.value = false; return }
   if (!confirmDiscardDrafts()) return
@@ -660,7 +679,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
           </div>
         </div>
         <div class="matter-summary" aria-label="Matter summary"><span><strong>{{docs.length}}</strong> documents</span><span><strong>{{totalPages}}</strong> source pages</span><span><strong>{{warningChecks.length+errorChecks.length}}</strong> review flags</span><span><strong>{{exportsList.length}}</strong> prepared packages</span></div>
-        <div class="workspace-tabs"><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></div>
+        <div class="workspace-tabs"><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='index'}" @click="showView('index')"><BookMarked :size="16"/> Index & bookmarks</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></div>
 
         <Transition name="section" mode="out-in" @after-enter="fitDocumentsWorkspace">
         <div v-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :class="{'details-open':detailsOpen && !!selectedDoc}" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
@@ -692,7 +711,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             <div class="docs-help"><LockKeyhole :size="14"/> Original files are never overwritten.</div>
           </section>
 
-          <section class="panel preview-panel"><PdfViewer :document="selectedDoc" :disabled="busy || isJobActive || documentDirty" :details-open="detailsOpen" :details-dirty="documentDirty" :document-position="selectedDocumentPosition" :document-count="docs.length" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @move-document="moveDocument" @archive-document="deleteDocument"/></section>
+          <section class="panel preview-panel"><PdfViewer :document="selectedDoc" :disabled="busy || isJobActive || documentDirty" :details-open="detailsOpen" :details-dirty="documentDirty" :document-position="selectedDocumentPosition" :document-count="docs.length" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @move-document="moveDocument" @archive-document="deleteDocument"/></section>
 
           <Transition name="inspector">
           <section v-if="detailsOpen && selectedDoc" id="document-details-panel" class="panel inspector-panel" aria-label="Document details">
@@ -710,6 +729,13 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
           </Transition>
         </div>
 
+        <div v-else-if="activeView==='index'" class="index-preparation">
+          <div class="notice subtle"><Info :size="17"/> Prepare the index and manual bookmarks as you arrange documents. Page ranges update from current matter order and the saved volume settings; review all destinations before export.</div>
+          <BundlePreview :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" @open-document="openPreviewDocument"/>
+          <ManualBookmarks :key="currentMatterId!" :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :disabled="busy || isJobActive" @modified="loadMatterResources"/>
+          <button class="btn primary" :disabled="!docs.length" @click="showView('build')"><Layers3 :size="17"/> Continue to Build bundle</button>
+        </div>
+
         <div v-else-if="activeView==='build'" class="build-layout">
           <div class="build-main">
             <div class="panel build-panel"><div class="panel-header"><div><h2>Collation & export settings</h2><span>Configured per matter—not universal legal rules</span></div><Settings2 :size="18" class="muted-icon"/></div>
@@ -725,10 +751,10 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <div v-for="job in interruptedJobs" :key="job.id" class="notice amber"><CircleAlert :size="18"/><span>{{job.kind === 'ocr' ? 'OCR' : job.kind === 'compress' ? 'Compression' : 'Bundle build'}} was interrupted by an engine restart. Review the current revision and exports before retrying.</span><span v-if="job.kind === 'compress'">Choose compression again in page tools.</span><button v-else class="text-tool" :disabled="isJobActive" @click="retryInterrupted(job)">Retry</button></div>
               </div>
             </div>
-            <ManualBookmarks :key="`${currentMatterId}-${history.undo_count}-${history.redo_count}`" :matter-id="currentMatterId!" :documents="docs" :disabled="busy || isJobActive" @modified="loadMatterResources"/>
+            <BundlePreview :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" @open-document="openPreviewDocument"/>
             <div class="panel exports-panel"><div class="panel-header"><div><h2>Generated exports</h2><span>Stored locally for repeat downloads</span></div><Archive :size="18" class="muted-icon"/></div>
               <div v-if="activeExport" class="export-body"><div v-if="activeExport.stale" class="notice amber"><ShieldAlert :size="18"/> Matter inputs changed since this export. Rebuild before using it.</div><div v-if="activeJob?.kind==='build' && activeJob.status==='failed'" class="notice amber"><ShieldAlert :size="18"/> The latest build failed. These files are from an earlier completed export; review them before use.</div><div class="export-summary"><div class="export-icon"><FileCheck2 :size="25"/></div><div><strong>{{activeJob?.kind==='build' && activeJob.status==='failed' ? 'Previous filing package' : 'Latest filing package'}}</strong><span>{{prettyDate(activeExport.created_at)}} · {{activeExport.volumes}} volume(s) · {{activeExport.pages}} pages</span></div></div><div v-if="activeExport.checks.some(check => check.code==='SOURCE_ANNOTATIONS_OMITTED' || check.code==='SOURCE_LINKS_OMITTED')" class="notice amber"><ShieldAlert :size="18"/> This export omitted source annotations or links. See validation-report.json for affected documents; generated index links remain.</div>
-                <div v-for="file in activeExport.files" :key="file.name" class="export-file"><FileText :size="18"/><div><strong>{{file.name}}</strong><small>{{bytesLabel(file.bytes)}}</small></div><button class="icon-btn" :disabled="savingExport" :title="inTauri() ? 'Save '+file.name : 'Download '+file.name" :aria-label="inTauri() ? 'Save '+file.name : 'Download '+file.name" @click="download(activeExport.id,file.name)"><ArrowDownToLine :size="18"/></button><button v-if="inTauri()" class="text-tool" :disabled="savingExport" :title="'Save '+file.name+' as'" @click="download(activeExport.id,file.name,true)">Save As</button></div>
+                <div v-for="file in activeExport.files" :key="file.name" class="export-file"><FileText :size="18"/><div><strong>{{file.name}}</strong><small>{{bytesLabel(file.bytes)}}</small></div><button v-if="file.name.endsWith('.pdf')" class="text-tool" :aria-label="'Review '+file.name" @click="reviewGeneratedPdf(activeExport.id,file.name,file.bytes)">Review PDF</button><button class="icon-btn" :disabled="savingExport" :title="inTauri() ? 'Save '+file.name : 'Download '+file.name" :aria-label="inTauri() ? 'Save '+file.name : 'Download '+file.name" @click="download(activeExport.id,file.name)"><ArrowDownToLine :size="18"/></button><button v-if="inTauri()" class="text-tool" :disabled="savingExport" :title="'Save '+file.name+' as'" @click="download(activeExport.id,file.name,true)">Save As</button></div>
                 <p class="export-footnote">The ZIP contains PDFs, an index CSV, and a technical validation report. It is not submitted to a court.</p>
               </div><div v-else class="empty-export"><Archive :size="28"/><strong>No exports yet</strong><span>Build a bundle to see generated files.</span></div>
             </div>
@@ -750,6 +776,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       <p v-if="documentDirty" class="notice amber">Save document details before editing pages.</p>
       <PageTools :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :job="activeJob" expanded @modified="refreshDocument" @job-started="watchJob" @cancel="cancelJob"/>
     </dialog>
+    <ExportPdfReview v-if="reviewingPdf && currentMatterId" :matter-id="currentMatterId" :export-id="reviewingPdf.exportId" :filename="reviewingPdf.filename" @close="reviewingPdf=null"/>
     <Transition name="modal"><MatterForm v-if="modalOpen" :profiles="profileList" :working="creating" @close="modalOpen=false" @create="createMatter"/></Transition>
     <Transition name="toast"><div v-if="toast" :class="['toast',toast.kind]"><CheckCircle2 v-if="toast.kind==='success'" :size="19"/><CircleAlert v-else-if="toast.kind==='error'" :size="19"/><Info v-else :size="19"/><span>{{toast.message}}</span><button class="icon-btn small" @click="toast=null"><X :size="15"/></button></div></Transition>
   </div>

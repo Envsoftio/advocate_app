@@ -30,6 +30,12 @@ class MatterPatch(BaseModel):
     keep_groups_intact: bool | None = None
 
 
+class BundlePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    max_pages_per_volume: int = Field(ge=2, le=2000)
+    keep_groups_intact: bool
+
+
 class DocumentPatch(BaseModel):
     model_config = ConfigDict(extra='forbid')
     title: str | None = Field(default=None, min_length=1, max_length=250)
