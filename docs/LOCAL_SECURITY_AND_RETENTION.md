@@ -12,9 +12,9 @@ On POSIX systems, the engine creates and tightens its data-root directory to own
 
 ## Retention and recovery policy in this POC
 
-- Matter and document removal archives their SQLite records. Originals, working revisions, exports and Memo data remain on disk. Users can restore archived records from the workspace.
+- Matter and document removal archives their SQLite records. Originals, working revisions, exports, Memo data and reusable matter values remain on disk. Users can restore archived records from the workspace.
 - There is no in-app permanent-delete action. Removing app data outside CourtBundle requires the user's separate decision and a verified backup. Historical orphan folders from earlier record-deletion behavior are not automatically adopted.
-- Portable `.cbmatter` packages include active and archived documents, originals, retained working revisions and metadata. They do not include generated exports or job history. Restore creates new matter/document IDs and preserves archive state. Users should verify a restored synthetic matter before relying on any backup procedure.
+- Portable `.cbmatter` packages include active and archived documents, originals, retained working revisions and metadata, including reusable matter values from v3. They do not include generated exports or job history. Restore creates new matter/document IDs and preserves archive state. Users should verify a restored synthetic matter before relying on any backup procedure.
 - Edit history retains the newest 100 events per matter. Import, archive and restore now add reversible entries; a new edit clears the redo branch. Job records have a separate 90-day terminal-state policy. Audit events are currently retained without automatic deletion; a release retention policy remains to be decided.
 
 ## Audit and routine logs

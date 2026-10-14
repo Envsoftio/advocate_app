@@ -9,10 +9,10 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from .storage import Store, new_id, utcnow
-from .schemas import MatterCreate, DocumentPatch, MemoPartiesUpdate, ManualBookmark
+from .schemas import MatterCreate, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate, ManualBookmark
 from .engine import load_profiles
 
-PACKAGE_VERSION = 2
+PACKAGE_VERSION = 3
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
 
@@ -59,6 +59,7 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
     manifest = {'format': 'courtbundle-matter', 'version': PACKAGE_VERSION,
                 'created_at': utcnow(), 'matter': matter, 'documents': documents,
                 'revisions': revisions, 'memo_parties': store.get_memo_parties(matter_id),
+                'matter_values': store.get_matter_values(matter_id),
                 'manual_bookmarks': [{key: item[key] for key in ('id', 'title',
                     'document_id', 'page_index', 'target_revision', 'parent_id', 'position')}
                     for item in store.list_manual_bookmarks(matter_id)],
@@ -91,7 +92,7 @@ def restore_package(store: Store, package: Path) -> dict:
             if archive.getinfo('manifest.json').file_size > 10 * 1024 * 1024:
                 raise PortableMatterError('Manifest is too large')
             manifest = json.loads(archive.read('manifest.json'))
-            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, PACKAGE_VERSION):
+            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, 2, PACKAGE_VERSION):
                 raise PortableMatterError('Unsupported portable matter package')
             files = manifest.get('files')
             if not isinstance(files, list):
@@ -128,6 +129,10 @@ def restore_package(store: Store, package: Path) -> dict:
             raise PortableMatterError('Unknown court profile in package')
         if manifest['memo_parties']:
             MemoPartiesUpdate.model_validate({'parties': manifest['memo_parties']})
+        if manifest['version'] >= 3:
+            if 'matter_values' not in manifest:
+                raise PortableMatterError('Missing matter values in v3 package')
+            MatterValuesUpdate.model_validate({'values': manifest['matter_values']})
         by_path = {item['path']: item for item in files}
         for doc in documents:
             DocumentPatch.model_validate({key: doc[key] for key in
@@ -193,6 +198,9 @@ def restore_package(store: Store, package: Path) -> dict:
             if manifest['memo_parties']:
                 con.execute('INSERT INTO memo_parties (matter_id,payload_json,updated_at) VALUES (?,?,?)',
                             (matter_id, json.dumps(manifest['memo_parties'], ensure_ascii=False), utcnow()))
+            if manifest['version'] >= 3 and manifest['matter_values']:
+                con.execute('INSERT INTO matter_values (matter_id,payload_json,updated_at) VALUES (?,?,?)',
+                            (matter_id, json.dumps(manifest['matter_values'], ensure_ascii=False), utcnow()))
             for item in bookmarks:
                 con.execute('''INSERT INTO manual_bookmarks
                     (id,matter_id,title,document_id,page_index,target_revision,parent_id,position)

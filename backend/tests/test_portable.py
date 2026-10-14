@@ -69,6 +69,27 @@ def test_legacy_v1_portable_package_still_restores(client, auth, make_pdf):
     assert client.get(f'/matters/{restored.json()["id"]}/bookmarks', headers=auth).json() == []
 
 
+def test_portable_matter_values_round_trip_and_legacy_v2(client, auth):
+    matter = _matter(client, auth)
+    matter_id = matter['id']
+    values = {'client_ref': 'Synthetic reference', 'hearing_date': '2026-10-14'}
+    saved = client.put(f'/matters/{matter_id}/values', headers=auth, json={'values': values})
+    assert saved.status_code == 200, saved.text
+    raw = client.get(f'/matters/{matter_id}/portable', headers=auth).content
+    restored = client.post('/matters/restore', headers=auth,
+        files={'file': ('backup.cbmatter', raw, 'application/zip')})
+    assert restored.status_code == 201, restored.text
+    assert client.get(f'/matters/{restored.json()["id"]}/values', headers=auth).json() == {'values': values}
+    def as_v2(manifest):
+        manifest['version'] = 2
+        manifest.pop('matter_values')
+    legacy = _package_with_manifest_change(raw, as_v2)
+    old = client.post('/matters/restore', headers=auth,
+        files={'file': ('legacy.cbmatter', legacy, 'application/zip')})
+    assert old.status_code == 201, old.text
+    assert client.get(f'/matters/{old.json()["id"]}/values', headers=auth).json() == {'values': {}}
+
+
 def test_startup_cleans_interrupted_portable_files_and_restricts_store(tmp_path):
     from fastapi.testclient import TestClient
     from app.main import create_app
@@ -96,6 +117,8 @@ def test_portable_restore_rejects_unsafe_corrupt_and_future_packages(client, aut
     variants = [
         _package_with_manifest_change(raw, lambda m: m.update(version=99)),
         _package_with_manifest_change(raw, lambda m: m.pop('manual_bookmarks')),
+        _package_with_manifest_change(raw, lambda m: m.pop('matter_values')),
+        _package_with_manifest_change(raw, lambda m: m.update(matter_values={'Invalid key': 'x'})),
         _package_with_manifest_change(raw, lambda m: m['files'][0].update(path='../escape.pdf')),
         _package_with_manifest_change(raw, lambda m: m['files'][0].update(sha256='0' * 64)),
         _package_with_manifest_change(raw, lambda m: m['matter'].update(court_profile='unreviewed-missing-profile')),

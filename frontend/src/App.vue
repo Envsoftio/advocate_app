@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
-  Archive, ArrowDownToLine, ArrowLeft, ArrowRight, BookMarked, BookOpen, BriefcaseBusiness,
+  Archive, ArrowDownToLine, ArrowRight, BookMarked, BookOpen, BriefcaseBusiness,
   Check, CheckCircle2, ChevronRight, CircleAlert, CircleHelp, CloudOff,
-  Ellipsis, FileCheck2, FilePenLine, FilePlus2, FileStack, FileText, FolderOpen, GripVertical, Info,
+  Ellipsis, FileCheck2, FilePlus2, FileStack, FileText, FolderOpen, GripVertical, Info,
   Layers3, LockKeyhole, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw,
-  Redo2, ScanText, Search, Settings2, ShieldAlert, ShieldCheck,
+  Redo2, Search, Settings2, ShieldAlert, ShieldCheck,
   Undo2, UploadCloud, WandSparkles, X
 } from 'lucide-vue-next'
 import PdfViewer from './components/PdfViewer.vue'
@@ -31,12 +31,13 @@ const profileList = ref<CourtProfile[]>([])
 const exportsList = ref<ExportManifest[]>([])
 const recentJobs = ref<Job[]>([])
 const history = ref({can_undo:false,can_redo:false,undo_count:0,redo_count:0})
+const guideReloadKey = ref(0)
+const filingGuide = ref<InstanceType<typeof DelhiFilingGuide> | null>(null)
 const checks = ref<PreflightCheck[]>([])
 const selectedDocId = ref<string | null>(null)
 const selectedDoc = computed(() => docs.value.find(d => d.id === selectedDocId.value) || null)
-const inspectorTab = ref<'details' | 'tools'>('details')
-const detailsTabButton = ref<HTMLButtonElement | null>(null)
-const toolsTabButton = ref<HTMLButtonElement | null>(null)
+const selectedDocumentPosition = computed(() => docs.value.findIndex(doc => doc.id === selectedDocId.value))
+const detailsOpen = ref(false)
 const pageToolsOpen = ref(false)
 const pageToolsDialog = ref<HTMLDialogElement | null>(null)
 const documentsWorkspace = ref<HTMLElement | null>(null)
@@ -114,7 +115,7 @@ function selectDocument(id: string) {
   pageTarget.value = {documentId:'', page:1, sequence:pageTarget.value.sequence + 1}
   selectedDocId.value = id
 }
-watch(selectedDocId, () => { inspectorTab.value = 'details'; pageToolsOpen.value = false })
+watch(selectedDocId, () => { pageToolsOpen.value = false })
 function fitDocumentsWorkspace() {
   const workspace = documentsWorkspace.value
   if (!workspace || window.innerWidth <= 1120) {
@@ -134,12 +135,6 @@ watch(pageToolsOpen, async open => {
   if (open && dialog && !dialog.open) dialog.showModal()
   if (!open && dialog?.open) dialog.close()
 })
-function onInspectorTabKeydown(event: KeyboardEvent) {
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-  event.preventDefault()
-  inspectorTab.value = event.key === 'ArrowLeft' || event.key === 'Home' ? 'details' : 'tools'
-  nextTick(() => (inspectorTab.value === 'details' ? detailsTabButton.value : toolsTabButton.value)?.focus())
-}
 function showView(view: View) {
   if (activeView.value === view) { mobileNavOpen.value = false; return }
   if (!confirmDiscardDrafts()) return
@@ -202,6 +197,7 @@ watch(currentMatter, (item, previous) => {
   matterEditor.keep_groups_intact = item?.keep_groups_intact ?? true
 }, {immediate:true})
 watch(currentMatterId, () => {
+  detailsOpen.value = false
   pageQuery.value = ''
   pageSearch.value = null
   searchSequence++
@@ -342,11 +338,16 @@ async function refreshHistory() {
 }
 async function traverseHistory(direction:'undo'|'redo') {
   if (!currentMatterId.value || busy.value || !confirmDiscardDrafts()) return
+  if (filingGuide.value && !(await filingGuide.value.flushPendingSave())) {
+    notify('Save the Memo of Parties before using Undo or Redo.', 'error')
+    return
+  }
   busy.value = true
   try {
     await api(`/matters/${currentMatterId.value}/history/${direction}`,'POST')
     await refreshMatters()
     await loadMatterResources()
+    guideReloadKey.value += 1
     notify(direction === 'undo' ? 'Last edit undone.' : 'Edit restored.', 'success')
   } catch (err) { issue(err) }
   finally { busy.value = false }
@@ -617,6 +618,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
 
       <div v-if="apiStatus==='offline'" class="backend-error"><CircleAlert :size="19"/><div><strong>Python engine unavailable</strong><p v-if="inTauri()">Quit and reopen CourtBundle to start a new local engine session. If it still fails, inspect the packaged sidecar and local port.</p><p v-else>Run <code>cd backend && ./dev.sh</code>, then retry. The browser development token is for local testing only.</p></div><button class="btn secondary" @click="init">Retry connection</button></div>
 
+      <Transition name="view" mode="out-in" @after-enter="fitDocumentsWorkspace">
       <main v-if="activeView==='rules'" id="main-content" tabindex="-1" class="page-content rules-page">
         <div class="page-eyebrow">LEGAL KNOWLEDGE</div><h1>Court rules & technical profiles</h1><p class="page-description">Source-linked preparation checks. These do not replace registry instructions or an advocate's review.</p>
         <div class="rules-grid"><div v-for="profile in profileList" :key="profile.id" class="card rule-card">
@@ -625,7 +627,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
           <div class="rule-facts"><div><span>File size setting</span><strong>{{profile.max_file_mb ? profile.max_file_mb+' MB' : 'None'}}</strong></div><div><span>Searchable text check</span><strong>{{profile.require_searchable_text?'Enabled':'Off'}}</strong></div><div><span>Source review date</span><strong>{{profile.last_checked}}</strong></div></div>
           <div class="rule-sources" v-if="profile.sources.length"><span>OFFICIAL REFERENCE LINKS</span><a v-for="source in profile.sources" :key="source.url" :href="source.url" target="_blank" rel="noopener noreferrer" @click.prevent="openOfficialReference(source.url)">{{source.title}} <ArrowRight :size="13"/></a></div>
         </div></div>
-        <DelhiFilingGuide v-if="delhiGuidance" :guidance="delhiGuidance" :matter-id="currentMatterId" @open-url="openOfficialReference"/>
+        <DelhiFilingGuide v-if="delhiGuidance" :key="guideReloadKey" ref="filingGuide" :guidance="delhiGuidance" :matter-id="currentMatterId" :can-undo="history.can_undo" :can-redo="history.can_redo" @open-url="openOfficialReference" @modified="refreshHistory" @undo="traverseHistory('undo')" @redo="traverseHistory('redo')"/>
         <div class="notice amber"><ShieldAlert :size="19"/> These rules are only a selected technical subset. Case-type documents, notarisation, signatures, fees, limitation and court acceptance are outside the POC's validation scope.</div>
       </main>
 
@@ -660,7 +662,8 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
         <div class="matter-summary" aria-label="Matter summary"><span><strong>{{docs.length}}</strong> documents</span><span><strong>{{totalPages}}</strong> source pages</span><span><strong>{{warningChecks.length+errorChecks.length}}</strong> review flags</span><span><strong>{{exportsList.length}}</strong> prepared packages</span></div>
         <div class="workspace-tabs"><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></div>
 
-        <div v-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
+        <Transition name="section" mode="out-in" @after-enter="fitDocumentsWorkspace">
+        <div v-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :class="{'details-open':detailsOpen && !!selectedDoc}" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
           <section class="panel docs-panel">
             <div class="panel-header"><div><h2>Source documents</h2><span>Reorder documents by dragging</span></div><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div>
             <div class="docs-search"><Search :size="16"/><input v-model="searching" placeholder="Search documents..." aria-label="Search documents"/></div>
@@ -673,14 +676,14 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <button v-for="match in pageSearch.matches" :key="match.document_id+'-'+match.page" class="page-search-hit" @click="openSearchMatch(match.document_id, match.page)"><strong>{{match.title}} · page {{match.page}}</strong><span>{{highlightedSnippet(match.snippet, pageQuery.trim()).before}}<mark>{{highlightedSnippet(match.snippet, pageQuery.trim()).match}}</mark>{{highlightedSnippet(match.snippet, pageQuery.trim()).after}}</span></button>
               </template>
             </div>
-            <div v-if="docs.length" class="docs-list">
+            <TransitionGroup v-if="filteredDocs.length" name="document-list" tag="div" class="docs-list">
               <div v-for="doc in filteredDocs" :key="doc.id" class="doc-item" :class="{selected:selectedDocId===doc.id,dragging:draggingDocId===doc.id}" :draggable="!busy" @dragstart="onDragStart(doc.id)" @dragend="draggingDocId=null" @dragover.prevent @drop.prevent="onDropOn(doc.id)" @click="selectDocument(doc.id)">
                 <GripVertical :size="16" class="grip"/>
                 <div class="doc-icon"><FileText :size="20"/></div>
                 <div class="doc-info"><strong :title="doc.title">{{doc.title}}</strong><span><span v-if="doc.label" class="doc-label">{{doc.label}} · </span>Part {{doc.part}} · {{doc.page_count}} {{doc.page_count===1?'page':'pages'}}</span></div>
                 <ChevronRight :size="16" class="doc-arrow"/>
               </div>
-            </div>
+            </TransitionGroup>
             <div v-else-if="docs.length" class="no-matching">No matching documents</div>
             <div v-else class="no-documents"><FileStack :size="30"/><strong>No documents added</strong><small>Import a PDF or scanned image to begin.</small></div>
             <div v-if="archivedDocs.length" class="docs-help"><Archive :size="14"/> Archived documents</div>
@@ -689,16 +692,12 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             <div class="docs-help"><LockKeyhole :size="14"/> Original files are never overwritten.</div>
           </section>
 
-          <section class="panel preview-panel"><PdfViewer :document="selectedDoc" :disabled="busy || isJobActive || documentDirty" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true"/></section>
+          <section class="panel preview-panel"><PdfViewer :document="selectedDoc" :disabled="busy || isJobActive || documentDirty" :details-open="detailsOpen" :details-dirty="documentDirty" :document-position="selectedDocumentPosition" :document-count="docs.length" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @move-document="moveDocument" @archive-document="deleteDocument"/></section>
 
-          <section class="panel inspector-panel">
-            <div class="panel-header"><div><h2>{{inspectorTab==='tools'?'Document tools':'Document details'}}</h2><span>{{inspectorTab==='tools'?'OCR and page editing':'Metadata for collation'}}</span></div><Settings2 :size="18" class="muted-icon"/></div>
-            <template v-if="selectedDoc">
-              <div class="inspector-tabs" role="tablist" aria-label="Document panel" @keydown="onInspectorTabKeydown">
-                <button ref="detailsTabButton" id="document-details-tab" role="tab" aria-controls="document-details-panel" :aria-selected="inspectorTab==='details'" :tabindex="inspectorTab==='details'?0:-1" :class="{active:inspectorTab==='details'}" @click="inspectorTab='details'">Details</button>
-                <button ref="toolsTabButton" id="document-tools-tab" role="tab" aria-controls="document-tools-panel" :aria-selected="inspectorTab==='tools'" :tabindex="inspectorTab==='tools'?0:-1" :class="{active:inspectorTab==='tools'}" @click="inspectorTab='tools'">Tools</button>
-              </div>
-              <div v-if="inspectorTab==='details'" id="document-details-panel" class="inspector-content" role="tabpanel" aria-labelledby="document-details-tab">
+          <Transition name="inspector">
+          <section v-if="detailsOpen && selectedDoc" id="document-details-panel" class="panel inspector-panel" aria-label="Document details">
+            <div class="panel-header"><div><h2>Document details</h2><span>Metadata for collation</span></div><button class="icon-btn" aria-label="Close document details" @click="detailsOpen=false"><X :size="18"/></button></div>
+              <div class="inspector-content">
                 <div class="inspector-heading"><div class="doc-icon big"><FileText :size="22"/></div><div><strong>{{selectedDoc.original_name}}</strong><small>{{selectedDoc.page_count}} pages · {{selectedDoc.ocr_status.split('_').join(' ')}}</small></div></div>
                 <label class="field">Display title<input v-model="docEditor.title" maxlength="250"/></label>
                 <label class="field">Document type<select v-model="docEditor.kind"><option v-for="kind in documentKindOptions" :key="kind" :value="kind">{{kind[0].toUpperCase()+kind.slice(1)}}</option></select></label>
@@ -707,18 +706,8 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <p v-if="documentDirty" role="status" class="hint">Unsaved document changes</p>
                 <button class="btn primary block" :disabled="busy || !docEditor.title.trim()" @click="saveDocument"><Check :size="16"/> Save document details</button>
               </div>
-              <div v-else id="document-tools-panel" class="inspector-content" role="tabpanel" aria-labelledby="document-tools-tab">
-                <p v-if="documentDirty" class="hint">Save document details before editing pages.</p>
-                <div class="action-caption">DOCUMENT TOOLS</div>
-                <button class="action-row" :disabled="isJobActive" @click="startOcr"><ScanText :size="17"/><div><strong>Run English OCR</strong><small>Make scanned pages searchable</small></div><ChevronRight :size="16"/></button>
-                <button class="action-row" :disabled="busy" @click="moveDocument(-1)"><ArrowLeft :size="17"/><div><strong>Move document up</strong><small>Adjust bundle order</small></div></button>
-                <button class="action-row" :disabled="busy" @click="moveDocument(1)"><ArrowRight :size="17"/><div><strong>Move document down</strong><small>Adjust bundle order</small></div></button>
-                <button class="action-row danger" :disabled="busy" @click="deleteDocument"><Archive :size="17"/><div><strong>Archive document</strong><small>Restore it from this matter</small></div></button>
-                <button class="action-row" :disabled="busy || isJobActive" @click="pageToolsOpen=true"><FilePenLine :size="17"/><div><strong>Insert, merge, replace or crop pages</strong><small>Opens tools for this document</small></div><ChevronRight :size="16"/></button>
-              </div>
-            </template>
-            <div v-else class="inspector-empty">Select a document to manage its details and OCR.</div>
           </section>
+          </Transition>
         </div>
 
         <div v-else-if="activeView==='build'" class="build-layout">
@@ -752,14 +741,16 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
           <div v-for="(check,index) in checks" :key="index" :class="['check-entry',check.severity]"><component :is="iconsBySeverity[check.severity]" :size="18"/><div><strong>{{check.code.split('_').join(' ')}}</strong><p>{{check.message}}</p></div><span class="check-severity">{{check.severity}}</span></div>
           <div v-if="!checks.length" class="empty-export">No checks reported.</div>
         </div><div class="panel review-panel"><h3>Human review remains essential</h3><p>These items are not certified by this application:</p><div><Check :size="16"/> Court-specific case-type requirements</div><div><Check :size="16"/> Signature and attestation validity</div><div><Check :size="16"/> Evidence authenticity and translations</div><div><Check :size="16"/> Limitation, fees and registry acceptance</div></div></div>
+        </Transition>
       </main>
+      </Transition>
     </div>
     <dialog v-if="selectedDoc" ref="pageToolsDialog" class="page-tools-dialog" aria-labelledby="page-tools-title" @close="pageToolsOpen=false" @click.self="pageToolsOpen=false">
       <div class="page-tools-dialog-head"><div><h2 id="page-tools-title">Page tools</h2><p>{{selectedDoc.title}} · Working copy</p></div><button class="icon-btn" aria-label="Close page tools" @click="pageToolsOpen=false"><X :size="18"/></button></div>
       <p v-if="documentDirty" class="notice amber">Save document details before editing pages.</p>
       <PageTools :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :job="activeJob" expanded @modified="refreshDocument" @job-started="watchJob" @cancel="cancelJob"/>
     </dialog>
-    <MatterForm v-if="modalOpen" :profiles="profileList" :working="creating" @close="modalOpen=false" @create="createMatter"/>
-    <div v-if="toast" :class="['toast',toast.kind]"><CheckCircle2 v-if="toast.kind==='success'" :size="19"/><CircleAlert v-else-if="toast.kind==='error'" :size="19"/><Info v-else :size="19"/><span>{{toast.message}}</span><button class="icon-btn small" @click="toast=null"><X :size="15"/></button></div>
+    <Transition name="modal"><MatterForm v-if="modalOpen" :profiles="profileList" :working="creating" @close="modalOpen=false" @create="createMatter"/></Transition>
+    <Transition name="toast"><div v-if="toast" :class="['toast',toast.kind]"><CheckCircle2 v-if="toast.kind==='success'" :size="19"/><CircleAlert v-else-if="toast.kind==='error'" :size="19"/><Info v-else :size="19"/><span>{{toast.message}}</span><button class="icon-btn small" @click="toast=null"><X :size="15"/></button></div></Transition>
   </div>
 </template>

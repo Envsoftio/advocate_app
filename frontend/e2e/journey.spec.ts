@@ -20,6 +20,18 @@ test('compression exposes measured results and retains a usable PDF', async ({ p
   const doc = (await uploaded.json())[0]
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'E2E Compression' })).toBeVisible()
+  await expect(page.locator('.page-counter')).toContainText('1 / 1')
+  await page.getByRole('button', { name: 'Show thumbnails' }).click()
+  await expect(page.getByRole('button', { name: 'Go to page 1' })).toBeVisible()
+  await expect.poll(() => page.locator('.thumbnail-button canvas').evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0)
+  await page.getByRole('button', { name: 'Hide thumbnails' }).click()
+  await expect(page.locator('.thumbnail-strip')).toHaveCount(0)
+  const preview = page.locator('.pdf-paper')
+  const originalWidth = await preview.evaluate((node: HTMLCanvasElement) => node.getBoundingClientRect().width)
+  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50')
+  await expect.poll(() => preview.evaluate((node: HTMLCanvasElement) => node.getBoundingClientRect().width)).toBeCloseTo(originalWidth / 2, 0)
+  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('25')
+  await expect.poll(() => preview.evaluate((node: HTMLCanvasElement) => node.getBoundingClientRect().width)).toBeCloseTo(originalWidth / 4, 0)
   await page.getByRole('button', { name: 'Page tools', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Page tools' })
   await dialog.getByRole('combobox', { name: 'Compression quality' }).selectOption('small')
@@ -84,6 +96,35 @@ test('manual bookmark survives reload and shows revision review', async ({ page,
   await expect(page.getByText('Needs review')).toBeHidden()
 })
 
+test('manual bookmark order is keyboard accessible and persists', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Bookmark Keyboard', court_profile: 'delhi-hc-illustrative',
+    case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
+      buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
+  })
+  const docId = (await uploaded.json())[0].id as string
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Bookmark document' }).selectOption(docId)
+  await page.getByRole('textbox', { name: 'New bookmark title' }).fill('First')
+  await page.getByRole('button', { name: 'Add bookmark' }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('First')
+  await page.getByRole('combobox', { name: 'Bookmark document' }).selectOption(docId)
+  await page.getByRole('textbox', { name: 'New bookmark title' }).fill('Second')
+  await page.getByRole('button', { name: 'Add bookmark' }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 2' })).toHaveValue('Second')
+  await page.getByRole('button', { name: 'Move bookmark 2 up' }).focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Second')
+  await page.reload()
+  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Second')
+})
+
 test('text editing works on a page already marked as rotated', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Rotated Text', court_profile: 'delhi-hc-illustrative',
@@ -113,6 +154,8 @@ test('text editing works on a page already marked as rotated', async ({ page, re
   expect(box!.x + box!.width).toBeLessThanOrEqual(canvas!.x + canvas!.width + 1)
   expect(box!.y + box!.height).toBeLessThanOrEqual(canvas!.y + canvas!.height + 1)
   await run.click()
+  await expect(page.locator('.pdf-inline-editor')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Replacement' })).toBeFocused()
   await page.getByRole('textbox', { name: 'Replacement' }).fill('UPDATED PETITION')
   await page.getByRole('button', { name: 'Apply replacement' }).click()
   await expect(page.locator('.text-overlay-panel [role="status"]')).toContainText('Applied in')
@@ -134,10 +177,22 @@ test('selectable PDF text can be selected and replaced from the preview', async 
   await expect(page.getByRole('heading', { name: 'E2E Replace Text' })).toBeVisible()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
   await page.getByRole('button', { name: /Edit text: DRAFT PETITION/ }).click()
-  await expect(page.getByRole('textbox', { name: 'Selected text' })).toHaveValue('DRAFT PETITION - EXAMPLE ONLY')
+  await expect(page.getByRole('textbox', { name: 'Replacement' })).toHaveValue('DRAFT PETITION - EXAMPLE ONLY')
+  await expect(page.locator('.pdf-inline-editor')).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page.locator('.pdf-inline-editor')).toHaveCount(0)
+  await page.getByRole('button', { name: /Edit text: DRAFT PETITION/ }).click()
   await page.getByRole('textbox', { name: 'Replacement' }).fill('UPDATED PETITION WITH MORE DETAILS')
+  await page.route('**/documents/*/pdf?revision=*', async route => {
+    await new Promise(resolve => setTimeout(resolve, 350))
+    await route.continue()
+  })
   await page.getByRole('button', { name: 'Apply replacement' }).click()
+  await expect(page.locator('.pdf-placement-surface')).toHaveClass(/is-edit-refreshing/)
+  await expect(page.locator('.pdf-edit-snapshot')).toBeVisible()
   await expect(page.locator('.text-overlay-panel [role="status"]')).toContainText('Applied in')
+  await expect(page.locator('.pdf-edit-snapshot')).toHaveCount(0)
+  await page.unroute('**/documents/*/pdf?revision=*')
   await expect.poll(async () => {
     const result = await request.get(`${backend}/matters/${matterId}/search?q=UPDATED%20PETITION%20WITH%20MORE%20DETAILS`, { headers })
     return (await result.json()).matches.length
@@ -147,7 +202,51 @@ test('selectable PDF text can be selected and replaced from the preview', async 
   await page.getByRole('button', { name: /Edit text: UPDATED PETITION/ }).click()
   await page.getByRole('textbox', { name: 'Replacement' }).fill('W'.repeat(200))
   await page.getByRole('button', { name: 'Apply replacement' }).click()
-  await expect(page.locator('.text-overlay-panel [role="alert"]')).toContainText('cannot fit in clear space')
+  await expect(page.locator('.pdf-inline-editor [role="alert"]')).toContainText('cannot fit in clear space')
+})
+
+test('selectable text can be dragged vertically and saved to the working copy', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Move Text', court_profile: 'delhi-hc-illustrative',
+    case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
+      buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
+  })
+  const doc = (await uploaded.json())[0]
+  const runsUrl = `${backend}/documents/${doc.id}/pages/0/text-runs`
+  const before = await request.get(runsUrl, { headers })
+  const original = (await before.json()).runs.find((run: {text:string}) => run.text.startsWith('IN THE COURT'))
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Move Text' })).toBeVisible()
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Move text vertically' })).toHaveCount(0)
+  const run = page.getByRole('button', { name: /Edit text: IN THE COURT/ })
+  await expect(page.locator('.preview-status')).toHaveCount(0)
+  const preview = page.locator('.pdf-placement-surface')
+  await expect.poll(async () => (await preview.boundingBox())!.y - (await page.locator('.canvas-scroll').boundingBox())!.y).toBeCloseTo(20, 0)
+  const previewTop = (await preview.boundingBox())!.y
+  await page.route('**/documents/*/pdf?revision=*', async route => {
+    await new Promise(resolve => setTimeout(resolve, 350))
+    await route.continue()
+  })
+  const bounds = await run.boundingBox()
+  expect(bounds).toBeTruthy()
+  await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2 + 14, { steps: 4 })
+  await page.mouse.up()
+  await expect(page.locator('.pdf-edit-snapshot')).toBeVisible()
+  expect((await preview.boundingBox())!.y).toBeCloseTo(previewTop, 0)
+  await expect(page.locator('.pdf-edit-snapshot')).toHaveCount(0)
+  await page.unroute('**/documents/*/pdf?revision=*')
+  await expect(page.locator('.text-overlay-panel [role="status"]')).toContainText('Text moved')
+  await expect(page.locator('.pdf-inline-editor')).toHaveCount(0)
+  const after = await request.get(runsUrl, { headers })
+  const moved = (await after.json()).runs.find((item: {text:string}) => item.text === original.text)
+  expect(moved.relative_bbox[1]).toBeGreaterThan(original.relative_bbox[1])
 })
 
 test('visible text overlay is placed from the preview and becomes searchable', async ({ page, request }) => {
@@ -211,9 +310,12 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await expect(page.locator('.sidebar .nav-label').first()).toBeHidden()
   await page.getByRole('button', { name: 'Expand sidebar' }).click()
   await expect(page.locator('.sidebar .nav-label').first()).toBeVisible()
-  expect(await page.locator('.documents-workspace').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(3)
+  expect(await page.locator('.documents-workspace').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(2)
   expect(await page.locator('.docs-panel').evaluate(element => element.getBoundingClientRect().top)).toBeLessThan(280)
-  expect(await page.locator('.canvas-scroll').evaluate(element => element.getBoundingClientRect().top)).toBeLessThan(400)
+  expect(await page.locator('.canvas-scroll').evaluate(element => element.getBoundingClientRect().top)).toBeLessThan(460)
+  await expect(page.locator('.inspector-panel')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Document details' }).click()
+  expect(await page.locator('.documents-workspace').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(3)
   await expect.poll(() => page.locator('.inspector-panel').evaluate(element => window.innerHeight - element.getBoundingClientRect().bottom)).toBeLessThan(18)
   expect(await page.locator('.inspector-panel').evaluate(element => window.innerHeight - element.getBoundingClientRect().bottom)).toBeGreaterThan(-2)
   await expect(page.locator('.thumbnail-strip')).toHaveCount(0)
@@ -221,10 +323,6 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await expect(page.getByRole('textbox', { name: 'Display title' })).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
   await expect(page.getByRole('button', { name: 'Build filing bundle' }).first()).toBeInViewport()
-  await page.getByRole('tab', { name: 'Tools' }).click()
-  await page.keyboard.press('ArrowLeft')
-  await expect(page.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true')
-  await page.keyboard.press('ArrowRight')
   await page.getByRole('button', { name: 'Page tools', exact: true }).click()
   const pageToolsDialog = page.getByRole('dialog', { name: 'Page tools' })
   await expect(pageToolsDialog).toBeVisible()
@@ -237,7 +335,8 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await page.getByRole('button', { name: 'Page tools', exact: true }).click()
   await page.keyboard.press('Escape')
   await expect(pageToolsDialog).toBeHidden()
-  await page.getByRole('tab', { name: 'Details' }).click()
+  await page.getByRole('button', { name: 'Close document details' }).click()
+  await expect(page.locator('.inspector-panel')).toHaveCount(0)
   await page.getByRole('button', { name: 'Court rules' }).click()
   await expect(page.locator('.topbar')).toHaveCSS('height', headerHeight)
   await expect(page.locator('.guide-card').first()).toHaveCSS('background-color', 'rgb(29, 41, 58)')
@@ -354,6 +453,86 @@ test('working-copy page tools edit and save synthetic pages', async ({ page, req
   expect((await readFile(await split.path())).subarray(0, 2).toString()).toBe('PK')
 })
 
+test('preview owns document actions while details stay collapsed until toggled', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Preview Actions', court_profile: 'delhi-hc-illustrative',
+    case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
+  } })
+  const id = (await created.json()).id as string
+  for (const filename of ['01_petition.pdf', '02_impugned_order.pdf']) {
+    const uploaded = await request.post(`${backend}/matters/${id}/documents`, { headers,
+      multipart: { files: { name: filename, mimeType: 'application/pdf',
+        buffer: await readFile(resolve(samples, filename)) } },
+    })
+    expect(uploaded.ok()).toBeTruthy()
+  }
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Preview Actions' })).toBeVisible()
+  await expect.poll(() => page.locator('.pdf-paper').evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0)
+  await expect(page.getByText('Loading PDF…')).toBeHidden()
+  await expect(page.locator('.inspector-panel')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Document details', exact: true })).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByRole('button', { name: 'Document details', exact: true })).toBeInViewport()
+  await page.getByRole('button', { name: 'Document details', exact: true }).click()
+  await expect.poll(() => page.locator('.preview-panel').evaluate(panel => {
+    const canvas = panel.querySelector('canvas.pdf-paper')!.getBoundingClientRect()
+    const scroll = panel.querySelector('.canvas-scroll')!.getBoundingClientRect()
+    return canvas.width <= scroll.width - 20
+  })).toBeTruthy()
+  await expect(page.locator('.inspector-panel')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Run English OCR' })).toBeInViewport()
+  await expect(page.getByRole('button', { name: 'Document details', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await page.getByRole('button', { name: 'Close document details' }).click()
+  await expect(page.locator('.inspector-panel')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Move document down' }).click()
+  await expect.poll(async () => {
+    const response = await request.get(`${backend}/matters/${id}/documents`, { headers })
+    return (await response.json() as {original_name:string}[]).map(doc => doc.original_name)
+  }).toEqual(['02_impugned_order.pdf', '01_petition.pdf'])
+})
+
+test('visible rotation controls turn the selected PDF page in either direction', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Page Rotation', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
+      buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
+  })
+  expect(uploaded.ok()).toBeTruthy()
+  const sourceHash = (await uploaded.json())[0].source_sha256 as string
+  const pdfRequests: string[] = []
+  page.on('request', request => {
+    if (request.url().includes('/documents/') && request.url().includes('/pdf?revision=')) pdfRequests.push(request.url())
+  })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Page Rotation' })).toBeVisible()
+  await page.getByRole('button', { name: 'Next page' }).click()
+  await expect(page.locator('.page-counter')).toContainText('2 / 3')
+  const canvas = page.locator('.pdf-paper')
+  const ratio = () => canvas.evaluate((node: HTMLCanvasElement) => node.width / node.height)
+  const originalRatio = await ratio()
+  await page.route('**/pages/rotate', async route => {
+    await new Promise(resolve => setTimeout(resolve, 350))
+    await route.continue()
+  })
+  await page.getByRole('button', { name: 'Rotate left' }).click()
+  const surface = page.locator('.pdf-placement-surface')
+  await expect(surface).toHaveClass(/is-rotating/)
+  await expect.poll(() => surface.evaluate(element => Number(getComputedStyle(element).opacity))).toBeLessThan(0.1)
+  await expect(page.locator('.page-counter')).toContainText('2 / 3')
+  await expect.poll(ratio).toBeCloseTo(1 / originalRatio, 1)
+  await expect(surface).not.toHaveClass(/is-rotating/)
+  await page.unroute('**/pages/rotate')
+  await page.getByRole('button', { name: 'Rotate right' }).click()
+  await expect(page.locator('.page-counter')).toContainText('2 / 3')
+  await expect.poll(ratio).toBeCloseTo(originalRatio, 1)
+  expect(pdfRequests.map(url => new URL(url).searchParams.get('revision'))).toEqual(['1', '2', '3'])
+  const documents = await request.get(`${backend}/matters/${matterId}/documents`, { headers })
+  expect((await documents.json())[0].source_sha256).toBe(sourceHash)
+})
+
 test('unavailable engine shows a bounded error and reconnects', async ({ page }) => {
   await page.route('**/health', route => route.abort())
   await page.goto('/')
@@ -413,7 +592,7 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   const canvas = page.locator('.pdf-paper')
   await expect.poll(() => canvas.evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0)
   const before = await canvas.evaluate((node: HTMLCanvasElement) => `${node.width}x${node.height}`)
-  await page.getByRole('button', { name: 'Rotate current page' }).click()
+  await page.getByRole('button', { name: 'Rotate right' }).click()
   await expect.poll(() => canvas.evaluate((node: HTMLCanvasElement) => `${node.width}x${node.height}`)).not.toBe(before)
   await page.locator('button[title="Move page right"]').click()
   page.once('dialog', dialog => void dialog.accept())
@@ -422,9 +601,8 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
 
   await page.locator('.doc-item', { hasText: '04_scanned_annexure' }).click()
   await expect(page.locator('.page-counter')).toContainText('1 / 1')
-  await page.getByRole('tab', { name: 'Tools' }).click()
   await page.getByRole('button', { name: 'Run English OCR' }).click()
-  await page.getByRole('tab', { name: 'Details' }).click()
+  await page.getByRole('button', { name: 'Document details' }).click()
   await expect(page.locator('.inspector-heading')).toContainText('processed', { timeout: 90_000 })
   await page.getByRole('textbox', { name: 'Display title' }).fill('Synthetic OCR Annexure')
   await page.getByRole('button', { name: 'Save document details' }).click()
@@ -432,6 +610,7 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await page.reload()
   await expect(page.locator('.doc-item')).toHaveCount(4)
   await page.locator('.doc-item', { hasText: 'Synthetic OCR Annexure' }).click()
+  await page.getByRole('button', { name: 'Document details' }).click()
   await expect(page.locator('.inspector-heading')).toContainText('processed')
 
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
@@ -496,6 +675,26 @@ test('Memo of Parties autosaves per matter and reports a failed save', async ({ 
   expect((await retried.json()).parties[0].name).toBe('Synthetic Retried Party')
 })
 
+test('Memo of Parties Undo flushes a pending edit and reloads saved rows', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Memo History', court_profile: 'delhi-hc-illustrative',
+    case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
+  } })
+  const id = (await created.json()).id as string
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Court rules' }).click()
+  const helper = page.locator('.memo-helper')
+  const name = helper.getByRole('textbox', { name: 'Party name' })
+  await name.fill('Synthetic First')
+  await expect(helper.getByRole('status')).toContainText('Saved to this matter')
+  await expect(helper.getByRole('button', { name: 'Undo matter edit' })).toBeEnabled()
+  await name.fill('Synthetic Second')
+  await helper.getByRole('button', { name: 'Undo matter edit' }).click()
+  await expect(helper.getByRole('textbox', { name: 'Party name' })).toHaveValue('Synthetic First')
+  const stored = await request.get(`${backend}/matters/${id}/memo-parties`, { headers })
+  expect((await stored.json()).parties[0].name).toBe('Synthetic First')
+})
+
 test('unsaved details are guarded and a failed settings save stops a build', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Draft Guard', court_profile: 'delhi-hc-illustrative',
@@ -509,8 +708,15 @@ test('unsaved details are guarded and a failed settings save stops a build', asy
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'E2E Draft Guard' })).toBeVisible()
+  await page.getByRole('button', { name: 'Document details' }).click()
   await page.getByRole('textbox', { name: 'Display title' }).fill('Unsaved synthetic title')
   await expect(page.getByText('Unsaved document changes')).toBeVisible()
+  await page.getByRole('button', { name: 'Close document details' }).click()
+  await expect(page.getByText('Save document details to use PDF tools.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Rotate left' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Rotate right' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Open details' }).click()
+  await expect(page.getByRole('textbox', { name: 'Display title' })).toHaveValue('Unsaved synthetic title')
   page.once('dialog', dialog => void dialog.dismiss())
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
   await expect(page.getByText('Unsaved document changes')).toBeVisible()
@@ -572,7 +778,6 @@ test('archived document and matter remain recoverable', async ({ page, request }
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'E2E Archive Matter' })).toBeVisible()
   page.once('dialog', dialog => void dialog.accept())
-  await page.getByRole('tab', { name: 'Tools' }).click()
   await page.getByRole('button', { name: 'Archive document' }).click()
   await expect(page.locator('.doc-item')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Restore', exact: true })).toBeVisible()
@@ -599,6 +804,7 @@ test('undo and redo metadata persist across browser reload', async ({ page, requ
   })
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'E2E History Matter' })).toBeVisible()
+  await page.getByRole('button', { name: 'Document details' }).click()
   await page.getByRole('textbox', { name: 'Display title' }).fill('Changed title')
   await page.getByRole('button', { name: 'Save document details' }).click()
   await expect(page.locator('.doc-item')).toContainText('Changed title')

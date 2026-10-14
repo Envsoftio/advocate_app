@@ -343,6 +343,60 @@ def replace_text_run(path: Path, page_index: int, span_index: int,
                 'font_size_reduced': size < source_size - .01}
 
 
+def move_text_run(path: Path, page_index: int, span_index: int,
+                  expected_text: str, vertical_offset: float) -> None:
+    """Move one native horizontal span vertically in displayed page coordinates."""
+    if not math.isfinite(vertical_offset) or abs(vertical_offset) < .0001:
+        raise ProcessingError('Drag the text up or down before applying the move')
+    runs = editable_text_runs(path, page_index)
+    if not 0 <= span_index < len(runs) or runs[span_index]['text'] != expected_text:
+        raise ProcessingError('Selected text changed; reload the page and select it again')
+    selected = runs[span_index]
+    if any(ord(char) < 32 or ord(char) > 126 for char in expected_text):
+        raise ProcessingError('Moving text currently supports single-line printable ASCII only')
+    source = pymupdf.Rect(selected['bbox'])
+    with pymupdf.open(path) as doc:
+        page = doc[page_index]
+        if any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
+            raise ProcessingError('This page has pending redaction marks. Review them before moving text.')
+        blocks = page.get_text('dict')['blocks']
+        spans = [span for block in blocks if block.get('type') == 0
+                 for line in block['lines'] for span in line['spans'] if span['text'].strip()]
+        source_matches = [span for span in spans if source.intersects(pymupdf.Rect(span['bbox']))]
+        if len(source_matches) != 1:
+            raise ProcessingError('Selected text overlaps other text; cannot move it safely')
+        display_delta = page.rect.height * vertical_offset
+        zero = pymupdf.Point(0, 0) * page.derotation_matrix
+        shifted = pymupdf.Point(0, display_delta) * page.derotation_matrix
+        dx, dy = shifted.x - zero.x, shifted.y - zero.y
+        target = source + (dx, dy, dx, dy)
+        page_bounds = page.rect * page.derotation_matrix
+        if not page_bounds.contains(target):
+            raise ProcessingError('The text would leave the page; drag it closer to the centre')
+        links = [pymupdf.Rect(link['from']) for link in page.get_links()]
+        if any(source.intersects(link) or target.intersects(link) for link in links):
+            raise ProcessingError('Text inside or over a link cannot be moved with this tool')
+        obstacles = [pymupdf.Rect(span['bbox']) for span in spans if span is not source_matches[0]]
+        obstacles.extend(pymupdf.Rect(block['bbox']) for block in blocks if block.get('type') == 1)
+        obstacles.extend(pymupdf.Rect(item['rect']) for item in page.get_drawings())
+        if any(target.intersects(obstacle) for obstacle in obstacles):
+            raise ProcessingError('The new position overlaps text or page graphics; choose a clear gap')
+        font = selected['font'].lower()
+        fontname = ('hebi' if 'bold' in font and ('italic' in font or 'oblique' in font)
+                    else 'hebo' if 'bold' in font
+                    else 'heit' if 'italic' in font or 'oblique' in font else 'helv')
+        color = selected['color']
+        rgb = ((color >> 16 & 255) / 255, (color >> 8 & 255) / 255, (color & 255) / 255)
+        page.add_redact_annot(source, fill=False, cross_out=False)
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
+                              graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+                              text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+        origin = selected['origin']
+        page.insert_text((origin[0] + dx, origin[1] + dy), expected_text,
+                         fontname=fontname, fontsize=selected['size'], color=rgb, overlay=True)
+        replace_pdf_atomically(path, doc)
+
+
 def _wrap_replacement(value: str, max_width: float, fontname: str,
                       size: float) -> list[str] | None:
     """Wrap at spaces; reject a word that cannot fit without breaking letters."""

@@ -22,11 +22,28 @@ def test_legacy_document_schema_migrates_without_changing_records(tmp_path):
     with store.connect() as con:
         row = con.execute('SELECT * FROM documents WHERE id=?', ('d',)).fetchone()
         revision = con.execute('SELECT * FROM document_revisions WHERE document_id=?', ('d',)).fetchone()
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 5
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 6
     assert row['revision'] == 1
     assert row['working_relpath'] == 'working/d.pdf'
     assert revision['working_relpath'] == row['working_relpath']
     store.close()
+
+
+def test_v5_store_gains_reusable_values_without_changing_matter(tmp_path):
+    first = Store(tmp_path)
+    matter = first.create_matter(dict(name='Synthetic matter', court_profile='delhi-hc-illustrative',
+        case_type='Demo', petitioner='', respondent='', advocate='', case_number='',
+        max_pages_per_volume=10, keep_groups_intact=True))
+    first.close()
+    with sqlite3.connect(tmp_path / 'court_bundle.sqlite3') as con:
+        con.execute('DROP TABLE matter_values')
+        con.execute('PRAGMA user_version=5')
+    reopened = Store(tmp_path)
+    assert reopened.get_matter(matter['id'])['name'] == 'Synthetic matter'
+    assert reopened.get_matter_values(matter['id']) == {}
+    with reopened.connect() as con:
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 6
+    reopened.close()
 
 
 def test_second_engine_cannot_open_active_matter_store(tmp_path):

@@ -313,3 +313,18 @@ This is a local baseline for native text, not a scan-heavy benchmark, throughput
 Windows x64, Intel Mac, minimum macOS 12, clean-machine install, native WebView interaction, native Save failure scenarios, power loss and large scan stress remain unverified for these changes. Native crash isolation/supervision is not implemented. Multilingual printed indexes/fonts, Office conversion, full layout/OCR correction, scanner/deskew, annotation/image authoring, password/security workflows, permanent redaction, signed-input review/acknowledgment and legal workflow specifications remain incomplete as listed in IMPLEMENTATION_TASKS.md. No task is closed merely because this hardening suite passes.
 
 Packaged smoke command: `backend/.venv312/bin/python backend/scripts/smoke_packaged_pdf.py frontend/src-tauri/binaries/filing-api-aarch64-apple-darwin`. Local frozen-engine startup took **23.52 seconds**; compression reduced the synthetic mixed PDF from **18,454 to 15,409 bytes**. This is within the current 30-second native readiness window on this run, but shows cold-start performance still needs target-device measurements. The smoke exercises an isolated sidecar API with temporary data; it does not establish packaged WebView/Save dialog behavior or a clean-device install.
+
+## Next ten unchecked tasks from DAT-02 — 14 October 2026
+
+The active backlog selection was DAT-02. The next ten unchecked entries in list order are DAT-02, DAT-07, FIL-01, FIL-02, FIL-03, FIL-04, FIL-05, FIL-07, FIL-08 and GEN-01. The product owner confirmed that no advocate-approved filing specification or expected outputs exist yet.
+
+| Task | Work and remaining gate |
+| --- | --- |
+| DAT-02 | Memo of Parties autosaves and reusable matter values now enter persisted Undo/Redo. Court rules has Undo/Redo controls that flush pending Memo changes before replay. Packaged Windows/macOS replay and the 100-event retention decision remain open. |
+| DAT-07 | Existing plaintext storage and backup boundary remains. Password plus separate recovery key is selected, but encryption, migration, key recovery and device tests remain open. |
+| FIL-01/02/03 | Part outputs, group numbering and index schemes remain blocked on DEC-02's reviewed examples. No filing rule was inferred. |
+| FIL-04 | Bookmark reorder/delete controls gained accessible labels; synthetic Chrome keyboard reorder persists after reload. Packaged PDF viewer and keyboard/drag review remain open. |
+| FIL-05/07/08 | Index import, scoped validation and multilingual generated output remain blocked on reviewed source/schema, checklist and language/font fixtures. |
+| GEN-01 | SQLite v6 adds bounded reusable draft values with API, history and v3 portable round trip; Memo rows remain persisted and feed the review CSV. Form/template mapping and agreed roles await DEC-02. |
+
+Final verification: backend `.venv312/bin/python -m pytest -q` **91 passed**; frontend `npm run build` and `npm run test` **passed** (6 unit tests); synthetic Chrome `COURTBUNDLE_E2E_VITE_PORT=1421 npm run test:e2e` **18 passed** when loopback binding was allowed. Initial sandboxed E2E start was denied on port 8768; rerun with loopback access passed. These checks do not establish native Windows/macOS behavior or legal approval.

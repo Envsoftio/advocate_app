@@ -113,8 +113,8 @@ export async function downloadPageOutput(documentId: string, operation: 'extract
   return true
 }
 
-export async function pdfBytes(docId: string): Promise<Uint8Array> {
-  const response = await request(`/documents/${docId}/pdf`)
+export async function pdfBytes(docId: string, revision: number): Promise<Uint8Array> {
+  const response = await request(`/documents/${docId}/pdf?revision=${revision}`, { cache: 'no-store' })
   return new Uint8Array(await response.arrayBuffer())
 }
 

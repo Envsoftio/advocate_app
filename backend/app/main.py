@@ -21,9 +21,9 @@ from .jobs import JobManager
 from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
                       rotate_page, delete_page, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
-                      replace_text_run, compress_pdf,
+                      replace_text_run, move_text_run, compress_pdf,
                       ocr_pdf, make_cover_pdf)
-from .schemas import MatterCreate, MatterPatch, DocumentPatch, MemoPartiesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, CropPages, TextOverlay, ReplaceTextRun
+from .schemas import MatterCreate, MatterPatch, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun
 from .storage import Store, new_id
 from .schemas import CompressionRequest
 from .portable import create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES
@@ -254,6 +254,17 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
             return {'parties': store.set_memo_parties(
                 matter_id, [party.model_dump() for party in payload.parties])}
 
+    @app.get('/matters/{matter_id}/values')
+    def get_matter_values(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        return {'values': store.get_matter_values(matter_id)}
+
+    @app.put('/matters/{matter_id}/values')
+    def put_matter_values(matter_id: str, payload: MatterValuesUpdate, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        with store.matter_lock(matter_id):
+            return {'values': store.set_matter_values(matter_id, payload.values)}
+
     async def import_document(matter_id: str, file: UploadFile):
         suffix = Path(file.filename or '').suffix.lower()
         if suffix not in SUPPORTED:
@@ -405,7 +416,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         path = store.working_path(doc)
         if not path.is_file():
             raise HTTPException(status_code=404, detail='PDF working copy missing')
-        return FileResponse(path, media_type='application/pdf', filename=doc['id'] + '.pdf')
+        return FileResponse(path, media_type='application/pdf', filename=doc['id'] + '.pdf',
+                            headers={'Cache-Control': 'no-store'})
 
     def edit_working_copy(doc_id: str, operation):
         doc = doc_or_404(doc_id)
@@ -528,6 +540,19 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
                                                     payload.expected_text, payload.replacement))
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
             return dict(edit_working_copy(doc_id, replace), edit_layout=edit_layout)
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/move-text-run')
+    def page_move_text_run(doc_id: str, payload: MoveTextRun, _: None = Depends(auth)):
+        try:
+            def move(path, doc):
+                if doc['revision'] != payload.expected_revision:
+                    raise HTTPException(status_code=409, detail='Document changed; reload and select text again')
+                move_text_run(path, payload.page_index, payload.span_index,
+                              payload.expected_text, payload.vertical_offset)
+                return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
+            return edit_working_copy(doc_id, move)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

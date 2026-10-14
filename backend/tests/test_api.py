@@ -62,7 +62,9 @@ def test_document_page_actions(client, auth, matter, make_pdf):
     assert r.status_code == 200, r.text
     assert r.json()['updated_at'] != reordered_at
     assert client.app.state.store.original_path(doc).read_bytes() == source_bytes
-    with pymupdf.open(stream=client.get(f'/documents/{doc_id}/pdf', headers=auth).content, filetype='pdf') as rotated:
+    pdf_response = client.get(f'/documents/{doc_id}/pdf?revision={r.json()["revision"]}', headers=auth)
+    assert pdf_response.headers['cache-control'] == 'no-store'
+    with pymupdf.open(stream=pdf_response.content, filetype='pdf') as rotated:
         assert rotated[0].rotation == 90
     r = client.post(f'/documents/{doc_id}/pages/delete', headers=auth, json={'page_index':0})
     assert r.json()['page_count'] == 2

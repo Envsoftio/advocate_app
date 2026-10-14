@@ -1,5 +1,6 @@
 from typing import Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+import re
 
 DocKind = Literal['petition', 'affidavit', 'order', 'annexure', 'application', 'evidence', 'other']
 
@@ -50,6 +51,21 @@ class MemoParty(BaseModel):
 
 class MemoPartiesUpdate(BaseModel):
     parties: list[MemoParty] = Field(min_length=1, max_length=100)
+
+
+class MatterValuesUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    values: dict[str, str] = Field(max_length=100)
+
+    @field_validator('values')
+    @classmethod
+    def validate_values(cls, values: dict[str, str]) -> dict[str, str]:
+        for key, value in values.items():
+            if not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', key):
+                raise ValueError('Matter value keys must be lowercase identifiers up to 64 characters')
+            if len(value) > 2000:
+                raise ValueError('Matter values must be at most 2000 characters')
+        return values
 
 
 class ReorderDocuments(BaseModel):
@@ -129,6 +145,15 @@ class ReplaceTextRun(BaseModel):
     expected_revision: int = Field(ge=1)
     expected_text: str = Field(min_length=1, max_length=2000)
     replacement: str = Field(min_length=1, max_length=2000)
+
+
+class MoveTextRun(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    page_index: int = Field(ge=0)
+    span_index: int = Field(ge=0)
+    expected_revision: int = Field(ge=1)
+    expected_text: str = Field(min_length=1, max_length=2000)
+    vertical_offset: float = Field(ge=-1, le=1)
 
 
 class JobView(BaseModel):

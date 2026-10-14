@@ -88,6 +88,48 @@ def test_replace_rejects_stale_and_unfittable_text_without_revision(client, auth
     assert client.get(base + '/pages/0/text-runs', headers=auth).status_code == 200
 
 
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+def test_move_text_vertically_preserves_original_and_checks_clear_space(client, auth, matter, rotation):
+    with pymupdf.open() as source:
+        page = source.new_page()
+        page.insert_text((80, 100), 'MOVE THIS LINE', fontsize=12)
+        page.insert_text((430, 100) if rotation in (90, 270) else (80, 430), 'LOWER LINE', fontsize=12)
+        page.set_rotation(rotation)
+        original = source.tobytes()
+    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+                           files=[('files', ('move.pdf', original, 'application/pdf'))])
+    assert uploaded.status_code == 201, uploaded.text
+    document = uploaded.json()[0]
+    store = client.app.state.store
+    source_hash = store.sha256(store.original_path(document))
+    base = f'/documents/{document["id"]}'
+    first = client.get(base + '/pages/0/text-runs', headers=auth).json()['runs'][0]
+    offset = .04
+    moved = client.post(base + '/pages/move-text-run', headers=auth, json={
+        'page_index': 0, 'span_index': first['index'], 'expected_revision': 1,
+        'expected_text': first['text'], 'vertical_offset': offset})
+    assert moved.status_code == 200, moved.text
+    after = client.get(base + '/pages/0/text-runs', headers=auth).json()['runs']
+    moved_run = next(run for run in after if run['text'] == first['text'])
+    assert moved_run['relative_bbox'][1] == pytest.approx(first['relative_bbox'][1] + offset, abs=.002)
+    assert store.sha256(store.original_path(document)) == source_hash
+    stale = client.post(base + '/pages/move-text-run', headers=auth, json={
+        'page_index': 0, 'span_index': first['index'], 'expected_revision': 1,
+        'expected_text': first['text'], 'vertical_offset': offset})
+    assert stale.status_code == 409
+    lower = next(run for run in after if run['text'] == 'LOWER LINE')
+    collision_offset = lower['relative_bbox'][1] - moved_run['relative_bbox'][1]
+    collision = client.post(base + '/pages/move-text-run', headers=auth, json={
+        'page_index': 0, 'span_index': moved_run['index'], 'expected_revision': 2,
+        'expected_text': moved_run['text'], 'vertical_offset': collision_offset})
+    assert collision.status_code == 422
+    assert store.get_document(document['id'])['revision'] == 2
+    undone = client.post(f'/matters/{matter["id"]}/history/undo', headers=auth)
+    assert undone.status_code == 200
+    restored = client.get(base + '/pages/0/text-runs', headers=auth).json()['runs'][0]
+    assert restored['relative_bbox'] == pytest.approx(first['relative_bbox'], abs=.002)
+
+
 @pytest.mark.parametrize('rotation', [90, 180, 270])
 def test_imported_rotated_page_text_can_be_selected_and_replaced(
         client, auth, matter, make_pdf, rotation):

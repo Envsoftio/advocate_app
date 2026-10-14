@@ -91,7 +91,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 5:
+            if version > 6:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -139,6 +139,10 @@ class Store:
                 matter_id TEXT PRIMARY KEY REFERENCES matters(id) ON DELETE CASCADE,
                 payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
             )''')
+            con.execute('''CREATE TABLE IF NOT EXISTS matter_values (
+                matter_id TEXT PRIMARY KEY REFERENCES matters(id) ON DELETE CASCADE,
+                payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
+            )''')
             con.execute('''CREATE TABLE IF NOT EXISTS edit_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 matter_id TEXT NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
@@ -165,8 +169,8 @@ class Store:
                     con.execute('ALTER TABLE matters ADD COLUMN archived_at TEXT')
                 if 'archived_at' not in document_columns:
                     con.execute('ALTER TABLE documents ADD COLUMN archived_at TEXT')
-            if version < 5:
-                con.execute('PRAGMA user_version=5')
+            if version < 6:
+                con.execute('PRAGMA user_version=6')
 
     def matter_dir(self, matter_id: str) -> Path:
         # Never accept caller-controlled paths. All ids must have been found in DB.
@@ -429,11 +433,41 @@ class Store:
 
     def set_memo_parties(self, matter_id: str, parties: list[dict]) -> list[dict]:
         with self.connect() as con:
+            previous = con.execute('SELECT payload_json FROM memo_parties WHERE matter_id=?',
+                                   (matter_id,)).fetchone()
+            before = json.loads(previous[0]) if previous else []
+            if before == parties:
+                return parties
             con.execute('''INSERT INTO memo_parties (matter_id,payload_json,updated_at)
                 VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
                 payload_json=excluded.payload_json,updated_at=excluded.updated_at''',
                 (matter_id, json.dumps(parties, ensure_ascii=False), utcnow()))
+            self._record_edit(con, matter_id, 'memo_parties', {'parties': before}, {'parties': parties})
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (utcnow(), matter_id))
+            self._audit(con, 'memo_parties_updated', matter_id)
         return parties
+
+    def get_matter_values(self, matter_id: str) -> dict[str, str]:
+        with self.connect() as con:
+            row = con.execute('SELECT payload_json FROM matter_values WHERE matter_id=?',
+                              (matter_id,)).fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def set_matter_values(self, matter_id: str, values: dict[str, str]) -> dict[str, str]:
+        with self.connect() as con:
+            previous = con.execute('SELECT payload_json FROM matter_values WHERE matter_id=?',
+                                   (matter_id,)).fetchone()
+            before = json.loads(previous[0]) if previous else {}
+            if before == values:
+                return values
+            con.execute('''INSERT INTO matter_values (matter_id,payload_json,updated_at)
+                VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
+                payload_json=excluded.payload_json,updated_at=excluded.updated_at''',
+                (matter_id, json.dumps(values, ensure_ascii=False), utcnow()))
+            self._record_edit(con, matter_id, 'matter_values', {'values': before}, {'values': values})
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (utcnow(), matter_id))
+            self._audit(con, 'matter_values_updated', matter_id)
+        return values
 
     def get_document(self, doc_id: str) -> dict | None:
         with self.connect() as con:
@@ -602,6 +636,13 @@ class Store:
             elif row['kind'] == 'bookmarks':
                 con.execute('DELETE FROM manual_bookmarks WHERE matter_id=?', (matter_id,))
                 self._write_manual_bookmarks(con, matter_id, state['entries'])
+            elif row['kind'] in ('memo_parties', 'matter_values'):
+                table = row['kind']
+                field = 'parties' if table == 'memo_parties' else 'values'
+                con.execute(f'''INSERT INTO {table} (matter_id,payload_json,updated_at)
+                    VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
+                    payload_json=excluded.payload_json,updated_at=excluded.updated_at''',
+                    (matter_id, json.dumps(state[field], ensure_ascii=False), now))
             else:
                 raise ValueError('Unsupported edit history entry')
             con.execute('UPDATE matters SET updated_at=? WHERE id=?', (now, matter_id))

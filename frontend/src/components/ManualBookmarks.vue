@@ -108,9 +108,9 @@ function resolve(index: number) {
         <option value="">Top level</option>
         <option v-for="parent in entries.slice(0,index)" :key="parent.id" :value="parent.id">Under {{parent.title}}</option>
       </select>
-      <button class="btn secondary small" :disabled="busy || disabled || index===0" @click="move(index,index-1)">↑</button>
-      <button class="btn secondary small" :disabled="busy || disabled || index===entries.length-1" @click="move(index,index+1)">↓</button>
-      <button class="btn secondary small" :disabled="busy || disabled" @click="remove(index)">Delete</button>
+      <button class="btn secondary small" :aria-label="'Move bookmark '+(index+1)+' up'" :disabled="busy || disabled || index===0" @click="move(index,index-1)">↑</button>
+      <button class="btn secondary small" :aria-label="'Move bookmark '+(index+1)+' down'" :disabled="busy || disabled || index===entries.length-1" @click="move(index,index+1)">↓</button>
+      <button class="btn secondary small" :aria-label="'Delete bookmark '+(index+1)" :disabled="busy || disabled" @click="remove(index)">Delete</button>
     </div>
     <div class="manual-bookmark-row">
       <input v-model="title" aria-label="New bookmark title" placeholder="Bookmark title" maxlength="200"/>
