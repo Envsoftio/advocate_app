@@ -28,7 +28,8 @@ export default defineConfig({
       url: 'http://127.0.0.1:8768/health',
       reuseExistingServer: false,
       timeout: 30_000,
-      env: { COURTBUNDLE_API_TOKEN: 'e2e-isolated-token', COURTBUNDLE_E2E_VITE_PORT: String(vitePort) },
+      env: { COURTBUNDLE_API_TOKEN: 'e2e-isolated-token', COURTBUNDLE_E2E_VITE_PORT: String(vitePort),
+        COURTBUNDLE_REQUIRE_VAULT: process.env.COURTBUNDLE_E2E_REQUIRE_VAULT === '1' ? '1' : '0' },
       // Authenticated health returns 401 until the test supplies its token.
       ignoreHTTPSErrors: false,
     },

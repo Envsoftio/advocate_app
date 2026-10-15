@@ -2,23 +2,55 @@
 from __future__ import annotations
 
 import json
+import io
 import os
+import struct
 import shutil
 import sqlite3
 import zipfile
 from pathlib import Path, PurePosixPath
 
 from .storage import Store, new_id, utcnow
+from .file_io import protected, read_bytes, size as file_size, write_bytes
+from .vault import encrypted_sink
 from .schemas import MatterCreate, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate, ManualBookmark
 from .engine import load_profiles
 
 PACKAGE_VERSION = 3
+PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
 
 
 class PortableMatterError(ValueError):
     pass
+
+
+def protected_package_header(envelope: dict) -> bytes:
+    metadata = json.dumps(envelope, separators=(',', ':')).encode('utf-8')
+    if len(metadata) > 16 * 1024:
+        raise PortableMatterError('Invalid protected package')
+    return PROTECTED_PACKAGE_MAGIC + struct.pack('>I', len(metadata)) + metadata
+
+
+def protected_package_bytes(envelope: dict, encrypted_zip: bytes) -> bytes:
+    if not encrypted_zip.startswith(b'CBENC1\n'):
+        raise PortableMatterError('Invalid protected package')
+    return protected_package_header(envelope) + encrypted_zip
+
+
+def parse_protected_package(raw: bytes) -> tuple[dict, bytes]:
+    if not raw.startswith(PROTECTED_PACKAGE_MAGIC) or len(raw) < len(PROTECTED_PACKAGE_MAGIC) + 4:
+        raise PortableMatterError('Invalid protected package')
+    offset = len(PROTECTED_PACKAGE_MAGIC)
+    length = struct.unpack('>I', raw[offset:offset + 4])[0]
+    if not 0 < length <= 16 * 1024 or len(raw) < offset + 4 + length:
+        raise PortableMatterError('Invalid protected package header')
+    try:
+        envelope = json.loads(raw[offset + 4:offset + 4 + length])
+    except (ValueError, TypeError) as exc:
+        raise PortableMatterError('Invalid protected package header') from exc
+    return envelope, raw[offset + 4 + length:]
 
 
 def _safe_relpath(value: str) -> str:
@@ -48,7 +80,7 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
         path = store.matter_dir(matter_id) / rel
         if not path.is_file() or path.is_symlink():
             raise PortableMatterError(f'Matter file missing or unsafe: {rel}')
-        size = path.stat().st_size
+        size = file_size(path)
         if size > MAX_FILE_BYTES:
             raise PortableMatterError(f'Matter file exceeds portable package limit: {rel}')
         files.append({'path': rel, 'bytes': size, 'sha256': store.sha256(path)})
@@ -67,24 +99,33 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     candidate = destination.with_name(destination.name + '.partial-' + new_id())
     try:
-        with zipfile.ZipFile(candidate, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-            archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False))
-            for item in files:
-                archive.write(store.matter_dir(matter_id) / item['path'], 'files/' + item['path'])
-        os.replace(candidate, destination)
+        def fill_archive(output):
+            with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+                archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False))
+                for item in files:
+                    archive.writestr('files/' + item['path'],
+                                     read_bytes(store.matter_dir(matter_id) / item['path']))
+        if protected(destination):
+            with encrypted_sink(destination, store._data_key) as output:
+                fill_archive(output)
+        else:
+            fill_archive(candidate)
+            os.replace(candidate, destination)
         store.audit('matter_backed_up', matter_id)
     finally:
         candidate.unlink(missing_ok=True)
 
 
-def restore_package(store: Store, package: Path) -> dict:
+def restore_package(store: Store, package: Path | bytes) -> dict:
     matter_id = new_id()
     final = store.matter_dir(matter_id)
     stage = final.with_name('.restore-' + matter_id)
     if stage.exists() or final.exists():
         raise PortableMatterError('Restore path collision')
     try:
-        with zipfile.ZipFile(package) as archive:
+        package_source = (io.BytesIO(package) if isinstance(package, bytes) else
+                          io.BytesIO(read_bytes(package)) if protected(package) else package)
+        with zipfile.ZipFile(package_source) as archive:
             entries = archive.infolist()
             names = [entry.filename for entry in entries]
             if len(names) != len(set(names)) or 'manifest.json' not in names:
@@ -116,8 +157,7 @@ def restore_package(store: Store, package: Path) -> dict:
                 rel = item['path']
                 target = stage / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open('files/' + rel) as source, target.open('xb') as output:
-                    shutil.copyfileobj(source, output, length=1024 * 1024)
+                write_bytes(target, archive.read('files/' + rel))
                 if store.sha256(target) != item['sha256']:
                     raise PortableMatterError(f'Hash mismatch in package: {rel}')
 

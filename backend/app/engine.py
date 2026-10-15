@@ -17,6 +17,7 @@ import zipfile
 import pymupdf
 
 from .pdf_ops import ProcessingError, validate_pdf
+from .file_io import open_pdf, read_bytes, save_pdf, size as file_size, write_bytes
 from .storage import Store, utcnow
 
 INDEX_ROWS_PER_PAGE = 23
@@ -83,7 +84,7 @@ def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
             issues.append(dict(severity='error', code='MISSING_WORKING_COPY', message=f'Working file missing: {doc["title"]}', **common))
             continue
         try:
-            with pymupdf.open(working) as pdf:
+            with open_pdf(working) as pdf:
                 if pdf.needs_pass:
                     issues.append(dict(severity='error', code='ENCRYPTED_INPUT', message=f'Encrypted input: {doc["title"]}', **common))
                 annotation_count = 0
@@ -130,6 +131,7 @@ def bundle_preview(store: Store, matter_id: str, max_pages: int,
     """Read-only view of the exact current volume/index/page-number plan."""
     documents = store.get_documents(matter_id)
     bookmarks = store.list_manual_bookmarks(matter_id)
+    document_titles = {document['id']: document['title'] for document in documents}
     plans = volume_plan(documents, max_pages, keep_groups) if documents else []
     volumes = []
     destinations = {}
@@ -143,6 +145,7 @@ def bundle_preview(store: Store, matter_id: str, max_pages: int,
             row['combined_end_page'] = combined_offset + row['end_page']
         volumes.append(dict(number=number, index_pages=index_count,
                             page_count=page_count, combined_start_page=combined_offset + 1,
+                            combined_end_page=combined_offset + page_count,
                             rows=rows))
         combined_offset += page_count
     manual = []
@@ -150,6 +153,8 @@ def bundle_preview(store: Store, matter_id: str, max_pages: int,
         destination = destinations.get(item['document_id'])
         resolved = bool(item['resolved'] and destination)
         manual.append(dict(id=item['id'], title=item['title'], resolved=resolved,
+                           document_title=document_titles.get(item['document_id'], 'Archived document'),
+                           document_page=item['page_index'] + 1,
                            volume=destination[0] if resolved else None,
                            volume_page=destination[1] + item['page_index'] if resolved else None,
                            combined_page=destination[2] + destination[1] + item['page_index'] if resolved else None))
@@ -222,7 +227,7 @@ def check_export_sizes(staging: Path, filenames: list[str], max_file_mb: float |
     if max_file_mb is None:
         return
     limit_bytes = max_file_mb * 1024 * 1024
-    sizes = [(name, (staging / name).stat().st_size) for name in filenames]
+    sizes = [(name, file_size(staging / name)) for name in filenames]
     oversized = [(name, size) for name, size in sizes if size > limit_bytes]
     if oversized:
         details = ', '.join(f'{name} ({size:,} bytes)' for name, size in oversized)
@@ -251,7 +256,7 @@ def manual_toc(bookmarks: list[dict], destinations: dict[str, int]) -> list[list
 def validate_navigation(path: Path, pages: int, toc: list, links: dict[int, list[int]]) -> None:
     """Check actual serialized destinations, not merely outline/link counts."""
     validate_pdf(path, pages)
-    with pymupdf.open(path) as pdf:
+    with open_pdf(path) as pdf:
         if pdf.get_toc() != toc:
             raise ProcessingError('Written PDF outline differs from the deterministic page map')
         for index, page in enumerate(pdf):
@@ -296,7 +301,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
         for row, d in zip(rows, documents):
             if cancelled and cancelled():
                 raise ProcessingError('Operation cancelled')
-            with pymupdf.open(d['_working_path']) as source:
+            with open_pdf(d['_working_path']) as source:
                 if source.page_count != d['page_count']:
                     raise ProcessingError(f'Page count changed for {d["title"]} while building. Retry.')
                 # Source annotations/links are omitted by policy; generated index links
@@ -318,10 +323,11 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
             if cancelled and cancelled():
                 raise ProcessingError('Operation cancelled')
             page = output[i]
-            x = page.rect.width / 2 - 16
             y = page.rect.height - 24
             if y > 40:
-                page.insert_text((x, y), str(i + 1), fontsize=9, color=(.24,.28,.33))
+                page.insert_textbox(pymupdf.Rect(24, y - 11, page.rect.width - 24, y + 5),
+                                    str(i + 1), fontsize=9, align=pymupdf.TEXT_ALIGN_CENTER,
+                                    color=(.24,.28,.33))
 
         # Link each index row to its true 0-based destination.
         for i in range(index_count):
@@ -337,14 +343,14 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
         output.set_metadata({'title': f'{matter["name"]} - Volume {volume_no}',
                              'subject': 'DRAFT CourtBundle POC - not court certified',
                              'creator': 'CourtBundle POC'})
-        output.save(path, garbage=4, deflate=True)
+        save_pdf(output, path, garbage=4, deflate=True)
 
     expected_links = {}
     for index, row in enumerate(rows):
         expected_links.setdefault(index // INDEX_ROWS_PER_PAGE, []).append(row['start_page'] - 1)
     validate_navigation(path, index_count + sum(d['page_count'] for d in documents), toc, expected_links)
 
-    with pymupdf.open(path) as check:
+    with open_pdf(path) as check:
         if check.page_count > matter['max_pages_per_volume']:
             raise ProcessingError('Internal error: resulting volume exceeded page cap')
         if len(check.get_toc()) < 2 or sum(len(check[i].get_links()) for i in range(index_count)) != len(rows):
@@ -402,7 +408,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             combined_destinations = {}
             offset = 0
             for vno, volume in enumerate(volume_rows, start=1):
-                with pymupdf.open(staging / volume['filename']) as part:
+                with open_pdf(staging / volume['filename']) as part:
                     count = part.page_count
                     # Re-create internal index hyperlinks after concatenation for reliable targets.
                     for first in range(0, count, 10):
@@ -432,12 +438,12 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             combined.set_metadata({'title': f'{matter["name"]} - Combined Filing Bundle',
                                    'subject': 'DRAFT CourtBundle POC - not court certified',
                                    'creator': 'CourtBundle POC'})
-            combined.save(combined_file, garbage=4, deflate=True)
+            save_pdf(combined, combined_file, garbage=4, deflate=True)
 
         validate_navigation(combined_file, offset, global_toc, global_links)
 
         progress(83, 'Checking bookmarks and generating index CSV')
-        with pymupdf.open(combined_file) as final:
+        with open_pdf(combined_file) as final:
             if not final.get_toc() or len(final.get_toc()) < len(all_rows):
                 raise ProcessingError('Combined bookmarks validation failed')
             if sum(len(final[i].get_links()) for i in range(final.page_count)) < len(all_rows):
@@ -445,11 +451,12 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             combined_pages = final.page_count
 
         csvpath = staging / 'index.csv'
-        with csvpath.open('w', newline='', encoding='utf-8-sig') as stream:
-            writer = csv.DictWriter(stream, fieldnames=['volume','part','kind','label','title','start_page','end_page','total_pages'])
-            writer.writeheader()
-            writer.writerows({key:r[key] for key in writer.fieldnames} for r in all_rows)
-        file_bytes = combined_file.stat().st_size
+        csv_stream = io.StringIO(newline='')
+        writer = csv.DictWriter(csv_stream, fieldnames=['volume','part','kind','label','title','start_page','end_page','total_pages'])
+        writer.writeheader()
+        writer.writerows({key:r[key] for key in writer.fieldnames} for r in all_rows)
+        write_bytes(csvpath, csv_stream.getvalue().encode('utf-8-sig'))
+        file_bytes = file_size(combined_file)
         if any(any(ord(c)>126 for c in row['title']+row['label']) for row in all_rows):
             problems.append(dict(severity='warning', code='NON_LATIN_INDEX', document_id=None,
                                  message='Printed index uses built-in Latin PDF fonts; non-Latin title glyphs may be replaced by ?. PDF outlines retain Unicode titles.'))
@@ -469,7 +476,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'total_input_documents': len(documents), 'volume_count': len(plans),
                   'combined_pages': combined_pages, 'combined_bytes': file_bytes,
                   'checks': problems, 'volumes': [{'name':v['filename'],'items':len(v['rows'])} for v in volume_rows]}
-        (staging / 'validation-report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+        write_bytes(staging / 'validation-report.json', json.dumps(report, indent=2).encode('utf-8'))
         readme = ('CourtBundle POC - DRAFT EXPORT\n\n'
                   'This package is NOT court-certified and is NOT proof of filing.\n'
                   'The selected rules are illustrative technical checks only.\n'
@@ -479,15 +486,17 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'Generated index links and bookmarks are retained. See validation-report.json for affected documents.\n'
                   'Every PDF page number in an index is the 1-based page position WITHIN that volume.\n'
                   'combined.pdf concatenates all generated volumes, including their separate indexes.\n')
-        (staging / 'READ_ME_FIRST.txt').write_text(readme, encoding='utf-8')
+        write_bytes(staging / 'READ_ME_FIRST.txt', readme.encode('utf-8'))
         progress(90, 'Packaging export ZIP')
         zip_file = staging / 'filing-package.zip'
-        with zipfile.ZipFile(zip_file, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        zip_stream = io.BytesIO()
+        with zipfile.ZipFile(zip_stream, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
             for filename in ['combined.pdf', *[v['filename'] for v in volume_rows], 'index.csv', 'validation-report.json', 'READ_ME_FIRST.txt']:
                 if cancelled():
                     raise ProcessingError('Operation cancelled')
-                z.write(staging / filename, arcname=filename)
-        with zipfile.ZipFile(zip_file) as archive:
+                z.writestr(filename, read_bytes(staging / filename))
+        write_bytes(zip_file, zip_stream.getvalue())
+        with zipfile.ZipFile(io.BytesIO(read_bytes(zip_file))) as archive:
             if archive.testzip() is not None:
                 raise ProcessingError('Export ZIP integrity verification failed')
         filenames = ['filing-package.zip', 'combined.pdf', *[v['filename'] for v in volume_rows], 'index.csv', 'validation-report.json']
@@ -500,10 +509,10 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                                build_input_digest=build_input_digest,
                                build_settings=build_settings, manual_bookmark_inputs=bookmark_inputs,
                                interactive_content_policy=EXPORT_INTERACTIVE_CONTENT_POLICY,
-                               files=[{'name':name,'bytes':(staging/name).stat().st_size,
+                               files=[{'name':name,'bytes':file_size(staging/name),
                                        'sha256':store.sha256(staging/name)} for name in filenames],
                                checks=problems)
-        (staging / 'export_manifest.json').write_text(json.dumps(export_manifest, indent=2), encoding='utf-8')
+        write_bytes(staging / 'export_manifest.json', json.dumps(export_manifest, indent=2).encode('utf-8'))
         if cancelled():
             raise ProcessingError('Operation cancelled')
         source_errors = original_integrity_issues(store, documents)

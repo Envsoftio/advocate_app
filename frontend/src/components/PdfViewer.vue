@@ -22,6 +22,8 @@ const rotatingPage = ref(false)
 const viewerError = ref('')
 const scalePct = ref(100)
 const showThumbnails = ref(false)
+const draggingPage = ref<number | null>(null)
+const dropTargetPage = ref<number | null>(null)
 type ManualBookmark = {id:string,title:string,document_id:string,page_index:number,target_revision:number,parent_id:string|null,resolved:boolean}
 const manualBookmarks = ref<ManualBookmark[]>([])
 const bookmarkOpen = ref(false)
@@ -268,8 +270,8 @@ async function addPageBookmark() {
   finally { bookmarkSaving.value = false }
 }
 
-async function edit(action: 'rotate' | 'delete' | 'reorder', params: unknown) {
-  if (!props.document || editing.value) return
+async function edit(action: 'rotate' | 'delete' | 'reorder', params: unknown, focusPage?: number): Promise<boolean> {
+  if (!props.document || editing.value) return false
   const rotating = action === 'rotate'
   const startedAt = performance.now()
   editing.value = true
@@ -282,8 +284,10 @@ async function edit(action: 'rotate' | 'delete' | 'reorder', params: unknown) {
         await new Promise(resolve => window.setTimeout(resolve, remaining))
       await loadPdf(updated)
     }
+    if (focusPage) current.value = focusPage
     emit('modified')
-  } catch (err) { emit('error', friendlyError(err)) }
+    return true
+  } catch (err) { emit('error', friendlyError(err)); return false }
   finally { editing.value = false; if (rotating) rotatingPage.value = false }
 }
 function move(step: number) {
@@ -293,7 +297,30 @@ function move(step: number) {
   if (to < 0 || to >= total.value) return
   const order = Array.from({ length: total.value }, (_, i) => i)
   ;[order[from], order[to]] = [order[to], order[from]]
-  void edit('reorder', { order })
+  void edit('reorder', { order }, to + 1)
+}
+function startPageDrag(event: DragEvent, number: number) {
+  if (editing.value || loading.value || props.disabled) { event.preventDefault(); return }
+  draggingPage.value = number
+  event.dataTransfer?.setData('text/plain', String(number))
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+function overPage(event: DragEvent, number: number) {
+  if (!draggingPage.value || draggingPage.value === number) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  dropTargetPage.value = number
+}
+function dropPage(event: DragEvent, target: number) {
+  const source = draggingPage.value || Number(event.dataTransfer?.getData('text/plain'))
+  draggingPage.value = null
+  dropTargetPage.value = null
+  if (!Number.isInteger(source) || source < 1 || source > total.value || source === target) return
+  const order = Array.from({length: total.value}, (_, index) => index)
+  order.splice(source - 1, 1)
+  const targetIndex = order.indexOf(target - 1)
+  order.splice(targetIndex + (source < target ? 1 : 0), 0, source - 1)
+  void edit('reorder', {order}, target)
 }
 function deleteCurrent() {
   if (total.value <= 1 || !window.confirm(`Remove page ${current.value} from the working copy? The original remains intact.`)) return
@@ -483,7 +510,8 @@ async function applyReplacement() {
         <p v-if="!textRuns.length && !editNotice">No selectable horizontal text found on this page. Scanned text needs OCR and review.</p>
       </div></Transition>
       <Transition name="soft"><div v-if="total > 0 && showThumbnails" ref="thumbnailWrap" class="thumbnail-strip" aria-label="Page thumbnails">
-        <button v-for="number in thumbnailPages" :key="number" class="thumbnail-button" :class="{selected:number===current}" :aria-label="'Go to page '+number" @click="current=number"><canvas :data-page="number"></canvas><span>{{number}}</span></button>
+        <span class="thumbnail-hint">Drag to reorder working-copy pages</span>
+        <button v-for="number in thumbnailPages" :key="number" class="thumbnail-button" :class="{selected:number===current,dragging:draggingPage===number,'drop-target':dropTargetPage===number}" :aria-label="'Go to page '+number" :draggable="!disabled && !editing" @dragstart="startPageDrag($event,number)" @dragend="draggingPage=null;dropTargetPage=null" @dragover="overPage($event,number)" @drop.prevent="dropPage($event,number)" @click="current=number"><canvas :data-page="number"></canvas><span>{{number}}</span></button>
       </div></Transition>
       <div ref="canvasWrap" class="canvas-scroll" :aria-busy="loading || editing">
         <div v-if="(loading || editing) && !(replacingText && editSnapshot)" class="preview-status"><LoaderCircle :size="18" class="spin"/> {{ editing ? 'Updating PDF…' : 'Loading PDF…' }}</div>

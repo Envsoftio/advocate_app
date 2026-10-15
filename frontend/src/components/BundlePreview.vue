@@ -18,12 +18,13 @@ interface Volume {
   index_pages: number
   page_count: number
   combined_start_page: number
+  combined_end_page: number
   rows: Row[]
 }
 interface Preview {
   volumes: Volume[]
   combined_pages: number
-  manual_bookmarks: Array<{id:string,title:string,resolved:boolean,volume:number|null,volume_page:number|null,combined_page:number|null}>
+  manual_bookmarks: Array<{id:string,title:string,document_title:string,document_page:number,resolved:boolean,volume:number|null,volume_page:number|null,combined_page:number|null}>
   numbering: string
 }
 const props = defineProps<{
@@ -32,7 +33,7 @@ const props = defineProps<{
   keepGroups: boolean
   refreshKey: number
 }>()
-const emit = defineEmits<{ openDocument: [id: string] }>()
+const emit = defineEmits<{ openDocument: [id: string], bookmarkDocument: [id: string] }>()
 const preview = ref<Preview | null>(null)
 const loading = ref(false)
 const error = ref('')
@@ -66,20 +67,20 @@ watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey]
     <div class="panel-header"><div><h2>Review index & page numbers</h2><span>Current plan before building</span></div>
       <button class="btn secondary small" :disabled="loading" @click="refresh">Refresh</button></div>
     <div class="bundle-preview-body">
-      <p class="hint">Index pages count toward each volume. Document rows become linked index entries and generated PDF bookmarks. Printed numbers restart in each volume.</p>
+      <p class="hint">Volume page numbers are printed on the PDFs and restart at 1. Combined page numbers are physical positions in combined.pdf. Index pages count in both.</p>
       <p v-if="loading" role="status">Calculating page map…</p>
       <p v-if="error" role="alert" class="error-msg">{{error}}</p>
       <div v-if="preview && !loading">
         <p v-if="!preview.volumes.length" class="hint">Import documents to see index rows and page numbers.</p>
-        <p v-else class="bundle-preview-summary">{{preview.volumes.length}} volume(s) · {{preview.combined_pages}} combined pages</p>
+        <p v-else class="bundle-preview-summary">{{preview.volumes.length}} volume(s) · {{preview.volumes.reduce((sum, volume) => sum + volume.index_pages, 0)}} index page(s) · {{preview.combined_pages}} combined pages</p>
         <div v-for="volume in preview.volumes" :key="volume.number" class="bundle-preview-volume">
           <h3>Volume {{volume.number}} <small>{{volume.page_count}} pages · {{volume.index_pages}} index page(s)</small></h3>
-          <p class="hint">Index: volume pages 1–{{volume.index_pages}} · combined starts at page {{volume.combined_start_page}}</p>
-          <div class="bundle-preview-scroll"><table><thead><tr><th scope="col">Index entry / bookmark</th><th scope="col">Volume pages</th><th scope="col">Combined PDF pages</th></tr></thead>
-            <tbody><tr v-for="row in volume.rows" :key="row.id"><td><button class="bundle-preview-doc" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">Part {{row.part}} · {{row.label ? row.label+' · ' : '' }}{{row.title}}</button></td><td>{{row.start_page}}–{{row.end_page}}</td><td>{{row.combined_start_page}}–{{row.combined_end_page}}</td></tr></tbody></table></div>
+          <p class="hint">Index: printed volume pages 1–{{volume.index_pages}} · combined starts at page {{volume.combined_start_page}} and ends at page {{volume.combined_end_page}}</p>
+          <div class="bundle-preview-scroll"><table><thead><tr><th scope="col">Index entry / bookmark</th><th scope="col">Printed volume pages</th><th scope="col">Combined PDF pages</th></tr></thead>
+            <tbody><tr v-for="row in volume.rows" :key="row.id"><td><button class="bundle-preview-doc" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">Part {{row.part}} · {{row.label ? row.label+' · ' : '' }}{{row.title}}</button><button class="bundle-preview-bookmark" :aria-label="'Bookmark '+row.title+' first page'" @click="emit('bookmarkDocument',row.id)">+ Bookmark</button></td><td>{{row.start_page}}–{{row.end_page}}</td><td>{{row.combined_start_page}}–{{row.combined_end_page}}</td></tr></tbody></table></div>
         </div>
         <div v-if="preview.manual_bookmarks.length" class="bundle-preview-manual"><h3>Manual bookmark destinations</h3>
-          <ul><li v-for="bookmark in preview.manual_bookmarks" :key="bookmark.id">{{bookmark.title}} — <span v-if="bookmark.resolved">Volume {{bookmark.volume}}, page {{bookmark.volume_page}} · combined page {{bookmark.combined_page}}</span><strong v-else>Needs review; omitted from export</strong></li></ul>
+          <ul><li v-for="bookmark in preview.manual_bookmarks" :key="bookmark.id"><strong>{{bookmark.title}}</strong> · {{bookmark.document_title}}, source page {{bookmark.document_page}} — <span v-if="bookmark.resolved">Volume {{bookmark.volume}}, printed page {{bookmark.volume_page}} · combined page {{bookmark.combined_page}}</span><strong v-else>Needs review; omitted from export</strong></li></ul>
         </div>
         <p class="hint">{{preview.numbering}} These are physical PDF pages, including index pages. Review the generated PDFs before use; the illustrative profile is not legally approved.</p>
       </div>

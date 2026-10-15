@@ -25,8 +25,9 @@ def new_id() -> str:
 
 class Store:
     HISTORY_LIMIT = 100
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, data_key: bytes | None = None):
         self.root = Path(root).expanduser().resolve()
+        self._data_key = data_key
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if os.name != 'nt':
             # The data root is an application-owned trust boundary. Existing stores
@@ -50,6 +51,9 @@ class Store:
             self._lock_file.close()
             raise RuntimeError('Matter data is already open in another CourtBundle engine') from exc
         self.dbpath = self.root / 'court_bundle.sqlite3'
+        if self._data_key is not None:
+            from .file_io import register
+            register(self.root, self._data_key)
         try:
             self._initialize()
             self.recover_temporary_packages()
@@ -59,6 +63,9 @@ class Store:
             raise
 
     def close(self):
+        if self._data_key is not None:
+            from .file_io import unregister
+            unregister(self.root)
         if not self._lock_file.closed:
             if os.name == 'nt':
                 import msvcrt
@@ -75,8 +82,16 @@ class Store:
 
     @contextmanager
     def connect(self):
-        con = sqlite3.connect(self.dbpath, timeout=30)
-        con.row_factory = sqlite3.Row
+        if self._data_key is None:
+            from .secure_db import is_plain_sqlite
+            if self.dbpath.exists() and not is_plain_sqlite(self.dbpath):
+                raise RuntimeError('Encrypted matter database requires an unlock key')
+            con = sqlite3.connect(self.dbpath, timeout=30)
+        else:
+            from .secure_db import connect_encrypted
+            con = connect_encrypted(self.dbpath, self._data_key)
+        if self._data_key is None:
+            con.row_factory = sqlite3.Row
         con.execute('PRAGMA foreign_keys=ON')
         con.execute('PRAGMA busy_timeout=30000')
         try:
@@ -656,11 +671,8 @@ class Store:
 
     @staticmethod
     def sha256(path: Path) -> str:
-        h = hashlib.sha256()
-        with path.open('rb') as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-                h.update(chunk)
-        return h.hexdigest()
+        from .file_io import sha256
+        return sha256(path)
 
     def original_path(self, doc: dict) -> Path:
         return self.matter_dir(doc['matter_id']) / doc['source_relpath']
@@ -720,6 +732,7 @@ class Store:
         return hashlib.sha256(encoded).hexdigest()
 
     def list_exports(self, matter_id: str) -> list[dict]:
+        from .file_io import read_bytes
         root = self.exports_root(matter_id)
         if not root.exists():
             return []
@@ -733,7 +746,7 @@ class Store:
             if manifest.parent.name.startswith('.'):
                 continue
             try:
-                info = json.loads(manifest.read_text(encoding='utf-8'))
+                info = json.loads(read_bytes(manifest))
                 recorded_digest = info.get('build_input_digest')
                 info['stale'] = (not recorded_digest or not matter or
                                  info.get('matter_updated_at') != matter['updated_at'] or
@@ -744,6 +757,7 @@ class Store:
         return sorted(exports, key=lambda x: x.get('created_at', ''), reverse=True)
 
     def get_export_file(self, matter_id: str, export_id: str, filename: str) -> Path | None:
+        from .file_io import read_bytes, size
         # Strict export folder identity and path containment.
         if len(export_id) != 32 or not all(c in '0123456789abcdef' for c in export_id):
             return None
@@ -753,9 +767,9 @@ class Store:
         if (path.is_file() and not path.is_symlink() and not path.parent.is_symlink()
                 and path.parent.resolve() == (self.exports_root(matter_id) / export_id).resolve()):
             try:
-                manifest = json.loads((path.parent / 'export_manifest.json').read_text())
+                manifest = json.loads(read_bytes(path.parent / 'export_manifest.json'))
                 artifact = next((item for item in manifest['files'] if item['name'] == filename), None)
-                if artifact and artifact['bytes'] == path.stat().st_size:
+                if artifact and artifact['bytes'] == size(path):
                     if artifact.get('sha256') and self.sha256(path) != artifact['sha256']:
                         return None
                     return path
@@ -804,6 +818,7 @@ class Store:
                 WHERE status IN ('queued','running')''', (utcnow(),))
 
     def recover_interrupted_work(self):
+        from .file_io import read_bytes
         """Remove only unpublished build staging directories after acquiring the data lock."""
         self.interrupt_unfinished_jobs()
         with self.connect() as con:
@@ -826,7 +841,7 @@ class Store:
                 if not re.fullmatch(r'[0-9a-f]{32}', job['id']):
                     continue
                 try:
-                    manifest = json.loads((root / job['id'] / 'export_manifest.json').read_text())
+                    manifest = json.loads(read_bytes(root / job['id'] / 'export_manifest.json'))
                     if (manifest['id'] != job['id'] or manifest['matter_id'] != matter_id
                             or not manifest['files']):
                         continue

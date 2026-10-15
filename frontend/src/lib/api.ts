@@ -42,7 +42,7 @@ async function request(path: string, init?: RequestInit, timeoutMs = REQUEST_TIM
   const conn = await getConnection()
   const headers = new Headers(init?.headers)
   headers.set('Authorization', 'Bearer ' + conn.token)
-  if (init?.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
+  if (typeof init?.body === 'string') headers.set('Content-Type', 'application/json')
   let res: Response
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
@@ -71,15 +71,18 @@ export async function api<T>(path: string, method = 'GET', body?: unknown, timeo
 }
 
 export async function uploadDocuments(matterId: string, files: File[]): Promise<void> {
-  const form = new FormData()
-  for (const file of files) form.append('files', file)
-  await request(`/matters/${matterId}/documents`, { method: 'POST', body: form })
+  for (const file of files) {
+    await request(`/matters/${matterId}/documents/raw`, { method: 'POST', body: file,
+      headers: { 'Content-Type': 'application/octet-stream',
+        'X-CourtBundle-Filename': encodeURIComponent(file.name) } }, 5 * 60_000)
+  }
 }
 
-export async function restoreMatter(file: File): Promise<Matter> {
-  const form = new FormData()
-  form.append('file', file)
-  const response = await request('/matters/restore', { method: 'POST', body: form }, 5 * 60_000)
+export async function restoreMatter(file: File, credential?: string, recovery = false): Promise<Matter> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/octet-stream' }
+  if (credential) headers['X-CourtBundle-Backup-Credential'] = credential
+  if (recovery) headers['X-CourtBundle-Backup-Recovery'] = 'true'
+  const response = await request('/matters/restore', { method: 'POST', body: file, headers }, 5 * 60_000)
   return response.json() as Promise<Matter>
 }
 

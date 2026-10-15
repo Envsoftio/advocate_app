@@ -11,3 +11,4 @@
 - Rust/Tauri: native build requires matching PyInstaller sidecar in `frontend/src-tauri/binaries/`; create via `python backend/scripts/build_sidecar.py`. NOT compiled in authoring container (Rust toolchain absent).
 - First priority: real Mac/Windows compile, browser UI runtime verification, native export/save testing. Do not infer those tests passed.
 - Work with synthetic files in `samples/`, not actual confidential matters. Source hashes and signed documents require extra caution.
+- For new implementation tickets, carry authorized work through implementation, verification and handoff in one pass; do not stop after scaffolding. Mark a ticket complete only when its stated acceptance checks pass.

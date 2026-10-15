@@ -58,10 +58,14 @@ def test_bundle_preview_matches_built_ranges_and_bookmarks(client, auth, matter,
     assert preview_response.status_code == 200, preview_response.text
     preview = preview_response.json()
     assert [(volume['index_pages'], volume['page_count']) for volume in preview['volumes']] == [(1, 3), (1, 3)]
+    assert [(volume['combined_start_page'], volume['combined_end_page'])
+            for volume in preview['volumes']] == [(1, 3), (4, 6)]
     assert [(row['start_page'], row['end_page'], row['combined_start_page'], row['combined_end_page'])
             for volume in preview['volumes'] for row in volume['rows']] == [(2, 3, 2, 3), (2, 3, 5, 6)]
     assert preview['manual_bookmarks'][0]['volume_page'] == 3
     assert preview['manual_bookmarks'][0]['combined_page'] == 6
+    assert preview['manual_bookmarks'][0]['document_title'] == second['title']
+    assert preview['manual_bookmarks'][0]['document_page'] == 2
     assert client.get(base, headers=auth).json()['max_pages_per_volume'] != 3  # preview did not save the draft
     assert client.patch(base, headers=auth, json=request).status_code == 200
     job = wait_for_job(client, auth, client.post(base + '/build', headers=auth).json()['id'])
@@ -71,6 +75,11 @@ def test_bundle_preview_matches_built_ranges_and_bookmarks(client, auth, matter,
         assert pdf.page_count == preview['combined_pages']
         assert [item[2] for item in pdf.get_toc() if item[1] in (first['title'], second['title'])] == [2, 5]
         assert [item[2] for item in pdf.get_toc() if item[1] == 'Reviewed page'] == [6]
+        for combined_index, printed_number in ((0, '1'), (2, '3'), (3, '1'), (5, '3')):
+            page = pdf[combined_index]
+            footer_words = [word[4] for word in page.get_text('words')
+                            if word[1] > page.rect.height - 50]
+            assert printed_number in footer_words
     with (folder / 'index.csv').open(encoding='utf-8-sig') as stream:
         import csv
         rows = list(csv.DictReader(stream))

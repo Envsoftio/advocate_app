@@ -7,6 +7,80 @@ const samples = resolve(import.meta.dirname, '../../samples')
 const backend = 'http://127.0.0.1:8768'
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 
+async function dragWithPointer(page: import('@playwright/test').Page,
+                               source: import('@playwright/test').Locator,
+                               target: import('@playwright/test').Locator) {
+  const from = await source.boundingBox()
+  const to = await target.boundingBox()
+  expect(from).not.toBeNull()
+  expect(to).not.toBeNull()
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(from!.x + from!.width / 2, from!.y + from!.height / 2 + 8, {steps:2})
+  await page.mouse.move(to!.x + to!.width / 2, to!.y + to!.height / 2, {steps:8})
+  await page.mouse.up()
+}
+
+test('Quick Bundle keeps one saved journey and blocks generation when settings cannot save', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Guided Quick Bundle', court_profile: 'general-demo',
+    case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  for (const name of ['01_petition.pdf', '02_impugned_order.pdf']) {
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+      multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
+    })
+    expect(uploaded.ok()).toBeTruthy()
+  }
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Guided Quick Bundle' })).toBeVisible()
+  await page.getByRole('button', { name: 'Quick Bundle', exact: true }).click()
+  const journey = page.getByRole('region', { name: 'Quick Bundle journey' })
+  await expect(journey.getByRole('heading', { name: 'Import' })).toBeVisible()
+  await expect(journey).toContainText('2 imported document(s)')
+  await journey.getByRole('button', { name: 'Continue to arrange' }).click()
+  await expect(journey.getByRole('heading', { name: 'Arrange' })).toBeVisible()
+
+  await page.reload()
+  await expect(journey.getByRole('heading', { name: 'Arrange' })).toBeVisible()
+  await journey.getByRole('button', { name: 'Open full workspace' }).click()
+  await expect(page.getByRole('button', { name: 'Index & bookmarks' })).toBeVisible()
+  await page.getByRole('button', { name: 'Quick Bundle', exact: true }).click()
+  await expect(journey.getByRole('heading', { name: 'Arrange' })).toBeVisible()
+  await journey.getByRole('button', { name: 'Review bundle' }).click()
+  await expect(journey.getByRole('heading', { name: 'Review' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('1 volume(s)')
+
+  let buildRequests = 0
+  await page.route(`**/matters/${matterId}`, async route => {
+    if (route.request().method() === 'PATCH') {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({detail:'synthetic settings failure'}) })
+    } else await route.continue()
+  })
+  await page.route(`**/matters/${matterId}/build`, async route => { buildRequests += 1; await route.continue() })
+  await journey.getByRole('button', { name: 'Generate bundle' }).click()
+  await expect(page.getByText('synthetic settings failure')).toBeVisible()
+  await expect(journey.getByRole('heading', { name: 'Review' })).toBeVisible()
+  expect(buildRequests).toBe(0)
+
+  await page.unroute(`**/matters/${matterId}`)
+  await journey.getByRole('button', { name: 'Generate bundle' }).click()
+  await expect(journey.getByRole('heading', { name: 'Export' })).toBeVisible()
+  await expect(page.getByText('Latest filing package')).toBeVisible({ timeout: 90_000 })
+  expect(buildRequests).toBe(1)
+  await journey.getByRole('button', { name: 'Review combined PDF' }).click()
+  const pdfReview = page.getByRole('dialog', { name: 'Review generated PDF' })
+  await expect(pdfReview).toBeVisible()
+  await pdfReview.getByRole('button', { name: 'Close review' }).click()
+  await journey.getByRole('button', { name: /Import$/ }).click()
+  await journey.getByRole('button', { name: 'Open sample matter' }).click()
+  await expect(page.getByRole('heading', { name: /Synthetic Quick Bundle/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'E2E Guided Quick Bundle' })).toBeVisible()
+  await expect(journey.getByRole('heading', { name: 'Arrange' })).toBeVisible()
+})
+
 test('compression exposes measured results and retains a usable PDF', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Compression', court_profile: 'general-demo', max_pages_per_volume: 300,
@@ -234,6 +308,80 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
   await page.reload()
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Second')
+})
+
+test('dragging document, bookmark and page order updates the shared index plan', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Drag Index', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  for (const name of ['01_petition.pdf', '02_impugned_order.pdf']) {
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+      multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
+    })
+    expect(uploaded.ok()).toBeTruthy()
+  }
+  await page.goto('/')
+  await expect(page.locator('body')).toHaveCSS('font-family', /Manrope Variable/)
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
+  const order = page.getByRole('region', { name: 'Index document order' }).locator('.index-order-row')
+  await dragWithPointer(page, order.nth(0).locator('.grip'), order.nth(1))
+  await expect(order.first()).toContainText('02_impugned_order')
+  const preview = page.getByRole('region', { name: 'Index and page number preview' })
+  await expect(preview.locator('tbody tr').first()).toContainText('02_impugned_order')
+  await expect(preview).toContainText('Printed volume pages')
+  await preview.getByRole('button', { name: 'Bookmark 02_impugned_order first page' }).click()
+  await expect(page.getByRole('textbox', { name: 'New bookmark title' })).toHaveValue('02_impugned_order')
+  await page.getByRole('button', { name: 'Add bookmark' }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('02_impugned_order')
+  await preview.getByRole('button', { name: 'Bookmark 01_petition first page' }).click()
+  await page.getByRole('button', { name: 'Add bookmark' }).click()
+  const bookmarks = page.getByRole('region', { name: 'Manual bookmarks' }).locator('.manual-bookmark-row')
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 2' })).toHaveValue('01_petition')
+  await dragWithPointer(page, bookmarks.nth(1).locator('.grip'), bookmarks.nth(0))
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('01_petition')
+  await expect(page.getByRole('button', { name: 'Add bookmark' })).toBeEnabled()
+  await page.reload()
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('01_petition')
+  await expect(order.first()).toContainText('02_impugned_order')
+  await expect(preview).toContainText('source page 1')
+  await page.getByRole('button', { name: 'Documents', exact: true }).click()
+  const rows = page.locator('.docs-list .doc-item')
+  await expect(rows.first()).toContainText('02_impugned_order')
+  await expect(rows.first()).toHaveCSS('user-select', 'none')
+  await expect(page.getByRole('textbox', { name: 'Search documents' })).toHaveCSS('user-select', 'text')
+  await expect(rows.first()).not.toHaveClass(/document-list-move/)
+  await page.evaluate(() => {
+    const state = window as Window & {__courtBundleDocumentListAnimated?:boolean}
+    state.__courtBundleDocumentListAnimated = false
+    const list = document.querySelector('.docs-list')
+    if (!list) return
+    new MutationObserver(records => {
+      for (const record of records) {
+        const element = record.target as HTMLElement
+        if (element.matches('.doc-item') && element.style.transform && element.style.transition.includes('transform')) {
+          state.__courtBundleDocumentListAnimated = true
+        }
+      }
+    }).observe(list, {subtree:true,attributes:true,attributeFilter:['style']})
+  })
+  await dragWithPointer(page, rows.nth(0).locator('.grip'), rows.nth(1))
+  await expect(rows.first()).toContainText('01_petition')
+  expect(await page.evaluate(() => (window as Window & {__courtBundleDocumentListAnimated?:boolean}).__courtBundleDocumentListAnimated)).toBe(true)
+  await expect.poll(async () => (await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json())
+    .map((document: {title:string}) => document.title)).toEqual(['01_petition', '02_impugned_order'])
+  await page.reload()
+  await expect(rows.first()).toContainText('01_petition')
+  await rows.first().click()
+  await page.getByRole('button', { name: 'Show thumbnails' }).click()
+  const thumbs = page.locator('.thumbnail-strip .thumbnail-button')
+  await expect(thumbs).toHaveCount(3)
+  const docId = (await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json())[0].id as string
+  await thumbs.nth(0).dragTo(thumbs.nth(1))
+  await expect.poll(async () => (await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json())
+    .find((document: {id:string}) => document.id === docId)?.revision).toBe(2)
+  await expect(page.locator('.page-counter')).toContainText('2 / 3')
 })
 
 test('text editing works on a page already marked as rotated', async ({ page, request }) => {
@@ -706,9 +854,10 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await page.getByRole('button', { name: 'Rotate right' }).click()
   await expect.poll(() => canvas.evaluate((node: HTMLCanvasElement) => `${node.width}x${node.height}`)).not.toBe(before)
   await page.locator('button[title="Move page right"]').click()
+  await expect(page.locator('.page-counter')).toContainText('2 / 3')
   page.once('dialog', dialog => void dialog.accept())
   await page.locator('button[title^="Delete page"]').click()
-  await expect(page.locator('.page-counter')).toContainText('1 / 2')
+  await expect(page.locator('.page-counter')).toContainText('2 / 2')
 
   await page.locator('.doc-item', { hasText: '04_scanned_annexure' }).click()
   await expect(page.locator('.page-counter')).toContainText('1 / 1')

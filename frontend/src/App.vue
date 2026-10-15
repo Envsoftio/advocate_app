@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
-  Archive, ArrowDownToLine, ArrowRight, BookMarked, BookOpen, BriefcaseBusiness,
+  Archive, ArrowDown, ArrowDownToLine, ArrowRight, ArrowUp, BookMarked, BookOpen, BriefcaseBusiness,
   Check, CheckCircle2, ChevronRight, CircleAlert, CircleHelp, CloudOff,
   Ellipsis, FileCheck2, FilePlus2, FileStack, FileText, FolderOpen, GripVertical, Info,
-  Layers3, LockKeyhole, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw,
+  Layers3, LoaderCircle, LockKeyhole, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw,
   Redo2, Search, Settings2, ShieldAlert, ShieldCheck,
   Undo2, UploadCloud, WandSparkles, X
 } from 'lucide-vue-next'
 import PdfViewer from './components/PdfViewer.vue'
+import PasswordInput from './components/PasswordInput.vue'
 import PageTools from './components/PageTools.vue'
 import ManualBookmarks from './components/ManualBookmarks.vue'
 import BundlePreview from './components/BundlePreview.vue'
@@ -16,12 +17,21 @@ import ExportPdfReview from './components/ExportPdfReview.vue'
 import MatterForm from './components/MatterForm.vue'
 import DelhiFilingGuide from './components/DelhiFilingGuide.vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { api, downloadExport, downloadMatter, inTauri, restoreMatter, uploadDocuments } from './lib/api'
+import { VueDraggable } from 'vue-draggable-plus'
+import { ApiError, api, downloadExport, downloadMatter, inTauri, restoreMatter, uploadDocuments } from './lib/api'
 import { bytesLabel, friendlyError, prettyDate } from './lib/format'
 import { applyAppearance, readAppearance, type Theme, type UiScale } from './lib/appearance'
-import type { Check as PreflightCheck, CourtProfile, DocKind, ExportManifest, Job, Matter, MatterDocument, MatterNew, PageSearchResult } from './lib/types'
+import type { Check as PreflightCheck, CourtProfile, DocKind, ExportManifest, Job, ManualBookmark, Matter, MatterDocument, MatterNew, PageSearchResult } from './lib/types'
 
 type View = 'documents' | 'index' | 'build' | 'validation' | 'rules' | 'about'
+type QuickStep = 'import' | 'arrange' | 'review' | 'export'
+const quickSteps: Array<{id:QuickStep,label:string,description:string}> = [
+  {id:'import',label:'Import',description:'Add local source files and review processing results.'},
+  {id:'arrange',label:'Arrange',description:'Set order and metadata while inspecting working copies.'},
+  {id:'review',label:'Review',description:'Check the shared page map, bookmarks and technical flags.'},
+  {id:'export',label:'Export',description:'Generate, inspect and save one identified build.'},
+]
+const quickStepViews: Record<QuickStep, View> = {import:'documents',arrange:'documents',review:'index',export:'build'}
 const matterList = ref<Matter[]>([])
 const archivedMatters = ref<Matter[]>([])
 const currentMatterId = ref<string | null>(null)
@@ -33,10 +43,12 @@ const profileList = ref<CourtProfile[]>([])
 const exportsList = ref<ExportManifest[]>([])
 const recentJobs = ref<Job[]>([])
 const previewRefreshKey = ref(0)
+const bookmarkPreset = ref<{documentId:string,sequence:number}>({documentId:'',sequence:0})
 const history = ref({can_undo:false,can_redo:false,undo_count:0,redo_count:0})
 const guideReloadKey = ref(0)
 const filingGuide = ref<InstanceType<typeof DelhiFilingGuide> | null>(null)
 const checks = ref<PreflightCheck[]>([])
+const manualBookmarks = ref<ManualBookmark[]>([])
 const selectedDocId = ref<string | null>(null)
 const selectedDoc = computed(() => docs.value.find(d => d.id === selectedDocId.value) || null)
 const selectedDocumentPosition = computed(() => docs.value.findIndex(doc => doc.id === selectedDocId.value))
@@ -46,6 +58,9 @@ const pageToolsDialog = ref<HTMLDialogElement | null>(null)
 const documentsWorkspace = ref<HTMLElement | null>(null)
 const documentsWorkspaceHeight = ref<number | null>(null)
 const activeView = ref<View>('documents')
+const guidedMode = ref(false)
+const quickStep = ref<QuickStep>('import')
+const quickWalkthroughOpen = ref(true)
 const sidebarCollapsed = ref(false)
 const smallScreen = ref(window.matchMedia('(max-width: 900px)').matches)
 const mobileNavOpen = ref(false)
@@ -63,9 +78,20 @@ const appearance = readAppearance()
 const theme = ref<Theme>(appearance.theme)
 const uiScale = ref<UiScale>(appearance.scale)
 const busy = ref(false)
-const draggingDocId = ref<string | null>(null)
 const hoverUpload = ref(false)
 const apiStatus = ref<'connecting'|'online'|'offline'>('connecting')
+const vaultState = ref<'checking'|'setup'|'locked'|'unlocked'|'show_recovery'|'change_password'>('checking')
+const vaultEnabled = ref(false)
+const vaultCredential = ref('')
+const vaultConfirm = ref('')
+const vaultRecoveryMode = ref(false)
+const vaultRecoveryKey = ref('')
+const vaultBusy = ref(false)
+const vaultError = ref('')
+const protectedRestoreFile = ref<File | null>(null)
+const protectedRestoreCredential = ref('')
+const protectedRestoreRecovery = ref(false)
+const protectedRestoreError = ref('')
 const toast = ref<{message:string, kind:'success'|'error'|'info'} | null>(null)
 const activeJob = ref<Job | null>(null)
 const savingExport = ref(false)
@@ -87,7 +113,23 @@ const activeExport = computed(() => exportsList.value[0] || null)
 const interruptedJobs = computed(() => recentJobs.value.filter(j => j.status === 'interrupted' && !j.retry_job_id))
 const errorChecks = computed(() => checks.value.filter(c => c.severity === 'error'))
 const warningChecks = computed(() => checks.value.filter(c => c.severity === 'warning'))
+const unresolvedBookmarkCount = computed(() => manualBookmarks.value.filter(entry => !entry.resolved).length)
 const totalPages = computed(() => docs.value.reduce((n,d) => n+d.page_count, 0))
+const quickStepIndex = computed(() => quickSteps.findIndex(step => step.id === quickStep.value))
+const currentQuickStep = computed(() => quickSteps[quickStepIndex.value] ?? quickSteps[0])
+const quickPrimaryLabel = computed(() => {
+  if (quickStep.value === 'import') return 'Continue to arrange'
+  if (quickStep.value === 'arrange') return 'Review bundle'
+  if (quickStep.value === 'review') return 'Generate bundle'
+  if (isJobActive.value) return 'Generating bundle…'
+  if (!activeExport.value || activeExport.value.stale) return 'Generate bundle'
+  return 'Review combined PDF'
+})
+const quickPrimaryDisabled = computed(() => {
+  if (busy.value || isJobActive.value) return true
+  if ((quickStep.value === 'import' || quickStep.value === 'arrange' || quickStep.value === 'review') && !docs.value.length) return true
+  return false
+})
 const documentKindOptions: DocKind[] = ['petition','affidavit','order','annexure','application','evidence','other']
 const documentDirty = computed(() => !!selectedDoc.value && (
   docEditor.title !== selectedDoc.value.title || docEditor.kind !== selectedDoc.value.kind ||
@@ -122,7 +164,14 @@ function selectDocument(id: string) {
 function openPreviewDocument(id: string) {
   if (!confirmDiscardDrafts()) return
   selectedDocId.value = id
-  activeView.value = 'documents'
+  if (guidedMode.value) {
+    quickStep.value = 'arrange'
+    activeView.value = quickStepViews.arrange
+    persistQuickState()
+  } else activeView.value = 'documents'
+}
+function prepareIndexBookmark(id: string) {
+  bookmarkPreset.value = {documentId:id,sequence:bookmarkPreset.value.sequence+1}
 }
 watch(selectedDocId, () => { pageToolsOpen.value = false })
 function fitDocumentsWorkspace() {
@@ -146,11 +195,86 @@ watch(pageToolsOpen, async open => {
   if (!open && dialog?.open) dialog.close()
 })
 function showView(view: View) {
-  if (activeView.value === view) { mobileNavOpen.value = false; return }
+  if (activeView.value === view) {
+    if (guidedMode.value) openFullWorkspace(view)
+    mobileNavOpen.value = false
+    return
+  }
   if (!confirmDiscardDrafts()) return
+  guidedMode.value = false
   activeView.value = view
   mobileNavOpen.value = false
+  persistQuickState()
   if (view === 'validation') void validate()
+}
+function quickStorageKey(matterId: string) { return `courtbundle.quickBundle.v1.${matterId}` }
+function persistQuickState() {
+  if (!currentMatterId.value) return
+  try {
+    localStorage.setItem(quickStorageKey(currentMatterId.value), JSON.stringify({step:quickStep.value,active:guidedMode.value}))
+  } catch { /* Storage may be unavailable. */ }
+}
+function restoreQuickState(matterId: string) {
+  let saved: {step?:QuickStep,active?:boolean} | null = null
+  try { saved = JSON.parse(localStorage.getItem(quickStorageKey(matterId)) || 'null') }
+  catch { /* Ignore invalid or unavailable storage. */ }
+  const valid = quickSteps.some(step => step.id === saved?.step)
+  quickStep.value = valid ? saved!.step! : 'import'
+  guidedMode.value = saved?.active === true
+  if (guidedMode.value) activeView.value = quickStepViews[quickStep.value]
+}
+function setQuickStep(step: QuickStep) {
+  if (quickStep.value === step && guidedMode.value) return
+  if (!confirmDiscardDrafts()) return
+  quickStep.value = step
+  guidedMode.value = true
+  activeView.value = quickStepViews[step]
+  mobileNavOpen.value = false
+  persistQuickState()
+  if (step === 'review') void validate()
+}
+function enterQuickBundle() {
+  if (!currentMatterId.value || !confirmDiscardDrafts()) return
+  guidedMode.value = true
+  activeView.value = quickStepViews[quickStep.value]
+  quickWalkthroughOpen.value = true
+  persistQuickState()
+}
+function openFullWorkspace(view: View = activeView.value) {
+  if (!confirmDiscardDrafts()) return
+  guidedMode.value = false
+  activeView.value = view
+  persistQuickState()
+}
+function goQuickBack() {
+  const previous = quickSteps[quickStepIndex.value - 1]
+  if (previous) setQuickStep(previous.id)
+}
+async function runQuickPrimary() {
+  if (quickPrimaryDisabled.value) return
+  if (quickStep.value === 'import') { setQuickStep('arrange'); return }
+  if (quickStep.value === 'arrange') { setQuickStep('review'); return }
+  if (quickStep.value === 'review') {
+    const currentChecks = await validate()
+    if (currentChecks.some(check => check.severity === 'error')) {
+      notify('Resolve the blocking technical checks before generating the bundle.', 'error')
+      return
+    }
+    if (await startBuild()) setQuickStep('export')
+    return
+  }
+  if (!activeExport.value || activeExport.value.stale) {
+    const currentChecks = await validate()
+    if (currentChecks.some(check => check.severity === 'error')) {
+      notify('Resolve the blocking technical checks before generating the bundle.', 'error')
+      return
+    }
+    await startBuild()
+    return
+  }
+  const combined = activeExport.value.files.find(file => file.name === 'combined.pdf')
+  if (combined) reviewGeneratedPdf(activeExport.value.id, combined.name, combined.bytes)
+  else notify('This build does not contain combined.pdf. Review and save one of its listed files.', 'error')
 }
 function toggleNavigation() {
   if (smallScreen.value) mobileNavOpen.value = !mobileNavOpen.value
@@ -188,6 +312,7 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 watch([theme, uiScale], () => applyAppearance(theme.value, uiScale.value), { immediate: true })
+watch([guidedMode, quickStep], persistQuickState)
 
 watch(selectedDoc, (doc, previous) => {
   if (doc && previous?.id === doc.id && (
@@ -212,7 +337,10 @@ watch(currentMatterId, () => {
   pageQuery.value = ''
   pageSearch.value = null
   searchSequence++
-  if (currentMatterId.value) void loadMatterResources()
+  if (currentMatterId.value) {
+    restoreQuickState(currentMatterId.value)
+    void loadMatterResources()
+  }
 })
 watch(pageQuery, () => {
   if (searchTimer) clearTimeout(searchTimer)
@@ -294,17 +422,64 @@ async function init() {
     if (!connected) throw new Error(inTauri()
       ? 'Local engine did not start. Quit and reopen CourtBundle. If this continues, check the packaged sidecar and local port.'
       : 'Local engine did not start. Run backend/dev.sh and retry.')
+    const vault = await api<{state:'setup'|'locked'|'unlocked',enabled:boolean}>('/vault/status')
+    vaultEnabled.value = vault.enabled
+    if (vault.state !== 'unlocked') {
+      vaultState.value = vault.state
+      apiStatus.value = 'online'
+      return
+    }
+    vaultState.value = 'unlocked'
     profileList.value = await api<CourtProfile[]>('/profiles')
     await refreshMatters()
     apiStatus.value = 'online'
   } catch (err) { apiStatus.value='offline'; issue(err) }
   finally { connecting = false }
 }
+async function setupVault() {
+  if (vaultBusy.value) return
+  if (vaultCredential.value !== vaultConfirm.value) { vaultError.value = 'Passwords do not match.'; return }
+  vaultBusy.value = true; vaultError.value = ''
+  try {
+    const result = await api<{recovery_key:string}>('/vault/setup', 'POST', {password:vaultCredential.value}, 5 * 60_000)
+    vaultCredential.value = ''; vaultConfirm.value = ''
+    vaultRecoveryKey.value = result.recovery_key
+    vaultState.value = 'show_recovery'
+  } catch (err) { vaultError.value = friendlyError(err) }
+  finally { vaultBusy.value = false }
+}
+async function unlockVault() {
+  if (vaultBusy.value) return
+  vaultBusy.value = true; vaultError.value = ''
+  try {
+    await api('/vault/unlock', 'POST', {credential:vaultCredential.value,recovery:vaultRecoveryMode.value}, 5 * 60_000)
+    vaultCredential.value = ''
+    vaultState.value = 'unlocked'
+    await init()
+  } catch (err) { vaultError.value = friendlyError(err) }
+  finally { vaultBusy.value = false }
+}
+async function rotateVault() {
+  if (vaultBusy.value) return
+  if (vaultCredential.value !== vaultConfirm.value) { vaultError.value = 'Passwords do not match.'; return }
+  vaultBusy.value = true; vaultError.value = ''
+  try {
+    const result = await api<{recovery_key:string}>('/vault/rotate', 'POST', {new_password:vaultCredential.value})
+    vaultCredential.value = ''; vaultConfirm.value = ''
+    vaultRecoveryKey.value = result.recovery_key
+    vaultState.value = 'show_recovery'
+  } catch (err) { vaultError.value = friendlyError(err) }
+  finally { vaultBusy.value = false }
+}
+async function finishVaultSetup() {
+  vaultRecoveryKey.value = ''
+  vaultState.value = 'unlocked'
+  await init()
+}
 async function checkHealth() {
-  if (connecting) return
+  if (connecting || apiStatus.value === 'offline') return
   try {
     await api('/health', 'GET', undefined, 1_500)
-    if (apiStatus.value === 'offline') await init()
   } catch {
     if (apiStatus.value === 'online') {
       apiStatus.value = 'offline'
@@ -326,7 +501,7 @@ async function loadMatterResources() {
   if (!currentMatterId.value) return
   const id = currentMatterId.value
   try {
-    const [d, c, e, j, h, archived, usage] = await Promise.all([
+    const [d, c, e, j, h, archived, usage, bookmarks] = await Promise.all([
       api<MatterDocument[]>(`/matters/${id}/documents`),
       api<PreflightCheck[]>(`/matters/${id}/validate`),
       api<ExportManifest[]>(`/matters/${id}/exports`),
@@ -334,9 +509,11 @@ async function loadMatterResources() {
       api<typeof history.value>(`/matters/${id}/history`),
       api<MatterDocument[]>(`/matters/${id}/archived-documents`),
       api<typeof storageUsage.value>(`/matters/${id}/storage`),
+      api<ManualBookmark[]>(`/matters/${id}/bookmarks`),
     ])
     if (currentMatterId.value !== id) return
     docs.value=d; checks.value=c; exportsList.value=e; recentJobs.value=j; history.value=h
+    manualBookmarks.value=bookmarks
     previewRefreshKey.value += 1
     if (pageQuery.value.trim().length >= 2) void searchPages()
     archivedDocs.value=archived; storageUsage.value=usage
@@ -371,11 +548,34 @@ async function createMatter(fields: MatterNew) {
     const value=await api<Matter>('/matters','POST',fields)
     await refreshMatters()
     currentMatterId.value=value.id
-    activeView.value='documents'; selectedDocId.value=null
+    quickStep.value='import'; guidedMode.value=false; activeView.value='documents'; selectedDocId.value=null
     modalOpen.value=false
-    notify('Matter created. Import your first document.', 'success')
+    notify('Matter created. Import your first document or open Quick Bundle for guided preparation.', 'success')
   } catch(err) { issue(err) }
   finally { creating.value=false }
+}
+async function createSampleMatter() {
+  if (creating.value || !confirmDiscardDrafts()) return
+  creating.value = true
+  try {
+    const value = await api<Matter>('/matters','POST',{
+      name:`Synthetic Quick Bundle ${new Date().toLocaleDateString('en-CA')}`,
+      court_profile:'general-demo', case_type:'Synthetic demonstration',
+      petitioner:'Sample Applicant', respondent:'Sample Respondent', advocate:'', case_number:'',
+      max_pages_per_volume:10, keep_groups_intact:true,
+    })
+    await api(`/matters/${value.id}/cover`,'POST')
+    await refreshMatters()
+    currentMatterId.value = value.id
+    selectedDocId.value = null
+    quickStep.value = 'arrange'
+    guidedMode.value = true
+    activeView.value = 'documents'
+    persistQuickState()
+    await loadMatterResources()
+    notify('Opened a separate synthetic sample matter. Its draft cover is not a court-approved form.', 'success')
+  } catch (err) { issue(err) }
+  finally { creating.value = false }
 }
 async function backupCurrentMatter() {
   if (!currentMatterId.value || busy.value || !confirmDiscardDrafts()) return
@@ -391,13 +591,33 @@ async function importMatterPackage(files: FileList | null) {
   busy.value = true
   try {
     const restored = await restoreMatter(file)
-    await refreshMatters()
-    currentMatterId.value = restored.id
-    selectedDocId.value = null
-    activeView.value = 'documents'
-    notify('Matter restored with originals and working revisions.', 'success')
-  } catch (err) { issue(err) }
+    await useRestoredMatter(restored)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 422 && err.message.includes('backup needs')) {
+      protectedRestoreFile.value = file
+      protectedRestoreError.value = ''
+    } else issue(err)
+  }
   finally { busy.value = false; if (matterFileInput.value) matterFileInput.value.value = '' }
+}
+async function useRestoredMatter(restored: Matter) {
+  await refreshMatters()
+  currentMatterId.value = restored.id
+  selectedDocId.value = null
+  activeView.value = 'documents'
+  notify('Matter restored with originals and working revisions.', 'success')
+}
+async function submitProtectedRestore() {
+  if (!protectedRestoreFile.value || busy.value) return
+  busy.value = true; protectedRestoreError.value = ''
+  try {
+    const restored = await restoreMatter(protectedRestoreFile.value,
+      protectedRestoreCredential.value, protectedRestoreRecovery.value)
+    protectedRestoreFile.value = null
+    protectedRestoreCredential.value = ''
+    await useRestoredMatter(restored)
+  } catch (err) { protectedRestoreError.value = friendlyError(err) }
+  finally { busy.value = false }
 }
 async function onUpload(files: FileList | File[]) {
   if (!currentMatterId.value || busy.value) return
@@ -447,33 +667,45 @@ async function deleteDocument() {
     notify('Document archived. It can be restored from this matter.', 'success')
   } catch(err){ issue(err) } finally { busy.value=false }
 }
-function onDragStart(docId:string){ draggingDocId.value=docId }
-async function onDropOn(targetId:string) {
-  const sourceId=draggingDocId.value
-  draggingDocId.value=null
-  if(!currentMatterId.value || !sourceId || sourceId===targetId) return
-  const ids=docs.value.map(d=>d.id)
-  ids.splice(ids.indexOf(sourceId),1)
-  ids.splice(ids.indexOf(targetId),0,sourceId)
+async function persistDocumentOrder(ids: string[]) {
+  if (!currentMatterId.value || busy.value) return
+  busy.value = true
   try {
     docs.value=await api<MatterDocument[]>(`/matters/${currentMatterId.value}/documents/reorder`,'POST',{ids})
     await refreshHistory()
     await validate()
     await loadMatterResources()
+    notify('Document order and index page ranges updated.', 'success')
   } catch(err){issue(err); await loadMatterResources()}
+  finally { busy.value = false }
+}
+async function submitDocumentOrder(ids: string[]) {
+  if (!currentMatterId.value || busy.value || !confirmDiscardDrafts()) return
+  await persistDocumentOrder(ids)
+}
+function applyDocumentSort(reordered: MatterDocument[]) {
+  const ids = reordered.map(doc => doc.id)
+  const currentIds = docs.value.map(doc => doc.id)
+  const sameDocuments = ids.length === currentIds.length && ids.every(id => currentIds.includes(id))
+  if (!sameDocuments || busy.value || searching.value.trim() || !confirmDiscardDrafts()) {
+    // A new array forces Vue to restore Sortable's moved DOM when a drop is rejected.
+    docs.value = [...docs.value]
+    return
+  }
+  if (ids.every((id,index) => id === currentIds[index])) return
+  docs.value = [...reordered]
+  void persistDocumentOrder(ids)
+}
+async function moveDocumentById(id: string, direction: number) {
+  if (!currentMatterId.value) return
+  const ids=docs.value.map(d=>d.id); const position=ids.indexOf(id)
+  const next=position+direction
+  if(position<0 || next<0 || next>=ids.length) return
+  ;[ids[position],ids[next]]=[ids[next],ids[position]]
+  await submitDocumentOrder(ids)
 }
 async function moveDocument(direction: number) {
-  if (!selectedDoc.value || !currentMatterId.value) return
-  const ids=docs.value.map(d=>d.id); const position=ids.indexOf(selectedDoc.value.id)
-  const next=position+direction
-  if(next<0 || next>=ids.length) return
-  ;[ids[position],ids[next]]=[ids[next],ids[position]]
-  try {
-    docs.value=await api<MatterDocument[]>(`/matters/${currentMatterId.value}/documents/reorder`,'POST',{ids})
-    await refreshHistory()
-    await validate()
-    await loadMatterResources()
-  } catch(err){issue(err)}
+  if (selectedDoc.value) await moveDocumentById(selectedDoc.value.id, direction)
 }
 async function refreshDocument() { await loadMatterResources() }
 async function startOcr() {
@@ -484,10 +716,13 @@ async function startOcr() {
     notify('OCR started on scanned and mixed-content pages.', 'info')
   } catch(err){issue(err)}
 }
-async function validate() {
-  if(!currentMatterId.value) return
-  try { checks.value=await api<PreflightCheck[]>(`/matters/${currentMatterId.value}/validate`) }
-  catch(err){issue(err)}
+async function validate(): Promise<PreflightCheck[]> {
+  if(!currentMatterId.value) return []
+  try {
+    checks.value=await api<PreflightCheck[]>(`/matters/${currentMatterId.value}/validate`)
+    return checks.value
+  }
+  catch(err){issue(err); return [{severity:'error',code:'VALIDATION_UNAVAILABLE',message:'Technical checks could not be loaded.',document_id:null}]}
 }
 async function savePolicy() {
   if(!currentMatter.value) return false
@@ -500,13 +735,14 @@ async function savePolicy() {
     return true
   } catch(err){issue(err);return false}
 }
-async function startBuild() {
-  if (!currentMatterId.value || isJobActive.value) return
+async function startBuild(): Promise<boolean> {
+  if (!currentMatterId.value || isJobActive.value) return false
   try {
-    if (!await savePolicy()) return
+    if (!await savePolicy()) return false
     const job=await api<Job>(`/matters/${currentMatterId.value}/build`,'POST')
     watchJob(job)
-  } catch(err){issue(err)}
+    return true
+  } catch(err){issue(err); return false}
 }
 function watchJob(job:Job) {
   activeJob.value=job
@@ -558,7 +794,7 @@ function reviewGeneratedPdf(exportId:string, filename:string, bytes:number) {
 function selectMatter(id:string){
   if (currentMatterId.value === id) { mobileNavOpen.value = false; return }
   if (!confirmDiscardDrafts()) return
-  currentMatterId.value=id;selectedDocId.value=null;activeView.value='documents'
+  currentMatterId.value=id;selectedDocId.value=null
   mobileNavOpen.value = false
 }
 async function removeMatter(){
@@ -590,7 +826,44 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
 </script>
 
 <template>
-  <div class="app-shell">
+  <main v-if="vaultState!=='unlocked' && apiStatus!=='offline'" class="vault-screen">
+    <section :class="['vault-card','vault-state-'+vaultState]" aria-labelledby="vault-title">
+      <div :class="['vault-mark',{loading:vaultState==='checking'}]" aria-hidden="true">
+        <LoaderCircle v-if="vaultState==='checking'" :size="27"/>
+        <LockKeyhole v-else :size="27"/>
+      </div>
+      <div class="vault-heading">
+        <span>{{vaultState==='checking'?'LOCAL ENGINE':vaultState==='show_recovery'?'RECOVERY KEY':'PROTECTED WORKSPACE'}}</span>
+        <h1 id="vault-title">{{vaultState==='setup'?'Protect local matters':vaultState==='locked'?'Unlock CourtBundle':vaultState==='show_recovery'?'Save your recovery key':vaultState==='change_password'?'Change vault password':'Starting local engine'}}</h1>
+      </div>
+      <p v-if="vaultState==='checking'">Opening the encrypted local workspace. CourtBundle stays on this computer and does not upload matter files.</p>
+      <p v-if="vaultState==='setup'">Create a password for the local matter store. The existing local data will be migrated before the workspace opens. Keep the separate recovery key outside this computer.</p>
+      <p v-else-if="vaultState==='locked'">Enter your password or recovery key. If both are lost, encrypted matter data cannot be recovered.</p>
+      <p v-else-if="vaultState==='change_password'">Changing the password creates a new recovery key. Previous recovery keys stop unlocking this local store.</p>
+      <p v-else-if="vaultState==='show_recovery'">Write down this key and keep it separately. It is shown only now and is not stored in the app.</p>
+      <div v-if="vaultState==='checking'" class="vault-progress" role="progressbar" aria-label="Starting local engine"><span></span></div>
+      <p v-if="vaultError" class="notice amber" role="alert">{{vaultError}}</p>
+      <form v-if="vaultState==='setup' || vaultState==='change_password'" @submit.prevent="vaultState==='setup'?setupVault():rotateVault()">
+        <PasswordInput v-model="vaultCredential" label="New password" autocomplete="new-password" :minlength="6"/>
+        <PasswordInput v-model="vaultConfirm" label="Confirm password" autocomplete="new-password" :minlength="6"/>
+        <small>Minimum 6 characters. A longer password is safer; keep your recovery key separately.</small>
+        <button class="btn primary" type="submit" :disabled="vaultBusy">{{vaultBusy?'Protecting local files…':vaultState==='setup'?'Protect and open':'Change password'}}</button>
+        <button v-if="vaultState==='change_password'" class="btn secondary" type="button" @click="vaultState='unlocked';vaultCredential='';vaultConfirm='';vaultError=''">Cancel</button>
+      </form>
+      <form v-else-if="vaultState==='locked'" @submit.prevent="unlockVault()">
+        <label v-if="vaultRecoveryMode">Recovery key<input v-model="vaultCredential" type="text" autocomplete="off" required/></label>
+        <PasswordInput v-else v-model="vaultCredential" label="Password" autocomplete="current-password"/>
+        <label class="vault-choice"><input v-model="vaultRecoveryMode" type="checkbox"/> Use recovery key</label>
+        <button class="btn primary" type="submit" :disabled="vaultBusy">{{vaultBusy?'Unlocking…':'Unlock'}}</button>
+      </form>
+      <div v-else-if="vaultState==='show_recovery'" class="vault-recovery">
+        <div class="vault-recovery-key"><span>RECOVERY KEY</span><code>{{vaultRecoveryKey}}</code></div>
+        <div class="vault-recovery-warning"><ShieldAlert :size="18"/><span>Store this separately from your password. Anyone with this key can unlock the local matter store.</span></div>
+        <button class="btn primary" @click="finishVaultSetup">I saved the recovery key</button>
+      </div>
+    </section>
+  </main>
+  <div v-else class="app-shell">
     <a class="skip-link" href="#main-content">Skip to main content</a>
     <button v-if="smallScreen && mobileNavOpen" class="sidebar-backdrop" aria-label="Close navigation" @click="mobileNavOpen=false"></button>
     <aside class="sidebar" :class="{collapsed:sidebarCollapsed && !smallScreen, 'mobile-open':mobileNavOpen}" :inert="smallScreen && !mobileNavOpen">
@@ -619,6 +892,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
         <button v-for="m in archivedMatters" :key="m.id" class="matter-link" :aria-label="'Restore '+m.name" :title="'Restore '+m.name" @click="restoreArchivedMatter(m.id)"><Archive :size="17"/><span>{{m.name}}</span></button>
       </div>
       <div class="sidebar-bottom">
+        <button v-if="vaultEnabled" class="side-link" @click="vaultError='';vaultState='change_password'"><LockKeyhole :size="17"/><span>Change vault password</span></button>
         <div class="appearance-controls">
           <label>Theme<select v-model="theme" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
           <label>Interface size<select v-model.number="uiScale" aria-label="Interface size"><option :value="90">90%</option><option :value="100">100%</option><option :value="110">110%</option><option :value="125">125%</option></select></label>
@@ -660,7 +934,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       <main v-else-if="!currentMatter" id="main-content" tabindex="-1" class="page-content welcome-page">
         <div class="welcome-icon"><FolderOpen :size="32"/></div><div class="page-eyebrow">YOUR FIRST MATTER</div><h1>From scattered files to<br/>a structured court bundle.</h1>
         <p>Create a matter to import documents, organise annexures, generate indexes and prepare a complete PDF package—offline.</p>
-        <button class="btn primary large" @click="modalOpen=true"><Plus :size="18"/> Create your first matter</button>
+        <div class="welcome-actions"><button class="btn primary large" @click="modalOpen=true"><Plus :size="18"/> Create your first matter</button><button class="btn secondary large" :disabled="creating" @click="createSampleMatter"><WandSparkles :size="18"/> {{creating?'Opening sample…':'Open sample matter'}}</button></div>
         <div class="welcome-steps"><span>01 &nbsp; Add documents</span><ArrowRight :size="18"/><span>02 &nbsp; Collate & OCR</span><ArrowRight :size="18"/><span>03 &nbsp; Build bundle</span></div>
       </main>
 
@@ -675,16 +949,31 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
               <button @click="confirmDiscardDrafts() && void loadMatterResources()"><RefreshCw :size="15"/> Refresh</button>
               <button :disabled="busy" @click="removeMatter">Archive matter</button>
             </div></details>
-            <button class="btn primary" @click="showView('build')"><FileStack :size="17"/> Build filing bundle</button>
+            <button v-if="!guidedMode" class="btn secondary" @click="enterQuickBundle"><WandSparkles :size="17"/> Quick Bundle</button>
+            <button v-if="!guidedMode" class="btn primary" @click="showView('build')"><FileStack :size="17"/> Build filing bundle</button>
           </div>
         </div>
         <div class="matter-summary" aria-label="Matter summary"><span><strong>{{docs.length}}</strong> documents</span><span><strong>{{totalPages}}</strong> source pages</span><span><strong>{{warningChecks.length+errorChecks.length}}</strong> review flags</span><span><strong>{{exportsList.length}}</strong> prepared packages</span></div>
-        <div class="workspace-tabs"><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='index'}" @click="showView('index')"><BookMarked :size="16"/> Index & bookmarks</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></div>
+        <section v-if="guidedMode" class="quick-bundle" aria-label="Quick Bundle journey">
+          <div class="quick-bundle-heading"><div><span class="page-eyebrow">GUIDED QUICK BUNDLE</span><h2>{{currentQuickStep.label}}</h2><p>{{currentQuickStep.description}}</p></div><div class="quick-bundle-heading-actions"><button v-if="!quickWalkthroughOpen" class="text-tool" @click="quickWalkthroughOpen=true"><CircleHelp :size="15"/> How this works</button><button class="btn secondary small" @click="openFullWorkspace()">Open full workspace</button></div></div>
+          <ol class="quick-steps">
+            <li v-for="(step,index) in quickSteps" :key="step.id" :class="{active:quickStep===step.id,complete:index<quickStepIndex}"><button :aria-current="quickStep===step.id?'step':undefined" :disabled="index>0&&!docs.length" @click="setQuickStep(step.id)"><span>{{index+1}}</span>{{step.label}}</button></li>
+          </ol>
+          <div v-if="quickWalkthroughOpen" class="quick-walkthrough"><Info :size="18"/><p><strong>Your saved matter is shared with the full workspace.</strong> Move backward at any time. Quick Bundle does not copy documents or calculate a separate page plan.</p><button class="icon-btn" aria-label="Dismiss Quick Bundle walkthrough" @click="quickWalkthroughOpen=false"><X :size="16"/></button></div>
+          <div class="quick-status" aria-live="polite">
+            <template v-if="quickStep==='import'"><span><strong>{{docs.length}}</strong> imported document(s)</span><span><strong>{{totalPages}}</strong> source page(s)</span><span>PDF, JPG and PNG are supported; originals remain unchanged.</span></template>
+            <template v-else-if="quickStep==='arrange'"><span><strong>{{docs.length}}</strong> document(s) in bundle order</span><span><strong>{{totalPages}}</strong> source page(s)</span><span v-if="documentDirty" class="quick-blocker"><CircleAlert :size="15"/> Save or discard the open document draft before continuing.</span></template>
+            <template v-else-if="quickStep==='review'"><span :class="{ 'quick-blocker':errorChecks.length }"><strong>{{errorChecks.length}}</strong> blocking error(s)</span><span><strong>{{warningChecks.length}}</strong> review warning(s)</span><span :class="{ 'quick-blocker':unresolvedBookmarkCount }"><strong>{{unresolvedBookmarkCount}}</strong> unresolved bookmark(s)</span><span>Legal sufficiency is not assessed.</span></template>
+            <template v-else><span v-if="isJobActive"><LoaderCircle :size="15" class="spin"/> {{activeJob?.message}} · {{activeJob?.progress}}%</span><span v-else-if="activeExport"><strong>{{activeExport.stale?'Outdated':'Current'}}</strong> build · {{activeExport.volumes}} volume(s) · {{activeExport.pages}} pages</span><span v-else>No generated build yet.</span><span>Review the actual PDF and technical report before saving.</span></template>
+          </div>
+          <div class="quick-actions"><button v-if="quickStepIndex>0" class="btn secondary" @click="goQuickBack"><ArrowRight class="quick-back-icon" :size="16"/> Back</button><button v-if="quickStep==='import'" class="btn secondary" :disabled="creating" @click="createSampleMatter"><WandSparkles :size="16"/> Open sample matter</button><button class="btn primary" :disabled="quickPrimaryDisabled" @click="runQuickPrimary"><LoaderCircle v-if="isJobActive" :size="16" class="spin"/><ArrowRight v-else :size="16"/> {{quickPrimaryLabel}}</button></div>
+        </section>
+        <div v-else class="workspace-tabs"><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='index'}" @click="showView('index')"><BookMarked :size="16"/> Index & bookmarks</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></div>
 
         <Transition name="section" mode="out-in" @after-enter="fitDocumentsWorkspace">
         <div v-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :class="{'details-open':detailsOpen && !!selectedDoc}" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
           <section class="panel docs-panel">
-            <div class="panel-header"><div><h2>Source documents</h2><span>Reorder documents by dragging</span></div><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div>
+            <div class="panel-header"><div><h2>Source documents</h2><span>Drag documents to set bundle order</span></div><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div>
             <div class="docs-search"><Search :size="16"/><input v-model="searching" placeholder="Search documents..." aria-label="Search documents"/></div>
             <div class="docs-search"><Search :size="16"/><input v-model="pageQuery" placeholder="Find text on pages..." aria-label="Find text on pages"/></div>
             <div v-if="pageQuery.trim().length >= 2" class="page-search-results" aria-live="polite">
@@ -695,14 +984,15 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <button v-for="match in pageSearch.matches" :key="match.document_id+'-'+match.page" class="page-search-hit" @click="openSearchMatch(match.document_id, match.page)"><strong>{{match.title}} · page {{match.page}}</strong><span>{{highlightedSnippet(match.snippet, pageQuery.trim()).before}}<mark>{{highlightedSnippet(match.snippet, pageQuery.trim()).match}}</mark>{{highlightedSnippet(match.snippet, pageQuery.trim()).after}}</span></button>
               </template>
             </div>
-            <TransitionGroup v-if="filteredDocs.length" name="document-list" tag="div" class="docs-list">
-              <div v-for="doc in filteredDocs" :key="doc.id" class="doc-item" :class="{selected:selectedDocId===doc.id,dragging:draggingDocId===doc.id}" :draggable="!busy" @dragstart="onDragStart(doc.id)" @dragend="draggingDocId=null" @dragover.prevent @drop.prevent="onDropOn(doc.id)" @click="selectDocument(doc.id)">
-                <GripVertical :size="16" class="grip"/>
+            <VueDraggable v-if="filteredDocs.length" :model-value="filteredDocs" class="docs-list" item-key="id" handle=".drag-handle" :disabled="busy || !!searching.trim()" :animation="220" easing="cubic-bezier(.2,.7,.2,1)" :force-fallback="true" :fallback-tolerance="5" :fallback-on-body="true" ghost-class="sortable-ghost" chosen-class="sortable-chosen" drag-class="sortable-drag" fallback-class="sortable-fallback" @update:model-value="applyDocumentSort">
+              <div v-for="doc in filteredDocs" :key="doc.id" class="doc-item" :data-document-id="doc.id" :class="{selected:selectedDocId===doc.id}" @click="selectDocument(doc.id)">
+                <span class="grip drag-handle" :aria-label="'Drag '+doc.title+' to reorder'" @click.stop><GripVertical :size="16"/></span>
                 <div class="doc-icon"><FileText :size="20"/></div>
                 <div class="doc-info"><strong :title="doc.title">{{doc.title}}</strong><span><span v-if="doc.label" class="doc-label">{{doc.label}} · </span>Part {{doc.part}} · {{doc.page_count}} {{doc.page_count===1?'page':'pages'}}</span></div>
+                <div class="doc-order-actions"><button class="icon-btn small" :aria-label="'Move '+doc.title+' up'" :disabled="busy || docs[0]?.id===doc.id" @click.stop="moveDocumentById(doc.id,-1)"><ArrowUp :size="14"/></button><button class="icon-btn small" :aria-label="'Move '+doc.title+' down'" :disabled="busy || docs[docs.length-1]?.id===doc.id" @click.stop="moveDocumentById(doc.id,1)"><ArrowDown :size="14"/></button></div>
                 <ChevronRight :size="16" class="doc-arrow"/>
               </div>
-            </TransitionGroup>
+            </VueDraggable>
             <div v-else-if="docs.length" class="no-matching">No matching documents</div>
             <div v-else class="no-documents"><FileStack :size="30"/><strong>No documents added</strong><small>Import a PDF or scanned image to begin.</small></div>
             <div v-if="archivedDocs.length" class="docs-help"><Archive :size="14"/> Archived documents</div>
@@ -731,9 +1021,12 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
 
         <div v-else-if="activeView==='index'" class="index-preparation">
           <div class="notice subtle"><Info :size="17"/> Prepare the index and manual bookmarks as you arrange documents. Page ranges update from current matter order and the saved volume settings; review all destinations before export.</div>
-          <BundlePreview :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" @open-document="openPreviewDocument"/>
-          <ManualBookmarks :key="currentMatterId!" :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :disabled="busy || isJobActive" @modified="loadMatterResources"/>
-          <button class="btn primary" :disabled="!docs.length" @click="showView('build')"><Layers3 :size="17"/> Continue to Build bundle</button>
+          <section v-if="docs.length" class="panel index-order-panel" aria-label="Index document order"><div class="panel-header"><div><h2>Index order</h2><span>Drag documents to change index rows, bookmarks and page ranges together.</span></div></div>
+            <VueDraggable :model-value="docs" class="index-order-list" item-key="id" handle=".drag-handle" :disabled="busy" :animation="160" :force-fallback="true" :fallback-tolerance="5" :fallback-on-body="true" ghost-class="sortable-ghost" chosen-class="sortable-chosen" drag-class="sortable-drag" fallback-class="sortable-fallback" @update:model-value="applyDocumentSort"><div v-for="(doc,index) in docs" :key="doc.id" class="index-order-row" :data-document-id="doc.id"><span class="grip drag-handle" :aria-label="'Drag '+doc.title+' to reorder'" @click.stop><GripVertical :size="16"/></span><strong>{{index+1}}. {{doc.label ? doc.label+' · ' : ''}}{{doc.title}}</strong><span>{{doc.page_count}} page(s)</span><button class="icon-btn small" :aria-label="'Move '+doc.title+' up'" :disabled="busy || index===0" @click="moveDocumentById(doc.id,-1)"><ArrowUp :size="14"/></button><button class="icon-btn small" :aria-label="'Move '+doc.title+' down'" :disabled="busy || index===docs.length-1" @click="moveDocumentById(doc.id,1)"><ArrowDown :size="14"/></button></div></VueDraggable>
+          </section>
+          <BundlePreview :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" @open-document="openPreviewDocument" @bookmark-document="prepareIndexBookmark"/>
+          <ManualBookmarks :key="currentMatterId!" :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :preset="bookmarkPreset" :disabled="busy || isJobActive" @modified="loadMatterResources"/>
+          <button v-if="!guidedMode" class="btn primary" :disabled="!docs.length" @click="showView('build')"><Layers3 :size="17"/> Continue to Build bundle</button>
         </div>
 
         <div v-else-if="activeView==='build'" class="build-layout">
@@ -745,7 +1038,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <div class="checklist"><div><CheckCircle2 :size="17"/> Generate index pages in every volume</div><div><CheckCircle2 :size="17"/> Include clickable index links and PDF bookmarks</div><div><CheckCircle2 :size="17"/> Generate combined PDF + separate volumes</div><div><CheckCircle2 :size="17"/> Archive in ZIP with validation report</div></div>
                 <div class="notice amber"><ShieldAlert :size="18"/><span>Working-copy PDF annotation objects and link actions are omitted from volume and combined PDFs; flattened marks in page content remain. Generated index links and bookmarks remain. Review validation warnings for affected documents; signature integrity and filing acceptance are not certified.</span></div>
                 <p v-if="settingsDirty" role="status" class="hint">Unsaved bundle settings. Building saves these settings first.</p>
-                <button class="btn primary large" :disabled="!docs.length || isJobActive" @click="startBuild"><Layers3 :size="19"/> {{isJobActive?'Processing…':'Build filing bundle'}}</button>
+                <button v-if="!guidedMode" class="btn primary large" :disabled="!docs.length || isJobActive" @click="startBuild"><Layers3 :size="19"/> {{isJobActive?'Processing…':'Build filing bundle'}}</button>
                 <div v-if="isJobActive && activeJob" class="job-progress"><div class="job-progress-line"><span>{{activeJob.message}}</span><strong>{{activeJob.progress}}%</strong></div><div class="progress-track"><div :style="{width:activeJob.progress+'%'}"></div></div><button class="text-tool danger" @click="cancelJob">Cancel operation</button></div>
                 <div v-else-if="activeJob?.status==='failed'" class="notice error"><CircleAlert :size="18"/> {{activeJob.error}}</div>
                 <div v-for="job in interruptedJobs" :key="job.id" class="notice amber"><CircleAlert :size="18"/><span>{{job.kind === 'ocr' ? 'OCR' : job.kind === 'compress' ? 'Compression' : 'Bundle build'}} was interrupted by an engine restart. Review the current revision and exports before retrying.</span><span v-if="job.kind === 'compress'">Choose compression again in page tools.</span><button v-else class="text-tool" :disabled="isJobActive" @click="retryInterrupted(job)">Retry</button></div>
@@ -777,6 +1070,20 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       <PageTools :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :job="activeJob" expanded @modified="refreshDocument" @job-started="watchJob" @cancel="cancelJob"/>
     </dialog>
     <ExportPdfReview v-if="reviewingPdf && currentMatterId" :matter-id="currentMatterId" :export-id="reviewingPdf.exportId" :filename="reviewingPdf.filename" @close="reviewingPdf=null"/>
+    <div v-if="protectedRestoreFile" class="vault-restore-overlay" role="presentation">
+      <section class="vault-card" role="dialog" aria-modal="true" aria-labelledby="restore-vault-title">
+        <h2 id="restore-vault-title">Unlock protected backup</h2>
+        <p>This backup uses a different vault key. Enter the password or recovery key that protected it.</p>
+        <p v-if="protectedRestoreError" class="notice amber" role="alert">{{protectedRestoreError}}</p>
+        <form @submit.prevent="submitProtectedRestore">
+          <label v-if="protectedRestoreRecovery">Recovery key<input v-model="protectedRestoreCredential" type="text" autocomplete="off" required/></label>
+          <PasswordInput v-else v-model="protectedRestoreCredential" label="Backup password" autocomplete="off"/>
+          <label class="vault-choice"><input v-model="protectedRestoreRecovery" type="checkbox"/> Use recovery key</label>
+          <button class="btn primary" type="submit" :disabled="busy">Restore backup</button>
+          <button class="btn secondary" type="button" @click="protectedRestoreFile=null;protectedRestoreCredential='';protectedRestoreError=''">Cancel</button>
+        </form>
+      </section>
+    </div>
     <Transition name="modal"><MatterForm v-if="modalOpen" :profiles="profileList" :working="creating" @close="modalOpen=false" @create="createMatter"/></Transition>
     <Transition name="toast"><div v-if="toast" :class="['toast',toast.kind]"><CheckCircle2 v-if="toast.kind==='success'" :size="19"/><CircleAlert v-else-if="toast.kind==='error'" :size="19"/><Info v-else :size="19"/><span>{{toast.message}}</span><button class="icon-btn small" @click="toast=null"><X :size="15"/></button></div></Transition>
   </div>

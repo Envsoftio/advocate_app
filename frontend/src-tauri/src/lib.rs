@@ -92,6 +92,7 @@ pub fn run() {
                     .shell()
                     .sidecar("filing-api")?
                     .env("COURTBUNDLE_API_TOKEN", &token)
+                    .env("COURTBUNDLE_REQUIRE_VAULT", "1")
                     .args([
                         "--port",
                         port_str.as_str(),

@@ -9,6 +9,8 @@ import zipfile
 
 import pymupdf
 
+from .file_io import open_pdf, protected, save_pdf, size as file_size
+
 
 class ProcessingError(Exception):
     pass
@@ -18,20 +20,20 @@ def normalize_to_pdf(source: Path, destination: Path):
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         if source.suffix.lower() == '.pdf':
-            with pymupdf.open(source) as doc:
+            with open_pdf(source) as doc:
                 if doc.needs_pass:
                     raise ProcessingError('Password-protected PDFs are not supported in this POC; decrypt a lawful working copy first')
                 if doc.page_count == 0:
                     raise ProcessingError('PDF has no pages')
-                doc.save(destination, garbage=3, deflate=True)
+                save_pdf(doc, destination, garbage=3, deflate=True)
         else:
-            with pymupdf.open(source) as image_doc:
+            with open_pdf(source) as image_doc:
                 content = image_doc.convert_to_pdf()
             with pymupdf.open(stream=content, filetype='pdf') as pdf:
                 if not pdf.page_count:
                     raise ProcessingError('Image does not contain a page')
-                pdf.save(destination)
-        with pymupdf.open(destination) as doc:
+                save_pdf(pdf, destination)
+        with open_pdf(destination) as doc:
             return doc.page_count
     except ProcessingError:
         raise
@@ -40,6 +42,15 @@ def normalize_to_pdf(source: Path, destination: Path):
 
 
 def replace_pdf_atomically(path: Path, doc: pymupdf.Document):
+    if protected(path):
+        candidate = path.with_name('.pdf-edit-' + os.urandom(12).hex() + '.pdf')
+        try:
+            save_pdf(doc, candidate, garbage=4, deflate=True)
+            validate_pdf(candidate, doc.page_count)
+            os.replace(candidate, path)
+        finally:
+            candidate.unlink(missing_ok=True)
+        return
     fd, candidate = tempfile.mkstemp(prefix='.pdf-edit-', suffix='.pdf', dir=path.parent)
     os.close(fd)
     try:
@@ -54,7 +65,7 @@ def replace_pdf_atomically(path: Path, doc: pymupdf.Document):
 
 def validate_pdf(path: Path, expected_pages: int) -> None:
     """Reopen a completed candidate before publishing it as a revision."""
-    with pymupdf.open(path) as check:
+    with open_pdf(path) as check:
         if check.needs_pass or check.page_count != expected_pages or expected_pages < 1:
             raise ProcessingError('Written PDF failed page-count or encryption validation')
         for page in check:
@@ -108,7 +119,7 @@ def assemble_pages(output: pymupdf.Document, selections: list[tuple]) -> None:
 
 
 def reorder_pages(path: Path, order: list[int]):
-    with pymupdf.open(path) as src:
+    with open_pdf(path) as src:
         if len(order) != src.page_count or sorted(order) != list(range(src.page_count)):
             raise ProcessingError('Page order must be a permutation of every page index')
         with pymupdf.open() as output:
@@ -120,7 +131,7 @@ def reorder_pages(path: Path, order: list[int]):
 def rotate_page(path: Path, page_index: int, degrees: int):
     if degrees not in (90, 180, 270):
         raise ProcessingError('Rotation must be 90, 180 or 270 degrees clockwise')
-    with pymupdf.open(path) as doc:
+    with open_pdf(path) as doc:
         if not 0 <= page_index < doc.page_count:
             raise ProcessingError('Invalid page number')
         page = doc[page_index]
@@ -130,7 +141,7 @@ def rotate_page(path: Path, page_index: int, degrees: int):
 
 
 def delete_page(path: Path, page_index: int):
-    with pymupdf.open(path) as doc:
+    with open_pdf(path) as doc:
         if not 0 <= page_index < doc.page_count:
             raise ProcessingError('Invalid page number')
         if doc.page_count == 1:
@@ -149,7 +160,7 @@ def _checked_pages(indices: list[int], count: int) -> list[int]:
 
 def insert_pages(path: Path, source_path: Path, source_pages: list[int], before_index: int) -> int:
     """Insert selected source pages before a target index; count means append."""
-    with pymupdf.open(path) as target, pymupdf.open(source_path) as source:
+    with open_pdf(path) as target, open_pdf(source_path) as source:
         _checked_pages(source_pages, source.page_count)
         if not 0 <= before_index <= target.page_count:
             raise ProcessingError('Invalid insertion position')
@@ -164,7 +175,7 @@ def insert_pages(path: Path, source_path: Path, source_pages: list[int], before_
 
 def replace_pages(path: Path, source_path: Path, target_pages: list[int], source_pages: list[int]) -> int:
     """Replace target slots one-for-one, preserving the remaining page order."""
-    with pymupdf.open(path) as target, pymupdf.open(source_path) as source:
+    with open_pdf(path) as target, open_pdf(source_path) as source:
         _checked_pages(target_pages, target.page_count)
         _checked_pages(source_pages, source.page_count)
         if len(target_pages) != len(source_pages) or len(set(target_pages)) != len(target_pages):
@@ -179,7 +190,7 @@ def replace_pages(path: Path, source_path: Path, target_pages: list[int], source
 
 def replace_document(path: Path, source_path: Path) -> int:
     """Replace all working pages with another document's current working pages."""
-    with pymupdf.open(source_path) as source:
+    with open_pdf(source_path) as source:
         if source.needs_pass or source.page_count < 1:
             raise ProcessingError('Replacement source must be an open PDF with pages')
         with pymupdf.open() as output:
@@ -192,7 +203,7 @@ def crop_pages(path: Path, pages: list[int], left: float, top: float, right: flo
     """Set crop boxes using normalized fractions of each page's current crop box."""
     if not (0 <= left < right <= 1 and 0 <= top < bottom <= 1):
         raise ProcessingError('Crop edges must be ordered fractions between 0 and 1')
-    with pymupdf.open(path) as doc:
+    with open_pdf(path) as doc:
         _checked_pages(pages, doc.page_count)
         for index in set(pages):
             page = doc[index]
@@ -211,7 +222,7 @@ def add_text_overlay(path: Path, page_index: int, x: float, y: float,
         raise ProcessingError('Text overlay supports printable ASCII and line breaks only')
     if not (0 <= x < 1 and 0 <= y < 1 and 6 <= font_size <= 36):
         raise ProcessingError('Invalid text placement or font size')
-    with pymupdf.open(path) as doc:
+    with open_pdf(path) as doc:
         if not 0 <= page_index < doc.page_count:
             raise ProcessingError('Invalid page number')
         page = doc[page_index]
@@ -231,7 +242,7 @@ def add_text_overlay(path: Path, page_index: int, x: float, y: float,
 
 def editable_text_runs(path: Path, page_index: int) -> list[dict]:
     """List horizontal text spans with PDF and displayed coordinates."""
-    with pymupdf.open(path) as doc:
+    with open_pdf(path) as doc:
         if not 0 <= page_index < doc.page_count:
             raise ProcessingError('Invalid page number')
         page = doc[page_index]
@@ -285,7 +296,7 @@ def replace_text_run(path: Path, page_index: int, span_index: int,
     fontname = ('hebi' if 'bold' in font and ('italic' in font or 'oblique' in font)
                 else 'hebo' if 'bold' in font
                 else 'heit' if 'italic' in font or 'oblique' in font else 'helv')
-    with pymupdf.open(path) as doc:
+    with open_pdf(path) as doc:
         page = doc[page_index]
         if any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
             raise ProcessingError('This page has pending redaction marks. Text replacement would apply them; review them outside this tool first.')
@@ -355,7 +366,7 @@ def move_text_run(path: Path, page_index: int, span_index: int,
     if any(ord(char) < 32 or ord(char) > 126 for char in expected_text):
         raise ProcessingError('Moving text currently supports single-line printable ASCII only')
     source = pymupdf.Rect(selected['bbox'])
-    with pymupdf.open(path) as doc:
+    with open_pdf(path) as doc:
         page = doc[page_index]
         if any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
             raise ProcessingError('This page has pending redaction marks. Review them before moving text.')
@@ -421,7 +432,7 @@ def _wrap_replacement(value: str, max_width: float, fontname: str,
 
 def extract_pages(path: Path, pages: list[int]) -> bytes:
     """Return a separate PDF in the requested order without changing the working copy."""
-    with pymupdf.open(path) as source, pymupdf.open() as output:
+    with open_pdf(path) as source, pymupdf.open() as output:
         _checked_pages(pages, source.page_count)
         assemble_pages(output, [(source, index) for index in pages])
         return output.tobytes(garbage=4, deflate=True)
@@ -429,7 +440,7 @@ def extract_pages(path: Path, pages: list[int]) -> bytes:
 
 def split_pages(path: Path, after_pages: list[int]) -> bytes:
     """Return sequential parts split after zero-based page indexes in a ZIP."""
-    with pymupdf.open(path) as source:
+    with open_pdf(path) as source:
         count = source.page_count
         if (not after_pages or len(after_pages) > 1999 or
                 sorted(set(after_pages)) != after_pages or
@@ -457,14 +468,14 @@ def compress_pdf(path: Path, preset: str, progress=None, cancelled=None) -> dict
     """
     if preset not in COMPRESSION_PRESETS:
         raise ProcessingError('Unknown compression preset')
-    before = path.stat().st_size
+    before = file_size(path)
     fd, name = tempfile.mkstemp(prefix='.pdf-edit-', suffix='.pdf', dir=path.parent)
     os.close(fd)
     candidate = Path(name)
     rewritten = 0
     skipped = 0
     try:
-        with pymupdf.open(path) as doc:
+        with open_pdf(path) as doc:
             images = {}
             for page in doc:
                 if cancelled and cancelled():
@@ -505,9 +516,9 @@ def compress_pdf(path: Path, preset: str, progress=None, cancelled=None) -> dict
                     if progress:
                         progress(int((number + 1) / max(1, len(images)) * 90),
                                  f'Compressing image {number + 1} of {len(images)}')
-            doc.save(candidate, garbage=4, deflate=True)
+            save_pdf(doc, candidate, garbage=4, deflate=True)
             validate_pdf(candidate, doc.page_count)
-        after = candidate.stat().st_size
+        after = file_size(candidate)
         if cancelled and cancelled():
             raise ProcessingError('Operation cancelled')
         changed = after < before
@@ -530,7 +541,7 @@ def ocr_pdf(path: Path, *, language: str='eng', progress=None, cancelled=None) -
     Mixed pages are recognized too. Existing text regions are removed from the
     generated layer to avoid duplicate searchable text. OCR remains unverified.
     """
-    with pymupdf.open(path) as source:
+    with open_pdf(path) as source:
         changed = 0
         total = source.page_count
         for index in range(total):
@@ -612,5 +623,5 @@ def make_cover_pdf(destination: Path, matter: dict) -> int:
             page.insert_text((65, cursor), heading.upper(), fontsize=9, color=(0.4,0.46,0.52))
             page.insert_textbox(pymupdf.Rect(65, cursor + 8, 530, cursor + 43), str(value or '--'), fontsize=12, fontname='helv')
             cursor += 64
-        doc.save(destination)
+        save_pdf(doc, destination)
     return 1

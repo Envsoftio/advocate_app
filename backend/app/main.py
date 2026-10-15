@@ -9,11 +9,13 @@ from pathlib import Path
 import secrets
 import shutil
 import tempfile
+from urllib.parse import unquote
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.responses import FileResponse, Response, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
+from starlette.datastructures import UploadFile as ParsedUploadFile
 import pymupdf
 
 from .engine import load_profiles, preflight, build_bundle, bundle_preview
@@ -25,37 +27,83 @@ from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
                       ocr_pdf, make_cover_pdf)
 from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun
 from .storage import Store, new_id
+from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
 from .schemas import CompressionRequest
-from .portable import create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES
+from .portable import (create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES,
+                       PROTECTED_PACKAGE_MAGIC, protected_package_header, parse_protected_package)
+from .vault import VaultError, decrypt_blob, encrypted_sink, unlock_key
+from .vault_store import VaultStore
 
 FILE_LIMIT_BYTES = 80 * 1024 * 1024
 SUPPORTED = {'.pdf', '.png', '.jpg', '.jpeg'}
 
 
-def create_app(data_dir: str | Path | None = None, token: str | None = None) -> FastAPI:
+def create_app(data_dir: str | Path | None = None, token: str | None = None,
+               data_key: bytes | None = None, require_vault: bool | None = None) -> FastAPI:
     token = token if token is not None else os.getenv('COURTBUNDLE_API_TOKEN')
     if not token:
         raise RuntimeError('COURTBUNDLE_API_TOKEN is required. Set a session secret or use backend/dev.sh.')
     profiles = load_profiles()
     root = Path(data_dir or os.getenv('COURTBUNDLE_DATA_DIR') or Path.home() / '.courtbundle-poc')
-    store = Store(root)
+    protected_mode = (os.getenv('COURTBUNDLE_REQUIRE_VAULT') == '1') if require_vault is None else require_vault
+    vault = VaultStore(root) if protected_mode else None
+    store = None if protected_mode and data_key is None else Store(root, data_key=data_key)
     try:
-        jobs = JobManager(store)
+        jobs = JobManager(store) if store is not None else None
     except BaseException:
-        store.close()
+        if store is not None:
+            store.close()
         raise
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:
             yield
         finally:
-            jobs.shutdown()
-            store.close()
+            if jobs is not None:
+                jobs.shutdown()
+            if store is not None:
+                store.close()
 
     app = FastAPI(title='CourtBundle Local API', version='0.1.0', docs_url=None,
                   redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.store = store
     app.state.jobs = jobs
+    app.state.vault = vault
+
+    @app.middleware('http')
+    async def reject_unprotected_backup_upload(request: Request, call_next):
+        if (protected_mode and request.url.path == '/matters/restore' and
+                request.headers.get('content-type', '').split(';', 1)[0] != 'application/octet-stream'):
+            return JSONResponse(status_code=415, content={
+                'detail': 'Protected backup restore requires a streamed binary upload'})
+        if (protected_mode and request.method == 'POST' and
+                request.url.path.startswith('/matters/') and request.url.path.endswith('/documents')):
+            return JSONResponse(status_code=415, content={
+                'detail': 'Protected document import requires a streamed binary upload'})
+        return await call_next(request)
+
+    def activate(data_key: bytes) -> None:
+        nonlocal store, jobs
+        if store is not None:
+            raise VaultError('Vault is already unlocked')
+        opened = Store(root, data_key=data_key)
+        try:
+            worker = JobManager(opened)
+        except BaseException:
+            opened.close()
+            raise
+        store, jobs = opened, worker
+        app.state.store, app.state.jobs = opened, worker
+
+    def file_response(path: Path, media_type: str, filename: str,
+                      background: BackgroundTask | None = None):
+        if protected(path):
+            response = Response(content=read_bytes(path), media_type=media_type,
+                                headers={'Content-Disposition': f'attachment; filename="{filename}"'})
+            response.background = background
+            return response
+        return FileResponse(path, media_type=media_type, filename=filename,
+                            background=background)
 
     @app.exception_handler(OSError)
     async def storage_error(_request, exc):
@@ -73,12 +121,15 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
     app.add_middleware(CORSMiddleware,
                        allow_origins=allowed_origins,
                        allow_methods=['GET','POST','PUT','PATCH','DELETE'],
-                       allow_headers=['Authorization','Content-Type'])
+                       allow_headers=['Authorization','Content-Type', 'X-CourtBundle-Filename',
+                                      'X-CourtBundle-Backup-Credential', 'X-CourtBundle-Backup-Recovery'])
 
     def auth(request: Request):
         supplied = request.headers.get('Authorization', '')
         if not secrets.compare_digest(supplied, 'Bearer ' + token):
             raise HTTPException(status_code=401, detail='Missing or invalid local session token')
+        if store is None and request.url.path != '/health' and not request.url.path.startswith('/vault/'):
+            raise HTTPException(status_code=423, detail='Matter store is locked. Unlock it first.')
 
     def matter_or_404(matter_id: str):
         item = store.get_matter(matter_id)
@@ -94,8 +145,44 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
 
     @app.get('/health')
     def health(_: None = Depends(auth)):
-        return {'status': 'ok', 'version': '0.1.0', 'ocr_engine': 'PyMuPDF+Tesseract',
+        return {'status': 'locked' if store is None else 'ok', 'version': '0.1.0', 'ocr_engine': 'PyMuPDF+Tesseract',
                 'app': 'CourtBundle POC'}
+
+    @app.get('/vault/status')
+    def vault_status(_: None = Depends(auth)):
+        return {'state': 'unlocked' if store is not None else vault.status(),
+                'enabled': vault is not None}
+
+    @app.post('/vault/setup')
+    def vault_setup(payload: dict, _: None = Depends(auth)):
+        if vault is None:
+            raise HTTPException(status_code=409, detail='Vault setup is unavailable in development mode')
+        try:
+            data_key, recovery_key = vault.setup(payload.get('password'))
+            activate(data_key)
+            return {'state': 'unlocked', 'recovery_key': recovery_key}
+        except VaultError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/vault/unlock')
+    def vault_unlock(payload: dict, _: None = Depends(auth)):
+        if vault is None:
+            raise HTTPException(status_code=409, detail='Vault unlock is unavailable in development mode')
+        try:
+            data_key = vault.unlock(payload.get('credential'), recovery=payload.get('recovery') is True)
+            activate(data_key)
+            return {'state': 'unlocked'}
+        except VaultError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    @app.post('/vault/rotate')
+    def vault_rotate(payload: dict, _: None = Depends(auth)):
+        if vault is None or store is None:
+            raise HTTPException(status_code=423, detail='Unlock the vault first')
+        try:
+            return {'recovery_key': vault.rotate(store._data_key, payload.get('new_password'))}
+        except VaultError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get('/profiles')
     def available_profiles(_: None = Depends(auth)):
@@ -183,30 +270,85 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
             if isinstance(exc, PortableMatterError):
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             raise
-        return FileResponse(path, media_type='application/zip',
-                            filename='court-matter.cbmatter',
-                            background=BackgroundTask(path.unlink, missing_ok=True))
+        if vault is not None:
+            try:
+                header = protected_package_header(vault.envelope())
+                def chunks():
+                    yield header
+                    with path.open('rb') as stream:
+                        while block := stream.read(1024 * 1024):
+                            yield block
+                return StreamingResponse(chunks(), media_type='application/octet-stream',
+                                headers={'Content-Disposition': 'attachment; filename="court-matter.cbmatter"'},
+                                background=BackgroundTask(path.unlink, missing_ok=True))
+            except BaseException:
+                path.unlink(missing_ok=True)
+                raise
+        return file_response(path, 'application/zip', 'court-matter.cbmatter',
+                             BackgroundTask(path.unlink, missing_ok=True))
 
     @app.post('/matters/restore', status_code=201)
-    async def restore_matter(file: UploadFile = File(...), _: None = Depends(auth)):
+    async def restore_matter(request: Request, _: None = Depends(auth)):
         with tempfile.NamedTemporaryFile(dir=store.root, prefix='.portable-',
                                          suffix='.cbmatter', delete=False) as temp:
             path = Path(temp.name)
+        file = None
         try:
             size = 0
-            with path.open('wb') as output:
+            if request.headers.get('content-type', '').split(';', 1)[0] == 'application/octet-stream':
+                if vault is not None:
+                    with encrypted_sink(path, store._data_key) as output:
+                        async for chunk in request.stream():
+                            size += len(chunk)
+                            if size > MAX_PACKAGE_BYTES:
+                                raise HTTPException(status_code=413, detail='Portable package exceeds 4 GiB')
+                            output.write(chunk)
+                else:
+                    with path.open('wb') as output:
+                        async for chunk in request.stream():
+                            size += len(chunk)
+                            if size > MAX_PACKAGE_BYTES:
+                                raise HTTPException(status_code=413, detail='Portable package exceeds 4 GiB')
+                            output.write(chunk)
+                credential = request.headers.get('x-courtbundle-backup-credential')
+                recovery = request.headers.get('x-courtbundle-backup-recovery') == 'true'
+            else:
+                if vault is not None:
+                    raise HTTPException(status_code=415, detail='Protected backup restore requires a streamed binary upload')
+                form = await request.form()
+                file = form.get('file')
+                if not isinstance(file, ParsedUploadFile):
+                    raise HTTPException(status_code=422, detail='Select a portable matter file')
+                chunks = []
                 while chunk := await file.read(1024 * 1024):
                     size += len(chunk)
                     if size > MAX_PACKAGE_BYTES:
                         raise HTTPException(status_code=413, detail='Portable package exceeds 4 GiB')
-                    output.write(chunk)
+                    chunks.append(chunk)
+                write_bytes(path, b''.join(chunks))
+                credential = form.get('credential')
+                recovery = form.get('recovery') == 'true'
             try:
+                raw = read_bytes(path)
+                if raw.startswith(PROTECTED_PACKAGE_MAGIC):
+                    if vault is None:
+                        raise PortableMatterError('Unlock a protected store before restoring this backup')
+                    envelope, ciphertext = parse_protected_package(raw)
+                    try:
+                        package_bytes = decrypt_blob(ciphertext, store._data_key)
+                    except VaultError:
+                        if not credential:
+                            raise PortableMatterError('This backup needs its password or recovery key')
+                        package_key = unlock_key(envelope, credential, recovery=recovery)
+                        package_bytes = decrypt_blob(ciphertext, package_key)
+                    return restore_package(store, package_bytes)
                 return restore_package(store, path)
-            except PortableMatterError as exc:
+            except (PortableMatterError, VaultError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:
             path.unlink(missing_ok=True)
-            await file.close()
+            if file is not None:
+                await file.close()
 
     @app.get('/matters/{matter_id}/documents')
     def get_documents(matter_id: str, _: None = Depends(auth)):
@@ -223,7 +365,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         with store.matter_lock(matter_id):
             for document in store.get_documents(matter_id):
                 try:
-                    with pymupdf.open(store.working_path(document)) as pdf:
+                    with open_pdf(store.working_path(document)) as pdf:
                         for page_index, page in enumerate(pdf):
                             text = ' '.join(page.get_text('text').split())
                             position = text.casefold().find(query.casefold())
@@ -265,8 +407,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         with store.matter_lock(matter_id):
             return {'values': store.set_matter_values(matter_id, payload.values)}
 
-    async def import_document(matter_id: str, file: UploadFile):
-        suffix = Path(file.filename or '').suffix.lower()
+    async def import_document(matter_id: str, filename: str,
+                              file: UploadFile | None = None, request: Request | None = None):
+        suffix = Path(filename).suffix.lower()
         if suffix not in SUPPORTED:
             raise HTTPException(status_code=415, detail='Only PDF, PNG and JPEG documents are supported in this POC')
         doc_id = new_id()
@@ -281,12 +424,29 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         target = folder / work_rel
         try:
             size = 0
-            with source.open('wb') as stream:
+            if request is not None:
+                if protected(source):
+                    with encrypted_sink(source, store._data_key) as output:
+                        async for chunk in request.stream():
+                            size += len(chunk)
+                            if size > FILE_LIMIT_BYTES:
+                                raise HTTPException(status_code=413, detail='POC import limit is 80 MB per file')
+                            output.write(chunk)
+                else:
+                    with source.open('wb') as output:
+                        async for chunk in request.stream():
+                            size += len(chunk)
+                            if size > FILE_LIMIT_BYTES:
+                                raise HTTPException(status_code=413, detail='POC import limit is 80 MB per file')
+                            output.write(chunk)
+            else:
+                chunks = []
                 while chunk := await file.read(1024 * 1024):
                     size += len(chunk)
                     if size > FILE_LIMIT_BYTES:
                         raise HTTPException(status_code=413, detail='POC import limit is 80 MB per file')
-                    stream.write(chunk)
+                    chunks.append(chunk)
+                write_bytes(source, b''.join(chunks))
             conversion = asyncio.create_task(asyncio.to_thread(normalize_to_pdf, source, target))
             try:
                 pages = await asyncio.shield(conversion)
@@ -297,7 +457,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
                     await conversion
                 finally:
                     raise
-            name = Path(file.filename or '').name or 'Untitled'
+            name = Path(filename).name or 'Untitled'
             item = dict(id=doc_id, matter_id=matter_id, title=Path(name).stem[:250],
                         kind='other', part=1, label='', group_key='', page_count=pages,
                         ocr_status='not_requested', original_name=name[:250],
@@ -312,7 +472,24 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
             if not store.get_document(doc_id):
                 source.unlink(missing_ok=True)
                 target.unlink(missing_ok=True)
-            await file.close()
+            if file is not None:
+                await file.close()
+
+    @app.post('/matters/{matter_id}/documents/raw', status_code=201)
+    async def upload_raw(matter_id: str, request: Request, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        if request.headers.get('content-type', '').split(';', 1)[0] != 'application/octet-stream':
+            raise HTTPException(status_code=415, detail='Stream one PDF, PNG or JPEG file')
+        filename = unquote(request.headers.get('x-courtbundle-filename', ''))
+        if not filename or len(filename) > 500 or '/' in filename or '\\' in filename:
+            raise HTTPException(status_code=422, detail='Invalid document filename')
+        lock = store.matter_lock(matter_id)
+        while not lock.acquire(blocking=False):
+            await asyncio.sleep(.05)
+        try:
+            return [await import_document(matter_id, filename, request=request)]
+        finally:
+            lock.release()
 
     @app.post('/matters/{matter_id}/documents', status_code=201)
     async def upload(matter_id: str, files: list[UploadFile] = File(...), _: None = Depends(auth)):
@@ -327,7 +504,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         try:
             records = []
             for f in files:
-                records.append(await import_document(matter_id, f))
+                records.append(await import_document(matter_id, f.filename or '', file=f))
             return records
         finally:
             lock.release()
@@ -345,7 +522,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
             work_rel = f'working/{doc_id}.pdf'
             path = folder / original_rel
             make_cover_pdf(path, matter)
-            shutil.copy2(path, folder / work_rel)
+            copy_file(path, folder / work_rel)
             return store.add_document(dict(id=doc_id, matter_id=matter_id,
                                            title='Draft matter cover sheet', kind='other', part=1,
                                            label='', group_key='', page_count=1, ocr_status='native_text',
@@ -416,8 +593,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         path = store.working_path(doc)
         if not path.is_file():
             raise HTTPException(status_code=404, detail='PDF working copy missing')
-        return FileResponse(path, media_type='application/pdf', filename=doc['id'] + '.pdf',
-                            headers={'Cache-Control': 'no-store'})
+        response = file_response(path, 'application/pdf', doc['id'] + '.pdf')
+        response.headers['Cache-Control'] = 'no-store'
+        return response
 
     def edit_working_copy(doc_id: str, operation):
         doc = doc_or_404(doc_id)
@@ -425,7 +603,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
             doc = doc_or_404(doc_id)
             rel, candidate = store.next_working_path(doc)
             try:
-                shutil.copy2(store.working_path(doc), candidate)
+                copy_file(store.working_path(doc), candidate)
                 changes = operation(candidate, doc) or {}
                 return store.update_document(doc_id, dict(changes, working_relpath=rel))
             except BaseException:
@@ -596,7 +774,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
                 rel, candidate = store.next_working_path(current)
                 committed = False
                 try:
-                    shutil.copy2(store.working_path(current), candidate)
+                    copy_file(store.working_path(current), candidate)
                     total, changed = ocr_pdf(candidate, progress=progress, cancelled=cancelled)
                     if cancelled():
                         raise ProcessingError('Operation cancelled')
@@ -627,7 +805,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
                 rel, candidate = store.next_working_path(current)
                 committed = False
                 try:
-                    shutil.copy2(store.working_path(current), candidate)
+                    copy_file(store.working_path(current), candidate)
                     result = compress_pdf(candidate, payload.preset, progress, cancelled)
                     if cancelled():
                         raise ProcessingError('Operation cancelled')
@@ -716,6 +894,6 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None) -> 
         if not path:
             raise HTTPException(status_code=404, detail='Export file not found')
         media = 'application/pdf' if filename.endswith('.pdf') else ('application/zip' if filename.endswith('.zip') else 'application/octet-stream')
-        return FileResponse(path, filename=filename, media_type=media)
+        return file_response(path, media, filename)
 
     return app

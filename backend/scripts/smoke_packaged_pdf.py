@@ -1,6 +1,6 @@
 """Exercise a frozen sidecar with disposable synthetic PDFs and bundled OCR.
 
-Usage: python backend/scripts/smoke_packaged_pdf.py /path/to/filing-api
+Usage: python backend/scripts/smoke_packaged_pdf.py /path/to/filing-api [--protected]
 This verifies the sidecar API, not the native WebView or Save dialog.
 """
 import hashlib
@@ -20,12 +20,15 @@ import pymupdf
 
 def main():
     executable = str(Path(sys.argv[1]).resolve())
+    protected = '--protected' in sys.argv[2:]
     with tempfile.TemporaryDirectory(prefix='courtbundle-packaged-qa-') as temporary:
         root = Path(temporary)
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             port = listener.getsockname()[1]
         environment = dict(os.environ, COURTBUNDLE_API_TOKEN=secrets.token_hex(24), PATH='/usr/bin:/bin')
+        if protected:
+            environment['COURTBUNDLE_REQUIRE_VAULT'] = '1'
         environment.pop('TESSDATA_PREFIX', None)
         with (root / 'engine.log').open('wb') as log:
             process = subprocess.Popen([executable, '--port', str(port), '--data-dir', str(root / 'data')],
@@ -44,6 +47,12 @@ def main():
                                 raise RuntimeError('Packaged engine failed to become ready; inspect local build')
                             time.sleep(.2)
                     startup = time.monotonic() - start
+                    if protected:
+                        assert client.get('/health').json()['status'] == 'locked'
+                        assert client.get('/matters').status_code == 423
+                        setup = client.post('/vault/setup', json={'password': 'synthetic packaged password 123'})
+                        setup.raise_for_status()
+                        assert len(setup.json()['recovery_key']) == 64
                     matter = client.post('/matters', json={'name': 'Synthetic packaged PDF QA',
                                                           'court_profile': 'general-demo'}).json()
                     base = f'/matters/{matter["id"]}'
@@ -56,7 +65,10 @@ def main():
                         page.insert_text((60, 60), 'Native header')
                         page.insert_image(pymupdf.Rect(40, 150, 540, 290), pixmap=pix)
                         original = pdf.tobytes()
-                    response = client.post(base + '/documents', files=[('files', ('mixed.pdf', original, 'application/pdf'))])
+                    response = (client.post(base + '/documents/raw', content=original,
+                        headers={'Content-Type': 'application/octet-stream', 'X-CourtBundle-Filename': 'mixed.pdf'})
+                        if protected else client.post(base + '/documents',
+                            files=[('files', ('mixed.pdf', original, 'application/pdf'))]))
                     response.raise_for_status()
                     doc = response.json()[0]
 
@@ -88,7 +100,11 @@ def main():
                         assert pdf[0].get_links()[0]['page'] == 1
                         assert [2, 'Reviewed synthetic target', 2] in pdf.get_toc()
                     original_path = root / 'data' / 'matters' / matter['id'] / doc['source_relpath']
-                    assert hashlib.sha256(original_path.read_bytes()).digest() == hashlib.sha256(original).digest()
+                    if protected:
+                        assert original_path.read_bytes().startswith(b'CBENC1\n')
+                        assert original_path.read_bytes() != original
+                    else:
+                        assert hashlib.sha256(original_path.read_bytes()).digest() == hashlib.sha256(original).digest()
                     print(json.dumps({'startup_seconds': round(startup, 2), 'bundled_ocr': 'passed',
                                       'compression': compressed['result'], 'bookmarked_export': 'passed',
                                       'original_integrity': 'passed'}, indent=2))

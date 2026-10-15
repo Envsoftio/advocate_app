@@ -33,6 +33,16 @@ export interface MatterDocument {
   updated_at: string
   archived_at?: string | null
 }
+export interface ManualBookmark {
+  id: string
+  title: string
+  document_id: string
+  page_index: number
+  target_revision: number
+  parent_id: string | null
+  position: number
+  resolved: boolean
+}
 export interface PageSearchMatch {
   document_id: string
   title: string

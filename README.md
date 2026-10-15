@@ -4,11 +4,15 @@
 
 This is a local-first desktop application prototype using **Tauri 2 + Vue 3 + TypeScript + Python FastAPI + PyMuPDF + integrated Tesseract OCR**.
 
+The [project context and requirements](CourtBundle_Project_Context_and_Handoff.md) define six approved improvements: Quick Bundle, batch document review, output presets, reviewed import cleanup, rebuild/export review and a source-linked chronology. These are planned requirements; implementation status remains in the [backlog](docs/IMPLEMENTATION_TASKS.md).
+
 The proof-of-concept workflow is:
 
 `Create matter -> Import PDF/images -> Inspect/edit working copies -> OCR -> Classify/group/drag to order -> Configure volumes -> Generate index/bookmarks -> Validate -> Export combined PDF + volumes + CSV + ZIP`
 
-On the matter's **Documents** page, use **Bookmark page** in the PDF viewer to mark the page you are reading. The adjacent **Index & bookmarks** tab shows the index plan and lets you rename, nest, reorder or resolve manual bookmarks before building. Build retains a read-only page plan beside its settings. The plan shows each volume's index rows, physical page ranges, combined PDF offsets and bookmark destinations. After building, **Review PDF** opens a generated PDF (up to 25 MiB) inside the app with page and bookmark navigation. Larger files should be saved and reviewed in a PDF viewer. The fixed index layout and per-volume printed numbering are technical POC choices, not reviewed filing rules.
+Use **Quick Bundle** for a guided `Import → Arrange → Review → Export` path over that same workspace and deterministic page map. The guide persists its step per matter, stops generation on technical blockers or settings-save failure, and keeps the full workspace available. **Open sample matter** creates a separate synthetic draft matter; it is not an approved court example.
+
+On the matter's **Documents** page, use **Bookmark page** in the PDF viewer to mark the page you are reading. Drag document rows or use their arrow buttons to set index order; open thumbnails to drag pages within a working copy. The adjacent **Index & bookmarks** tab repeats document ordering beside the page map, offers a bookmark shortcut on every index row, and lets you rename, nest, reorder or resolve manual bookmarks. Drag bookmarks among siblings or use their arrow buttons. The preview distinguishes printed volume pages from physical combined PDF pages and shows each bookmark's source page. Build retains a read-only page plan beside its settings. After building, **Review PDF** opens a generated PDF (up to 25 MiB) inside the app with page and bookmark navigation. Larger files should be saved and reviewed in a PDF viewer. The fixed index layout and per-volume printed numbering are technical POC choices, not reviewed filing rules.
 
 The Delhi High Court profile also includes a source-linked preparation guide,
 official form/template links, explicit handling of the 2026 Rule 3.4 size
@@ -39,7 +43,7 @@ CourtBundle_POC/
     package.json
   samples/             # synthetic PDF/JPEG sources and verified output package
   docs/
-    PROJECT_CONTEXT_AND_HANDOFF.md
+    PROJECT_CONTEXT_AND_HANDOFF.md # pointer to the root handoff
     POC_ACCEPTANCE_TESTS.md
 ```
 
@@ -166,11 +170,11 @@ All routes require `Authorization: Bearer <local-token>`.
 
 - `GET /health`, `GET /profiles`
 - `GET|POST /matters`; `GET|PATCH|DELETE /matters/{id}`
-- `GET /matters/{id}/portable`; `POST /matters/restore` (versioned local matter backup/restore)
+- `GET /matters/{id}/portable`; `POST /matters/restore` (versioned local matter backup/restore; protected mode streams `application/octet-stream`)
 - `GET /matters/{id}/history`; `POST /matters/{id}/history/undo|redo`
 - `GET|PUT /matters/{id}/bookmarks` (revision-aware manual outline entries)
 - `GET /matters/archived`; `POST /matters/{id}/restore`; `GET /matters/{id}/archived-documents|storage|audit`
-- `GET|POST /matters/{id}/documents`; `POST /matters/{id}/cover`
+- `GET /matters/{id}/documents`; `POST /matters/{id}/documents/raw` (streamed file with `X-CourtBundle-Filename`); legacy multipart `POST /matters/{id}/documents` is for plaintext development mode; `POST /matters/{id}/cover`
 - `GET|PUT /matters/{id}/memo-parties` (matter-scoped review data)
 - `GET|PUT /matters/{id}/values` (matter-scoped reusable draft values; no filing template consumes them yet)
 - `POST /matters/{id}/documents/reorder`
@@ -181,7 +185,7 @@ All routes require `Authorization: Bearer <local-token>`.
 - `GET /jobs/{id}`; `POST /jobs/{id}/cancel`
 - `GET /matters/{id}/exports`; `GET /matters/{id}/exports/{exportId}/{filename}`
 
-Full request/response examples and architecture notes are in `docs/PROJECT_CONTEXT_AND_HANDOFF.md`.
+Full request/response examples and architecture notes are in `CourtBundle_Project_Context_and_Handoff.md`.
 
 ## POC boundaries — important
 
@@ -194,11 +198,11 @@ Full request/response examples and architecture notes are in `docs/PROJECT_CONTE
 - Job state and progress persist in SQLite. After a restart, unfinished jobs are shown as interrupted and can be retried from a new job; abandoned build staging is removed. Working-copy revisions and a process-wide processing lock keep PDF requests and jobs from running concurrently. Late cancellation cannot relabel a committed output as cancelled. Restart recovery recognizes a published build only after verifying its artifact hashes. Large-job cancellation and native crash recovery still need device testing.
 - Manual bookmarks persist with document/page/revision targets. A later edit or archive leaves an affected bookmark visible as unresolved until reviewed; unresolved entries are omitted from generated outlines with a report warning. The v3 portable matter package includes bookmarks and reusable draft matter values and accepts legacy v1/v2 packages. Build manifests fingerprint matter inputs, current working-copy hashes, manual bookmarks and the selected profile; older manifests are conservatively marked stale.
 - Memo of Parties helper rows autosave to the selected local matter and show save failures. Document-detail and bundle-setting forms use explicit Save, show unsaved indicators, and prompt before discarding drafts during navigation or reload. A failed bundle-settings save stops the build.
-- Local data and portable matter backups are **not encrypted at rest**. Matter/document removal archives records and keeps files; there is no in-app permanent delete. See [local security and retention](docs/LOCAL_SECURITY_AND_RETENTION.md). Do not import actual confidential court/client files for a demonstration.
+- The packaged desktop app requires a password-protected local vault. Its SQLite database, matter files, internal exports and new `.cbmatter` backups are encrypted at rest. Browser development mode remains plaintext, and explicitly saved PDF/ZIP downloads are plaintext at their chosen destination. Matter/document removal archives records and keeps files; there is no in-app permanent delete. See [local security and retention](docs/LOCAL_SECURITY_AND_RETENTION.md). Use synthetic matters until native macOS and Windows security checks are complete.
 - Vue build, Vitest, Apple Silicon Rust compile and local package tests passed on 13 October 2026; see the acceptance log for exact runs. Other target builds and clean-device tests are still required.
 - **PyMuPDF licensing:** Determine AGPL/commercial licensing requirements before distributing any proprietary build. Review other dependencies' licenses too.
 
-See [Project Context and Handoff](docs/PROJECT_CONTEXT_AND_HANDOFF.md) and [Acceptance Tests](docs/POC_ACCEPTANCE_TESTS.md).
+See [Project Context and Handoff](CourtBundle_Project_Context_and_Handoff.md) and [Acceptance Tests](docs/POC_ACCEPTANCE_TESTS.md).
 
 ### PDF reliability hardening — 14 October 2026
 
