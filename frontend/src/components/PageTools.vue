@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { api, downloadPageOutput } from '../lib/api'
 import { friendlyError } from '../lib/format'
+import { confirmSignatureTransformation } from '../lib/signatures'
 import type { Job, MatterDocument } from '../lib/types'
 
 const props = defineProps<{ document: MatterDocument, documents: MatterDocument[], disabled: boolean, expanded?: boolean, job?: Job | null }>()
@@ -11,11 +12,14 @@ const compressionJob = computed(() => props.job?.kind === 'compress' && props.jo
 const compressionResult = computed(() => compressionJob.value?.result as Record<string, unknown> | null)
 async function compress() {
   if (props.disabled || working.value) return
+  const signature = confirmSignatureTransformation([props.document], 'Compression')
+  if (!signature.proceed) return
   working.value = true
   error.value = ''
   try {
     const job = await api<Job>(`/documents/${props.document.id}/compress`, 'POST', {
       preset: compressionPreset.value, expected_revision: props.document.revision,
+      acknowledge_signature_risk: signature.acknowledged,
     })
     emit('jobStarted', job)
   } catch (err) { error.value = friendlyError(err) }
@@ -62,12 +66,19 @@ async function run(action: 'insert' | 'insertAfter' | 'replace' | 'replaceDocume
   error.value = ''
   working.value = true
   try {
+    const involved = action === 'crop' || !source.value
+      ? [props.document] : [props.document, source.value]
+    const signature = confirmSignatureTransformation(involved,
+      action === 'crop' ? 'Cropping' : action === 'replaceDocument' ? 'Replacing the working document' :
+        action === 'replace' ? 'Replacing pages' : 'Inserting pages')
+    if (!signature.proceed) return
     let payload: unknown
     let operation = action
     if (action === 'crop') {
       payload = { pages: parsePages(cropRange.value, props.document.page_count),
         left: crop.value.left / 100, top: crop.value.top / 100,
-        right: crop.value.right / 100, bottom: crop.value.bottom / 100 }
+        right: crop.value.right / 100, bottom: crop.value.bottom / 100,
+        acknowledge_signature_risk: signature.acknowledged }
     } else {
       if (!source.value) throw new Error('Choose a source document in this matter.')
       if (action === 'replaceDocument' && source.value.id === props.document.id)
@@ -76,10 +87,12 @@ async function run(action: 'insert' | 'insertAfter' | 'replace' | 'replaceDocume
         ? Array.from({ length: source.value.page_count }, (_, index) => index)
         : action === 'replaceDocument' ? [] : parsePages(sourceRange.value, source.value.page_count)
       if (action === 'replaceDocument') {
-        payload = { source_document_id: source.value.id }
+        payload = { source_document_id: source.value.id,
+          acknowledge_signature_risk: signature.acknowledged }
       } else if (action === 'replace') {
         payload = { source_document_id: source.value.id, source_pages: sourcePages,
-          target_pages: parsePages(targetRange.value, props.document.page_count) }
+          target_pages: parsePages(targetRange.value, props.document.page_count),
+          acknowledge_signature_risk: signature.acknowledged }
       } else {
         operation = 'insert'
         if (action === 'insertAfter' && (!Number.isInteger(afterPage.value) || afterPage.value < 1 || afterPage.value > props.document.page_count))
@@ -88,7 +101,8 @@ async function run(action: 'insert' | 'insertAfter' | 'replace' | 'replaceDocume
           : action === 'insertAfter' ? afterPage.value + 1 : beforePage.value
         if (!Number.isInteger(before) || before < 1 || before > props.document.page_count + 1)
           throw new Error(`Insert before page 1 to ${props.document.page_count + 1}.`)
-        payload = { source_document_id: source.value.id, source_pages: sourcePages, before_index: before - 1 }
+        payload = { source_document_id: source.value.id, source_pages: sourcePages,
+          before_index: before - 1, acknowledge_signature_risk: signature.acknowledged }
       }
     }
     await api(action === 'replaceDocument' ? `/documents/${props.document.id}/replace`
@@ -102,10 +116,13 @@ async function savePages(operation: 'extract' | 'split') {
   error.value = ''
   working.value = true
   try {
+    const signature = confirmSignatureTransformation([props.document],
+      operation === 'extract' ? 'Creating an extracted PDF' : 'Creating split PDFs')
+    if (!signature.proceed) return
     const indexes = operation === 'extract'
       ? parsePages(extractRange.value, props.document.page_count)
       : parsePages(splitAfter.value, props.document.page_count - 1)
-    await downloadPageOutput(props.document.id, operation, indexes)
+    await downloadPageOutput(props.document.id, operation, indexes, signature.acknowledged)
   } catch (err) { error.value = friendlyError(err) }
   finally { working.value = false }
 }

@@ -74,7 +74,8 @@ export async function uploadDocuments(matterId: string, files: File[]): Promise<
   for (const file of files) {
     await request(`/matters/${matterId}/documents/raw`, { method: 'POST', body: file,
       headers: { 'Content-Type': 'application/octet-stream',
-        'X-CourtBundle-Filename': encodeURIComponent(file.name) } }, 5 * 60_000)
+        'X-CourtBundle-Filename': encodeURIComponent(file.name),
+        'X-CourtBundle-File-Mtime': file.lastModified ? new Date(file.lastModified).toISOString() : '' } }, 5 * 60_000)
   }
 }
 
@@ -100,11 +101,15 @@ export async function downloadMatter(matterId: string): Promise<boolean> {
   return true
 }
 
-export async function downloadPageOutput(documentId: string, operation: 'extract' | 'split', indexes: number[]): Promise<boolean> {
+export async function downloadPageOutput(documentId: string, operation: 'extract' | 'split', indexes: number[],
+                                         acknowledgeSignatureRisk = false): Promise<boolean> {
   const selection = indexes.join(',')
-  if (inTauri()) return invoke<boolean>('save_page_output', { documentId, operation, selection })
+  if (inTauri()) return invoke<boolean>('save_page_output', {
+    documentId, operation, selection, acknowledgeSignatureRisk,
+  })
   const query = operation === 'extract' ? 'selection' : 'after'
-  const response = await request(`/documents/${documentId}/pages/${operation}?${query}=${selection}`)
+  const response = await request(`/documents/${documentId}/pages/${operation}?${query}=${selection}` +
+    `&acknowledge_signature_risk=${acknowledgeSignatureRisk}`)
   const url = URL.createObjectURL(await response.blob())
   const anchor = document.createElement('a')
   anchor.href = url

@@ -277,6 +277,7 @@ pub(crate) async fn save_page_output(
     document_id: String,
     operation: String,
     selection: String,
+    acknowledge_signature_risk: bool,
 ) -> Result<bool, String> {
     if !valid_id(&document_id)
         || !matches!(operation.as_str(), "extract" | "split")
@@ -327,7 +328,7 @@ pub(crate) async fn save_page_output(
     };
     transfer(
         &backend.connection,
-        &format!("/documents/{document_id}/pages/{operation}?{query}={selection}"),
+        &format!("/documents/{document_id}/pages/{operation}?{query}={selection}&acknowledge_signature_risk={acknowledge_signature_risk}"),
         &destination,
     )
     .await?;

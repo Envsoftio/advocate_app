@@ -1,8 +1,15 @@
 from typing import Literal
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from datetime import date
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 import re
 
 DocKind = Literal['petition', 'affidavit', 'order', 'annexure', 'application', 'evidence', 'other']
+DocumentDateStatus = Literal['unknown', 'ambiguous', 'suggested', 'confirmed']
+DocumentDateSource = Literal['none', 'user', 'extracted', 'filename', 'filesystem']
+LabelStatus = Literal['unreviewed', 'confirmed']
+LabelSource = Literal['none', 'legacy', 'user', 'proposal', 'filename']
+GroupRole = Literal['member', 'parent']
+VisibleSignatureStatus = Literal['unreviewed', 'present', 'absent']
 
 
 class MatterCreate(BaseModel):
@@ -42,7 +49,135 @@ class DocumentPatch(BaseModel):
     kind: DocKind | None = None
     part: int | None = Field(default=None, ge=1, le=4)
     label: str | None = Field(default=None, max_length=60)
+    label_status: LabelStatus | None = None
+    label_source: LabelSource | None = None
     group_key: str | None = Field(default=None, max_length=100)
+    group_role: GroupRole | None = None
+    document_date: str | None = Field(default=None, pattern=r'^(|\d{4}-\d{2}-\d{2})$')
+    date_status: DocumentDateStatus | None = None
+    date_source: DocumentDateSource | None = None
+    date_note: str | None = Field(default=None, max_length=120)
+    visible_signature_status: VisibleSignatureStatus | None = None
+
+    @field_validator('document_date')
+    @classmethod
+    def validate_document_date(cls, value: str | None) -> str | None:
+        if value:
+            date.fromisoformat(value)
+        return value
+
+    @model_validator(mode='after')
+    def validate_date_metadata(self):
+        values = (self.document_date, self.date_status, self.date_source)
+        if all(value is None for value in values) and self.date_note is None:
+            return self
+        if any(value is None for value in values):
+            raise ValueError('Document date, status and source must be updated together')
+        if self.date_status == 'unknown':
+            if self.document_date or self.date_source != 'none' or self.date_note:
+                raise ValueError('Unknown dates must not have a value or source')
+        elif self.date_status == 'ambiguous':
+            if self.document_date or self.date_source in ('none', 'user') or not self.date_note:
+                raise ValueError('Ambiguous dates require a source and the unparsed date text')
+        elif not self.document_date:
+            raise ValueError('Suggested and confirmed dates require a date value')
+        elif self.date_status == 'confirmed' and self.date_source != 'user':
+            raise ValueError('Only a user-reviewed date can be confirmed')
+        elif self.date_status == 'suggested' and self.date_source in ('none', 'user'):
+            raise ValueError('Suggested dates require an extracted, filename or filesystem source')
+        return self
+
+    @model_validator(mode='after')
+    def validate_label_metadata(self):
+        if self.label_status is None and self.label_source is None:
+            return self
+        if self.label is None or self.label_status is None or self.label_source is None:
+            raise ValueError('Label, confirmation status and source must be updated together')
+        if not self.label:
+            if self.label_status != 'unreviewed' or self.label_source != 'none':
+                raise ValueError('An empty label cannot be confirmed or have a source')
+        elif self.label_status == 'confirmed' and self.label_source not in ('user', 'proposal'):
+            raise ValueError('Confirmed labels require a user or reviewed proposal source')
+        elif self.label_status == 'unreviewed' and self.label_source not in ('legacy', 'filename'):
+            raise ValueError('Unreviewed labels require a legacy or filename source')
+        return self
+
+
+class BatchDocumentPatch(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    ids: list[str] = Field(min_length=1, max_length=1000)
+    kind: DocKind | None = None
+    part: int | None = Field(default=None, ge=1, le=4)
+    group_key: str | None = Field(default=None, max_length=100)
+
+    @model_validator(mode='after')
+    def require_change(self):
+        if self.kind is None and self.part is None and self.group_key is None:
+            raise ValueError('Choose at least one batch field')
+        if len(self.ids) != len(set(self.ids)):
+            raise ValueError('Select each document once')
+        return self
+
+
+class DocumentSortPreview(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    mode: Literal['manual', 'upload', 'filename', 'document_date']
+    unknown_dates: Literal['last'] = 'last'
+
+
+class LabelProposalRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    ids: list[str] = Field(min_length=1, max_length=1000)
+    mode: Literal['sequential', 'grouped_suffix', 'filename']
+    prefix: str = Field(default='P-', max_length=20)
+    start: int = Field(default=1, ge=1, le=9999)
+    group_separator: str = Field(default='', max_length=5)
+    group_suffix_style: Literal['lower_alpha', 'upper_alpha', 'numeric',
+                                'lower_alpha_parenthesized',
+                                'upper_alpha_parenthesized',
+                                'numeric_parenthesized'] = 'lower_alpha'
+    first_member_base: bool = False
+    existing_label_policy: Literal['compact', 'preserve'] = 'compact'
+    reference_document_id: str | None = None
+
+    @field_validator('ids')
+    @classmethod
+    def unique_ids(cls, values: list[str]) -> list[str]:
+        if len(values) != len(set(values)):
+            raise ValueError('Select each document once')
+        return values
+
+    @field_validator('prefix', 'group_separator')
+    @classmethod
+    def visible_label_fragment(cls, value: str) -> str:
+        if any(ord(char) < 32 for char in value):
+            raise ValueError('Label formatting cannot contain control characters')
+        return value
+
+
+class LabelMapping(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    document_id: str
+    old_label: str = Field(max_length=60)
+    new_label: str = Field(min_length=1, max_length=60)
+
+
+class ApplyLabelProposal(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    mappings: list[LabelMapping] = Field(min_length=1, max_length=1000)
+    reference_document_id: str | None = None
+    expected_reference_revision: int | None = Field(default=None, ge=1)
+    acknowledge_existing_labels: bool = False
+    acknowledge_prior_exports: bool = False
+    acknowledge_references: bool = False
+
+    @field_validator('mappings')
+    @classmethod
+    def unique_mapping_ids(cls, values: list[LabelMapping]) -> list[LabelMapping]:
+        ids = [item.document_id for item in values]
+        if len(ids) != len(set(ids)):
+            raise ValueError('Map each document once')
+        return values
 
 
 class MemoParty(BaseModel):
@@ -78,36 +213,40 @@ class ReorderDocuments(BaseModel):
     ids: list[str]
 
 
-class ReorderPages(BaseModel):
+class SignatureRiskAcknowledgement(BaseModel):
+    acknowledge_signature_risk: bool = False
+
+
+class ReorderPages(SignatureRiskAcknowledgement):
     order: list[int]
 
 
-class RotatePage(BaseModel):
+class RotatePage(SignatureRiskAcknowledgement):
     page_index: int = Field(ge=0)
     degrees: int
 
 
-class DeletePage(BaseModel):
+class DeletePage(SignatureRiskAcknowledgement):
     page_index: int = Field(ge=0)
 
 
-class InsertPages(BaseModel):
+class InsertPages(SignatureRiskAcknowledgement):
     source_document_id: str
     source_pages: list[int] = Field(min_length=1, max_length=2000)
     before_index: int = Field(ge=0)
 
 
-class ReplacePages(BaseModel):
+class ReplacePages(SignatureRiskAcknowledgement):
     source_document_id: str
     target_pages: list[int] = Field(min_length=1, max_length=2000)
     source_pages: list[int] = Field(min_length=1, max_length=2000)
 
 
-class ReplaceDocument(BaseModel):
+class ReplaceDocument(SignatureRiskAcknowledgement):
     source_document_id: str
 
 
-class CompressionRequest(BaseModel):
+class CompressionRequest(SignatureRiskAcknowledgement):
     model_config = ConfigDict(extra='forbid')
     preset: Literal['lossless', 'balanced', 'small'] = 'lossless'
     expected_revision: int = Field(ge=1)
@@ -127,7 +266,7 @@ class ManualBookmarksUpdate(BaseModel):
     entries: list[ManualBookmark] = Field(max_length=500)
 
 
-class CropPages(BaseModel):
+class CropPages(SignatureRiskAcknowledgement):
     pages: list[int] = Field(min_length=1, max_length=2000)
     left: float = Field(ge=0, le=1)
     top: float = Field(ge=0, le=1)
@@ -135,7 +274,7 @@ class CropPages(BaseModel):
     bottom: float = Field(ge=0, le=1)
 
 
-class TextOverlay(BaseModel):
+class TextOverlay(SignatureRiskAcknowledgement):
     model_config = ConfigDict(extra='forbid')
     page_index: int = Field(ge=0)
     x: float = Field(ge=0, lt=1)
@@ -144,7 +283,7 @@ class TextOverlay(BaseModel):
     font_size: float = Field(default=12, ge=6, le=36)
 
 
-class ReplaceTextRun(BaseModel):
+class ReplaceTextRun(SignatureRiskAcknowledgement):
     model_config = ConfigDict(extra='forbid')
     page_index: int = Field(ge=0)
     span_index: int = Field(ge=0)
@@ -153,7 +292,7 @@ class ReplaceTextRun(BaseModel):
     replacement: str = Field(min_length=1, max_length=2000)
 
 
-class MoveTextRun(BaseModel):
+class MoveTextRun(SignatureRiskAcknowledgement):
     model_config = ConfigDict(extra='forbid')
     page_index: int = Field(ge=0)
     span_index: int = Field(ge=0)

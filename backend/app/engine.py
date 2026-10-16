@@ -19,6 +19,9 @@ import pymupdf
 from .pdf_ops import ProcessingError, validate_pdf
 from .file_io import open_pdf, read_bytes, save_pdf, size as file_size, write_bytes
 from .storage import Store, utcnow
+from .signatures import (CERTIFICATE_SIGNATURE_DETECTED,
+                         SIGNATURE_INSPECTION_INCONCLUSIVE,
+                         VISIBLE_SIGNATURE_ONLY, risk_summary)
 
 INDEX_ROWS_PER_PAGE = 23
 A4_W, A4_H = 595, 842
@@ -69,6 +72,23 @@ def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
     seen_labels = set()
     for doc in docs:
         common = dict(document_id=doc['id'])
+        signature_status = doc.get('signature_status', SIGNATURE_INSPECTION_INCONCLUSIVE)
+        if signature_status == CERTIFICATE_SIGNATURE_DETECTED:
+            issues.append(dict(severity='warning', code='CERTIFICATE_SIGNATURE_INDICATORS',
+                               message=(f'{doc["title"]} contains PDF certificate-signature indicators. '
+                                        'Validity and current byte coverage were not checked; edits, OCR and '
+                                        'bundle generation may invalidate or omit signature protections. '
+                                        'The imported original is retained.'), **common))
+        elif signature_status == SIGNATURE_INSPECTION_INCONCLUSIVE:
+            issues.append(dict(severity='warning', code='SIGNATURE_INSPECTION_INCONCLUSIVE',
+                               message=(f'Signature inspection for {doc["title"]} was inconclusive. '
+                                        'No cryptographic validation was attempted; acknowledge the risk '
+                                        'before transforming it.'), **common))
+        elif signature_status == VISIBLE_SIGNATURE_ONLY:
+            issues.append(dict(severity='warning', code='VISIBLE_SIGNATURE_ONLY',
+                               message=(f'{doc["title"]} was marked by a reviewer as containing a visible '
+                                        'or scanned signature, but no PDF certificate-signature indicators '
+                                        'were detected. The signature and signer are not verified.'), **common))
         if doc['source_sha256'] in seen_hashes:
             issues.append(dict(severity='warning', code='DUPLICATE_INPUT', message=f'Possible duplicate original: {doc["title"]}', **common))
         seen_hashes.add(doc['source_sha256'])
@@ -358,13 +378,17 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
     return rows, index_count
 
 
-def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancelled) -> dict:
+def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancelled,
+                 signature_acknowledged: bool = False) -> dict:
     matter = store.get_matter(matter_id)
     if not matter:
         raise ProcessingError('Matter not found')
     profiles = load_profiles()
     profile = profiles[matter['court_profile']]
     documents = store.get_documents(matter_id)
+    signature_risks = risk_summary(documents)
+    if signature_risks and not signature_acknowledged:
+        raise ProcessingError('Signature-risk acknowledgment is required before building transformed bundle PDFs')
     bookmarks = store.list_manual_bookmarks(matter_id)
     progress(5, 'Checking source documents')
     problems = preflight(store, matter_id, profile)
@@ -380,6 +404,18 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
     input_revisions = [{'document_id': d['id'], 'revision': d['revision'],
                         'working_sha256': store.sha256(store.working_path(d))}
                        for d in documents]
+    label_inputs = [{'document_id': d['id'], 'position': d['position'],
+                     'label': d['label'],
+                     'label_status': d.get('label_status', 'unreviewed'),
+                     'label_source': d.get('label_source', 'legacy' if d['label'] else 'none'),
+                     'group_key': d['group_key'],
+                     'group_role': d.get('group_role', 'member')}
+                    for d in documents]
+    signature_inputs = [{'document_id': d['id'], 'signature_status': d['signature_status'],
+                         'certificate_signature_status': d['certificate_signature_status'],
+                         'certificate_signature_count': d['certificate_signature_count'],
+                         'visible_signature_status': d['visible_signature_status']}
+                        for d in documents]
     docs = [dict(d, _working_path=str(store.working_path(d))) for d in documents]
     plans = volume_plan(docs, matter['max_pages_per_volume'], matter['keep_groups_intact'])
     if cancelled():
@@ -470,6 +506,9 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         report = {'matter_id': matter_id, 'export_id': export_id, 'profile': profile['id'],
                   'profile_status': profile['status'], 'created_at': utcnow(),
                   'matter_updated_at': matter['updated_at'], 'input_revisions': input_revisions,
+                  'label_inputs': label_inputs,
+                  'signature_inputs': signature_inputs,
+                  'signature_risk_acknowledged': bool(signature_risks and signature_acknowledged),
                   'build_input_digest': build_input_digest,
                   'build_settings': build_settings, 'manual_bookmark_inputs': bookmark_inputs,
                   'interactive_content_policy': EXPORT_INTERACTIVE_CONTENT_POLICY,
@@ -506,6 +545,9 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         export_manifest = dict(id=export_id, created_at=report['created_at'], matter_id=matter_id,
                                pages=combined_pages, volumes=len(plans),
                                matter_updated_at=matter['updated_at'], input_revisions=input_revisions,
+                               label_inputs=label_inputs,
+                               signature_inputs=signature_inputs,
+                               signature_risk_acknowledged=bool(signature_risks and signature_acknowledged),
                                build_input_digest=build_input_digest,
                                build_settings=build_settings, manual_bookmark_inputs=bookmark_inputs,
                                interactive_content_policy=EXPORT_INTERACTIVE_CONTENT_POLICY,

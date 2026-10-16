@@ -10,7 +10,7 @@
 
 **Approved scope — 15 October 2026:** The six accepted workflow improvements are merged into the relevant sections below and prioritized in §10. They remain planned work, not completed features or legal approval. Existing client commitments and native/security, multilingual-output and advocate-review gates remain in force.
 
-**Product direction — 15 October 2026 follow-up:** Keep the focus on India; US expansion is off the current plan. Pricing, tiers, billing periods and discounts are deferred for a later decision. Reuse useful competitor presentation and interaction patterns in the existing landing page and desktop workflow. “High-converting” is a hypothesis to measure, not an established property of any reviewed site. The Bundledocs findings below refine the six approved improvements; additional capability proposals are explicitly distinguished from committed implementation scope.
+**Product direction — 15 October 2026 follow-up:** Keep the focus on India; US expansion is off the current plan. Pricing, tiers, billing periods and discounts are deferred for a later decision. Reuse useful competitor presentation and interaction patterns in the existing landing page and desktop workflow. “High-converting” is a hypothesis to measure, not an established property of any reviewed site. The Bundledocs findings below refine the five approved improvements; additional capability proposals are explicitly distinguished from committed implementation scope.
 
 ---
 
@@ -136,36 +136,22 @@ Indian filing work can contain several languages and scripts in the same matter 
 
 **Scope excluded from POC:** full visual OCR editing of PDF text, Office round-trip conversion, universal PDF editing, cropping/replacement of pages, physical scanner driver integration, cloud link sharing, qualified digital signatures, legal AI drafting, real court e-filing, actual template form libraries, nationwide rules, automated legal fee/limitation advice, encrypted-at-rest storage, PDF redaction and guaranteed acceptance.
 
-### 4.1 Guided Quick Bundle journey (UX-04)
+### 4.1 Single matter workspace
 
-**Status:** Engineering implemented and browser-tested, 16 October 2026; native acceptance deferred. Enhancement priority 1 of 6.
+**Status:** The alternate guided mode was removed on 16 October 2026. The application now exposes one matter workspace and one set of navigation controls.
 
-**Need:** Prepare an ordinary bundle without learning every workspace tool first.
+The workspace uses the existing Documents, Index & bookmarks, Preflight checks and Build bundle views. They share the same matter metadata, working copies, settings, validation routes, jobs and deterministic page map. There is no separate workflow state or duplicate pagination calculation.
 
-- Provide an **Import → Arrange → Review → Export** journey with one clear primary next action at each step. Keep the full workspace accessible and use the same matter, documents, settings and backend operations in both views.
-- Show document/page counts, technical issues, unresolved bookmarks and the planned output at the relevant step. Distinguish blocking errors, review warnings and legal matters the software has not assessed.
-- Permit back navigation and switching to the full workspace without losing saved work or silently discarding drafts. Save failures must stop dependent processing and offer a retry.
-- Review uses the existing page-map preview; Export exposes progress/cancellation, generated-file review and Save. Advanced settings remain available without crowding the default journey.
+- **Documents:** import files, inspect working copies, run OCR, edit metadata and arrange document order.
+- **Index & bookmarks:** review the proposed page map, index ranges, volume allocation and manual bookmark destinations.
+- **Preflight checks:** distinguish blocking technical errors, warnings and legal matters the software has not assessed.
+- **Build bundle:** save settings, generate an identified build, inspect generated PDFs and save the selected artifacts. A failed settings save prevents the build request.
 
-**Bundledocs-informed flow refinement:** Start with a small matter setup (name, clearly scoped profile, optional reusable structure), then retain the four-step journey rather than adding a second competing wizard:
+**Open sample matter** creates a separate synthetic matter with a generated draft cover and never overwrites the current matter. Existing save/discard protection, progress/cancellation, immutable exports and native Save controls remain part of the single workspace.
 
-| Stage | Main work and visible outcome | Existing implementation to reuse |
-| --- | --- | --- |
-| Import | Choose local files or a synthetic sample matter; show per-file processing, supported formats, errors and retry. Offer cleanup/OCR review without hiding failures. | Import, originals/working copies, DAT-03, IMP-01 |
-| Arrange | Review a section/document table, edit metadata, move selected documents, inspect the selected PDF and preview sorting. Show included document/page counts. | Documents, UX-05, FIL-01/02 |
-| Review | Inspect the proposed index, bookmarks, volumes and numbering; resolve technical blockers; inspect format presets and changes since the previous build. | Index & bookmarks, backend page-map preview, FIL-09/10 |
-| Export | Save settings, generate a specific build, inspect its PDFs/check report, then Save the selected artifact. A later edit returns the user to a visibly outdated-output state. | Build, jobs, Review PDF, immutable exports, native Save |
+**Casedo-informed reading workspace — proposed refinement:** Make **Read & link** available from Documents and Index & bookmarks. Keep the matter navigator beside one reader, with an optional second reader for a petition/evidence or judgment/reference comparison. Each pane retains its own document, page, scroll and zoom; users explicitly choose which pane receives a search/bookmark/link destination. Show the active pane with text as well as colour, provide **Open beside** and keyboard alternatives, and retain a readable single-pane mode on smaller windows. Reopening a matter should restore saved reading positions against the recorded revisions or explain why a position cannot be restored. Two panes share the same matter and revision store; they do not create independent copies. Precise links and research notes are scoped in §6.2.3; this remains a proposal, not implemented dual-reader functionality.
 
-- Use one primary action per state: Continue, Review bundle, Generate bundle, then Review/Save. “Export” includes generation and output review; reaching the step does not mean a file already exists or was saved.
-- Offer **Open sample matter** and a dismissible, repeatable contextual walkthrough. Explain unfamiliar controls next to their use. A sample must be a separate synthetic matter and never overwrite an existing matter.
-- Keep the document/section navigator, PDF preview and context settings visually distinct. Make side panels collapsible/resizable; preserve a readable PDF area and keyboard alternatives to dragging. Keep index/bookmark review accessible without permanently consuming the document viewer's height.
-- Use human-readable action labels rather than copying Bundledocs' dense icon toolbar. Persist selection and scroll context across detail edits. Keep existing save/discard behavior and full-workspace navigation.
-
-**Casedo-informed reading workspace — proposed refinement:** Make **Read & link** available from Arrange and Review without introducing a mandatory fifth Quick Bundle step. Keep the matter navigator beside one reader, with an optional second reader for a petition/evidence or judgment/reference comparison. Each pane retains its own document, page, scroll and zoom; users explicitly choose which pane receives a search/bookmark/link destination. Show the active pane with text as well as colour, provide **Open beside** and keyboard alternatives, and retain a readable single-pane mode on smaller windows. Reopening a matter should restore saved reading positions against the recorded revisions or explain why a position cannot be restored. Two panes share the same matter and revision store; they do not create independent copies. Precise links and research notes are scoped in §6.2.3; this remains a proposal, not implemented dual-reader functionality.
-
-**16 October implementation:** Quick Bundle is a matter-scoped, persisted guided layer over the existing workspace. Its four steps route to the existing Documents, Index/bookmark preview and Build/export components; they do not copy documents or calculate pagination separately. Review shows technical errors, warnings and unresolved bookmarks. Generation first reruns validation and then uses the existing settings-save/build path, so a failed settings save or blocking technical check leaves the user in Review without starting a build. Export retains the existing job progress/cancellation, generated-PDF viewer and browser/native Save controls. Normal matter creation still opens the full workspace for backward compatibility; **Quick Bundle** enters the guide explicitly. **Open sample matter** creates a separate synthetic matter with a generated draft cover and does not overwrite the current matter. The current step and selected mode persist locally per matter. Browser coverage verifies reload, full-workspace switching, failed-save retry, generation and generated-PDF review. Target-device behavior remains part of deferred NAT acceptance; dual reading and precise passage links remain proposals.
-
-**Acceptance:** A synthetic matter completes all four steps and yields the same page map, index ranges and bookmark destinations as the full workspace for identical saved inputs/settings. Back navigation, workspace switching and reopen retain saved state; unsaved drafts receive the established save/discard handling. A failed save or blocking validation error prevents the dependent build. Browser and supported native journeys cover failure/retry and export/save; existing workspace behavior remains usable.
+**Acceptance:** A synthetic matter can be prepared and exported without choosing between competing modes. Page-map preview, generated index ranges, bookmarks and CSV destinations agree. Unsaved drafts receive the established save/discard handling; a failed settings save does not start a build; job progress, retry, generated-PDF review and Save remain available.
 
 ### 4.2 Existing landing page: presentation improvements, pricing deferred
 
@@ -199,7 +185,7 @@ Proposed presentation work, to implement in that marketing project later:
 **Reviewed 15 October 2026.** Sources are vendor descriptions and a historical vendor demo, not an independent reliability audit or evidence of conversion rates. No trial account was created, no case files were uploaded and no Bundledocs output was generated by this review.
 
 - [Homepage](https://www.bundledocs.com/): outcome-focused explanation, visual steps, product features, integrations and customer evidence. Borrow the sequence of explanation and demonstration; our own proof must replace their claims and logos.
-- [Five-step written workflow](https://www.bundledocs.com/blog/2019/7/9/how-to-collate-a-document-bundle): create, upload, arrange, generate, download. Our matter setup plus four-step guided journey covers the same mechanical preparation task, with a more explicit review stage.
+- [Five-step written workflow](https://www.bundledocs.com/blog/2019/7/9/how-to-collate-a-document-bundle): create, upload, arrange, generate, download. The single matter workspace covers the same mechanical preparation task with explicit index, bookmark and preflight review.
 - [Templates guide](https://www.bundledocs.com/blog/2019/1/8/how-to-prepare-a-court-bundle-template-with-bundledocs): reusable structure and formatting. This motivates the structure-template proposal in §6.1.3, distinct from legal form generation.
 - [Features](https://www.bundledocs.com/features): describes section inclusion, page ranges, dates, configurable output and alternative late-insert numbering. These motivate the candidates and safeguards below; they are not Indian filing requirements.
 - [Annotation design explanation](https://www.bundledocs.com/blog/2018/5/10/how-do-i-add-annotations-to-my-digital-binder-using-bundledocs-video): document-attached notes and selectable export inclusion. See §6.2.3 for our proposed review-copy boundary.
@@ -239,7 +225,7 @@ Proposed presentation work, to implement in that marketing project later:
 
 **[Likely] Recommended Indian preparation flow:** Keep **Import → Arrange → Review → Export**. Select the exact court/filing context first. Import originals and review OCR/cleanup; arrange documents alongside a petition preview; confirm labels and linked groups; preview optional separators/stamps, index and volume allocation; then inspect the actual generated PDF and measured output sizes. The advocate chooses the applicable terminology and layout. A label assigned by software must never imply judicial admission, authenticity or legal verification.
 
-**Priority within this review:** First refine UX-05/FIL-02 label review; next FIL-09 batch formatting and placement; then FIL-10 label/page-change explanations. These fit the existing six approved priorities. Explicit volume breaks, individual labelled-PDF export, editable Word indexes and a persistent Bates ledger are **candidates for scoping**, not newly approved implementation tickets. Do not reproduce the competitor's separate-tool menu when the same actions can share one matter, metadata register and build.
+**Priority within this review:** First refine UX-05/FIL-02 label review; next FIL-09 batch formatting and placement; then FIL-10 label/page-change explanations. These fit the existing five approved priorities. Explicit volume breaks, individual labelled-PDF export, editable Word indexes and a persistent Bates ledger are **candidates for scoping**, not newly approved implementation tickets. Do not reproduce the competitor's separate-tool menu when the same actions can share one matter, metadata register and build.
 
 **Avoid copying these defaults:** automatic filename-driven confirmation, silent relabelling after documents have been cited, automatic shrinking of evidence, US-specific exhibit wording, or password-protected filing outputs irrespective of profile. Preserve originals and prior builds. Reordering a bundle does not update references inside an external petition; expose the review work instead of claiming it was done. Price/plan selection remains deferred.
 
@@ -262,7 +248,7 @@ Proposed presentation work, to implement in that marketing project later:
 
 **Export/search caveat:** The [annotation-export article](https://www.casedo.com/support/how-to-export-annotations-in-casedo/), updated February 2025, describes direct bookmark export and a TOC workaround for comments/highlights. The [annotation-search article](https://www.casedo.com/support/how-to-search-annotations-in-casedo/), updated March 2024, describes a similar workaround. These dated articles do not prove the latest app's complete capabilities. They do show why we must independently specify workspace links, note search and saved-PDF behavior. Do not adopt the vendor's broad statements about what all courts allow.
 
-**[Likely] India-focused value:** Let an advocate connect petition paragraph 12 to the relevant annexure passage, a proposition to a judgment paragraph, or a translation passage to its source. These are manually reviewed relationships, not legal conclusions or translation certification. Keep reference-only research separate from intended filing contents. The six approved enhancement priorities remain unchanged; the reading/linking extensions below refine existing candidates and require implementation scoping.
+**[Likely] India-focused value:** Let an advocate connect petition paragraph 12 to the relevant annexure passage, a proposition to a judgment paragraph, or a translation passage to its source. These are manually reviewed relationships, not legal conclusions or translation certification. Keep reference-only research separate from intended filing contents. The five approved enhancement priorities remain unchanged; the reading/linking extensions below refine existing candidates and require implementation scoping.
 
 ## 5. Current implemented capabilities
 
@@ -321,7 +307,7 @@ SQLite tables: `matters` and `documents`.
 
 Matter fields: id, name, court_profile, case_type, petitioner/respondent/advocate/case_number, max_pages_per_volume, keep_groups_intact, created/updated dates.
 
-Document fields: id, matter_id, title, kind, part, label, group_key, position, page_count, ocr_status, original_name, source_sha256, source_relpath, working_relpath, timestamps.
+Document fields: id, matter_id, title, kind, part, label, label_status, label_source, group_key, group_role, document_date, date_status, date_source, date_note, source_file_mtime, position, page_count, ocr_status, original_name, source_sha256, source_relpath, working_relpath, certificate-signature inspection status/count/note, reviewer visible-signature status, combined signature-review status and timestamps. A group role is a technical `member`/`parent` designation with at most one parent per group; it does not establish a legal relationship. Labels distinguish unreviewed legacy/filename values from user-confirmed or reviewed-proposal values. Document dates remain exact/unknown/ambiguous/suggested/confirmed metadata; a source file timestamp is never treated as the document/event date. Signature metadata distinguishes structural PDF certificate indicators from a human review of visible/scanned marks; neither verifies a signature or signer.
 
 Original source bytes are never edited by page actions or OCR. Working-copy edits now create numbered revisions, retaining prior files; a failed edit discards its candidate. Deleted document records do not erase on-disk originals. Stored source hashes are explicitly checked during validation and immediately before export publication. This checks byte consistency at those times; it does not prove authenticity. DAT-01 serializes app edits and build/OCR jobs per matter and rejects a second engine using the same data directory.
 
@@ -329,7 +315,7 @@ Original source bytes are never edited by page actions or OCR. Working-copy edit
 
 #### 6.1.1 Editable document table and batch actions (UX-05)
 
-**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 2 of 6.
+**Status:** Engineering implemented 16 October 2026; native acceptance deferred. Enhancement priority 1 of 5. The policy-neutral proposal/review layer is complete under FIL-02, including explicit technical parent designation, per-preview group formatting and reviewer-selected compact-or-preserve insertion/removal behaviour. The model does not infer a legal relationship or approved court convention; named reusable court/chamber presets remain FIL-09.
 
 **Need:** Review and classify many documents without opening a separate detail form for every item.
 
@@ -340,13 +326,13 @@ Original source bytes are never edited by page actions or OCR. Working-copy edit
 - Persist edits through the existing revision/history and export-freshness mechanisms. Automatic annexure renumbering remains governed by FIL-02 and its reviewed policy.
 - Present collapsible part/section rows with document counts and explicit move targets. Start by exposing existing Part/group concepts accurately; arbitrary nesting is a separate model/engine change, not merely a drag-and-drop styling change. Offer both drag and **Move to…**/keyboard controls. Keep editable display titles separate from original filenames, and show OCR/import/review status without treating it as legal verification.
 
-**Exhibit Flow refinement — label review (UX-05/FIL-02):** Add a batch preview of document identity, original filename, proposed label, description and confirmation status. Filename parsing or a chosen starting label may suggest values; ambiguous names, duplicate labels and gaps need visible review, not silent correction. Label schemes remain scoped/reviewed preferences. Offer manual placement in citation-order slots beside a petition preview, retaining keyboard move controls; do not claim automatic citation extraction. Keep annexure labels independent of page numbers and original filenames. For labels already used in a circulated/issued build, require an explicit old→new mapping review before relabelling; flag external petition references as requiring human checking. Any future exported filename change applies to output copies only. User-defined document/translation groups retain their order and cohesion; grouping does not certify a translation.
+**Exhibit Flow refinement — label review (UX-05/FIL-02):** The table provides a batch preview of document identity, original filename, proposed label, description and confirmation status. A chosen prefix/start, existing group keys or conservative filename parsing may suggest values; ambiguous names, duplicate labels and missing values stay visible for manual resolution. A group can designate one technical parent, even when it is not first in document order. For grouped proposals, the reviewer can choose lower/upper-case alphabetic, numeric or parenthesized suffixes, a separator, base-label treatment, and whether to compact the selected sequence or preserve existing labels for manual completion. These are matter-level technical choices, not court approval or proof of a legal parent/child relationship. Searchable petition text can be scanned for annexure/exhibit tokens with page/revision evidence, but matches are incomplete, unverified citation candidates and are never rewritten automatically. Labels stay independent of page numbers and original filenames. Existing-label changes require an explicit old-to-new acknowledgement; prior generated artifacts remain immutable and trigger a separate warning because they may have circulated. Applying a reviewed map is one atomic undoable edit and new manifests record the exact label snapshot. User-defined document/translation groups retain their order and cohesion; grouping does not certify a translation. Manual citation-order placement beside the petition and reusable named court/chamber presets remain future work under their separately scoped tickets.
 
 **Acceptance:** Batch changes affect only the displayed selection, survive reload and can be undone/redone. Cancelled sort previews leave order unchanged; committed sorts are deterministic and respect the approved group policy. Fixtures cover equal, missing and ambiguous dates, filtered selections, duplicate labels and failed saves. A guessed date never becomes confirmed merely because a sort or build succeeds.
 
 #### 6.1.2 Source-linked chronology, later increment (CHR-01)
 
-**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 6 of 6.
+**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 5 of 5.
 
 **Need:** Arrange material events and inspect the document pages supporting each event.
 
@@ -360,7 +346,7 @@ Original source bytes are never edited by page actions or OCR. Working-copy edit
 
 #### 6.1.3 Structure templates and selective bundle contents — proposals
 
-**Status:** Bundledocs-informed candidates for product scoping, not additional completed tickets or automatic first-release commitments. Extend UX-05, FIL-01/02/03/09 and DAT-01/02/04 if selected. Preserve the existing six-item priority order.
+**Status:** Bundledocs-informed candidates for product scoping, not additional completed tickets or automatic first-release commitments. Extend UX-05, FIL-01/02/03/09 and DAT-01/02/04 if selected. Preserve the existing five-item priority order.
 
 - **Reusable structure templates:** Create a matter from named sections and a versioned output preset. Store structure/settings only by default; never copy another client's documents, parties, notes or completed review statuses. Keep a structure template distinct from a court profile (rules/provenance), an output preset (appearance) and a generated legal form (GEN-03). Show the proposed structure before applying it. A reusable template update must not rewrite existing matters.
 - **Include/exclude without archive:** Let users prepare a selected bundle from retained matter documents, with visible included/excluded counts and an explicit output selection. Search filters do not change inclusion. Excluding a section must clearly resolve child inclusion; excluded sources stay in the matter. Persist selection in build inputs/history/backups and make dependent outputs stale. This is separate from record archive/removal.
@@ -388,7 +374,7 @@ For each selected volume, the engine:
 
 #### 6.2.1 Reusable output presets and stamp previews (FIL-09)
 
-**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 3 of 6.
+**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 2 of 5.
 
 **Need:** Reuse chamber preferences and inspect formatting before generating the complete bundle.
 
@@ -405,7 +391,7 @@ For each selected volume, the engine:
 
 #### 6.2.2 Rebuild explanation and export review (FIL-10)
 
-**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 5 of 6.
+**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 4 of 5.
 
 **Need:** Understand what a late change affects and verify the regenerated package before saving it.
 
@@ -420,7 +406,7 @@ For each selected volume, the engine:
 
 | Capability | Code-inspected baseline, 15 October 2026 | Required improvement / task |
 | --- | --- | --- |
-| Combined PDF, per-volume index rows/ranges, generated index hyperlinks and hierarchical outlines | Already produced by `backend/app/engine.py`; navigation validation checks serialized destinations against the page map | Preserve as core acceptance; demonstrate it clearly in UX-04 and landing-page output samples |
+| Combined PDF, per-volume index rows/ranges, generated index hyperlinks and hierarchical outlines | Already produced by `backend/app/engine.py`; navigation validation checks serialized destinations against the page map | Preserve as core acceptance; demonstrate it clearly in the workspace and landing-page output samples |
 | Finished-PDF review inside the app | `frontend/src/components/ExportPdfReview.vue` renders pages and resolves outline destinations; it explicitly tells users to test index hyperlinks in a saved viewer | Extend FIL-10 with clickable internal PDF links; retain external review fallback |
 | Sectioned/styled index | Current fixed A4/23-row layout and existing part/volume outlines; not the demo's styled section-header table | Scope section-header rows, columns, wrapping, optional cover/separators and typography through FIL-03/09; include their page cost in the planner |
 | Search/select text in generated output | The export review component currently renders a canvas without a text layer or find UI; source-document search is a separate existing capability | Add generated-artifact find and selectable text as a FIL-10/UX-02 refinement; distinguish no searchable text from no matches |
@@ -467,7 +453,7 @@ Cloud collaboration, author permissions, secure download links and DMS connector
 
 #### 6.2.4 Exhibit Flow candidates: volume control and output variants
 
-**Status:** Research recommendations, not implemented or added to the approved six-item scope. Scope against FIL-03/06/08/09/10 and GEN-03 before coding.
+**Status:** Research recommendations, not implemented or added to the approved five-item scope. Scope against FIL-03/06/08/09/10 and GEN-03 before coding.
 
 - **Explicit volume breaks:** Allow a proposed break before a whole document/group, with backend-calculated index growth and ranges. Reject breaks that violate cohesion or page limits; explain oversized indivisible inputs. Keep page capacity and measured byte size separate. Rendered file sizes require final verification, and any compression/split/rebuild must regenerate and revalidate navigation. Do not promise arbitrary files will fit a portal limit or split evidence silently. §6.4 supplies a Delhi-specific example, not a national split policy.
 - **Optional individual labelled PDFs:** If selected, generate these alongside the combined PDF/volumes from the same confirmed metadata and build manifest. Define local versus bundle pagination explicitly, naming collisions and included cover/stamp policy. Every offered output must have been generated and checked; exporting individual files must not overwrite imported sources.
@@ -484,7 +470,7 @@ Document revisions and a process-wide PDF processing lock now serialize API PDF 
 
 #### 6.3.1 Reviewed import-cleanup queue (IMP-01)
 
-**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 4 of 6.
+**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 3 of 5.
 
 **Need:** Make phone images and scans easier to prepare without silently changing evidence.
 
@@ -620,13 +606,13 @@ Run: `cd backend && python scripts/build_demo_output.py`; outputs are in `sample
 
 ### Acceptance for the approved workflow improvements
 
-Each planned task above has feature-specific acceptance criteria. Use synthetic fixtures and record browser checks separately from native Windows/macOS and clean-device checks. Guided navigation and batch tables must retain keyboard access, readable scaling and existing save/discard behavior. New metadata must follow the packaged vault boundary and portable-backup migration conventions in [local security and retention](docs/LOCAL_SECURITY_AND_RETENTION.md).
+Each planned task above has feature-specific acceptance criteria. Use synthetic fixtures and record browser checks separately from native Windows/macOS and clean-device checks. Workspace navigation and batch tables must retain keyboard access, readable scaling and existing save/discard behavior. New metadata must follow the packaged vault boundary and portable-backup migration conventions in [local security and retention](docs/LOCAL_SECURITY_AND_RETENTION.md).
 
-For the guided flow and batch table, compare a fixed synthetic preparation task with the existing workspace: record elapsed time, interaction count, corrections and completion without assistance. Establish a baseline and product-reviewed targets during implementation; do not adopt competitor time-saving or court-acceptance statistics.
+For workspace and batch-table refinements, compare a fixed synthetic preparation task before and after the change: record elapsed time, interaction count, corrections and completion without assistance. Establish a baseline and product-reviewed targets during implementation; do not adopt competitor time-saving or court-acceptance statistics.
 
 The repeatable demonstration must complete a synthetic matter, insert a late document, explain the impact and regenerate matching indexes, bookmarks, volumes and CSV. Record artifact checks and visible output review. Every new volume/index/numbering rule requires pytest boundary cases derived from the shared page map; UI previews must not implement an independent pagination calculation. This demonstration supplements failure-path and native-device acceptance rather than replacing them.
 
-**Bundledocs-review follow-up checks:** Add sample-matter isolation, section navigation and keyboard move coverage when refining UX-04/05. If the §6.1.3/§6.2.3 candidates are selected, first translate their acceptance criteria into scoped implementation tasks; do not mark them accepted based on the competitor demo. Check private-note exclusion and template cross-matter isolation explicitly. Record web-marketing QA separately from desktop/native QA; loading the landing-page static preview is not a successful Nuxt production build, signup-email test or evidence of increased conversion.
+**Bundledocs-review follow-up checks:** Add sample-matter isolation, section navigation and keyboard move coverage when refining UX-05. If the §6.1.3/§6.2.3 candidates are selected, first translate their acceptance criteria into scoped implementation tasks; do not mark them accepted based on the competitor demo. Check private-note exclusion and template cross-matter isolation explicitly. Record web-marketing QA separately from desktop/native QA; loading the landing-page static preview is not a successful Nuxt production build, signup-email test or evidence of increased conversion.
 
 **Exhibit Flow-review follow-up checks:** Use a synthetic petition with explicit annexure references, ambiguous/duplicate filenames and a linked translation group. Review proposed labels, apply formatting with one placement exception, build, then insert/remove/reorder a document. Verify a truthful label/page impact report, unresolved external-reference checklist and immutable prior output. Include rotated pages, crowded signature/seal areas and covers that push an index/volume boundary. Cancellation of a label preview changes nothing; confirmation never changes original filenames or bytes. Candidate output/volume features require the additional §6.2.4 acceptance checks. Documentation of these proposals is not implementation completion.
 
@@ -636,7 +622,7 @@ The repeatable demonstration must complete a synthetic matter, insert a late doc
 
 1. **Licensing:** PyMuPDF offers AGPL/commercial licensing routes; obtain an appropriate license/assessment before proprietary distribution.
 2. **Local data security:** The SQLite DB and original/working files are plain on disk; production legal work needs threat modeling, optional storage encryption and safe temporary-file/wipe policies.
-3. **No product-grade PDF signature handling:** Reordering, rasterizing, stamping and combining may invalidate or disturb signed material; signed PDFs should be detected/blocked or handled through an approved workflow.
+3. **No product-grade PDF signature validation:** PDF-11 now detects conservative certificate-signature dictionary indicators, retains inconclusive status, supports reviewer classification of visible/scanned marks and requires explicit acknowledgment before transformations. It does not validate certificates, identities, trust chains, revocation, signing time or byte coverage. Reordering, rasterizing, stamping and combining may still invalidate or disturb signed material; use an approved legal/signing workflow outside this POC.
 4. **OCR fidelity:** OCR may misrecognise text; image-only and mixed pages are rendered at 240 DPI for recognition, but only the invisible recognition layer is added to the existing page; existing GlyphLessFont layers are skipped. It is NOT safe to treat OCR output as the authoritative document text.
 5. **English-only text generation:** The PDF index uses built-in Latin fonts. Hindi and other scripts require bundled, properly licensed fonts and comprehensive text shaping tests. UI strings may be Unicode but PDF index rendering is not yet complete.
 6. **Single fixed index layout:** 23 entries per A4 index page, simple columns. Real cases require court/category-specific index templates, sometimes hyperlink conventions and paragraph-level references.
@@ -654,16 +640,15 @@ The repeatable demonstration must complete a synthetic matter, insert a late doc
 
 ### Approved enhancement priorities — 15 October 2026
 
-The product owner accepted all six recommendations from the CaseReady review in this order. The ranking applies within this enhancement set; existing P0 integrity/native work and security, multilingual-output and legal-review gates retain precedence. No delivery date or first-release inclusion of every item is implied. Chronology remains a later increment. Product approval does not close DEC-02 or approve any court-specific label/index rule.
+The product owner retained five recommendations from the CaseReady review in this order. The ranking applies within this enhancement set; existing P0 integrity/native work and security, multilingual-output and legal-review gates retain precedence. No delivery date or first-release inclusion of every item is implied. Chronology remains a later increment. Product approval does not close DEC-02 or approve any court-specific label/index rule.
 
 | Rank | Improvement | Task / requirement section | Existing work to extend |
 | --- | --- | --- | --- |
-| 1 | Guided Quick Bundle | UX-04 / §4.1 | DAT-03/05, FIL-03/06, QA-01 |
-| 2 | Editable document table and batch actions | UX-05 / §6.1.1 | DAT-01/02/05, FIL-02 |
-| 3 | Reusable output presets and stamp previews | FIL-09 / §6.2.1 | FIL-02/03/08, PDF-04 |
-| 4 | Reviewed import cleanup, HEIC and multipage TIFF | IMP-01 / §6.3.1 | PDF-01/02/06/08/11, DAT-01/03 |
-| 5 | Rebuild explanation and export review | FIL-10 / §6.2.2 | FIL-04/06, NAT-03 |
-| 6 | Source-linked chronology, later increment | CHR-01 / §6.1.2 | DAT-01/02/04, FIL-04 |
+| 1 | Editable document table and batch actions | UX-05 / §6.1.1 | DAT-01/02/05, FIL-02 |
+| 2 | Reusable output presets and stamp previews | FIL-09 / §6.2.1 | FIL-02/03/08, PDF-04 |
+| 3 | Reviewed import cleanup, HEIC and multipage TIFF | IMP-01 / §6.3.1 | PDF-01/02/06/08/11, DAT-01/03 |
+| 4 | Rebuild explanation and export review | FIL-10 / §6.2.2 | FIL-04/06, NAT-03 |
+| 5 | Source-linked chronology, later increment | CHR-01 / §6.1.2 | DAT-01/02/04, FIL-04 |
 
 These requirements extend the existing engine and workspace. The HEIC/TIFF selection amends DEC-03's earlier format exclusion for those inputs only. Permanent redaction remains PDF-10. This scope addition does not introduce a cloud client portal, team cloud storage, AI drafting, predictive outcomes, automated e-filing or universal compliance claims.
 
@@ -674,11 +659,11 @@ Design references reviewed: [CaseReady demo](https://caseready.io/case1.mp4), [f
 - **Pricing:** Deferred by the product owner. No price, plan or billing model is selected here.
 - **Market:** India remains the delivery focus; US expansion is off the current plan. Competitor research is for product/design learning.
 - **Landing page:** Improve the existing `/Users/vishnu/Downloads/caseready` project according to §4.2, preserving its visual identity and signup infrastructure. Implementation and any deployment are future work; this review changes the handoff only.
-- **App interaction refinements:** Fold the §4.1 section/table/preview flow into UX-04/05, the grouped settings into FIL-09, and named-build review into FIL-10. The after-2:00 follow-up makes the combined indexed PDF and in-app link navigation explicit under §6.2.2; search-assisted redaction and cross-document references extend existing PDF-10/PDF-04 proposals under §6.2.3. Reuse current tools rather than duplicate the bundling engine or PDF editor.
-- **Candidate capability order after scoping:** (1) reusable structure templates and explicit include/exclude, (2) source-linked review notes and output inclusion policy, (3) selected page ranges/missing-item checklist, (4) stable-reference late inserts. These proposals do not reorder the six approved priorities or bypass native/integrity/legal gates. Track any selected additions in `docs/IMPLEMENTATION_TASKS.md` before coding.
+- **App interaction refinements:** Fold the §4.1 section/table/preview principles into UX-05, the grouped settings into FIL-09, and named-build review into FIL-10. The after-2:00 follow-up makes the combined indexed PDF and in-app link navigation explicit under §6.2.2; search-assisted redaction and cross-document references extend existing PDF-10/PDF-04 proposals under §6.2.3. Reuse current tools rather than duplicate the bundling engine or PDF editor.
+- **Candidate capability order after scoping:** (1) reusable structure templates and explicit include/exclude, (2) source-linked review notes and output inclusion policy, (3) selected page ranges/missing-item checklist, (4) stable-reference late inserts. These proposals do not reorder the five approved priorities or bypass native/integrity/legal gates. Track any selected additions in `docs/IMPLEMENTATION_TASKS.md` before coding.
 - **Evidence:** §4.3 records the current sources, sampled video timestamps and limits of verification. Earlier BatesFast sample-editor observations support a document/preview/context-panel layout; [Casedo](https://www.casedo.com/) and [Bundledocs](https://www.bundledocs.com/) support a clear workflow/demo/help presentation. None establishes a measured conversion advantage.
-- **Exhibit Flow follow-up:** §4.4 records the new video review; merge label-register/renumbering safeguards into UX-05/FIL-02, batch mark/separator previews into FIL-09 and label-change explanations into FIL-10. Scope §6.2.4 candidates separately before adding implementation tickets. §6.4 records the Indian court-source checks and their limits. Preserve the approved six-item order, India focus and deferred pricing decision.
-- **Casedo follow-up:** §4.5 records the full homepage-video transcript review, visual observations and supporting documentation. Within the existing review-note/reference candidate, recommend (1) optional dual reader and precise bookmarks, (2) two-way passage links with revision-safe targets, (3) searchable review notes, then (4) explicitly scoped PDF link export. Tie these to UX-04/05, PDF-03/04 and FIL-04/10 before coding. Reuse §6.1.3 inclusion controls and the §4.2 demo presentation plan; do not reorder the six approved priorities or introduce cloud/AI/US expansion.
+- **Exhibit Flow follow-up:** §4.4 records the new video review; merge label-register/renumbering safeguards into UX-05/FIL-02, batch mark/separator previews into FIL-09 and label-change explanations into FIL-10. Scope §6.2.4 candidates separately before adding implementation tickets. §6.4 records the Indian court-source checks and their limits. Preserve the approved five-item order, India focus and deferred pricing decision.
+- **Casedo follow-up:** §4.5 records the full homepage-video transcript review, visual observations and supporting documentation. Within the existing review-note/reference candidate, recommend (1) optional dual reader and precise bookmarks, (2) two-way passage links with revision-safe targets, (3) searchable review notes, then (4) explicitly scoped PDF link export. Tie these to UX-05, PDF-03/04 and FIL-04/10 before coding. Reuse §6.1.3 inclusion controls and the §4.2 demo presentation plan; do not reorder the five approved priorities or introduce cloud/AI/US expansion.
 
 ### Milestone 0 — Native integration verification (first)
 
@@ -689,7 +674,7 @@ Design references reviewed: [CaseReady demo](https://caseready.io/case1.mp4), [f
 
 ### Milestone 1 — Filing bundle POC completion with an advocate
 
-- Add UX-04/UX-05 guided preparation and batch review over the existing workspace; extend FIL-02/03 with FIL-09 presets and stamp previews once the relevant output policies are reviewed.
+- Refine UX-05 batch review in the existing workspace; extend FIL-02/03 with FIL-09 presets and stamp previews once the relevant output policies are reviewed.
 - Extend FIL-06 with FIL-10 change explanations and integrated export review.
 
 - Obtain 2-3 **anonymized** full real filing examples and the approved outputs, including indexes, bookmarks, annexures and chamber workflow.
@@ -769,3 +754,7 @@ Design references reviewed: [CaseReady demo](https://caseready.io/case1.mp4), [f
 See acceptance section AB and the PDF reliability regression suite. This pass adds navigation-preserving page assembly, exact serialized bundle destination checks, Unicode outlines, canonical bookmark hierarchy, additive mixed-page OCR, rotated text placement, measured compression, validated/synced PDF replacement, partial-copy cleanup, honest cancellation outcomes and hash-verified committed-build recovery. Existing imported originals and all retained revisions remain untouched.
 
 Production qualification remains incomplete: native-device coverage, complex scan/font/form/signature fixtures, process crash isolation, full durability under actual power loss, multilingual printed indexes, legal workflow approval, security and distribution gates are not established by these automated tests. The 1,000-page benchmark uses native-text synthetic pages; it does not establish scanned-matter throughput or memory ceilings.
+
+## PDF-02 compression acceptance update — 16 October 2026
+
+The existing lossless, Balanced (240 DPI/JPEG 85) and Smaller (150 DPI/JPEG 70) presets now have a deterministic synthetic visual corpus and fixed regression budgets. The three 300 DPI pages cover a noisy scan, an explicitly unverified red synthetic seal and approximately 5–5.8 pt raster text. The generator emits before/after PDFs, side-by-side PNG sheets and JSON measurements; pytest enforces byte, PSNR, ink/contrast and red-shape floors. See [PDF-02 compression acceptance](docs/PDF02_COMPRESSION_ACCEPTANCE.md) and acceptance section AH. This closes the PDF-02 backend engineering ticket for current PDF inputs, not native device qualification, a universal size/fidelity promise, filing readiness or signature verification.

@@ -21,9 +21,176 @@ async function dragWithPointer(page: import('@playwright/test').Page,
   await page.mouse.up()
 }
 
-test('Quick Bundle keeps one saved journey and blocks generation when settings cannot save', async ({ page, request }) => {
+test('visible-signature review warns before a working-copy transformation', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
-    name: 'E2E Guided Quick Bundle', court_profile: 'general-demo',
+    name: 'E2E Signature Warning', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name:'01_petition.pdf', mimeType:'application/pdf',
+      buffer:await readFile(resolve(samples, '01_petition.pdf')) } },
+  })
+  expect(uploaded.ok()).toBeTruthy()
+  const document = (await uploaded.json())[0]
+  const reviewed = await request.patch(`${backend}/documents/${document.id}`, { headers,
+    data: {visible_signature_status:'present'},
+  })
+  expect(reviewed.ok()).toBeTruthy()
+  expect((await reviewed.json()).signature_status).toBe('visible_signature_only')
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name:'E2E Signature Warning'})).toBeVisible()
+  await page.getByRole('button', {name:/Document details/}).click()
+  const details = page.getByRole('region', {name:'Document details'})
+  await expect(details).toContainText('Visible/scanned signature only')
+  await expect(details.getByRole('combobox', {name:'Visible/scanned signature review'}))
+    .toHaveValue('present')
+
+  page.once('dialog', dialog => void dialog.dismiss())
+  await page.getByRole('button', {name:'Rotate right'}).click()
+  await expect.poll(async () => {
+    const docs = await (await request.get(`${backend}/matters/${matterId}/documents`, {headers})).json()
+    return docs[0].revision
+  }).toBe(1)
+
+  page.once('dialog', dialog => {
+    expect(dialog.message()).toContain('Imported originals remain unchanged')
+    void dialog.accept()
+  })
+  await page.getByRole('button', {name:'Rotate right'}).click()
+  await expect.poll(async () => {
+    const docs = await (await request.get(`${backend}/matters/${matterId}/documents`, {headers})).json()
+    return docs[0].revision
+  }).toBe(2)
+})
+
+test('document table preserves explicit selection and previews batch ordering before commit', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Document Table', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  for (const name of ['03_affidavit.pdf', '01_petition.pdf', '02_impugned_order.pdf']) {
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+      multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
+    })
+    expect(uploaded.ok()).toBeTruthy()
+  }
+  const initial = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Document Table' })).toBeVisible()
+  await page.getByRole('button', { name: 'Open table' }).click()
+  const register = page.getByRole('region', { name: 'Editable document table' })
+  await expect(register.getByRole('heading', { name: 'Document table' })).toBeVisible()
+  const firstRow = register.locator('tr', { hasText: '03_affidavit.pdf' })
+  const lastRow = register.locator('tr', { hasText: '02_impugned_order.pdf' })
+  await firstRow.getByRole('checkbox', { name: /Select/ }).check()
+  await lastRow.getByRole('checkbox', { name: /Select/ }).check()
+  await expect(register.getByText('2 selected', { exact: true })).toBeVisible()
+  await register.getByRole('searchbox', { name: 'Filter rows' }).fill('impugned')
+  await expect(register.getByText('1 visible in this filter')).toBeVisible()
+
+  await register.getByRole('combobox', { name: 'Type' }).selectOption('annexure')
+  await register.getByRole('combobox', { name: 'Part' }).selectOption('2')
+  await register.getByRole('checkbox', { name: 'Change group' }).check()
+  await register.getByPlaceholder('Blank clears group').fill('selected-pair')
+  await register.getByRole('button', { name: 'Apply batch change' }).click()
+  await expect(register.getByText('Updated 2 selected document(s) in one undoable action.')).toBeVisible()
+  const changed = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+  expect(changed.filter((doc:{kind:string}) => doc.kind === 'annexure')).toHaveLength(2)
+  expect(changed.find((doc:{original_name:string}) => doc.original_name === '01_petition.pdf').kind).toBe('other')
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.getByText('Last edit undone.')).toBeVisible()
+  const undone = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+  expect(undone.every((doc:{kind:string,part:number,group_key:string}) =>
+    doc.kind === 'other' && doc.part === 1 && doc.group_key === '')).toBeTruthy()
+
+  await register.getByRole('searchbox', { name: 'Filter rows' }).fill('')
+  await register.getByRole('combobox', { name: 'Order method' }).selectOption('filename')
+  await register.getByRole('button', { name: 'Preview order', exact: true }).click()
+  const preview = register.getByRole('dialog', { name: 'Sort preview' })
+  await expect(preview).toContainText('Proposed filename order')
+  await preview.getByRole('button', { name: 'Cancel' }).click()
+  await expect(preview).toBeHidden()
+  const afterCancel = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+  expect(afterCancel.map((doc:{id:string}) => doc.id)).toEqual(initial.map((doc:{id:string}) => doc.id))
+
+  await register.getByRole('button', { name: 'Preview order', exact: true }).click()
+  await preview.getByRole('button', { name: 'Apply order' }).click()
+  await expect(register.getByText('Applied filename order.')).toBeVisible()
+  const sorted = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+  expect(sorted.map((doc:{original_name:string}) => doc.original_name)).toEqual([
+    '01_petition.pdf', '02_impugned_order.pdf', '03_affidavit.pdf'])
+
+  const petitionRow = register.locator('tr', { hasText: '01_petition.pdf' })
+  await petitionRow.locator('input[type="date"]').fill('2026-10-16')
+  const dateSaved = page.waitForResponse(response => response.url().includes('/documents/') &&
+    response.request().method() === 'PATCH')
+  await petitionRow.getByRole('button', { name: 'Save row' }).click()
+  expect((await dateSaved).ok()).toBeTruthy()
+  const dated = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+  const petition = dated.find((doc:{original_name:string}) => doc.original_name === '01_petition.pdf')
+  expect(petition).toMatchObject({document_date:'2026-10-16', date_status:'confirmed', date_source:'user'})
+})
+
+test('label proposal preview cancels cleanly and applies one undoable grouped mapping', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Label Proposal', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  for (const name of ['01_petition.pdf', '02_impugned_order.pdf', '03_affidavit.pdf']) {
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+      multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
+    })
+    expect(uploaded.ok()).toBeTruthy()
+  }
+  const docs = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+  const grouped = await request.patch(`${backend}/matters/${matterId}/documents/batch`, { headers,
+    data: { ids:[docs[0].id, docs[1].id], group_key:'linked-annexures' },
+  })
+  expect(grouped.ok()).toBeTruthy()
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Label Proposal' })).toBeVisible()
+  await page.getByRole('button', { name: 'Open table' }).click()
+  const register = page.getByRole('region', { name: 'Editable document table' })
+  const designatedParent = register.locator('tr', { hasText: '02_impugned_order.pdf' })
+  await designatedParent.getByRole('combobox', { name: 'Hierarchy role for 02_impugned_order' })
+    .selectOption('parent')
+  await designatedParent.getByRole('button', { name: 'Save row' }).click()
+  await expect(register.getByText('Saved “02_impugned_order”.')).toBeVisible()
+  await register.getByRole('checkbox', { name: 'Select all filtered documents' }).check()
+  await register.getByRole('combobox', { name: 'Method', exact: true }).selectOption('grouped_suffix')
+  await register.getByRole('combobox', { name: 'Suffix style' }).selectOption('upper_alpha')
+  await register.getByRole('textbox', { name: 'Separator' }).fill('.')
+  await register.getByRole('button', { name: 'Preview label changes' }).click()
+  const preview = register.getByRole('dialog', { name: 'Label proposal preview' })
+  await expect(preview.getByRole('textbox', { name: 'Proposed label for 01_petition' })).toHaveValue('P-1.A')
+  await expect(preview.getByRole('textbox', { name: 'Proposed label for 02_impugned_order' })).toHaveValue('P-1')
+  await expect(preview.getByRole('textbox', { name: 'Proposed label for 03_affidavit' })).toHaveValue('P-2')
+  await preview.getByRole('button', { name: 'Cancel without changes' }).click()
+  await expect(preview).toBeHidden()
+  let current = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+  expect(current.every((doc:{label:string}) => doc.label === '')).toBeTruthy()
+
+  await register.getByRole('button', { name: 'Preview label changes' }).click()
+  await preview.getByRole('button', { name: 'Apply reviewed mapping' }).click()
+  await expect(register.getByText('Applied 3 reviewed label mapping(s) in one undoable action.')).toBeVisible()
+  current = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+  expect(current.map((doc:{label:string}) => doc.label)).toEqual(['P-1.A', 'P-1', 'P-2'])
+  expect(current.every((doc:{label_status:string,label_source:string}) =>
+    doc.label_status === 'confirmed' && doc.label_source === 'proposal')).toBeTruthy()
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.getByText('Last edit undone.')).toBeVisible()
+  current = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
+  expect(current.every((doc:{label:string}) => doc.label === '')).toBeTruthy()
+})
+
+test('the workspace build flow blocks generation when settings cannot save', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Bundle Flow', court_profile: 'general-demo',
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
@@ -35,23 +202,10 @@ test('Quick Bundle keeps one saved journey and blocks generation when settings c
   }
 
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Guided Quick Bundle' })).toBeVisible()
-  await page.getByRole('button', { name: 'Quick Bundle', exact: true }).click()
-  const journey = page.getByRole('region', { name: 'Quick Bundle journey' })
-  await expect(journey.getByRole('heading', { name: 'Import' })).toBeVisible()
-  await expect(journey).toContainText('2 imported document(s)')
-  await journey.getByRole('button', { name: 'Continue to arrange' }).click()
-  await expect(journey.getByRole('heading', { name: 'Arrange' })).toBeVisible()
-
-  await page.reload()
-  await expect(journey.getByRole('heading', { name: 'Arrange' })).toBeVisible()
-  await journey.getByRole('button', { name: 'Open full workspace' }).click()
-  await expect(page.getByRole('button', { name: 'Index & bookmarks' })).toBeVisible()
-  await page.getByRole('button', { name: 'Quick Bundle', exact: true }).click()
-  await expect(journey.getByRole('heading', { name: 'Arrange' })).toBeVisible()
-  await journey.getByRole('button', { name: 'Review bundle' }).click()
-  await expect(journey.getByRole('heading', { name: 'Review' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'E2E Bundle Flow' })).toBeVisible()
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('1 volume(s)')
+  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
 
   let buildRequests = 0
   await page.route(`**/matters/${matterId}`, async route => {
@@ -60,25 +214,19 @@ test('Quick Bundle keeps one saved journey and blocks generation when settings c
     } else await route.continue()
   })
   await page.route(`**/matters/${matterId}/build`, async route => { buildRequests += 1; await route.continue() })
-  await journey.getByRole('button', { name: 'Generate bundle' }).click()
+  const buildPanel = page.locator('.build-panel')
+  await buildPanel.getByRole('button', { name: 'Build filing bundle' }).click()
   await expect(page.getByText('synthetic settings failure')).toBeVisible()
-  await expect(journey.getByRole('heading', { name: 'Review' })).toBeVisible()
   expect(buildRequests).toBe(0)
 
   await page.unroute(`**/matters/${matterId}`)
-  await journey.getByRole('button', { name: 'Generate bundle' }).click()
-  await expect(journey.getByRole('heading', { name: 'Export' })).toBeVisible()
+  await buildPanel.getByRole('button', { name: 'Build filing bundle' }).click()
   await expect(page.getByText('Latest filing package')).toBeVisible({ timeout: 90_000 })
   expect(buildRequests).toBe(1)
-  await journey.getByRole('button', { name: 'Review combined PDF' }).click()
+  await page.getByRole('button', { name: 'Review combined.pdf' }).click()
   const pdfReview = page.getByRole('dialog', { name: 'Review generated PDF' })
   await expect(pdfReview).toBeVisible()
   await pdfReview.getByRole('button', { name: 'Close review' }).click()
-  await journey.getByRole('button', { name: /Import$/ }).click()
-  await journey.getByRole('button', { name: 'Open sample matter' }).click()
-  await expect(page.getByRole('heading', { name: /Synthetic Quick Bundle/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'E2E Guided Quick Bundle' })).toBeVisible()
-  await expect(journey.getByRole('heading', { name: 'Arrange' })).toBeVisible()
 })
 
 test('compression exposes measured results and retains a usable PDF', async ({ page, request }) => {

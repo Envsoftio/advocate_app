@@ -15,8 +15,9 @@ from .file_io import protected, read_bytes, size as file_size, write_bytes
 from .vault import encrypted_sink
 from .schemas import MatterCreate, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate, ManualBookmark
 from .engine import load_profiles
+from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 3
+PACKAGE_VERSION = 8
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -133,7 +134,7 @@ def restore_package(store: Store, package: Path | bytes) -> dict:
             if archive.getinfo('manifest.json').file_size > 10 * 1024 * 1024:
                 raise PortableMatterError('Manifest is too large')
             manifest = json.loads(archive.read('manifest.json'))
-            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, 2, PACKAGE_VERSION):
+            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, 2, 3, 4, 5, 6, 7, PACKAGE_VERSION):
                 raise PortableMatterError('Unsupported portable matter package')
             files = manifest.get('files')
             if not isinstance(files, list):
@@ -174,12 +175,52 @@ def restore_package(store: Store, package: Path | bytes) -> dict:
                 raise PortableMatterError('Missing matter values in v3 package')
             MatterValuesUpdate.model_validate({'values': manifest['matter_values']})
         by_path = {item['path']: item for item in files}
+        active_group_parents: set[str] = set()
         for doc in documents:
+            if manifest['version'] < 4:
+                doc.setdefault('document_date', '')
+                doc.setdefault('date_status', 'unknown')
+                doc.setdefault('date_source', 'none')
+                doc.setdefault('source_file_mtime', '')
+            if manifest['version'] < 5:
+                doc.setdefault('date_note', '')
+            if manifest['version'] < 6:
+                doc.setdefault('label_status', 'unreviewed')
+                doc.setdefault('label_source', 'legacy' if doc.get('label') else 'none')
+            if manifest['version'] < 7:
+                doc.setdefault('group_role', 'member')
+            if manifest['version'] < 8:
+                doc.setdefault('certificate_signature_status', 'unknown')
+                doc.setdefault('certificate_signature_count', 0)
+                doc.setdefault('signature_inspection_note',
+                               'Legacy package was not inspected for PDF certificate-signature indicators.')
+                doc.setdefault('visible_signature_status', 'unreviewed')
+                doc.setdefault('signature_status', 'inspection_inconclusive')
             DocumentPatch.model_validate({key: doc[key] for key in
-                ('title', 'kind', 'part', 'label', 'group_key')})
+                ('title', 'kind', 'part', 'label', 'label_status', 'label_source',
+                 'group_key', 'group_role', 'document_date',
+                 'date_status', 'date_source', 'date_note', 'visible_signature_status')})
+            if (doc['certificate_signature_status'] not in ('detected', 'not_detected', 'unknown') or
+                    type(doc['certificate_signature_count']) is not int or
+                    doc['certificate_signature_count'] < 0 or
+                    not isinstance(doc['signature_inspection_note'], str) or
+                    len(doc['signature_inspection_note']) > 1000 or
+                    doc['signature_status'] != combined_signature_status(
+                        doc['certificate_signature_status'], doc['visible_signature_status'])):
+                raise PortableMatterError('Invalid signature inspection metadata in package')
+            if doc['group_role'] == 'parent':
+                group_key = doc['group_key'].strip()
+                if not group_key:
+                    raise PortableMatterError('A group parent must have a group name')
+                if doc.get('archived_at') is None:
+                    if group_key in active_group_parents:
+                        raise PortableMatterError(f'Group “{group_key}” has more than one designated parent')
+                    active_group_parents.add(group_key)
             if any(type(doc[key]) is not int for key in ('page_count', 'revision', 'position')) or \
                     doc['page_count'] < 1 or doc['revision'] < 1 or doc['position'] < 0:
                 raise PortableMatterError('Invalid document counts in package')
+            if not isinstance(doc['source_file_mtime'], str) or len(doc['source_file_mtime']) > 40:
+                raise PortableMatterError('Invalid source file timestamp in package')
             if (_safe_relpath(doc['source_relpath']) not in by_path or
                     _safe_relpath(doc['working_relpath']) not in by_path or
                     by_path[doc['source_relpath']]['sha256'] != doc['source_sha256']):
@@ -224,9 +265,14 @@ def restore_package(store: Store, package: Path | bytes) -> dict:
                         ','.join('?' for _ in matter_fields) + ')', tuple(matter_fields.values()))
             for doc in documents:
                 fields = {key: doc[key] for key in (
-                    'title', 'kind', 'part', 'label', 'group_key', 'position', 'page_count',
+                    'title', 'kind', 'part', 'label', 'label_status', 'label_source',
+                    'group_key', 'group_role', 'position', 'page_count',
+                    'document_date', 'date_status', 'date_source', 'date_note', 'source_file_mtime',
                     'ocr_status', 'original_name', 'source_sha256', 'source_relpath',
-                    'working_relpath', 'created_at', 'updated_at', 'revision', 'archived_at')}
+                    'working_relpath', 'certificate_signature_status',
+                    'certificate_signature_count', 'signature_inspection_note',
+                    'visible_signature_status', 'signature_status',
+                    'created_at', 'updated_at', 'revision', 'archived_at')}
                 fields.update(id=id_map[doc['id']], matter_id=matter_id)
                 con.execute('INSERT INTO documents (' + ','.join(fields) + ') VALUES (' +
                             ','.join('?' for _ in fields) + ')', tuple(fields.values()))

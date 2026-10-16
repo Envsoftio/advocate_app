@@ -15,6 +15,8 @@ export interface Matter {
 }
 export interface MatterNew extends Omit<Matter, 'id' | 'created_at' | 'updated_at'> {}
 export type DocKind = 'petition' | 'affidavit' | 'order' | 'annexure' | 'application' | 'evidence' | 'other'
+export type SignatureStatus = 'certificate_signature_detected' | 'no_certificate_signature_detected' |
+  'inspection_inconclusive' | 'visible_signature_only' | 'unsigned'
 export interface MatterDocument {
   id: string
   matter_id: string
@@ -22,12 +24,25 @@ export interface MatterDocument {
   kind: DocKind
   part: number
   group_key: string
+  group_role: 'member' | 'parent'
   label: string
+  label_status: 'unreviewed' | 'confirmed'
+  label_source: 'none' | 'legacy' | 'user' | 'proposal' | 'filename'
+  document_date: string
+  date_status: 'unknown' | 'ambiguous' | 'suggested' | 'confirmed'
+  date_source: 'none' | 'user' | 'extracted' | 'filename' | 'filesystem'
+  date_note: string
+  source_file_mtime: string
   position: number
   page_count: number
   ocr_status: string
   original_name: string
   source_sha256: string
+  certificate_signature_status: 'detected' | 'not_detected' | 'unknown'
+  certificate_signature_count: number
+  signature_inspection_note: string
+  visible_signature_status: 'unreviewed' | 'present' | 'absent'
+  signature_status: SignatureStatus
   revision: number
   created_at: string
   updated_at: string

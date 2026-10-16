@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 6:
+            if version > 11:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -122,10 +122,25 @@ class Store:
                 CREATE TABLE IF NOT EXISTS documents (
                     id TEXT PRIMARY KEY, matter_id TEXT NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
                     title TEXT NOT NULL, kind TEXT NOT NULL, part INTEGER NOT NULL,
-                    label TEXT NOT NULL, group_key TEXT NOT NULL, position INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    label_status TEXT NOT NULL DEFAULT 'unreviewed',
+                    label_source TEXT NOT NULL DEFAULT 'none',
+                    group_key TEXT NOT NULL,
+                    group_role TEXT NOT NULL DEFAULT 'member',
+                    position INTEGER NOT NULL,
                     page_count INTEGER NOT NULL, ocr_status TEXT NOT NULL,
                     original_name TEXT NOT NULL, source_sha256 TEXT NOT NULL,
                     source_relpath TEXT NOT NULL, working_relpath TEXT NOT NULL,
+                    certificate_signature_status TEXT NOT NULL DEFAULT 'unknown',
+                    certificate_signature_count INTEGER NOT NULL DEFAULT 0,
+                    signature_inspection_note TEXT NOT NULL DEFAULT '',
+                    visible_signature_status TEXT NOT NULL DEFAULT 'unreviewed',
+                    signature_status TEXT NOT NULL DEFAULT 'inspection_inconclusive',
+                    document_date TEXT NOT NULL DEFAULT '',
+                    date_status TEXT NOT NULL DEFAULT 'unknown',
+                    date_source TEXT NOT NULL DEFAULT 'none',
+                    date_note TEXT NOT NULL DEFAULT '',
+                    source_file_mtime TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_docs_matter ON documents(matter_id,position);
@@ -184,8 +199,46 @@ class Store:
                     con.execute('ALTER TABLE matters ADD COLUMN archived_at TEXT')
                 if 'archived_at' not in document_columns:
                     con.execute('ALTER TABLE documents ADD COLUMN archived_at TEXT')
-            if version < 6:
-                con.execute('PRAGMA user_version=6')
+            if version < 8:
+                document_columns = {row['name'] for row in con.execute('PRAGMA table_info(documents)')}
+                additions = {
+                    'document_date': "TEXT NOT NULL DEFAULT ''",
+                    'date_status': "TEXT NOT NULL DEFAULT 'unknown'",
+                    'date_source': "TEXT NOT NULL DEFAULT 'none'",
+                    'date_note': "TEXT NOT NULL DEFAULT ''",
+                    'source_file_mtime': "TEXT NOT NULL DEFAULT ''",
+                }
+                for column, definition in additions.items():
+                    if column not in document_columns:
+                        con.execute(f'ALTER TABLE documents ADD COLUMN {column} {definition}')
+                con.execute('PRAGMA user_version=8')
+            if version < 9:
+                document_columns = {row['name'] for row in con.execute('PRAGMA table_info(documents)')}
+                if 'label_status' not in document_columns:
+                    con.execute("ALTER TABLE documents ADD COLUMN label_status TEXT NOT NULL DEFAULT 'unreviewed'")
+                if 'label_source' not in document_columns:
+                    con.execute("ALTER TABLE documents ADD COLUMN label_source TEXT NOT NULL DEFAULT 'none'")
+                con.execute("""UPDATE documents SET label_source='legacy'
+                    WHERE label<>'' AND label_source='none'""")
+                con.execute('PRAGMA user_version=9')
+            if version < 10:
+                document_columns = {row['name'] for row in con.execute('PRAGMA table_info(documents)')}
+                if 'group_role' not in document_columns:
+                    con.execute("ALTER TABLE documents ADD COLUMN group_role TEXT NOT NULL DEFAULT 'member'")
+                con.execute('PRAGMA user_version=10')
+            if version < 11:
+                document_columns = {row['name'] for row in con.execute('PRAGMA table_info(documents)')}
+                additions = {
+                    'certificate_signature_status': "TEXT NOT NULL DEFAULT 'unknown'",
+                    'certificate_signature_count': 'INTEGER NOT NULL DEFAULT 0',
+                    'signature_inspection_note': "TEXT NOT NULL DEFAULT ''",
+                    'visible_signature_status': "TEXT NOT NULL DEFAULT 'unreviewed'",
+                    'signature_status': "TEXT NOT NULL DEFAULT 'inspection_inconclusive'",
+                }
+                for column, definition in additions.items():
+                    if column not in document_columns:
+                        con.execute(f'ALTER TABLE documents ADD COLUMN {column} {definition}')
+                con.execute('PRAGMA user_version=11')
 
     def matter_dir(self, matter_id: str) -> Path:
         # Never accept caller-controlled paths. All ids must have been found in DB.
@@ -489,6 +542,20 @@ class Store:
             row = con.execute('SELECT * FROM documents WHERE id=? AND archived_at IS NULL', (doc_id,)).fetchone()
         return dict(row) if row else None
 
+    @staticmethod
+    def _validate_group_parent(con, matter_id: str, doc_id: str,
+                               group_key: str, group_role: str) -> None:
+        group_key = group_key.strip()
+        if group_role != 'parent':
+            return
+        if not group_key:
+            raise ValueError('A group parent must have a group name')
+        if con.execute('''SELECT 1 FROM documents
+            WHERE matter_id=? AND archived_at IS NULL AND id<>? AND group_key=?
+            AND group_role='parent' LIMIT 1''',
+            (matter_id, doc_id, group_key)).fetchone():
+            raise ValueError(f'Group “{group_key}” already has a designated parent')
+
     def add_document(self, data: dict) -> dict:
         with self.connect() as con:
             pos = con.execute('SELECT COALESCE(MAX(position),-1)+1 FROM documents WHERE matter_id=?', (data['matter_id'],)).fetchone()[0]
@@ -515,6 +582,9 @@ class Store:
             if current is None:
                 raise ValueError('Document not found')
             matter_id = current['matter_id']
+            final_group = changes.get('group_key', current['group_key']).strip()
+            final_role = changes.get('group_role', current['group_role'])
+            self._validate_group_parent(con, matter_id, doc_id, final_group, final_role)
             tracked = {key: value for key, value in changes.items() if key != 'updated_at'}
             if all(current[key] == value for key, value in tracked.items()):
                 return dict(current)
@@ -538,6 +608,208 @@ class Store:
             result = dict(con.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone())
         return result
 
+    def batch_update_documents(self, matter_id: str, ids: list[str], changes: dict):
+        """Apply one metadata edit to an explicit selection as one undoable transaction."""
+        if not changes:
+            raise ValueError('Choose at least one batch field')
+        with self.connect() as con:
+            rows = [dict(row) for row in con.execute(
+                '''SELECT * FROM documents WHERE matter_id=? AND archived_at IS NULL
+                ORDER BY position,created_at''', (matter_id,))]
+            by_id = {row['id']: row for row in rows}
+            if len(ids) != len(set(ids)) or any(doc_id not in by_id for doc_id in ids):
+                raise ValueError('Selection contains a missing, archived or duplicate document')
+            affected = [by_id[doc_id] for doc_id in ids]
+            if 'group_key' in changes:
+                final_groups = {row['id']: (changes['group_key'] if row['id'] in ids
+                                             else row['group_key']).strip() for row in rows}
+                for row in rows:
+                    if row['group_role'] == 'parent' and not final_groups[row['id']]:
+                        raise ValueError('Clear or change the designated parent role before removing its group')
+                parents: dict[str, str] = {}
+                for row in rows:
+                    if row['group_role'] != 'parent':
+                        continue
+                    key = final_groups[row['id']]
+                    if key in parents:
+                        raise ValueError(f'Group “{key}” would have more than one designated parent')
+                    parents[key] = row['id']
+            changed = [row for row in affected if any(row[key] != value for key, value in changes.items())]
+            if not changed:
+                return self.get_documents(matter_id)
+            now = utcnow()
+            before = [{'id': row['id'], 'fields': {key: row[key] for key in changes}} for row in changed]
+            after = [{'id': row['id'], 'fields': dict(changes)} for row in changed]
+            assignments = ','.join(f'{key}=?' for key in changes)
+            for row in changed:
+                con.execute(f'UPDATE documents SET {assignments},updated_at=? WHERE id=?',
+                            (*changes.values(), now, row['id']))
+            self._record_edit(con, matter_id, 'document_batch', {'items': before}, {'items': after})
+            self._audit(con, 'documents_batch_updated', matter_id)
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (now, matter_id))
+        return self.get_documents(matter_id)
+
+    def apply_label_mapping(self, matter_id: str, mappings: list[dict]) -> list[dict]:
+        """Apply an explicitly reviewed old-to-new label map as one undoable edit."""
+        ids = [item['document_id'] for item in mappings]
+        if len(ids) != len(set(ids)):
+            raise ValueError('Map each document once')
+        with self.connect() as con:
+            rows = [dict(row) for row in con.execute(
+                '''SELECT * FROM documents WHERE matter_id=? AND archived_at IS NULL
+                ORDER BY position,created_at''', (matter_id,))]
+            by_id = {row['id']: row for row in rows}
+            if any(doc_id not in by_id for doc_id in ids):
+                raise ValueError('A mapped document is missing or archived; preview again')
+
+            normalized = []
+            for item in mappings:
+                row = by_id[item['document_id']]
+                if row['label'] != item['old_label']:
+                    raise ValueError(f'Label for “{row["title"]}” changed after preview; preview again')
+                new_label = item['new_label'].strip()
+                if not new_label or len(new_label) > 60:
+                    raise ValueError('Every proposed label must contain 1 to 60 visible characters')
+                normalized.append((row, new_label))
+
+            final_labels = {row['id']: row['label'].strip() for row in rows}
+            for row, new_label in normalized:
+                final_labels[row['id']] = new_label
+            seen: dict[str, str] = {}
+            for row in rows:
+                label = final_labels[row['id']]
+                if not label:
+                    continue
+                folded = label.casefold()
+                if folded in seen:
+                    raise ValueError(f'Label “{label}” would be duplicated')
+                seen[folded] = row['id']
+
+            changed = [(row, label) for row, label in normalized
+                       if row['label'] != label or row['label_status'] != 'confirmed'
+                       or row['label_source'] != 'proposal']
+            if not changed:
+                return rows
+            now = utcnow()
+            before = [{'id': row['id'], 'fields': {
+                'label': row['label'], 'label_status': row['label_status'],
+                'label_source': row['label_source']}} for row, _label in changed]
+            after = [{'id': row['id'], 'fields': {
+                'label': label, 'label_status': 'confirmed',
+                'label_source': 'proposal'}} for row, label in changed]
+            for row, label in changed:
+                con.execute('''UPDATE documents SET label=?,label_status='confirmed',
+                    label_source='proposal',updated_at=? WHERE id=?''',
+                    (label, now, row['id']))
+            self._record_edit(con, matter_id, 'document_batch',
+                              {'items': before}, {'items': after})
+            self._audit(con, 'document_labels_applied', matter_id)
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (now, matter_id))
+        return self.get_documents(matter_id)
+
+    def label_export_history(self, matter_id: str, selected_ids: list[str]) -> dict:
+        """Report prior generated bundles that recorded the selected documents' labels."""
+        from .file_io import read_bytes
+        selected = set(selected_ids)
+        prior_uses = []
+        unknown_exports = []
+        root = self.exports_root(matter_id)
+        if not root.exists():
+            return {'has_prior_exports': False, 'prior_uses': [], 'unknown_exports': []}
+        for path in root.glob('*/export_manifest.json'):
+            if path.parent.name.startswith('.'):
+                continue
+            try:
+                manifest = json.loads(read_bytes(path))
+            except (OSError, ValueError, TypeError):
+                continue
+            if 'label_inputs' not in manifest:
+                unknown_exports.append({'id': manifest.get('id', path.parent.name),
+                                        'created_at': manifest.get('created_at')})
+                continue
+            uses = [item for item in manifest['label_inputs']
+                    if item.get('document_id') in selected]
+            if uses:
+                prior_uses.append({'id': manifest.get('id', path.parent.name),
+                                   'created_at': manifest.get('created_at'),
+                                   'labels': uses})
+        prior_uses.sort(key=lambda item: item.get('created_at') or '', reverse=True)
+        unknown_exports.sort(key=lambda item: item.get('created_at') or '', reverse=True)
+        return {'has_prior_exports': bool(prior_uses or unknown_exports),
+                'prior_uses': prior_uses, 'unknown_exports': unknown_exports}
+
+    def preview_document_sort(self, matter_id: str, mode: str) -> dict:
+        docs = self.get_documents(matter_id)
+        matter = self.get_matter(matter_id)
+        if matter is None:
+            raise ValueError('Matter not found')
+        if mode not in ('manual', 'upload', 'filename', 'document_date'):
+            raise ValueError('Unknown document sort mode')
+
+        def document_key(doc: dict):
+            if mode == 'upload':
+                return (doc['created_at'], doc['position'], doc['id'])
+            if mode == 'filename':
+                return (doc['original_name'].casefold(), doc['position'], doc['id'])
+            if mode == 'document_date':
+                # Exact suggestions may participate in the preview, but their review
+                # state is preserved. Missing/ambiguous dates remain stable at the end.
+                return (0, doc['document_date'], doc['position'], doc['id']) if doc['document_date'] else \
+                       (1, '', doc['position'], doc['id'])
+            return (doc['position'], doc['id'])
+
+        if mode == 'manual':
+            ordered = list(docs)
+        elif matter['keep_groups_intact']:
+            units: list[list[dict]] = []
+            group_units: dict[str, list[dict]] = {}
+            for doc in docs:
+                key = doc['group_key'].strip()
+                if not key:
+                    units.append([doc])
+                elif key not in group_units:
+                    group_units[key] = [doc]
+                    units.append(group_units[key])
+                else:
+                    group_units[key].append(doc)
+            units.sort(key=lambda unit: document_key(unit[0]))
+            ordered = [doc for unit in units for doc in unit]
+        else:
+            ordered = sorted(docs, key=document_key)
+
+        old_positions = {doc['id']: index for index, doc in enumerate(docs)}
+        label_counts: dict[str, list[str]] = {}
+        label_numbers: dict[str, set[int]] = {}
+        for doc in docs:
+            label = doc['label'].strip()
+            if not label:
+                continue
+            label_counts.setdefault(label.casefold(), []).append(label)
+            match = re.fullmatch(r'(.+?)[- ]?(\d+)', label)
+            if match:
+                label_numbers.setdefault(match.group(1).upper(), set()).add(int(match.group(2)))
+        duplicate_labels = sorted({values[0] for values in label_counts.values() if len(values) > 1},
+                                  key=str.casefold)
+        label_gaps = []
+        for prefix, values in sorted(label_numbers.items()):
+            if len(values) > 1:
+                label_gaps.extend(f'{prefix}-{number}' for number in
+                                  range(min(values), max(values)) if number not in values)
+        rows = [{key: doc[key] for key in ('id', 'title', 'original_name', 'document_date',
+                                           'date_status', 'date_source', 'date_note', 'group_key', 'label')}
+                | {'old_position': old_positions[doc['id']], 'new_position': index}
+                for index, doc in enumerate(ordered)]
+        return {
+            'mode': mode,
+            'ids': [doc['id'] for doc in ordered],
+            'rows': rows,
+            'unknown_dates': 'last',
+            'stable_ties': 'current manual order',
+            'group_policy': ('keep grouped documents together in their current internal order'
+                             if matter['keep_groups_intact'] else 'sort documents individually'),
+            'label_review': {'duplicates': duplicate_labels, 'gaps': label_gaps[:100]},
+        }
+
     def delete_document(self, doc_id: str):
         with self.connect() as con:
             row = con.execute('SELECT matter_id,position FROM documents WHERE id=? AND archived_at IS NULL', (doc_id,)).fetchone()
@@ -554,8 +826,12 @@ class Store:
 
     def restore_document(self, matter_id: str, doc_id: str) -> dict | None:
         with self.connect() as con:
-            previous = con.execute('''SELECT archived_at,position FROM documents
+            previous = con.execute('''SELECT archived_at,position,group_key,group_role FROM documents
                 WHERE id=? AND matter_id=? AND archived_at IS NOT NULL''', (doc_id, matter_id)).fetchone()
+            if previous is None:
+                return None
+            self._validate_group_parent(con, matter_id, doc_id,
+                                        previous['group_key'], previous['group_role'])
             position = con.execute('''SELECT COALESCE(MAX(position),-1)+1 FROM documents
                 WHERE matter_id=? AND archived_at IS NULL''', (matter_id,)).fetchone()[0]
             con.execute('''UPDATE documents SET archived_at=NULL,position=?,updated_at=?
@@ -614,6 +890,8 @@ class Store:
                     folder = self.matter_dir(matter_id)
                     if not (folder / doc['source_relpath']).is_file() or not (folder / doc['working_relpath']).is_file():
                         raise ValueError('Document files are missing; this edit cannot be restored')
+                    self._validate_group_parent(con, matter_id, state['id'],
+                                                doc['group_key'], doc['group_role'])
                 con.execute('''UPDATE documents SET archived_at=?,position=?,updated_at=? WHERE id=?''',
                             (state['archived_at'], state['position'], now, state['id']))
             elif row['kind'] == 'document':
@@ -622,6 +900,10 @@ class Store:
                 if doc is None:
                     raise ValueError('Document was removed; this edit cannot be restored')
                 fields = state['fields']
+                self._validate_group_parent(
+                    con, matter_id, state['id'],
+                    fields.get('group_key', doc['group_key']),
+                    fields.get('group_role', doc['group_role']))
                 if 'working_relpath' in fields:
                     if not (self.matter_dir(matter_id) / fields['working_relpath']).is_file():
                         raise ValueError('Working copy is missing; this edit cannot be restored')
@@ -636,6 +918,16 @@ class Store:
                 changes = dict(fields, updated_at=now)
                 con.execute('UPDATE documents SET ' + ','.join(f'{key}=?' for key in changes) +
                             ' WHERE id=?', (*changes.values(), state['id']))
+            elif row['kind'] == 'document_batch':
+                for item in state['items']:
+                    doc = con.execute('''SELECT id FROM documents WHERE id=? AND matter_id=?
+                        AND archived_at IS NULL''', (item['id'], matter_id)).fetchone()
+                    if doc is None:
+                        raise ValueError('A selected document was removed; this batch edit cannot be restored')
+                    fields = item['fields']
+                    changes = dict(fields, updated_at=now)
+                    con.execute('UPDATE documents SET ' + ','.join(f'{key}=?' for key in changes) +
+                                ' WHERE id=?', (*changes.values(), item['id']))
             elif row['kind'] == 'matter':
                 changes = dict(state, updated_at=now)
                 con.execute('UPDATE matters SET ' + ','.join(f'{key}=?' for key in changes) +
@@ -713,8 +1005,14 @@ class Store:
         for doc in self.get_documents(matter_id):
             documents.append({
                 key: doc[key] for key in ('id', 'position', 'title', 'kind', 'part',
-                                           'label', 'group_key', 'page_count',
-                                           'revision', 'source_sha256')
+                                           'label', 'label_status', 'label_source', 'group_key',
+                                           'group_role',
+                                           'document_date', 'date_status',
+                                           'date_source', 'date_note', 'page_count',
+                                           'revision', 'source_sha256',
+                                           'certificate_signature_status',
+                                           'certificate_signature_count',
+                                           'visible_signature_status', 'signature_status')
             } | {'working_sha256': self.sha256(self.working_path(doc)),
                  'original_sha256': self.sha256(self.original_path(doc))})
         profiles_path = Path(__file__).resolve().parent / 'rules' / 'profiles.json'

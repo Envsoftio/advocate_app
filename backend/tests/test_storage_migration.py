@@ -16,15 +16,25 @@ def test_legacy_document_schema_migrates_without_changing_records(tmp_path):
             source_relpath TEXT NOT NULL, working_relpath TEXT NOT NULL,
             created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''')
         con.execute('''INSERT INTO documents VALUES
-            ('d','m','Synthetic','other',1,'','',0,2,'not_requested',
+            ('d','m','Synthetic','other',1,'P-1','',0,2,'not_requested',
              'source.pdf','hash','originals/d.pdf','working/d.pdf','start','last')''')
     store = Store(tmp_path)
     with store.connect() as con:
         row = con.execute('SELECT * FROM documents WHERE id=?', ('d',)).fetchone()
         revision = con.execute('SELECT * FROM document_revisions WHERE document_id=?', ('d',)).fetchone()
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 6
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 11
     assert row['revision'] == 1
     assert row['working_relpath'] == 'working/d.pdf'
+    assert row['document_date'] == ''
+    assert row['date_status'] == 'unknown'
+    assert row['date_note'] == ''
+    assert row['label_status'] == 'unreviewed'
+    assert row['label_source'] == 'legacy'
+    assert row['label'] == 'P-1'
+    assert row['group_role'] == 'member'
+    assert row['certificate_signature_status'] == 'unknown'
+    assert row['visible_signature_status'] == 'unreviewed'
+    assert row['signature_status'] == 'inspection_inconclusive'
     assert revision['working_relpath'] == row['working_relpath']
     store.close()
 
@@ -42,7 +52,7 @@ def test_v5_store_gains_reusable_values_without_changing_matter(tmp_path):
     assert reopened.get_matter(matter['id'])['name'] == 'Synthetic matter'
     assert reopened.get_matter_values(matter['id']) == {}
     with reopened.connect() as con:
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 6
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 11
     reopened.close()
 
 

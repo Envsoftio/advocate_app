@@ -13,6 +13,7 @@ import PasswordInput from './components/PasswordInput.vue'
 import PageTools from './components/PageTools.vue'
 import ManualBookmarks from './components/ManualBookmarks.vue'
 import BundlePreview from './components/BundlePreview.vue'
+import DocumentTable from './components/DocumentTable.vue'
 import ExportPdfReview from './components/ExportPdfReview.vue'
 import MatterForm from './components/MatterForm.vue'
 import DelhiFilingGuide from './components/DelhiFilingGuide.vue'
@@ -21,17 +22,10 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { ApiError, api, downloadExport, downloadMatter, inTauri, restoreMatter, uploadDocuments } from './lib/api'
 import { bytesLabel, friendlyError, prettyDate } from './lib/format'
 import { applyAppearance, readAppearance, type Theme, type UiScale } from './lib/appearance'
+import { confirmSignatureTransformation, signatureRiskDocuments, signatureStatusLabel } from './lib/signatures'
 import type { Check as PreflightCheck, CourtProfile, DocKind, ExportManifest, Job, ManualBookmark, Matter, MatterDocument, MatterNew, PageSearchResult } from './lib/types'
 
 type View = 'documents' | 'index' | 'build' | 'validation' | 'rules' | 'about'
-type QuickStep = 'import' | 'arrange' | 'review' | 'export'
-const quickSteps: Array<{id:QuickStep,label:string,description:string}> = [
-  {id:'import',label:'Import',description:'Add local source files and review processing results.'},
-  {id:'arrange',label:'Arrange',description:'Set order and metadata while inspecting working copies.'},
-  {id:'review',label:'Review',description:'Check the shared page map, bookmarks and technical flags.'},
-  {id:'export',label:'Export',description:'Generate, inspect and save one identified build.'},
-]
-const quickStepViews: Record<QuickStep, View> = {import:'documents',arrange:'documents',review:'index',export:'build'}
 const matterList = ref<Matter[]>([])
 const archivedMatters = ref<Matter[]>([])
 const currentMatterId = ref<string | null>(null)
@@ -53,14 +47,12 @@ const selectedDocId = ref<string | null>(null)
 const selectedDoc = computed(() => docs.value.find(d => d.id === selectedDocId.value) || null)
 const selectedDocumentPosition = computed(() => docs.value.findIndex(doc => doc.id === selectedDocId.value))
 const detailsOpen = ref(false)
+const documentTableOpen = ref(false)
 const pageToolsOpen = ref(false)
 const pageToolsDialog = ref<HTMLDialogElement | null>(null)
 const documentsWorkspace = ref<HTMLElement | null>(null)
 const documentsWorkspaceHeight = ref<number | null>(null)
 const activeView = ref<View>('documents')
-const guidedMode = ref(false)
-const quickStep = ref<QuickStep>('import')
-const quickWalkthroughOpen = ref(true)
 const sidebarCollapsed = ref(false)
 const smallScreen = ref(window.matchMedia('(max-width: 900px)').matches)
 const mobileNavOpen = ref(false)
@@ -98,7 +90,9 @@ const savingExport = ref(false)
 const reviewingPdf = ref<{exportId:string,filename:string} | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const matterFileInput = ref<HTMLInputElement | null>(null)
-const docEditor = reactive({ title: '', kind: 'other' as DocKind, part: 1, label: '', group_key: '' })
+const docEditor = reactive({ title: '', kind: 'other' as DocKind, part: 1, label: '', group_key: '',
+  document_date: '', date_confirmed: false,
+  visible_signature_status: 'unreviewed' as MatterDocument['visible_signature_status'] })
 const matterEditor = reactive({max_pages_per_volume:300,keep_groups_intact:true})
 let jobTimer: ReturnType<typeof setInterval> | null = null
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -113,28 +107,16 @@ const activeExport = computed(() => exportsList.value[0] || null)
 const interruptedJobs = computed(() => recentJobs.value.filter(j => j.status === 'interrupted' && !j.retry_job_id))
 const errorChecks = computed(() => checks.value.filter(c => c.severity === 'error'))
 const warningChecks = computed(() => checks.value.filter(c => c.severity === 'warning'))
-const unresolvedBookmarkCount = computed(() => manualBookmarks.value.filter(entry => !entry.resolved).length)
+const signatureRiskDocs = computed(() => signatureRiskDocuments(docs.value))
 const totalPages = computed(() => docs.value.reduce((n,d) => n+d.page_count, 0))
-const quickStepIndex = computed(() => quickSteps.findIndex(step => step.id === quickStep.value))
-const currentQuickStep = computed(() => quickSteps[quickStepIndex.value] ?? quickSteps[0])
-const quickPrimaryLabel = computed(() => {
-  if (quickStep.value === 'import') return 'Continue to arrange'
-  if (quickStep.value === 'arrange') return 'Review bundle'
-  if (quickStep.value === 'review') return 'Generate bundle'
-  if (isJobActive.value) return 'Generating bundle…'
-  if (!activeExport.value || activeExport.value.stale) return 'Generate bundle'
-  return 'Review combined PDF'
-})
-const quickPrimaryDisabled = computed(() => {
-  if (busy.value || isJobActive.value) return true
-  if ((quickStep.value === 'import' || quickStep.value === 'arrange' || quickStep.value === 'review') && !docs.value.length) return true
-  return false
-})
 const documentKindOptions: DocKind[] = ['petition','affidavit','order','annexure','application','evidence','other']
 const documentDirty = computed(() => !!selectedDoc.value && (
   docEditor.title !== selectedDoc.value.title || docEditor.kind !== selectedDoc.value.kind ||
   docEditor.part !== selectedDoc.value.part || docEditor.label !== selectedDoc.value.label ||
-  docEditor.group_key !== selectedDoc.value.group_key))
+  docEditor.group_key !== selectedDoc.value.group_key ||
+  docEditor.visible_signature_status !== selectedDoc.value.visible_signature_status ||
+  docEditor.document_date !== selectedDoc.value.document_date ||
+  docEditor.date_confirmed !== (selectedDoc.value.date_status === 'confirmed')))
 const settingsDirty = computed(() => !!currentMatter.value && (
   matterEditor.max_pages_per_volume !== currentMatter.value.max_pages_per_volume ||
   matterEditor.keep_groups_intact !== currentMatter.value.keep_groups_intact))
@@ -146,6 +128,9 @@ function resetDrafts() {
   docEditor.part = doc?.part || 1
   docEditor.label = doc?.label || ''
   docEditor.group_key = doc?.group_key || ''
+  docEditor.document_date = doc?.document_date || ''
+  docEditor.date_confirmed = doc?.date_status === 'confirmed'
+  docEditor.visible_signature_status = doc?.visible_signature_status || 'unreviewed'
   const matter = currentMatter.value
   matterEditor.max_pages_per_volume = matter?.max_pages_per_volume || 300
   matterEditor.keep_groups_intact = matter?.keep_groups_intact ?? true
@@ -164,11 +149,7 @@ function selectDocument(id: string) {
 function openPreviewDocument(id: string) {
   if (!confirmDiscardDrafts()) return
   selectedDocId.value = id
-  if (guidedMode.value) {
-    quickStep.value = 'arrange'
-    activeView.value = quickStepViews.arrange
-    persistQuickState()
-  } else activeView.value = 'documents'
+  activeView.value = 'documents'
 }
 function prepareIndexBookmark(id: string) {
   bookmarkPreset.value = {documentId:id,sequence:bookmarkPreset.value.sequence+1}
@@ -196,85 +177,13 @@ watch(pageToolsOpen, async open => {
 })
 function showView(view: View) {
   if (activeView.value === view) {
-    if (guidedMode.value) openFullWorkspace(view)
     mobileNavOpen.value = false
     return
   }
   if (!confirmDiscardDrafts()) return
-  guidedMode.value = false
   activeView.value = view
   mobileNavOpen.value = false
-  persistQuickState()
   if (view === 'validation') void validate()
-}
-function quickStorageKey(matterId: string) { return `courtbundle.quickBundle.v1.${matterId}` }
-function persistQuickState() {
-  if (!currentMatterId.value) return
-  try {
-    localStorage.setItem(quickStorageKey(currentMatterId.value), JSON.stringify({step:quickStep.value,active:guidedMode.value}))
-  } catch { /* Storage may be unavailable. */ }
-}
-function restoreQuickState(matterId: string) {
-  let saved: {step?:QuickStep,active?:boolean} | null = null
-  try { saved = JSON.parse(localStorage.getItem(quickStorageKey(matterId)) || 'null') }
-  catch { /* Ignore invalid or unavailable storage. */ }
-  const valid = quickSteps.some(step => step.id === saved?.step)
-  quickStep.value = valid ? saved!.step! : 'import'
-  guidedMode.value = saved?.active === true
-  if (guidedMode.value) activeView.value = quickStepViews[quickStep.value]
-}
-function setQuickStep(step: QuickStep) {
-  if (quickStep.value === step && guidedMode.value) return
-  if (!confirmDiscardDrafts()) return
-  quickStep.value = step
-  guidedMode.value = true
-  activeView.value = quickStepViews[step]
-  mobileNavOpen.value = false
-  persistQuickState()
-  if (step === 'review') void validate()
-}
-function enterQuickBundle() {
-  if (!currentMatterId.value || !confirmDiscardDrafts()) return
-  guidedMode.value = true
-  activeView.value = quickStepViews[quickStep.value]
-  quickWalkthroughOpen.value = true
-  persistQuickState()
-}
-function openFullWorkspace(view: View = activeView.value) {
-  if (!confirmDiscardDrafts()) return
-  guidedMode.value = false
-  activeView.value = view
-  persistQuickState()
-}
-function goQuickBack() {
-  const previous = quickSteps[quickStepIndex.value - 1]
-  if (previous) setQuickStep(previous.id)
-}
-async function runQuickPrimary() {
-  if (quickPrimaryDisabled.value) return
-  if (quickStep.value === 'import') { setQuickStep('arrange'); return }
-  if (quickStep.value === 'arrange') { setQuickStep('review'); return }
-  if (quickStep.value === 'review') {
-    const currentChecks = await validate()
-    if (currentChecks.some(check => check.severity === 'error')) {
-      notify('Resolve the blocking technical checks before generating the bundle.', 'error')
-      return
-    }
-    if (await startBuild()) setQuickStep('export')
-    return
-  }
-  if (!activeExport.value || activeExport.value.stale) {
-    const currentChecks = await validate()
-    if (currentChecks.some(check => check.severity === 'error')) {
-      notify('Resolve the blocking technical checks before generating the bundle.', 'error')
-      return
-    }
-    await startBuild()
-    return
-  }
-  const combined = activeExport.value.files.find(file => file.name === 'combined.pdf')
-  if (combined) reviewGeneratedPdf(activeExport.value.id, combined.name, combined.bytes)
-  else notify('This build does not contain combined.pdf. Review and save one of its listed files.', 'error')
 }
 function toggleNavigation() {
   if (smallScreen.value) mobileNavOpen.value = !mobileNavOpen.value
@@ -312,18 +221,22 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 watch([theme, uiScale], () => applyAppearance(theme.value, uiScale.value), { immediate: true })
-watch([guidedMode, quickStep], persistQuickState)
 
 watch(selectedDoc, (doc, previous) => {
   if (doc && previous?.id === doc.id && (
     docEditor.title !== previous.title || docEditor.kind !== previous.kind ||
     docEditor.part !== previous.part || docEditor.label !== previous.label ||
-    docEditor.group_key !== previous.group_key)) return
+    docEditor.group_key !== previous.group_key || docEditor.document_date !== previous.document_date ||
+    docEditor.date_confirmed !== (previous.date_status === 'confirmed') ||
+    docEditor.visible_signature_status !== previous.visible_signature_status)) return
   docEditor.title = doc?.title || ''
   docEditor.kind = doc?.kind || 'other'
   docEditor.part = doc?.part || 1
   docEditor.label = doc?.label || ''
   docEditor.group_key = doc?.group_key || ''
+  docEditor.document_date = doc?.document_date || ''
+  docEditor.date_confirmed = doc?.date_status === 'confirmed'
+  docEditor.visible_signature_status = doc?.visible_signature_status || 'unreviewed'
 }, {immediate:true})
 watch(currentMatter, (item, previous) => {
   if (item && previous?.id === item.id && (
@@ -334,11 +247,11 @@ watch(currentMatter, (item, previous) => {
 }, {immediate:true})
 watch(currentMatterId, () => {
   detailsOpen.value = false
+  documentTableOpen.value = false
   pageQuery.value = ''
   pageSearch.value = null
   searchSequence++
   if (currentMatterId.value) {
-    restoreQuickState(currentMatterId.value)
     void loadMatterResources()
   }
 })
@@ -548,9 +461,9 @@ async function createMatter(fields: MatterNew) {
     const value=await api<Matter>('/matters','POST',fields)
     await refreshMatters()
     currentMatterId.value=value.id
-    quickStep.value='import'; guidedMode.value=false; activeView.value='documents'; selectedDocId.value=null
+    activeView.value='documents'; selectedDocId.value=null
     modalOpen.value=false
-    notify('Matter created. Import your first document or open Quick Bundle for guided preparation.', 'success')
+    notify('Matter created. Import your first document to begin.', 'success')
   } catch(err) { issue(err) }
   finally { creating.value=false }
 }
@@ -559,7 +472,7 @@ async function createSampleMatter() {
   creating.value = true
   try {
     const value = await api<Matter>('/matters','POST',{
-      name:`Synthetic Quick Bundle ${new Date().toLocaleDateString('en-CA')}`,
+      name:`Synthetic Sample Matter ${new Date().toLocaleDateString('en-CA')}`,
       court_profile:'general-demo', case_type:'Synthetic demonstration',
       petitioner:'Sample Applicant', respondent:'Sample Respondent', advocate:'', case_number:'',
       max_pages_per_volume:10, keep_groups_intact:true,
@@ -568,10 +481,7 @@ async function createSampleMatter() {
     await refreshMatters()
     currentMatterId.value = value.id
     selectedDocId.value = null
-    quickStep.value = 'arrange'
-    guidedMode.value = true
     activeView.value = 'documents'
-    persistQuickState()
     await loadMatterResources()
     notify('Opened a separate synthetic sample matter. Its draft cover is not a court-approved form.', 'success')
   } catch (err) { issue(err) }
@@ -649,13 +559,31 @@ async function saveDocument() {
   if (!selectedDoc.value) return
   busy.value=true
   try {
-    const updated=await api<MatterDocument>(`/documents/${selectedDoc.value.id}`,'PATCH',{...docEditor})
+    const preserveAmbiguous = !docEditor.document_date && selectedDoc.value.date_status === 'ambiguous'
+    const updated=await api<MatterDocument>(`/documents/${selectedDoc.value.id}`,'PATCH',{
+      title:docEditor.title, kind:docEditor.kind, part:docEditor.part, label:docEditor.label,
+      group_key:docEditor.group_key, document_date:docEditor.document_date,
+      visible_signature_status:docEditor.visible_signature_status,
+      date_status:docEditor.document_date ? (docEditor.date_confirmed ? 'confirmed' : selectedDoc.value.date_status) : (preserveAmbiguous ? 'ambiguous' : 'unknown'),
+      date_source:docEditor.document_date ? (docEditor.date_confirmed ? 'user' : selectedDoc.value.date_source) : (preserveAmbiguous ? selectedDoc.value.date_source : 'none'),
+      date_note:preserveAmbiguous ? selectedDoc.value.date_note : '',
+    })
     docs.value=docs.value.map(x=>x.id===updated.id ? updated : x)
     await refreshHistory()
     await validate()
     await loadMatterResources()
     notify('Document details updated.', 'success')
   } catch(err){issue(err)} finally{busy.value=false}
+}
+async function documentTableModified() {
+  await refreshMatters()
+  await loadMatterResources()
+  notify('Document table changes saved. Bundle order and freshness were refreshed.', 'success')
+}
+function openDocumentFromTable(id:string) {
+  documentTableOpen.value = false
+  selectedDocId.value = id
+  detailsOpen.value = true
 }
 async function deleteDocument() {
   if (!selectedDoc.value || !confirmDiscardDrafts() || !window.confirm(`Archive ${selectedDoc.value.title}? Its records and original remain available for restore.`)) return
@@ -710,8 +638,12 @@ async function moveDocument(direction: number) {
 async function refreshDocument() { await loadMatterResources() }
 async function startOcr() {
   if(!selectedDoc.value || isJobActive.value) return
+  const signature = confirmSignatureTransformation([selectedDoc.value], 'OCR')
+  if (!signature.proceed) return
   try {
-    const job=await api<Job>(`/documents/${selectedDoc.value.id}/ocr`,'POST')
+    const job=await api<Job>(`/documents/${selectedDoc.value.id}/ocr`,'POST',{
+      acknowledge_signature_risk:signature.acknowledged,
+    })
     watchJob(job)
     notify('OCR started on scanned and mixed-content pages.', 'info')
   } catch(err){issue(err)}
@@ -739,7 +671,11 @@ async function startBuild(): Promise<boolean> {
   if (!currentMatterId.value || isJobActive.value) return false
   try {
     if (!await savePolicy()) return false
-    const job=await api<Job>(`/matters/${currentMatterId.value}/build`,'POST')
+    const signature = confirmSignatureTransformation(docs.value, 'Bundle generation')
+    if (!signature.proceed) return false
+    const job=await api<Job>(`/matters/${currentMatterId.value}/build`,'POST',{
+      acknowledge_signature_risk:signature.acknowledged,
+    })
     watchJob(job)
     return true
   } catch(err){issue(err); return false}
@@ -769,7 +705,13 @@ function watchJob(job:Job) {
 async function cancelJob(){if(activeJob.value)await api(`/jobs/${activeJob.value.id}/cancel`,'POST').catch(issue)}
 async function retryInterrupted(job: Job) {
   try {
-    const retry = await api<Job>(`/jobs/${job.id}/retry`, 'POST')
+    const relevant = job.kind === 'ocr' ? docs.value.filter(document => document.id === job.target_id) : docs.value
+    const signature = confirmSignatureTransformation(relevant,
+      job.kind === 'ocr' ? 'Retrying OCR' : 'Retrying bundle generation')
+    if (!signature.proceed) return
+    const retry = await api<Job>(`/jobs/${job.id}/retry`, 'POST', {
+      acknowledge_signature_risk: signature.acknowledged,
+    })
     watchJob(retry)
     await loadMatterResources()
     notify(`Restarted ${job.kind} as a new job.`, 'info')
@@ -949,31 +891,17 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
               <button @click="confirmDiscardDrafts() && void loadMatterResources()"><RefreshCw :size="15"/> Refresh</button>
               <button :disabled="busy" @click="removeMatter">Archive matter</button>
             </div></details>
-            <button v-if="!guidedMode" class="btn secondary" @click="enterQuickBundle"><WandSparkles :size="17"/> Quick Bundle</button>
-            <button v-if="!guidedMode" class="btn primary" @click="showView('build')"><FileStack :size="17"/> Build filing bundle</button>
+            <button class="btn primary" @click="showView('build')"><FileStack :size="17"/> Build filing bundle</button>
           </div>
         </div>
         <div class="matter-summary" aria-label="Matter summary"><span><strong>{{docs.length}}</strong> documents</span><span><strong>{{totalPages}}</strong> source pages</span><span><strong>{{warningChecks.length+errorChecks.length}}</strong> review flags</span><span><strong>{{exportsList.length}}</strong> prepared packages</span></div>
-        <section v-if="guidedMode" class="quick-bundle" aria-label="Quick Bundle journey">
-          <div class="quick-bundle-heading"><div><span class="page-eyebrow">GUIDED QUICK BUNDLE</span><h2>{{currentQuickStep.label}}</h2><p>{{currentQuickStep.description}}</p></div><div class="quick-bundle-heading-actions"><button v-if="!quickWalkthroughOpen" class="text-tool" @click="quickWalkthroughOpen=true"><CircleHelp :size="15"/> How this works</button><button class="btn secondary small" @click="openFullWorkspace()">Open full workspace</button></div></div>
-          <ol class="quick-steps">
-            <li v-for="(step,index) in quickSteps" :key="step.id" :class="{active:quickStep===step.id,complete:index<quickStepIndex}"><button :aria-current="quickStep===step.id?'step':undefined" :disabled="index>0&&!docs.length" @click="setQuickStep(step.id)"><span>{{index+1}}</span>{{step.label}}</button></li>
-          </ol>
-          <div v-if="quickWalkthroughOpen" class="quick-walkthrough"><Info :size="18"/><p><strong>Your saved matter is shared with the full workspace.</strong> Move backward at any time. Quick Bundle does not copy documents or calculate a separate page plan.</p><button class="icon-btn" aria-label="Dismiss Quick Bundle walkthrough" @click="quickWalkthroughOpen=false"><X :size="16"/></button></div>
-          <div class="quick-status" aria-live="polite">
-            <template v-if="quickStep==='import'"><span><strong>{{docs.length}}</strong> imported document(s)</span><span><strong>{{totalPages}}</strong> source page(s)</span><span>PDF, JPG and PNG are supported; originals remain unchanged.</span></template>
-            <template v-else-if="quickStep==='arrange'"><span><strong>{{docs.length}}</strong> document(s) in bundle order</span><span><strong>{{totalPages}}</strong> source page(s)</span><span v-if="documentDirty" class="quick-blocker"><CircleAlert :size="15"/> Save or discard the open document draft before continuing.</span></template>
-            <template v-else-if="quickStep==='review'"><span :class="{ 'quick-blocker':errorChecks.length }"><strong>{{errorChecks.length}}</strong> blocking error(s)</span><span><strong>{{warningChecks.length}}</strong> review warning(s)</span><span :class="{ 'quick-blocker':unresolvedBookmarkCount }"><strong>{{unresolvedBookmarkCount}}</strong> unresolved bookmark(s)</span><span>Legal sufficiency is not assessed.</span></template>
-            <template v-else><span v-if="isJobActive"><LoaderCircle :size="15" class="spin"/> {{activeJob?.message}} · {{activeJob?.progress}}%</span><span v-else-if="activeExport"><strong>{{activeExport.stale?'Outdated':'Current'}}</strong> build · {{activeExport.volumes}} volume(s) · {{activeExport.pages}} pages</span><span v-else>No generated build yet.</span><span>Review the actual PDF and technical report before saving.</span></template>
-          </div>
-          <div class="quick-actions"><button v-if="quickStepIndex>0" class="btn secondary" @click="goQuickBack"><ArrowRight class="quick-back-icon" :size="16"/> Back</button><button v-if="quickStep==='import'" class="btn secondary" :disabled="creating" @click="createSampleMatter"><WandSparkles :size="16"/> Open sample matter</button><button class="btn primary" :disabled="quickPrimaryDisabled" @click="runQuickPrimary"><LoaderCircle v-if="isJobActive" :size="16" class="spin"/><ArrowRight v-else :size="16"/> {{quickPrimaryLabel}}</button></div>
-        </section>
-        <div v-else class="workspace-tabs"><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='index'}" @click="showView('index')"><BookMarked :size="16"/> Index & bookmarks</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></div>
+        <div class="workspace-tabs"><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='index'}" @click="showView('index')"><BookMarked :size="16"/> Index & bookmarks</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></div>
 
         <Transition name="section" mode="out-in" @after-enter="fitDocumentsWorkspace">
-        <div v-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :class="{'details-open':detailsOpen && !!selectedDoc}" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
+        <DocumentTable v-if="activeView==='documents' && documentTableOpen" :matter-id="currentMatterId!" :documents="docs" :busy="busy || isJobActive" :keep-groups="currentMatter.keep_groups_intact" @modified="documentTableModified" @open-document="openDocumentFromTable" @error="issue" @close="documentTableOpen=false"/>
+        <div v-else-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :class="{'details-open':detailsOpen && !!selectedDoc}" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
           <section class="panel docs-panel">
-            <div class="panel-header"><div><h2>Source documents</h2><span>Drag documents to set bundle order</span></div><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div>
+            <div class="panel-header"><div><h2>Source documents</h2><span>Drag documents to set bundle order</span></div><div class="panel-header-actions"><button class="text-tool" :disabled="!docs.length" @click="documentTableOpen=true">Open table</button><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div></div>
             <div class="docs-search"><Search :size="16"/><input v-model="searching" placeholder="Search documents..." aria-label="Search documents"/></div>
             <div class="docs-search"><Search :size="16"/><input v-model="pageQuery" placeholder="Find text on pages..." aria-label="Find text on pages"/></div>
             <div v-if="pageQuery.trim().length >= 2" class="page-search-results" aria-live="polite">
@@ -1011,6 +939,19 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <label class="field">Display title<input v-model="docEditor.title" maxlength="250"/></label>
                 <label class="field">Document type<select v-model="docEditor.kind"><option v-for="kind in documentKindOptions" :key="kind" :value="kind">{{kind[0].toUpperCase()+kind.slice(1)}}</option></select></label>
                 <div class="field-row"><label class="field">Part<select v-model.number="docEditor.part"><option v-for="part in 4" :value="part">Part {{part}}</option></select></label><label class="field">Label<input v-model="docEditor.label" placeholder="P-1" maxlength="60"/></label></div>
+                <label class="field">Document date<input v-model="docEditor.document_date" type="date" @input="docEditor.date_confirmed=true"/><span v-if="selectedDoc.date_status==='ambiguous' && !docEditor.document_date" class="hint">Ambiguous {{selectedDoc.date_source}} text: {{selectedDoc.date_note}}. Enter and confirm a date only after checking the document.</span><span v-else class="hint">Unknown is preserved when blank. A file timestamp is never treated as the document date.</span></label>
+                <label v-if="docEditor.document_date" class="checkbox-line"><input v-model="docEditor.date_confirmed" type="checkbox"/><span><strong>Confirmed from the document</strong><small v-if="selectedDoc.date_status==='suggested' && !docEditor.date_confirmed">Current value is an unreviewed {{selectedDoc.date_source}} suggestion.</small></span></label>
+                <div :class="['notice', ['certificate_signature_detected','inspection_inconclusive','visible_signature_only'].includes(selectedDoc.signature_status) ? 'amber' : 'subtle']">
+                  <ShieldAlert :size="18"/><span><strong>{{signatureStatusLabel(selectedDoc.signature_status)}}</strong><small>{{selectedDoc.signature_inspection_note}} This does not validate a certificate, signer, scanned mark or current signature coverage.</small></span>
+                </div>
+                <label class="field">Visible/scanned signature review
+                  <select v-model="docEditor.visible_signature_status">
+                    <option value="unreviewed">Not reviewed</option>
+                    <option value="present">Visible or scanned signature appears present</option>
+                    <option value="absent">No visible or scanned signature found in review</option>
+                  </select>
+                  <span class="hint">This is a reviewer classification only. It is separate from PDF certificate indicators and does not verify a signature.</span>
+                </label>
                 <label class="field">Keep-together group<input v-model="docEditor.group_key" placeholder="Optional: annexures-a"/><span class="hint">Adjacent documents with the same group stay together when enabled.</span></label>
                 <p v-if="documentDirty" role="status" class="hint">Unsaved document changes</p>
                 <button class="btn primary block" :disabled="busy || !docEditor.title.trim()" @click="saveDocument"><Check :size="16"/> Save document details</button>
@@ -1026,7 +967,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
           </section>
           <BundlePreview :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" @open-document="openPreviewDocument" @bookmark-document="prepareIndexBookmark"/>
           <ManualBookmarks :key="currentMatterId!" :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :preset="bookmarkPreset" :disabled="busy || isJobActive" @modified="loadMatterResources"/>
-          <button v-if="!guidedMode" class="btn primary" :disabled="!docs.length" @click="showView('build')"><Layers3 :size="17"/> Continue to Build bundle</button>
+          <button class="btn primary" :disabled="!docs.length" @click="showView('build')"><Layers3 :size="17"/> Continue to Build bundle</button>
         </div>
 
         <div v-else-if="activeView==='build'" class="build-layout">
@@ -1037,8 +978,9 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <button class="btn secondary" :disabled="!settingsDirty || isJobActive" @click="savePolicy"><Check :size="16"/> Save bundle settings</button>
                 <div class="checklist"><div><CheckCircle2 :size="17"/> Generate index pages in every volume</div><div><CheckCircle2 :size="17"/> Include clickable index links and PDF bookmarks</div><div><CheckCircle2 :size="17"/> Generate combined PDF + separate volumes</div><div><CheckCircle2 :size="17"/> Archive in ZIP with validation report</div></div>
                 <div class="notice amber"><ShieldAlert :size="18"/><span>Working-copy PDF annotation objects and link actions are omitted from volume and combined PDFs; flattened marks in page content remain. Generated index links and bookmarks remain. Review validation warnings for affected documents; signature integrity and filing acceptance are not certified.</span></div>
+                <div v-if="signatureRiskDocs.length" class="notice amber"><ShieldAlert :size="18"/><span><strong>{{signatureRiskDocs.length}} signature-risk document(s) require acknowledgment before build.</strong><small>Bundle generation rewrites pages and cannot preserve certificate protections. Imported originals remain unchanged; no signature validity is asserted.</small></span></div>
                 <p v-if="settingsDirty" role="status" class="hint">Unsaved bundle settings. Building saves these settings first.</p>
-                <button v-if="!guidedMode" class="btn primary large" :disabled="!docs.length || isJobActive" @click="startBuild"><Layers3 :size="19"/> {{isJobActive?'Processing…':'Build filing bundle'}}</button>
+                <button class="btn primary large" :disabled="!docs.length || isJobActive" @click="startBuild"><Layers3 :size="19"/> {{isJobActive?'Processing…':'Build filing bundle'}}</button>
                 <div v-if="isJobActive && activeJob" class="job-progress"><div class="job-progress-line"><span>{{activeJob.message}}</span><strong>{{activeJob.progress}}%</strong></div><div class="progress-track"><div :style="{width:activeJob.progress+'%'}"></div></div><button class="text-tool danger" @click="cancelJob">Cancel operation</button></div>
                 <div v-else-if="activeJob?.status==='failed'" class="notice error"><CircleAlert :size="18"/> {{activeJob.error}}</div>
                 <div v-for="job in interruptedJobs" :key="job.id" class="notice amber"><CircleAlert :size="18"/><span>{{job.kind === 'ocr' ? 'OCR' : job.kind === 'compress' ? 'Compression' : 'Bundle build'}} was interrupted by an engine restart. Review the current revision and exports before retrying.</span><span v-if="job.kind === 'compress'">Choose compression again in page tools.</span><button v-else class="text-tool" :disabled="isJobActive" @click="retryInterrupted(job)">Retry</button></div>

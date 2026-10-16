@@ -9,6 +9,7 @@ from pathlib import Path
 import secrets
 import shutil
 import tempfile
+from datetime import datetime
 from urllib.parse import unquote
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
@@ -25,7 +26,7 @@ from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
                       replace_text_run, move_text_run, compress_pdf,
                       ocr_pdf, make_cover_pdf)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, SignatureRiskAcknowledgement
 from .storage import Store, new_id
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
 from .schemas import CompressionRequest
@@ -33,6 +34,9 @@ from .portable import (create_package, restore_package, PortableMatterError, MAX
                        PROTECTED_PACKAGE_MAGIC, protected_package_header, parse_protected_package)
 from .vault import VaultError, decrypt_blob, encrypted_sink, unlock_key
 from .vault_store import VaultStore
+from .labels import propose_labels, extract_label_references
+from .signatures import (combined_signature_status, inspect_source_signature,
+                         risk_summary)
 
 FILE_LIMIT_BYTES = 80 * 1024 * 1024
 SUPPORTED = {'.pdf', '.png', '.jpg', '.jpeg'}
@@ -122,6 +126,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                        allow_origins=allowed_origins,
                        allow_methods=['GET','POST','PUT','PATCH','DELETE'],
                        allow_headers=['Authorization','Content-Type', 'X-CourtBundle-Filename',
+                                      'X-CourtBundle-File-Mtime',
                                       'X-CourtBundle-Backup-Credential', 'X-CourtBundle-Backup-Recovery'])
 
     def auth(request: Request):
@@ -142,6 +147,20 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         if not item or not store.get_matter(item['matter_id']):
             raise HTTPException(status_code=404, detail='Document not found')
         return item
+
+    def require_signature_acknowledgement(documents: list[dict], acknowledged: bool,
+                                          action: str) -> None:
+        risks = risk_summary(documents)
+        if not risks or acknowledged:
+            return
+        names = ', '.join(item['title'] for item in risks[:5])
+        if len(risks) > 5:
+            names += f' and {len(risks) - 5} more'
+        raise HTTPException(status_code=409, detail=(
+            f'Signature-risk acknowledgment required before {action}: {names}. '
+            'Certificate indicators are not proof of validity, and transforming a working '
+            'copy or generated bundle may invalidate or omit signature protections. '
+            'Imported originals will remain unchanged.'))
 
     @app.get('/health')
     def health(_: None = Depends(auth)):
@@ -250,8 +269,11 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     @app.post('/matters/{matter_id}/archived-documents/{doc_id}/restore')
     def restore_archived_document(matter_id: str, doc_id: str, _: None = Depends(auth)):
         matter_or_404(matter_id)
-        with store.matter_lock(matter_id):
-            restored = store.restore_document(matter_id, doc_id)
+        try:
+            with store.matter_lock(matter_id):
+                restored = store.restore_document(matter_id, doc_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if not restored:
             raise HTTPException(status_code=404, detail='Archived document not found')
         return restored
@@ -408,7 +430,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             return {'values': store.set_matter_values(matter_id, payload.values)}
 
     async def import_document(matter_id: str, filename: str,
-                              file: UploadFile | None = None, request: Request | None = None):
+                              file: UploadFile | None = None, request: Request | None = None,
+                              source_file_mtime: str = ''):
         suffix = Path(filename).suffix.lower()
         if suffix not in SUPPORTED:
             raise HTTPException(status_code=415, detail='Only PDF, PNG and JPEG documents are supported in this POC')
@@ -447,6 +470,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                         raise HTTPException(status_code=413, detail='POC import limit is 80 MB per file')
                     chunks.append(chunk)
                 write_bytes(source, b''.join(chunks))
+            signature = await asyncio.to_thread(inspect_source_signature, source, suffix)
             conversion = asyncio.create_task(asyncio.to_thread(normalize_to_pdf, source, target))
             try:
                 pages = await asyncio.shield(conversion)
@@ -459,10 +483,13 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                     raise
             name = Path(filename).name or 'Untitled'
             item = dict(id=doc_id, matter_id=matter_id, title=Path(name).stem[:250],
-                        kind='other', part=1, label='', group_key='', page_count=pages,
+                        kind='other', part=1, label='', label_status='unreviewed',
+                        label_source='none', group_key='', group_role='member', page_count=pages,
+                        document_date='', date_status='unknown', date_source='none', date_note='',
+                        source_file_mtime=source_file_mtime,
                         ocr_status='not_requested', original_name=name[:250],
                         source_sha256=store.sha256(source), source_relpath=source_rel,
-                        working_relpath=work_rel)
+                        working_relpath=work_rel, **signature)
             return store.add_document(item)
         except HTTPException:
             raise
@@ -483,11 +510,20 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         filename = unquote(request.headers.get('x-courtbundle-filename', ''))
         if not filename or len(filename) > 500 or '/' in filename or '\\' in filename:
             raise HTTPException(status_code=422, detail='Invalid document filename')
+        source_file_mtime = request.headers.get('x-courtbundle-file-mtime', '')
+        if source_file_mtime:
+            try:
+                if len(source_file_mtime) > 40:
+                    raise ValueError
+                datetime.fromisoformat(source_file_mtime.replace('Z', '+00:00'))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail='Invalid source file timestamp') from exc
         lock = store.matter_lock(matter_id)
         while not lock.acquire(blocking=False):
             await asyncio.sleep(.05)
         try:
-            return [await import_document(matter_id, filename, request=request)]
+            return [await import_document(matter_id, filename, request=request,
+                                          source_file_mtime=source_file_mtime)]
         finally:
             lock.release()
 
@@ -525,9 +561,17 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             copy_file(path, folder / work_rel)
             return store.add_document(dict(id=doc_id, matter_id=matter_id,
                                            title='Draft matter cover sheet', kind='other', part=1,
-                                           label='', group_key='', page_count=1, ocr_status='native_text',
+                                           label='', label_status='unreviewed', label_source='none',
+                                           group_key='', group_role='member', page_count=1, ocr_status='native_text',
+                                           document_date='', date_status='unknown', date_source='none', date_note='',
+                                           source_file_mtime='',
                                            original_name='generated-cover.pdf', source_sha256=store.sha256(path),
-                                           source_relpath=original_rel, working_relpath=work_rel))
+                                           source_relpath=original_rel, working_relpath=work_rel,
+                                           certificate_signature_status='not_detected',
+                                           certificate_signature_count=0,
+                                           signature_inspection_note='Generated locally without a PDF certificate signature.',
+                                           visible_signature_status='absent',
+                                           signature_status='unsigned'))
 
     @app.post('/matters/{matter_id}/documents/reorder')
     def order_docs(matter_id: str, payload: ReorderDocuments, _: None = Depends(auth)):
@@ -537,6 +581,112 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 return store.reorder(matter_id, payload.ids)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.patch('/matters/{matter_id}/documents/batch')
+    def batch_patch_docs(matter_id: str, payload: BatchDocumentPatch,
+                         _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        values = payload.model_dump(exclude={'ids'}, exclude_none=True)
+        try:
+            with store.matter_lock(matter_id):
+                return store.batch_update_documents(matter_id, payload.ids, values)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/documents/sort-preview')
+    def preview_doc_sort(matter_id: str, payload: DocumentSortPreview,
+                         _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                return store.preview_document_sort(matter_id, payload.mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/labels/preview')
+    def preview_labels(matter_id: str, payload: LabelProposalRequest,
+                       _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                documents = store.get_documents(matter_id)
+                result = propose_labels(documents, payload.ids, payload.mode,
+                                        payload.prefix, payload.start,
+                                        payload.group_separator,
+                                        payload.group_suffix_style,
+                                        payload.first_member_base,
+                                        payload.existing_label_policy)
+                reference_review = None
+                if payload.reference_document_id:
+                    reference = store.get_document(payload.reference_document_id)
+                    if not reference or reference['matter_id'] != matter_id:
+                        raise ValueError('Reference document is missing, archived or belongs to another matter')
+                    mappings = [{'document_id': row['document_id'],
+                                 'old_label': row['old_label'],
+                                 'new_label': row['proposed_label']}
+                                for row in result['rows']]
+                    reference_review = extract_label_references(
+                        store.working_path(reference), mappings, reference['revision'])
+                    reference_review.update(document_id=reference['id'], title=reference['title'])
+                    if reference_review['searchable_pages'] == 0:
+                        result['warnings'].append(
+                            'The selected reference document has no searchable text. OCR may help, but OCR results remain unverified.')
+                result['reference_review'] = reference_review
+                result['export_history'] = store.label_export_history(matter_id, payload.ids)
+                result['policy'] = (
+                    'Technical proposal only. Confirm the mapping and check court-specific requirements; '
+                    'no numbering convention is represented as court-approved.')
+                return result
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=409,
+                detail=f'Citation review could not read the selected working copy: {exc}') from exc
+
+    @app.post('/matters/{matter_id}/labels/apply')
+    def apply_labels(matter_id: str, payload: ApplyLabelProposal,
+                     _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        mappings = [item.model_dump() for item in payload.mappings]
+        try:
+            with store.matter_lock(matter_id):
+                reference_review = None
+                if payload.reference_document_id:
+                    if payload.expected_reference_revision is None:
+                        raise ValueError('Expected reference revision is required')
+                    reference = store.get_document(payload.reference_document_id)
+                    if not reference or reference['matter_id'] != matter_id:
+                        raise ValueError('Reference document is missing, archived or belongs to another matter')
+                    if reference['revision'] != payload.expected_reference_revision:
+                        raise ValueError('Reference document changed after preview; preview again')
+                    reference_review = extract_label_references(
+                        store.working_path(reference), mappings, reference['revision'])
+
+                changed_existing = any(item['old_label'].strip() and
+                                       item['old_label'].strip() != item['new_label'].strip()
+                                       for item in mappings)
+                history = store.label_export_history(
+                    matter_id, [item['document_id'] for item in mappings])
+                has_references = bool(reference_review and reference_review['references'])
+                missing = []
+                if changed_existing and not payload.acknowledge_existing_labels:
+                    missing.append('existing labels and the old-to-new mapping')
+                if history['has_prior_exports'] and not payload.acknowledge_prior_exports:
+                    missing.append('prior generated builds, which remain unchanged and may have circulated')
+                if has_references and not payload.acknowledge_references:
+                    missing.append('citation references requiring human review')
+                if missing:
+                    raise RuntimeError('Acknowledge ' + '; '.join(missing) + ' before applying labels')
+                documents = store.apply_label_mapping(matter_id, mappings)
+                return {'documents': documents, 'applied': len(mappings),
+                        'reference_review': reference_review, 'export_history': history}
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=409,
+                detail=f'Label mapping could not be applied: {exc}') from exc
 
     @app.get('/matters/{matter_id}/history')
     def history_state(matter_id: str, _: None = Depends(auth)):
@@ -576,8 +726,18 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         values = payload.model_dump(exclude_unset=True)
         if any(v is None for v in values.values()):
             raise HTTPException(status_code=422, detail='Do not clear document fields with null; use empty string instead')
-        with store.matter_lock(doc['matter_id']):
-            return store.update_document(doc_id, values)
+        if 'label' in values and 'label_status' not in values:
+            values['label'] = values['label'].strip()
+            values['label_status'] = 'confirmed' if values['label'] else 'unreviewed'
+            values['label_source'] = 'user' if values['label'] else 'none'
+        if 'visible_signature_status' in values:
+            values['signature_status'] = combined_signature_status(
+                doc['certificate_signature_status'], values['visible_signature_status'])
+        try:
+            with store.matter_lock(doc['matter_id']):
+                return store.update_document(doc_id, values)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.delete('/documents/{doc_id}')
     def remove_doc(doc_id: str, _: None = Depends(auth)):
@@ -597,10 +757,16 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         response.headers['Cache-Control'] = 'no-store'
         return response
 
-    def edit_working_copy(doc_id: str, operation):
+    def edit_working_copy(doc_id: str, operation, acknowledged: bool = False,
+                          related_document_ids: list[str] | None = None):
         doc = doc_or_404(doc_id)
         with store.matter_lock(doc['matter_id']):
             doc = doc_or_404(doc_id)
+            related = [doc_or_404(item) for item in (related_document_ids or [])]
+            if any(item['matter_id'] != doc['matter_id'] for item in related):
+                raise HTTPException(status_code=422, detail='Source must be in the same matter')
+            require_signature_acknowledgement([doc, *related], acknowledged,
+                                              'transforming this working copy')
             rel, candidate = store.next_working_path(doc)
             try:
                 copy_file(store.working_path(doc), candidate)
@@ -614,7 +780,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     def page_reorder(doc_id: str, payload: ReorderPages, _: None = Depends(auth)):
         try:
             return edit_working_copy(doc_id, lambda path, doc: {
-                'page_count': reorder_pages(path, payload.order), 'ocr_status': 'modified'})
+                'page_count': reorder_pages(path, payload.order), 'ocr_status': 'modified'},
+                payload.acknowledge_signature_risk)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -624,7 +791,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             def rotate(path, doc):
                 rotate_page(path, payload.page_index, payload.degrees)
                 return {'page_count': doc['page_count']}
-            return edit_working_copy(doc_id, rotate)
+            return edit_working_copy(doc_id, rotate, payload.acknowledge_signature_risk)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -632,7 +799,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     def page_delete(doc_id: str, payload: DeletePage, _: None = Depends(auth)):
         try:
             return edit_working_copy(doc_id, lambda path, doc: {
-                'page_count': delete_page(path, payload.page_index)})
+                'page_count': delete_page(path, payload.page_index)},
+                payload.acknowledge_signature_risk)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -648,7 +816,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             return edit_working_copy(doc_id, lambda path, doc: {
                 'page_count': insert_pages(path, source_for_edit(doc, payload.source_document_id),
                                            payload.source_pages, payload.before_index),
-                'ocr_status': 'modified'})
+                'ocr_status': 'modified'}, payload.acknowledge_signature_risk,
+                [payload.source_document_id])
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -658,7 +827,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             return edit_working_copy(doc_id, lambda path, doc: {
                 'page_count': replace_pages(path, source_for_edit(doc, payload.source_document_id),
                                             payload.target_pages, payload.source_pages),
-                'ocr_status': 'modified'})
+                'ocr_status': 'modified'}, payload.acknowledge_signature_risk,
+                [payload.source_document_id])
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -671,7 +841,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 return {'page_count': replace_document(
                     path, source_for_edit(doc, payload.source_document_id)),
                     'ocr_status': 'modified'}
-            return edit_working_copy(doc_id, replace)
+            return edit_working_copy(doc_id, replace, payload.acknowledge_signature_risk,
+                                     [payload.source_document_id])
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -681,7 +852,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             return edit_working_copy(doc_id, lambda path, doc: {
                 'page_count': crop_pages(path, payload.pages, payload.left, payload.top,
                                          payload.right, payload.bottom),
-                'ocr_status': 'modified'})
+                'ocr_status': 'modified'}, payload.acknowledge_signature_risk)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -692,7 +863,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 add_text_overlay(path, payload.page_index, payload.x, payload.y,
                                  payload.text, payload.font_size)
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
-            return edit_working_copy(doc_id, place)
+            return edit_working_copy(doc_id, place, payload.acknowledge_signature_risk)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -717,7 +888,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 edit_layout.update(replace_text_run(path, payload.page_index, payload.span_index,
                                                     payload.expected_text, payload.replacement))
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
-            return dict(edit_working_copy(doc_id, replace), edit_layout=edit_layout)
+            return dict(edit_working_copy(doc_id, replace, payload.acknowledge_signature_risk),
+                        edit_layout=edit_layout)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -730,7 +902,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 move_text_run(path, payload.page_index, payload.span_index,
                               payload.expected_text, payload.vertical_offset)
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
-            return edit_working_copy(doc_id, move)
+            return edit_working_copy(doc_id, move, payload.acknowledge_signature_risk)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -741,11 +913,14 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         return [int(piece) for piece in value.split(',')]
 
     @app.get('/documents/{doc_id}/pages/extract')
-    def page_extract(doc_id: str, selection: str, _: None = Depends(auth)):
+    def page_extract(doc_id: str, selection: str, acknowledge_signature_risk: bool = False,
+                     _: None = Depends(auth)):
         doc = doc_or_404(doc_id)
         try:
             with store.matter_lock(doc['matter_id']):
                 current = doc_or_404(doc_id)
+                require_signature_acknowledgement([current], acknowledge_signature_risk,
+                                                  'creating an extracted PDF')
                 data = extract_pages(store.working_path(current), page_selection(selection))
             return Response(data, media_type='application/pdf', headers={
                 'Content-Disposition': 'attachment; filename="extracted-pages.pdf"'})
@@ -753,24 +928,31 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get('/documents/{doc_id}/pages/split')
-    def page_split(doc_id: str, after: str, _: None = Depends(auth)):
+    def page_split(doc_id: str, after: str, acknowledge_signature_risk: bool = False,
+                   _: None = Depends(auth)):
         doc = doc_or_404(doc_id)
         try:
             with store.matter_lock(doc['matter_id']):
                 current = doc_or_404(doc_id)
+                require_signature_acknowledgement([current], acknowledge_signature_risk,
+                                                  'creating split PDFs')
                 data = split_pages(store.working_path(current), page_selection(after))
             return Response(data, media_type='application/zip', headers={
                 'Content-Disposition': 'attachment; filename="split-pages.zip"'})
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    def submit_ocr(doc: dict, job_id: str | None = None):
+    def submit_ocr(doc: dict, job_id: str | None = None,
+                   acknowledge_signature_risk: bool = False):
         doc_id = doc['id']
+        require_signature_acknowledgement([doc], acknowledge_signature_risk, 'running OCR')
         def task(job_id, progress, cancelled):
             with store.matter_lock(doc['matter_id']):
                 current = store.get_document(doc_id)
                 if current is None:
                     raise ProcessingError('Document was removed before OCR started')
+                require_signature_acknowledgement([current], acknowledge_signature_risk,
+                                                  'running OCR')
                 rel, candidate = store.next_working_path(current)
                 committed = False
                 try:
@@ -791,15 +973,21 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         return jobs.submit(doc['matter_id'], 'ocr', task, target_id=doc_id, job_id=job_id)
 
     @app.post('/documents/{doc_id}/ocr', status_code=202)
-    def start_ocr(doc_id: str, _: None = Depends(auth)):
-        return submit_ocr(doc_or_404(doc_id))
+    def start_ocr(doc_id: str, payload: SignatureRiskAcknowledgement | None = None,
+                  _: None = Depends(auth)):
+        return submit_ocr(doc_or_404(doc_id), acknowledge_signature_risk=(
+            payload.acknowledge_signature_risk if payload else False))
 
     @app.post('/documents/{doc_id}/compress', status_code=202)
     def start_compression(doc_id: str, payload: CompressionRequest, _: None = Depends(auth)):
         doc = doc_or_404(doc_id)
+        require_signature_acknowledgement([doc], payload.acknowledge_signature_risk,
+                                          'compressing this working copy')
         def task(job_id, progress, cancelled):
             with store.matter_lock(doc['matter_id']):
                 current = doc_or_404(doc_id)
+                require_signature_acknowledgement([current], payload.acknowledge_signature_risk,
+                                                  'compressing this working copy')
                 if current['revision'] != payload.expected_revision:
                     raise ProcessingError('Document changed before compression; reload and try again')
                 rel, candidate = store.next_working_path(current)
@@ -835,16 +1023,23 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             except ProcessingError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    def submit_build(matter_id: str, job_id: str | None = None):
+    def submit_build(matter_id: str, job_id: str | None = None,
+                     acknowledge_signature_risk: bool = False):
+        require_signature_acknowledgement(store.get_documents(matter_id),
+                                          acknowledge_signature_risk,
+                                          'building transformed bundle PDFs')
         def task(job_id, progress, cancelled):
             with store.matter_lock(matter_id):
-                return build_bundle(store, matter_id, job_id, progress, cancelled)
+                return build_bundle(store, matter_id, job_id, progress, cancelled,
+                                    signature_acknowledged=acknowledge_signature_risk)
         return jobs.submit(matter_id, 'build', task, job_id=job_id)
 
     @app.post('/matters/{matter_id}/build', status_code=202)
-    def start_build(matter_id: str, _: None = Depends(auth)):
+    def start_build(matter_id: str, payload: SignatureRiskAcknowledgement | None = None,
+                    _: None = Depends(auth)):
         matter_or_404(matter_id)
-        return submit_build(matter_id)
+        return submit_build(matter_id, acknowledge_signature_risk=(
+            payload.acknowledge_signature_risk if payload else False))
 
     @app.get('/matters/{matter_id}/jobs')
     def matter_jobs(matter_id: str, _: None = Depends(auth)):
@@ -866,7 +1061,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         return {'cancel_requested': True}
 
     @app.post('/jobs/{job_id}/retry', status_code=202)
-    def retry_job(job_id: str, _: None = Depends(auth)):
+    def retry_job(job_id: str, payload: SignatureRiskAcknowledgement | None = None,
+                  _: None = Depends(auth)):
         prior = jobs.get(job_id)
         if not prior:
             raise HTTPException(status_code=404, detail='Job not found')
@@ -877,10 +1073,17 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 raise HTTPException(status_code=409, detail='OCR document no longer belongs to this matter')
         elif prior['kind'] != 'build':
             raise HTTPException(status_code=409, detail='This job type cannot be retried')
+        acknowledged = payload.acknowledge_signature_risk if payload else False
+        if prior['kind'] == 'ocr':
+            require_signature_acknowledgement([doc], acknowledged, 'retrying OCR')
+        else:
+            require_signature_acknowledgement(store.get_documents(prior['matter_id']),
+                                              acknowledged, 'retrying bundle generation')
         new_job_id = new_id()
         if not jobs.claim_retry(job_id, new_job_id):
             raise HTTPException(status_code=409, detail='Only an interrupted job may be retried once')
-        return submit_ocr(doc, new_job_id) if prior['kind'] == 'ocr' else submit_build(prior['matter_id'], new_job_id)
+        return (submit_ocr(doc, new_job_id, acknowledged) if prior['kind'] == 'ocr'
+                else submit_build(prior['matter_id'], new_job_id, acknowledged))
 
     @app.get('/matters/{matter_id}/exports')
     def exports(matter_id: str, _: None = Depends(auth)):

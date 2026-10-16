@@ -7,6 +7,7 @@ import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import type { MatterDocument } from '../lib/types'
 import { api, pdfBytes } from '../lib/api'
 import { friendlyError } from '../lib/format'
+import { confirmSignatureTransformation } from '../lib/signatures'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
 const props = defineProps<{ document: MatterDocument | null, disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, documentPosition?: number, documentCount?: number, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
@@ -272,12 +273,17 @@ async function addPageBookmark() {
 
 async function edit(action: 'rotate' | 'delete' | 'reorder', params: unknown, focusPage?: number): Promise<boolean> {
   if (!props.document || editing.value) return false
+  const signature = confirmSignatureTransformation([props.document],
+    action === 'rotate' ? 'Rotating a page' : action === 'delete' ? 'Deleting a page' : 'Reordering pages')
+  if (!signature.proceed) return false
   const rotating = action === 'rotate'
   const startedAt = performance.now()
   editing.value = true
   if (rotating) rotatingPage.value = true
   try {
-    const updated = await api<MatterDocument>(`/documents/${props.document.id}/pages/${action}`, 'POST', params)
+    const updated = await api<MatterDocument>(`/documents/${props.document.id}/pages/${action}`, 'POST', {
+      ...(params as Record<string, unknown>), acknowledge_signature_risk: signature.acknowledged,
+    })
     if (rotating) {
       const remaining = 220 - (performance.now() - startedAt)
       if (remaining > 0 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -335,11 +341,14 @@ function choosePlacement(event: MouseEvent) {
 }
 async function placeText() {
   if (!props.document || !placement.value || !overlayText.value.trim() || editing.value || props.disabled) return
+  const signature = confirmSignatureTransformation([props.document], 'Adding visible text')
+  if (!signature.proceed) return
   editing.value = true
   try {
     await api(`/documents/${props.document.id}/pages/text-overlay`, 'POST', {
       page_index: placement.value.page - 1, x: placement.value.x, y: placement.value.y,
       text: overlayText.value, font_size: overlaySize.value,
+      acknowledge_signature_risk: signature.acknowledged,
     })
     placement.value = null
     overlayText.value = ''
@@ -402,6 +411,8 @@ function clickRun(run: TextRun) {
 }
 async function applyMove(run: TextRun, offset: number) {
   if (!props.document || editing.value || props.disabled) return
+  const signature = confirmSignatureTransformation([props.document], 'Moving visible text')
+  if (!signature.proceed) return
   try { editSnapshot.value = canvas.value?.toDataURL('image/png') || '' } catch { editSnapshot.value = '' }
   editSnapshotFading.value = false
   replacingText.value = true
@@ -412,6 +423,7 @@ async function applyMove(run: TextRun, offset: number) {
       page_index: current.value - 1, span_index: run.index,
       expected_revision: runsRevision.value, expected_text: run.text,
       vertical_offset: offset,
+      acknowledge_signature_risk: signature.acknowledged,
     })
     await loadPdf(updated)
     if (!viewerError.value && editSnapshot.value) {
@@ -426,6 +438,8 @@ async function applyMove(run: TextRun, offset: number) {
 }
 async function applyReplacement() {
   if (!props.document || !selectedRun.value || !replacement.value.trim() || props.disabled || editing.value) return
+  const signature = confirmSignatureTransformation([props.document], 'Replacing visible text')
+  if (!signature.proceed) return
   editing.value = true
   replacingText.value = true
   runsError.value = ''
@@ -434,6 +448,7 @@ async function applyReplacement() {
       page_index: current.value - 1, span_index: selectedRun.value.index,
       expected_revision: runsRevision.value, expected_text: selectedRun.value.text,
       replacement: replacement.value,
+      acknowledge_signature_risk: signature.acknowledged,
     })
     editNotice.value = `Applied in ${result.edit_layout.line_count} line(s) at ${result.edit_layout.font_size} pt${result.edit_layout.font_size_reduced ? ' (reduced to fit)' : ''}. Review the page.`
     selectedRun.value = null

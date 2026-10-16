@@ -31,6 +31,11 @@ def test_portable_matter_round_trip_preserves_originals_and_revisions(client, au
         files=[('files', ('synthetic.pdf', original, 'application/pdf'))])
     assert uploaded.status_code == 201
     doc = uploaded.json()[0]
+    dated = client.patch(f'/documents/{doc["id"]}', headers=auth, json={
+        'document_date': '2026-10-16', 'date_status': 'confirmed', 'date_source': 'user',
+        'label': 'P-7', 'label_status': 'confirmed', 'label_source': 'user',
+        'group_key': 'portable-group', 'group_role': 'parent'})
+    assert dated.status_code == 200, dated.text
     rotated = client.post(f'/documents/{doc["id"]}/pages/rotate', headers=auth,
                           json={'page_index': 0, 'degrees': 90})
     assert rotated.status_code == 200
@@ -44,6 +49,14 @@ def test_portable_matter_round_trip_preserves_originals_and_revisions(client, au
     new_doc = client.get(f'/matters/{new_matter["id"]}/documents', headers=auth).json()[0]
     assert new_doc['id'] != doc['id']
     assert new_doc['revision'] == 2
+    assert (new_doc['document_date'], new_doc['date_status'], new_doc['date_source']) == (
+        '2026-10-16', 'confirmed', 'user')
+    assert (new_doc['label'], new_doc['label_status'], new_doc['label_source']) == (
+        'P-7', 'confirmed', 'user')
+    assert (new_doc['group_key'], new_doc['group_role']) == ('portable-group', 'parent')
+    assert (new_doc['certificate_signature_status'], new_doc['visible_signature_status'],
+            new_doc['signature_status']) == ('not_detected', 'unreviewed',
+                                             'no_certificate_signature_detected')
     store = client.app.state.store
     assert store.original_path(new_doc).read_bytes() == original
     assert store.sha256(store.working_path(new_doc)) == store.sha256(store.working_path(rotated.json()))
@@ -62,11 +75,21 @@ def test_legacy_v1_portable_package_still_restores(client, auth, make_pdf):
     def as_v1(manifest):
         manifest['version'] = 1
         manifest.pop('manual_bookmarks')
+        for document in manifest['documents']:
+            for field in ('document_date', 'date_status', 'date_source', 'date_note',
+                          'source_file_mtime', 'label_status', 'label_source',
+                          'certificate_signature_status', 'certificate_signature_count',
+                          'signature_inspection_note', 'visible_signature_status',
+                          'signature_status'):
+                document.pop(field)
+            document.pop('group_role')
     legacy = _package_with_manifest_change(raw, as_v1)
     restored = client.post('/matters/restore', headers=auth,
         files={'file': ('legacy.cbmatter', legacy, 'application/zip')})
     assert restored.status_code == 201, restored.text
     assert client.get(f'/matters/{restored.json()["id"]}/bookmarks', headers=auth).json() == []
+    legacy_doc = client.get(f'/matters/{restored.json()["id"]}/documents', headers=auth).json()[0]
+    assert legacy_doc['signature_status'] == 'inspection_inconclusive'
 
 
 def test_portable_matter_values_round_trip_and_legacy_v2(client, auth):
@@ -113,7 +136,13 @@ def test_portable_restore_rejects_unsafe_corrupt_and_future_packages(client, aut
     matter = _matter(client, auth)
     client.post(f'/matters/{matter["id"]}/documents', headers=auth,
         files=[('files', ('synthetic.pdf', make_pdf(1), 'application/pdf'))])
+    client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+        files=[('files', ('synthetic-2.pdf', make_pdf(1), 'application/pdf'))])
     raw = client.get(f'/matters/{matter["id"]}/portable', headers=auth).content
+    def duplicate_group_parents(manifest):
+        for document in manifest['documents']:
+            document['group_key'] = 'duplicate-parent-group'
+            document['group_role'] = 'parent'
     variants = [
         _package_with_manifest_change(raw, lambda m: m.update(version=99)),
         _package_with_manifest_change(raw, lambda m: m.pop('manual_bookmarks')),
@@ -122,6 +151,9 @@ def test_portable_restore_rejects_unsafe_corrupt_and_future_packages(client, aut
         _package_with_manifest_change(raw, lambda m: m['files'][0].update(path='../escape.pdf')),
         _package_with_manifest_change(raw, lambda m: m['files'][0].update(sha256='0' * 64)),
         _package_with_manifest_change(raw, lambda m: m['matter'].update(court_profile='unreviewed-missing-profile')),
+        _package_with_manifest_change(raw, lambda m: m['documents'][0].update(
+            signature_status='certificate_signature_detected')),
+        _package_with_manifest_change(raw, duplicate_group_parents),
     ]
     for package in variants:
         result = client.post('/matters/restore', headers=auth,

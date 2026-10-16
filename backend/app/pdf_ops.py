@@ -9,7 +9,7 @@ import zipfile
 
 import pymupdf
 
-from .file_io import open_pdf, protected, save_pdf, size as file_size
+from .file_io import copy_file, open_pdf, protected, save_pdf, size as file_size
 
 
 class ProcessingError(Exception):
@@ -25,7 +25,10 @@ def normalize_to_pdf(source: Path, destination: Path):
                     raise ProcessingError('Password-protected PDFs are not supported in this POC; decrypt a lawful working copy first')
                 if doc.page_count == 0:
                     raise ProcessingError('PDF has no pages')
-                save_pdf(doc, destination, garbage=3, deflate=True)
+                # Keep the initial working PDF byte-identical to the imported PDF.
+                # Re-saving here could disturb certificate-signature byte ranges
+                # before the user has seen and acknowledged the warning.
+            copy_file(source, destination)
         else:
             with open_pdf(source) as image_doc:
                 content = image_doc.convert_to_pdf()
