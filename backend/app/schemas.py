@@ -371,6 +371,48 @@ class TextOverlay(SignatureRiskAcknowledgement):
     font_size: float = Field(default=12, ge=6, le=36)
 
 
+AnnotationColor = Literal['yellow', 'green', 'blue', 'pink']
+
+
+class PageAnnotationCreate(BaseModel):
+    """A private review annotation anchored to one exact working revision."""
+    model_config = ConfigDict(extra='forbid')
+    kind: Literal['highlight', 'comment']
+    page_index: int = Field(ge=0)
+    expected_revision: int = Field(ge=1)
+    rect_x: float = Field(ge=0, lt=1)
+    rect_y: float = Field(ge=0, lt=1)
+    rect_width: float = Field(gt=0, le=1)
+    rect_height: float = Field(gt=0, le=1)
+    body: str = Field(default='', max_length=4000)
+    color: AnnotationColor = 'yellow'
+
+    @model_validator(mode='after')
+    def validate_annotation(self):
+        if self.rect_x + self.rect_width > 1 or self.rect_y + self.rect_height > 1:
+            raise ValueError('Annotation region must stay within the displayed page')
+        if self.kind == 'comment' and not self.body.strip():
+            raise ValueError('Comments require visible note text')
+        return self
+
+
+class PageAnnotationUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: int = Field(ge=1)
+    rect_x: float = Field(ge=0, lt=1)
+    rect_y: float = Field(ge=0, lt=1)
+    rect_width: float = Field(gt=0, le=1)
+    rect_height: float = Field(gt=0, le=1)
+    body: str = Field(default='', max_length=4000)
+    color: AnnotationColor = 'yellow'
+
+    @model_validator(mode='after')
+    def validate_region(self):
+        if self.rect_x + self.rect_width > 1 or self.rect_y + self.rect_height > 1:
+            raise ValueError('Annotation region must stay within the displayed page')
+        return self
+
+
 class ReplaceTextRun(SignatureRiskAcknowledgement):
     model_config = ConfigDict(extra='forbid')
     page_index: int = Field(ge=0)

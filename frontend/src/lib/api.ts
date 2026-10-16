@@ -126,6 +126,23 @@ export async function pdfBytes(docId: string, revision: number): Promise<Uint8Ar
   return new Uint8Array(await response.arrayBuffer())
 }
 
+export async function uploadPageAnnotationImage(documentId: string, file: File,
+  fields: {page_index:number,expected_revision:number,rect_x:number,rect_y:number,
+    rect_width:number,rect_height:number}): Promise<import('./types').PageAnnotation[]> {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  for (const [key, value] of Object.entries(fields)) form.append(key, String(value))
+  const response = await request(`/documents/${documentId}/annotations/image`, {
+    method: 'POST', body: form,
+  }, 2 * 60_000)
+  return response.json() as Promise<import('./types').PageAnnotation[]>
+}
+
+export async function pageAnnotationAsset(annotationId: string): Promise<Blob> {
+  const response = await request(`/annotations/${annotationId}/asset`, {cache:'no-store'})
+  return response.blob()
+}
+
 export async function exportPdfBytes(matterId: string, exportId: string, filename: string): Promise<Uint8Array> {
   const response = await request(`/matters/${matterId}/exports/${exportId}/${encodeURIComponent(filename)}`, { cache: 'no-store' }, 5 * 60_000)
   return new Uint8Array(await response.arrayBuffer())

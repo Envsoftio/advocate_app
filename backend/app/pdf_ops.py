@@ -245,6 +245,24 @@ def add_text_overlay(path: Path, page_index: int, x: float, y: float,
         replace_pdf_atomically(path, doc)
 
 
+def validate_overlay_image(data: bytes, filetype: str) -> tuple[int, int]:
+    """Validate a bounded raster overlay without trusting its filename."""
+    if filetype not in ('png', 'jpeg'):
+        raise ProcessingError('Image overlays support PNG and JPEG only')
+    if ((filetype == 'png' and not data.startswith(b'\x89PNG\r\n\x1a\n')) or
+            (filetype == 'jpeg' and not data.startswith(b'\xff\xd8\xff'))):
+        raise ProcessingError('Overlay image bytes do not match the PNG/JPEG filename')
+    try:
+        pix = pymupdf.Pixmap(data)
+    except Exception as exc:
+        raise ProcessingError(f'Cannot read overlay image: {exc}') from exc
+    if pix.width < 1 or pix.height < 1:
+        raise ProcessingError('Overlay image has no visible pixels')
+    if pix.width * pix.height > 40_000_000:
+        raise ProcessingError('Overlay image exceeds the 40-megapixel safety limit')
+    return pix.width, pix.height
+
+
 def _mark_timestamp(settings: dict, at: datetime | str | None) -> str:
     if isinstance(at, str):
         at = datetime.fromisoformat(at.replace('Z', '+00:00'))

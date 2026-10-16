@@ -17,7 +17,8 @@ import zipfile
 
 import pymupdf
 
-from .pdf_ops import ProcessingError, validate_pdf, apply_output_marks
+from .pdf_ops import (ProcessingError, validate_pdf, apply_output_marks,
+                      validate_overlay_image)
 from .file_io import open_pdf, read_bytes, save_pdf, size as file_size, write_bytes
 from .storage import Store, utcnow
 from .signatures import (CERTIFICATE_SIGNATURE_DETECTED,
@@ -29,6 +30,8 @@ A4_W, A4_H = 595, 842
 EXPORT_INTERACTIVE_CONTENT_POLICY = {
     'source_annotations': 'omitted',
     'source_links': 'omitted',
+    'courtbundle_image_overlays': 'flattened into source-document pages when revision anchors resolve',
+    'courtbundle_highlights_comments': 'private review annotations omitted from filing-preparation PDFs',
     'reviewed_user_links': 'retained when both revision-anchored endpoints resolve',
     'generated_index_links': 'retained',
 }
@@ -124,6 +127,37 @@ def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
                                        message=f'{doc["title"]} has {link_count} working-copy link(s) that will be omitted from volume and combined PDFs; generated index links remain.', **common))
         except Exception as exc:
             issues.append(dict(severity='error', code='BAD_PDF', message=f'Cannot process {doc["title"]}: {exc}', **common))
+    annotations = store.list_page_annotations(matter_id)
+    private_count = sum(item['kind'] in ('highlight', 'comment') for item in annotations)
+    unresolved_images = sum(item['kind'] == 'image' and not item['resolved'] for item in annotations)
+    resolved_images = sum(item['kind'] == 'image' and item['resolved'] for item in annotations)
+    for item in annotations:
+        if item['kind'] != 'image':
+            continue
+        path = store.matter_dir(matter_id) / item['asset_relpath']
+        try:
+            if not path.is_file() or path.is_symlink():
+                raise ProcessingError('asset file is missing or unsafe')
+            validate_overlay_image(
+                read_bytes(path), 'png' if item['asset_mime'] == 'image/png' else 'jpeg')
+        except (OSError, ProcessingError) as exc:
+            issues.append(dict(severity='error', code='BAD_IMAGE_OVERLAY_ASSET',
+                               message=f'Image overlay {item["id"]} cannot be used: {exc}',
+                               document_id=item['document_id']))
+    if resolved_images:
+        issues.append(dict(severity='info', code='IMAGE_OVERLAYS_FLATTENED',
+                           message=(f'{resolved_images} resolved image overlay(s) will be flattened '
+                                    'into newly generated source-document pages.'), document_id=None))
+    if private_count:
+        issues.append(dict(severity='info', code='PRIVATE_REVIEW_ANNOTATIONS_OMITTED',
+                           message=(f'{private_count} CourtBundle highlight/comment review annotation(s) '
+                                    'will be omitted from filing-preparation PDFs. Image overlays use a '
+                                    'separate explicit flattened-content policy.'), document_id=None))
+    if unresolved_images:
+        issues.append(dict(severity='warning', code='UNRESOLVED_IMAGE_OVERLAYS',
+                           message=(f'{unresolved_images} image overlay(s) target an older revision, '
+                                    'removed document or missing page and will be omitted until reviewed.'),
+                           document_id=None))
     if not any(i['severity'] == 'error' for i in issues):
         issues.append(dict(severity='info', code='TECHNICAL_PREFLIGHT', message='Basic technical preflight completed. Legal completeness, authenticity, signatures, limitation and registry acceptance are not verified.', document_id=None))
     return issues
@@ -343,9 +377,46 @@ def validate_reviewed_links(path: Path, expected_uri: dict[int, list[str]]) -> N
                 raise ProcessingError('Written PDF external links differ from reviewed link inputs')
 
 
+def apply_page_annotations(output: pymupdf.Document, annotations: list[dict],
+                           document_starts: dict[str, int], cancelled=None) -> dict:
+    """Flatten resolved image overlays; private review annotations stay out."""
+    inserted = unresolved_images = private_omitted = 0
+    for item in annotations:
+        if cancelled and cancelled():
+            raise ProcessingError('Operation cancelled')
+        start = document_starts.get(item['document_id'])
+        if start is None:
+            continue
+        if item['kind'] in ('highlight', 'comment'):
+            private_omitted += 1
+            continue
+        if item['kind'] != 'image':
+            raise ProcessingError('Unknown CourtBundle page annotation kind')
+        if not item.get('resolved'):
+            unresolved_images += 1
+            continue
+        page_index = start + item['page_index']
+        if not 0 <= page_index < output.page_count:
+            raise ProcessingError('Image overlay target differs from the deterministic page map')
+        page = output[page_index]
+        displayed = pymupdf.Rect(
+            page.rect.x0 + page.rect.width * item['rect_x'],
+            page.rect.y0 + page.rect.height * item['rect_y'],
+            page.rect.x0 + page.rect.width * (item['rect_x'] + item['rect_width']),
+            page.rect.y0 + page.rect.height * (item['rect_y'] + item['rect_height']))
+        page.insert_image(displayed * page.derotation_matrix,
+                          stream=read_bytes(Path(item['_asset_path'])),
+                          keep_proportion=False, overlay=True)
+        inserted += 1
+    return {'image_overlays_inserted': inserted,
+            'unresolved_image_overlays': unresolved_images,
+            'private_review_annotations_omitted': private_omitted}
+
+
 def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: int,
                   cancelled=None, bookmarks: list[dict] | None = None,
                   reviewed_links: list[dict] | None = None,
+                  page_annotations: list[dict] | None = None,
                   output_marks: dict | None = None,
                   mark_at: datetime | str | None = None):
     """Create an indexed, paginated, bookmarked volume and return page-map records."""
@@ -398,6 +469,10 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
             title = (row['label'] + ' - ' if row['label'] else '') + row['title']
             toc.append([2, title, row['start_page']])
 
+        document_starts = {row['id']: row['start_page'] - 1 for row in rows}
+        annotation_summary = apply_page_annotations(
+            output, page_annotations or [], document_starts, cancelled)
+
         # Stamp consistent 1-based physical page number at the foot of each volume page.
         for i in range(output.page_count):
             if cancelled and cancelled():
@@ -410,7 +485,6 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                                     color=(.24,.28,.33))
 
         mark_count = mark_overlap_count = 0
-        document_starts = {row['id']: row['start_page'] - 1 for row in rows}
         if output_marks and (output_marks.get('watermark_enabled') or
                              output_marks.get('timestamp_enabled')):
             for row, document in zip(rows, documents):
@@ -456,6 +530,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
     return rows, index_count, {
         'reviewed_links': {key: reviewed_summary[key] for key in
                            ('retained', 'omitted_cross_output', 'unresolved')},
+        'page_annotations': annotation_summary,
         'marks': {'inserted': mark_count, 'overlaps_content': mark_overlap_count},
     }
 
@@ -473,6 +548,10 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         raise ProcessingError('Signature-risk acknowledgment is required before building transformed bundle PDFs')
     bookmarks = store.list_manual_bookmarks(matter_id)
     reviewed_links = store.list_reviewed_links(matter_id)
+    page_annotations = store.list_page_annotations(matter_id)
+    for item in page_annotations:
+        if item['kind'] == 'image' and item['asset_relpath']:
+            item['_asset_path'] = str(store.matter_dir(matter_id) / item['asset_relpath'])
     output_marks = store.get_output_marks(matter_id)
     mark_at = datetime.now(timezone.utc)
     mark_at_iso = mark_at.isoformat(timespec='seconds')
@@ -493,6 +572,17 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                             'target_document_id', 'target_page_index', 'target_revision',
                             'uri', 'position')} | {'resolved': item['resolved']}
                             for item in reviewed_links]
+    # Export reports must prove which annotations influenced a build without
+    # copying private review text or internal asset paths into filing artifacts.
+    annotation_inputs = [{key: item[key] for key in (
+        'id', 'document_id', 'page_index', 'target_revision', 'kind',
+        'rect_x', 'rect_y', 'rect_width', 'rect_height', 'color', 'position')}
+        | {'resolved': item['resolved'],
+           'body_present': bool(item['body']),
+           'asset_sha256': (store.sha256(Path(item['_asset_path']))
+                            if item['kind'] == 'image' and item.get('_asset_path')
+                            and Path(item['_asset_path']).is_file() else None)}
+        for item in page_annotations]
     input_revisions = [{'document_id': d['id'], 'revision': d['revision'],
                         'working_sha256': store.sha256(store.working_path(d))}
                        for d in documents]
@@ -525,7 +615,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             filename = f'volume-{vno:02}.pdf'
             rows, index_count, content_summary = render_volume(
                 group, matter, staging / filename, vno, cancelled, bookmarks,
-                reviewed_links, output_marks, mark_at)
+                reviewed_links, page_annotations, output_marks, mark_at)
             volume_rows.append(dict(filename=filename, rows=rows, index_count=index_count,
                                     content_summary=content_summary))
             all_rows.extend(rows)
@@ -614,6 +704,10 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             problems.append(dict(severity='warning', code='CROSS_VOLUME_LINKS_COMBINED_ONLY',
                                  document_id=None,
                                  message=f'{cross_volume_omissions} reviewed internal link occurrence(s) crossed a volume boundary. They are active in combined.pdf and omitted from standalone volumes to avoid broken destinations.'))
+        unresolved_images = [item for item in page_annotations
+                             if item['kind'] == 'image' and not item['resolved']]
+        private_annotations = [item for item in page_annotations
+                               if item['kind'] in ('highlight', 'comment')]
         mark_overlap_count = sum(
             volume['content_summary']['marks']['overlaps_content'] for volume in volume_rows)
         if mark_overlap_count:
@@ -631,6 +725,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'build_input_digest': build_input_digest,
                   'build_settings': build_settings, 'manual_bookmark_inputs': bookmark_inputs,
                   'reviewed_link_inputs': reviewed_link_inputs,
+                  'page_annotation_inputs': annotation_inputs,
                   'output_marks': output_marks, 'output_mark_timestamp': mark_at_iso,
                   'reviewed_link_summary': {
                       'combined_retained': combined_link_summary['retained'],
@@ -639,6 +734,10 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'output_mark_summary': {'overlaps_content': mark_overlap_count,
                       'inserted': sum(volume['content_summary']['marks']['inserted']
                                       for volume in volume_rows)},
+                  'page_annotation_summary': {
+                      'image_overlays_inserted': sum(volume['content_summary']['page_annotations']['image_overlays_inserted'] for volume in volume_rows),
+                      'unresolved_image_overlays': len(unresolved_images),
+                      'private_review_annotations_omitted': len(private_annotations)},
                   'interactive_content_policy': EXPORT_INTERACTIVE_CONTENT_POLICY,
                   'total_input_documents': len(documents), 'volume_count': len(plans),
                   'combined_pages': combined_pages, 'combined_bytes': file_bytes,
@@ -650,6 +749,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'Original evidence and signed files must be reviewed independently.\n'
                   'Working-copy PDF annotation objects and link actions are omitted from volume and combined PDFs.\n'
                   'Flattened marks already in page content remain visible.\n'
+                  'Resolved CourtBundle image overlays are flattened into new source-document pages. Private highlights and comments are omitted by default.\n'
                   'Generated index links, bookmarks and explicitly reviewed CourtBundle links are retained when their revision-anchored targets resolve.\n'
                   'Cross-volume reviewed links are available only in combined.pdf; configured output marks apply to source document pages, not index pages.\n'
                   'See validation-report.json for omissions, mark settings and detectable overlap warnings.\n'
@@ -681,6 +781,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                                build_input_digest=build_input_digest,
                                build_settings=build_settings, manual_bookmark_inputs=bookmark_inputs,
                                reviewed_link_inputs=reviewed_link_inputs,
+                               page_annotation_inputs=annotation_inputs,
                                output_marks=output_marks, output_mark_timestamp=mark_at_iso,
                                interactive_content_policy=EXPORT_INTERACTIVE_CONTENT_POLICY,
                                files=[{'name':name,'bytes':file_size(staging/name),

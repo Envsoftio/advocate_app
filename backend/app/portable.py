@@ -16,9 +16,10 @@ from .vault import encrypted_sink
 from .schemas import (MatterCreate, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate,
                       ManualBookmark, ReviewedLink, OutputMarks)
 from .engine import load_profiles
+from .pdf_ops import ProcessingError, validate_overlay_image
 from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 9
+PACKAGE_VERSION = 10
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -58,7 +59,7 @@ def parse_protected_package(raw: bytes) -> tuple[dict, bytes]:
 def _safe_relpath(value: str) -> str:
     path = PurePosixPath(value)
     if (not value or path.is_absolute() or len(path.parts) < 2 or
-            path.parts[0] not in ('originals', 'working') or
+            path.parts[0] not in ('originals', 'working', 'assets') or
             any(part in ('.', '..') or part.startswith('.') for part in path.parts)):
         raise PortableMatterError('Unsafe matter file path')
     return value
@@ -76,6 +77,9 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
     paths = {doc['source_relpath'] for doc in documents}
     paths.update(rev['working_relpath'] for rev in revisions)
     paths.update(doc['working_relpath'] for doc in documents)
+    annotations = store.list_page_annotations(matter_id)
+    paths.update(item['asset_relpath'] for item in annotations
+                 if item['kind'] == 'image' and item['asset_relpath'])
     files = []
     for rel in sorted(paths):
         _safe_relpath(rel)
@@ -103,6 +107,8 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
                     'target_document_id', 'target_page_index', 'target_revision',
                     'uri', 'position')} for item in store.list_reviewed_links(matter_id)],
                 'output_marks': store.get_output_marks(matter_id),
+                'page_annotations': [{key: item[key] for key in store._annotation_fields()}
+                                     for item in annotations],
                 'files': files}
     destination.parent.mkdir(parents=True, exist_ok=True)
     candidate = destination.with_name(destination.name + '.partial-' + new_id())
@@ -141,7 +147,7 @@ def restore_package(store: Store, package: Path | bytes) -> dict:
             if archive.getinfo('manifest.json').file_size > 10 * 1024 * 1024:
                 raise PortableMatterError('Manifest is too large')
             manifest = json.loads(archive.read('manifest.json'))
-            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, 2, 3, 4, 5, 6, 7, 8, PACKAGE_VERSION):
+            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, 2, 3, 4, 5, 6, 7, 8, 9, PACKAGE_VERSION):
                 raise PortableMatterError('Unsupported portable matter package')
             files = manifest.get('files')
             if not isinstance(files, list):
@@ -288,6 +294,52 @@ def restore_package(store: Store, package: Path | bytes) -> dict:
                 raise PortableMatterError('Invalid reviewed link target')
         validated_marks = OutputMarks.model_validate(marks).model_dump()
         link_id_map = {old: new_id() for old in link_ids}
+        annotations = manifest.get('page_annotations', [])
+        if manifest['version'] >= 10 and 'page_annotations' not in manifest:
+            raise PortableMatterError('Missing PDF-03 annotations in v10 package')
+        if not isinstance(annotations, list) or len(annotations) > 2000:
+            raise PortableMatterError('Invalid page annotations')
+        annotation_ids = [item.get('id') for item in annotations]
+        if len(annotation_ids) != len(set(annotation_ids)):
+            raise PortableMatterError('Duplicate page annotation IDs')
+        annotation_id_map = {old: new_id() for old in annotation_ids}
+        allowed_colors = {'yellow', 'green', 'blue', 'pink'}
+        for index, item in enumerate(annotations):
+            required = set(store._annotation_fields())
+            if set(item) != required or item['kind'] not in ('image', 'highlight', 'comment'):
+                raise PortableMatterError('Invalid page annotation fields')
+            if (not isinstance(item['id'], str) or len(item['id']) != 32 or
+                    item['document_id'] not in old_ids or item['position'] != index or
+                    type(item['page_index']) is not int or item['page_index'] < 0 or
+                    type(item['target_revision']) is not int or item['target_revision'] < 1 or
+                    item['page_index'] >= revision_pages.get(
+                        (item['document_id'], item['target_revision']), 0) or
+                    item['color'] not in allowed_colors or not isinstance(item['body'], str) or
+                    len(item['body']) > 4000):
+                raise PortableMatterError('Invalid page annotation target or content')
+            for key in ('rect_x', 'rect_y', 'rect_width', 'rect_height'):
+                if not isinstance(item[key], (int, float)):
+                    raise PortableMatterError('Invalid page annotation region')
+            if (item['rect_x'] < 0 or item['rect_y'] < 0 or item['rect_width'] <= 0 or
+                    item['rect_height'] <= 0 or item['rect_x'] + item['rect_width'] > 1 or
+                    item['rect_y'] + item['rect_height'] > 1):
+                raise PortableMatterError('Invalid page annotation region')
+            if item['kind'] == 'comment' and not item['body'].strip():
+                raise PortableMatterError('Invalid empty comment')
+            if item['kind'] == 'image':
+                if (item['asset_mime'] not in ('image/png', 'image/jpeg') or
+                        not item['asset_relpath'] or
+                        _safe_relpath(item['asset_relpath']) not in by_path or
+                        by_path[item['asset_relpath']]['bytes'] > 10 * 1024 * 1024):
+                    raise PortableMatterError('Invalid image overlay asset')
+                try:
+                    validate_overlay_image(
+                        read_bytes(stage / item['asset_relpath']),
+                        'png' if item['asset_mime'] == 'image/png' else 'jpeg')
+                except ProcessingError as exc:
+                    raise PortableMatterError(f'Invalid image overlay asset: {exc}') from exc
+            elif item['asset_relpath'] is not None or item['asset_mime'] is not None:
+                raise PortableMatterError('Review annotations cannot contain image assets')
         os.replace(stage, final)
         with store.connect() as con:
             con.execute('BEGIN IMMEDIATE')
@@ -343,6 +395,16 @@ def restore_package(store: Store, package: Path | bytes) -> dict:
                 con.execute('''INSERT INTO output_marks
                     (matter_id,payload_json,updated_at) VALUES (?,?,?)''',
                     (matter_id, json.dumps(validated_marks, sort_keys=True), utcnow()))
+            for item in annotations:
+                con.execute('''INSERT INTO page_annotations
+                    (id,matter_id,document_id,page_index,target_revision,kind,rect_x,rect_y,
+                     rect_width,rect_height,body,color,asset_relpath,asset_mime,position)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    (annotation_id_map[item['id']], matter_id,
+                     id_map[item['document_id']], item['page_index'], item['target_revision'],
+                     item['kind'], item['rect_x'], item['rect_y'], item['rect_width'],
+                     item['rect_height'], item['body'], item['color'], item['asset_relpath'],
+                     item['asset_mime'], item['position']))
             store._audit(con, 'matter_restored_from_package', matter_id)
     except (KeyError, TypeError, ValueError, zipfile.BadZipFile, sqlite3.Error, OSError) as exc:
         shutil.rmtree(stage, ignore_errors=True)

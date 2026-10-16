@@ -683,6 +683,68 @@ test('visible text overlay is placed from the preview and becomes searchable', a
   }).toBe(1)
 })
 
+test('image overlays, highlights and comments can be placed, edited and removed', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E PDF Annotations', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name:'01_petition.pdf', mimeType:'application/pdf',
+      buffer:await readFile(resolve(samples, '01_petition.pdf')) } },
+  })
+  expect(uploaded.ok()).toBeTruthy()
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name:'E2E PDF Annotations'})).toBeVisible()
+  await page.getByRole('button', {name:'Images & notes', exact:false}).click()
+  const paper = page.locator('.pdf-paper')
+  const draw = async (x:number, y:number, width:number, height:number) => {
+    await paper.scrollIntoViewIfNeeded()
+    const bounds = await paper.boundingBox()
+    expect(bounds).toBeTruthy()
+    await page.mouse.move(bounds!.x + x, bounds!.y + y)
+    await page.mouse.down()
+    await page.mouse.move(bounds!.x + x + width, bounds!.y + y + height, {steps:5})
+    await page.mouse.up()
+  }
+
+  await page.getByRole('textbox', {name:'Optional highlight note'}).fill('Important passage')
+  await draw(80, 12, 150, 28)
+  await expect(page.getByRole('button', {name:'Save annotation'})).toBeEnabled()
+  await page.getByRole('button', {name:'Save annotation'}).click()
+  await expect(page.getByText('Highlight saved as a private review annotation.')).toBeVisible()
+  await expect(page.locator('.pdf-review-highlight')).toHaveCount(1)
+
+  await page.getByRole('button', {name:'Comment', exact:true}).click()
+  await page.getByRole('textbox', {name:'Comment text'}).fill('Check the cited proposition')
+  await draw(250, 12, 45, 28)
+  await expect(page.getByRole('button', {name:'Save annotation'})).toBeEnabled()
+  await page.getByRole('button', {name:'Save annotation'}).click()
+  await expect(page.locator('.pdf-review-comment')).toHaveCount(1)
+
+  await page.getByRole('button', {name:'Image overlay', exact:true}).click()
+  await page.getByLabel('PNG or JPEG').setInputFiles(resolve(samples, '04_scanned_annexure.jpg'))
+  await draw(320, 12, 120, 28)
+  await expect(page.getByRole('button', {name:'Save annotation'})).toBeEnabled()
+  await page.getByRole('button', {name:'Save annotation'}).click()
+  await expect(page.locator('.pdf-image-overlay')).toHaveCount(1)
+  let annotations = await (await request.get(`${backend}/matters/${matterId}/annotations`, {headers})).json()
+  expect(annotations.map((item:{kind:string}) => item.kind).sort()).toEqual(['comment','highlight','image'])
+
+  await page.getByRole('button', {name:'Edit comment'}).click()
+  await page.getByRole('textbox', {name:'Comment text'}).fill('Reviewed comment text')
+  await page.getByRole('button', {name:'Update annotation'}).click()
+  await expect(page.getByText('Annotation updated.')).toBeVisible()
+  annotations = await (await request.get(`${backend}/matters/${matterId}/annotations`, {headers})).json()
+  expect(annotations.find((item:{kind:string}) => item.kind === 'comment').body).toBe('Reviewed comment text')
+
+  page.once('dialog', dialog => void dialog.accept())
+  await page.getByRole('button', {name:'Remove highlight'}).click()
+  await expect(page.locator('.pdf-review-highlight')).toHaveCount(0)
+  annotations = await (await request.get(`${backend}/matters/${matterId}/annotations`, {headers})).json()
+  expect(annotations).toHaveLength(2)
+})
+
 test('reviewed link and output-mark preview persist through the matter workspace', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Links And Marks', court_profile: 'general-demo', max_pages_per_volume: 10,

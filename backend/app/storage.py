@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 12:
+            if version > 13:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -209,6 +209,16 @@ class Store:
                 matter_id TEXT PRIMARY KEY REFERENCES matters(id) ON DELETE CASCADE,
                 payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
             )''')
+            con.execute('''CREATE TABLE IF NOT EXISTS page_annotations (
+                id TEXT PRIMARY KEY, matter_id TEXT NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
+                document_id TEXT NOT NULL REFERENCES documents(id),
+                page_index INTEGER NOT NULL, target_revision INTEGER NOT NULL,
+                kind TEXT NOT NULL, rect_x REAL NOT NULL, rect_y REAL NOT NULL,
+                rect_width REAL NOT NULL, rect_height REAL NOT NULL,
+                body TEXT NOT NULL, color TEXT NOT NULL,
+                asset_relpath TEXT, asset_mime TEXT, position INTEGER NOT NULL
+            )''')
+            con.execute('CREATE INDEX IF NOT EXISTS idx_page_annotations_matter ON page_annotations(matter_id,position)')
             if version < 3:
                 matter_columns = {row['name'] for row in con.execute('PRAGMA table_info(matters)')}
                 document_columns = {row['name'] for row in con.execute('PRAGMA table_info(documents)')}
@@ -258,6 +268,8 @@ class Store:
                 con.execute('PRAGMA user_version=11')
             if version < 12:
                 con.execute('PRAGMA user_version=12')
+            if version < 13:
+                con.execute('PRAGMA user_version=13')
 
     def matter_dir(self, matter_id: str) -> Path:
         # Never accept caller-controlled paths. All ids must have been found in DB.
@@ -619,6 +631,126 @@ class Store:
             self._audit(con, 'output_marks_updated', matter_id)
             con.execute('UPDATE matters SET updated_at=? WHERE id=?', (now, matter_id))
         return settings
+
+    @staticmethod
+    def _annotation_fields() -> tuple[str, ...]:
+        return ('id', 'document_id', 'page_index', 'target_revision', 'kind',
+                'rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color',
+                'asset_relpath', 'asset_mime', 'position')
+
+    @classmethod
+    def _raw_page_annotations(cls, con, matter_id: str) -> list[dict]:
+        fields = cls._annotation_fields()
+        rows = con.execute('''SELECT id,document_id,page_index,target_revision,kind,
+            rect_x,rect_y,rect_width,rect_height,body,color,asset_relpath,asset_mime,position
+            FROM page_annotations WHERE matter_id=? ORDER BY position''', (matter_id,)).fetchall()
+        return [{key: row[key] for key in fields} for row in rows]
+
+    def list_page_annotations(self, matter_id: str) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute('''SELECT a.*, d.revision AS current_revision,
+                d.page_count AS current_page_count,d.archived_at AS document_archived_at
+                FROM page_annotations a LEFT JOIN documents d ON d.id=a.document_id
+                WHERE a.matter_id=? ORDER BY a.position''', (matter_id,)).fetchall()
+        entries = []
+        fields = self._annotation_fields()
+        for row in rows:
+            item = {key: row[key] for key in fields}
+            item['resolved'] = bool(row['current_revision'] == row['target_revision'] and
+                                    row['document_archived_at'] is None and
+                                    row['current_page_count'] is not None and
+                                    row['page_index'] < row['current_page_count'])
+            entries.append(item)
+        return entries
+
+    def get_page_annotation(self, annotation_id: str) -> dict | None:
+        with self.connect() as con:
+            row = con.execute('SELECT * FROM page_annotations WHERE id=?',
+                              (annotation_id,)).fetchone()
+        return dict(row) if row else None
+
+    @classmethod
+    def _write_page_annotations(cls, con, matter_id: str, entries: list[dict]) -> None:
+        fields = cls._annotation_fields()
+        for entry in entries:
+            con.execute('''INSERT INTO page_annotations
+                (id,matter_id,document_id,page_index,target_revision,kind,rect_x,rect_y,
+                 rect_width,rect_height,body,color,asset_relpath,asset_mime,position)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (entry['id'], matter_id, *(entry[key] for key in fields[1:])))
+
+    @staticmethod
+    def _validate_annotation_document(con, matter_id: str, entry: dict,
+                                      *, allow_stale: bool = False) -> None:
+        doc = con.execute('''SELECT revision,page_count,archived_at FROM documents
+            WHERE id=? AND matter_id=?''', (entry['document_id'], matter_id)).fetchone()
+        if (not doc or doc['archived_at'] is not None or
+                entry['page_index'] >= doc['page_count'] or
+                (not allow_stale and entry['target_revision'] != doc['revision'])):
+            raise ValueError('Choose a current page in an active document')
+
+    def create_page_annotation(self, matter_id: str, entry: dict) -> list[dict]:
+        with self.connect() as con:
+            before = self._raw_page_annotations(con, matter_id)
+            self._validate_annotation_document(con, matter_id, entry)
+            if con.execute('SELECT 1 FROM page_annotations WHERE id=?',
+                           (entry['id'],)).fetchone():
+                raise ValueError('Annotation ID already exists')
+            entry = dict(entry, position=len(before))
+            self._write_page_annotations(con, matter_id, [entry])
+            after = before + [entry]
+            self._record_edit(con, matter_id, 'page_annotations', {'entries': before},
+                              {'entries': after})
+            now = utcnow()
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (now, matter_id))
+            self._audit(con, 'page_annotation_created', matter_id, entry['document_id'])
+        return self.list_page_annotations(matter_id)
+
+    def update_page_annotation(self, annotation_id: str, changes: dict) -> list[dict]:
+        with self.connect() as con:
+            current = con.execute('SELECT * FROM page_annotations WHERE id=?',
+                                  (annotation_id,)).fetchone()
+            if current is None:
+                raise ValueError('Annotation not found')
+            matter_id = current['matter_id']
+            before = self._raw_page_annotations(con, matter_id)
+            merged = dict(current)
+            merged.update(changes)
+            self._validate_annotation_document(con, matter_id, merged)
+            if merged['kind'] == 'comment' and not merged['body'].strip():
+                raise ValueError('Comments require visible note text')
+            tracked = ('rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color')
+            if all(current[key] == merged[key] for key in tracked):
+                return self.list_page_annotations(matter_id)
+            con.execute('UPDATE page_annotations SET ' + ','.join(f'{key}=?' for key in tracked) +
+                        ' WHERE id=?', (*(merged[key] for key in tracked), annotation_id))
+            after = self._raw_page_annotations(con, matter_id)
+            self._record_edit(con, matter_id, 'page_annotations', {'entries': before},
+                              {'entries': after})
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (utcnow(), matter_id))
+            self._audit(con, 'page_annotation_updated', matter_id, current['document_id'])
+        return self.list_page_annotations(matter_id)
+
+    def delete_page_annotation(self, annotation_id: str) -> tuple[str, list[dict]]:
+        with self.connect() as con:
+            current = con.execute('SELECT * FROM page_annotations WHERE id=?',
+                                  (annotation_id,)).fetchone()
+            if current is None:
+                raise ValueError('Annotation not found')
+            matter_id = current['matter_id']
+            before = self._raw_page_annotations(con, matter_id)
+            con.execute('DELETE FROM page_annotations WHERE id=?', (annotation_id,))
+            after = self._raw_page_annotations(con, matter_id)
+            for position, entry in enumerate(after):
+                if entry['position'] != position:
+                    con.execute('UPDATE page_annotations SET position=? WHERE id=?',
+                                (position, entry['id']))
+                    entry['position'] = position
+            self._record_edit(con, matter_id, 'page_annotations', {'entries': before},
+                              {'entries': after})
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (utcnow(), matter_id))
+            self._audit(con, 'page_annotation_deleted', matter_id, current['document_id'])
+        return matter_id, self.list_page_annotations(matter_id)
 
     @staticmethod
     def _write_manual_bookmarks(con, matter_id: str, entries: list[dict]):
@@ -1104,6 +1236,15 @@ class Store:
                     VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
                     payload_json=excluded.payload_json,updated_at=excluded.updated_at''',
                     (matter_id, json.dumps(state['settings'], sort_keys=True), now))
+            elif row['kind'] == 'page_annotations':
+                for entry in state['entries']:
+                    self._validate_annotation_document(con, matter_id, entry, allow_stale=True)
+                    if entry['kind'] == 'image':
+                        asset = self.matter_dir(matter_id) / entry['asset_relpath']
+                        if not asset.is_file() or asset.is_symlink():
+                            raise ValueError('Image overlay asset is missing; this edit cannot be restored')
+                con.execute('DELETE FROM page_annotations WHERE matter_id=?', (matter_id,))
+                self._write_page_annotations(con, matter_id, state['entries'])
             elif row['kind'] in ('memo_parties', 'matter_values'):
                 table = row['kind']
                 field = 'parties' if table == 'memo_parties' else 'values'
@@ -1192,6 +1333,14 @@ class Store:
                        'target_document_id', 'target_page_index', 'target_revision',
                        'uri', 'position')} for entry in self.list_reviewed_links(matter_id)],
                    'output_marks': self.get_output_marks(matter_id)}
+        annotations = []
+        for entry in self.list_page_annotations(matter_id):
+            item = {key: entry[key] for key in self._annotation_fields()}
+            if item['kind'] == 'image':
+                item['asset_sha256'] = self.sha256(
+                    self.matter_dir(matter_id) / item['asset_relpath'])
+            annotations.append(item)
+        payload['page_annotations'] = annotations
         encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'),
                              ensure_ascii=False).encode('utf-8')
         return hashlib.sha256(encoded).hexdigest()

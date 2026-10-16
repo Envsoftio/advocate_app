@@ -25,8 +25,8 @@ from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
                       rotate_page, delete_page, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
                       replace_text_run, move_text_run, compress_pdf,
-                      ocr_pdf, make_cover_pdf, preview_output_marks)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, SignatureRiskAcknowledgement
+                      ocr_pdf, make_cover_pdf, preview_output_marks, validate_overlay_image)
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, SignatureRiskAcknowledgement, PageAnnotationCreate, PageAnnotationUpdate
 from .storage import Store, new_id
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
 from .schemas import CompressionRequest
@@ -39,6 +39,7 @@ from .signatures import (combined_signature_status, inspect_source_signature,
                          risk_summary)
 
 FILE_LIMIT_BYTES = 80 * 1024 * 1024
+OVERLAY_IMAGE_LIMIT_BYTES = 10 * 1024 * 1024
 SUPPORTED = {'.pdf', '.png', '.jpg', '.jpeg'}
 
 
@@ -736,6 +737,112 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         matter_or_404(matter_id)
         with store.matter_lock(matter_id):
             return store.set_output_marks(matter_id, payload.model_dump())
+
+    @app.get('/matters/{matter_id}/annotations')
+    def page_annotations(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        return store.list_page_annotations(matter_id)
+
+    @app.post('/documents/{doc_id}/annotations', status_code=201)
+    def create_page_annotation(doc_id: str, payload: PageAnnotationCreate,
+                               _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        if payload.expected_revision != doc['revision']:
+            raise HTTPException(status_code=409, detail='Document changed; reload and draw the annotation again')
+        entry = payload.model_dump(exclude={'expected_revision'})
+        entry.update(id=new_id(), document_id=doc_id,
+                     target_revision=payload.expected_revision,
+                     asset_relpath=None, asset_mime=None)
+        try:
+            with store.matter_lock(doc['matter_id']):
+                return store.create_page_annotation(doc['matter_id'], entry)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/annotations/image', status_code=201)
+    async def create_image_overlay(
+            doc_id: str, file: UploadFile = File(...),
+            page_index: int = Form(...), expected_revision: int = Form(...),
+            rect_x: float = Form(...), rect_y: float = Form(...),
+            rect_width: float = Form(...), rect_height: float = Form(...),
+            _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        if expected_revision != doc['revision']:
+            raise HTTPException(status_code=409, detail='Document changed; reload and place the image again')
+        suffix = Path(file.filename or '').suffix.lower()
+        filetype = 'png' if suffix == '.png' else 'jpeg' if suffix in ('.jpg', '.jpeg') else ''
+        data = bytearray()
+        try:
+            while chunk := await file.read(1024 * 1024):
+                data.extend(chunk)
+                if len(data) > OVERLAY_IMAGE_LIMIT_BYTES:
+                    raise HTTPException(status_code=413, detail='Image overlay exceeds 10 MiB')
+            validate_overlay_image(bytes(data), filetype)
+            # Reuse the strict region validation shared by highlight/comment inputs.
+            PageAnnotationUpdate.model_validate({
+                'expected_revision': expected_revision, 'rect_x': rect_x, 'rect_y': rect_y,
+                'rect_width': rect_width, 'rect_height': rect_height,
+                'body': '', 'color': 'yellow'})
+            if page_index < 0:
+                raise ValueError('Invalid page number')
+            annotation_id = new_id()
+            extension = '.png' if filetype == 'png' else '.jpg'
+            rel = f'assets/{annotation_id}{extension}'
+            path = store.matter_dir(doc['matter_id']) / rel
+            write_bytes(path, bytes(data))
+            entry = dict(id=annotation_id, document_id=doc_id, page_index=page_index,
+                         target_revision=expected_revision, kind='image', rect_x=rect_x,
+                         rect_y=rect_y, rect_width=rect_width, rect_height=rect_height,
+                         body='', color='yellow', asset_relpath=rel,
+                         asset_mime='image/png' if filetype == 'png' else 'image/jpeg')
+            try:
+                with store.matter_lock(doc['matter_id']):
+                    return store.create_page_annotation(doc['matter_id'], entry)
+            except BaseException:
+                path.unlink(missing_ok=True)
+                raise
+        except HTTPException:
+            raise
+        except (ProcessingError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        finally:
+            await file.close()
+
+    @app.patch('/annotations/{annotation_id}')
+    def update_page_annotation(annotation_id: str, payload: PageAnnotationUpdate,
+                               _: None = Depends(auth)):
+        annotation = store.get_page_annotation(annotation_id)
+        if annotation is None:
+            raise HTTPException(status_code=404, detail='Annotation not found')
+        doc = doc_or_404(annotation['document_id'])
+        if payload.expected_revision != annotation['target_revision'] or doc['revision'] != payload.expected_revision:
+            raise HTTPException(status_code=409, detail='Document changed; this annotation needs review')
+        changes = payload.model_dump(exclude={'expected_revision'})
+        try:
+            with store.matter_lock(annotation['matter_id']):
+                return store.update_page_annotation(annotation_id, changes)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.delete('/annotations/{annotation_id}')
+    def delete_page_annotation(annotation_id: str, _: None = Depends(auth)):
+        annotation = store.get_page_annotation(annotation_id)
+        if annotation is None:
+            raise HTTPException(status_code=404, detail='Annotation not found')
+        with store.matter_lock(annotation['matter_id']):
+            _matter_id, entries = store.delete_page_annotation(annotation_id)
+        return entries
+
+    @app.get('/annotations/{annotation_id}/asset')
+    def page_annotation_asset(annotation_id: str, _: None = Depends(auth)):
+        annotation = store.get_page_annotation(annotation_id)
+        if annotation is None or annotation['kind'] != 'image' or not annotation['asset_relpath']:
+            raise HTTPException(status_code=404, detail='Image overlay not found')
+        matter_or_404(annotation['matter_id'])
+        path = store.matter_dir(annotation['matter_id']) / annotation['asset_relpath']
+        if not path.is_file() or path.is_symlink():
+            raise HTTPException(status_code=404, detail='Image overlay asset missing')
+        return file_response(path, annotation['asset_mime'], Path(annotation['asset_relpath']).name)
 
     @app.post('/matters/{matter_id}/history/{direction}')
     def traverse_history(matter_id: str, direction: str, _: None = Depends(auth)):

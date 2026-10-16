@@ -76,6 +76,23 @@ export interface ReviewedLink {
   position: number
   resolved: boolean
 }
+export interface PageAnnotation {
+  id: string
+  document_id: string
+  page_index: number
+  target_revision: number
+  kind: 'image' | 'highlight' | 'comment'
+  rect_x: number
+  rect_y: number
+  rect_width: number
+  rect_height: number
+  body: string
+  color: 'yellow' | 'green' | 'blue' | 'pink'
+  asset_relpath: string | null
+  asset_mime: string | null
+  position: number
+  resolved: boolean
+}
 export type MarkPosition = 'top_left' | 'top_center' | 'top_right' | 'center' |
   'bottom_left' | 'bottom_center' | 'bottom_right'
 export interface OutputMarks {
