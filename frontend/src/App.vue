@@ -1052,7 +1052,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       </Transition>
     </div>
     <dialog v-if="selectedDoc" ref="pageToolsDialog" class="page-tools-dialog" aria-labelledby="page-tools-title" @close="pageToolsOpen=false" @click.self="pageToolsOpen=false">
-      <div class="page-tools-dialog-head"><div><h2 id="page-tools-title">Page tools</h2><p>{{selectedDoc.title}} · Working copy</p></div><button class="icon-btn" aria-label="Close page tools" @click="pageToolsOpen=false"><X :size="18"/></button></div>
+      <div class="page-tools-dialog-head"><div><h2 id="page-tools-title">Page tools</h2><p>{{selectedDoc.title}} · {{selectedDoc.page_count}} pages · Choose what you want to do below</p></div><button class="icon-btn" aria-label="Close page tools" @click="pageToolsOpen=false"><X :size="18"/></button></div>
       <p v-if="documentDirty" class="notice amber">Save document details before editing pages.</p>
       <PageTools :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :job="activeJob" expanded @modified="refreshDocument" @job-started="watchJob" @cancel="cancelJob"/>
     </dialog>
