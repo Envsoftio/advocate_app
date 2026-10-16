@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { Archive, ArrowDown, ArrowUp, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare } from 'lucide-vue-next'
+import { Maximize2, Minimize2, Archive, ArrowDown, ArrowUp, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare } from 'lucide-vue-next'
 import * as pdfjs from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
@@ -10,8 +10,8 @@ import { friendlyError } from '../lib/format'
 import { confirmSignatureTransformation } from '../lib/signatures'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
-const props = defineProps<{ document: MatterDocument | null, documents?: MatterDocument[], disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, documentPosition?: number, documentCount?: number, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
-const emit = defineEmits<{ modified: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [], moveDocument: [direction: number], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string] }>()
+const props = defineProps<{ expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, documentPosition?: number, documentCount?: number, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
+const emit = defineEmits<{ toggleExpanded: [], toggleFocus: [], modified: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [], moveDocument: [direction: number], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const canvasWrap = ref<HTMLDivElement | null>(null)
 const thumbnailWrap = ref<HTMLDivElement | null>(null)
@@ -801,34 +801,31 @@ async function applyReplacement() {
   <div class="viewer-root">
     <template v-if="document">
       <div class="viewer-toolbar">
-        <div class="toolbar-group"><FileSearch :size="16"/><span class="toolbar-label">PDF PREVIEW</span></div>
+        <div class="toolbar-group reader-document"><FileSearch :size="16"/><div><strong :title="document.title">{{document.title}}</strong><span>Working copy · Original preserved</span></div></div>
         <div class="toolbar-group">
           <button class="icon-btn small" :disabled="current <= 1 || loading" title="Previous page" @click="current--"><ChevronLeft :size="17" /></button>
           <span class="page-counter">{{ current }} / {{ total }}</span>
           <button class="icon-btn small" :disabled="current >= total || loading" title="Next page" @click="current++"><ChevronRight :size="17" /></button>
         </div>
-        <div class="toolbar-group"><button class="icon-btn small" :aria-label="showThumbnails?'Hide thumbnails':'Show thumbnails'" :aria-pressed="showThumbnails" title="Toggle page thumbnails" @click="showThumbnails=!showThumbnails"><LayoutGrid :size="16"/></button><select v-model.number="scalePct" class="zoom-select" aria-label="Zoom"><option :value="25">25%</option><option :value="50">50%</option><option :value="75">75%</option><option :value="100">100%</option><option :value="125">125%</option><option :value="150">150%</option></select></div>
+        <div class="toolbar-group"><button class="btn secondary small editor-expand-button" :aria-pressed="!!expanded" :title="expanded ? 'Exit full screen (Esc)' : 'Expand PDF editor to fill the window'" @click="emit('toggleExpanded')"><Minimize2 v-if="expanded" :size="16"/><Maximize2 v-else :size="16"/><span>{{expanded ? 'Exit full screen' : 'Full screen'}}</span></button><button class="icon-btn small" :aria-label="focusMode ? 'Show document list' : 'Focus on PDF'" :title="focusMode ? 'Show document list' : 'Focus on PDF'" :aria-pressed="!!focusMode" @click="emit('toggleFocus')"><PanelRightClose :size="16"/></button><button class="icon-btn small" :aria-label="showThumbnails?'Hide thumbnails':'Show thumbnails'" :aria-pressed="showThumbnails" title="Toggle page thumbnails" @click="showThumbnails=!showThumbnails"><LayoutGrid :size="16"/></button><select v-model.number="scalePct" class="zoom-select" aria-label="Zoom"><option :value="25">25%</option><option :value="50">50%</option><option :value="75">75%</option><option :value="100">100%</option><option :value="125">125%</option><option :value="150">150%</option></select></div>
       </div>
       <div class="page-editbar">
-        <button class="text-tool" :disabled="editing || loading || disabled" title="Open page tools for this document" @click="emit('pageTools')"><FilePenLine :size="15"/> Page tools</button>
+        <div class="editor-tool-group" role="group" aria-label="Read and annotate"><span class="editor-group-label">Read & annotate</span>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-expanded="bookmarkOpen" @click="bookmarkOpen=!bookmarkOpen;bookmarkTitle=document?.title+' — page '+current;bookmarkError=''"><BookMarked :size="15"/> Bookmark page<span v-if="pageBookmarks.length" class="page-bookmark-count">{{pageBookmarks.length}}</span></button>
+        </div><div class="editor-tool-group" role="group" aria-label="Edit PDF"><span class="editor-group-label">Edit & mark</span>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="textMode=!textMode; editTextMode=false; linkPanelOpen=false; marksPanelOpen=false; annotationPanelOpen=false; placement=null"><Type :size="15"/> Add text</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="editTextMode=!editTextMode; textMode=false; linkPanelOpen=false; marksPanelOpen=false; annotationPanelOpen=false; placement=null"><Pencil :size="15"/> Edit text</button>
         <button class="text-tool" :disabled="editing || loading || disabled" aria-label="Images & notes" title="Image overlays, highlights and comments" :aria-pressed="annotationPanelOpen" @click="annotationPanelOpen=!annotationPanelOpen; textMode=false; editTextMode=false; linkPanelOpen=false; marksPanelOpen=false; placement=null; resetAnnotationDraft()"><Highlighter :size="15"/> Notes<span v-if="currentPageAnnotations.length" class="page-bookmark-count">{{currentPageAnnotations.length}}</span></button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="linkPanelOpen=!linkPanelOpen; textMode=false; editTextMode=false; marksPanelOpen=false; annotationPanelOpen=false; placement=null; linkDraft.target_document_id ||= document.id"><Link2 :size="15"/> Links<span v-if="currentPageLinks.length" class="page-bookmark-count">{{currentPageLinks.length}}</span></button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="marksPanelOpen" @click="marksPanelOpen=!marksPanelOpen; textMode=false; editTextMode=false; linkPanelOpen=false; annotationPanelOpen=false; placement=null"><Stamp :size="15"/> Output marks<span v-if="marksDirty" class="details-unsaved-indicator">Unsaved</span></button>
+        </div><div class="editor-tool-group" role="group" aria-label="Organise pages"><span class="editor-group-label">Pages</span>
+        <button class="text-tool" :disabled="editing || loading || disabled" title="Open page tools for this document" @click="emit('pageTools')"><FilePenLine :size="15"/> Page tools</button>
         <button class="text-tool" :disabled="editing || loading || disabled" title="Rotate this page 90° counterclockwise in the working PDF" @click="edit('rotate', {page_index:current-1,degrees:270})"><RotateCcw :size="16"/> Rotate left</button>
         <button class="text-tool" :disabled="editing || loading || disabled" title="Rotate this page 90° clockwise in the working PDF" @click="edit('rotate', {page_index:current-1,degrees:90})"><RotateCw :size="16"/> Rotate right</button>
         <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || current<=1" aria-label="Move page left" title="Move page left" @click="move(-1)"><ChevronLeft :size="16"/></button>
         <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || current>=total" aria-label="Move page right" title="Move page right" @click="move(1)"><ChevronRight :size="16"/></button>
         <button class="text-tool page-icon-tool danger" :disabled="editing || loading || disabled || total<=1" aria-label="Delete page from working copy" title="Delete page from working copy" @click="deleteCurrent"><Trash2 :size="16"/></button>
-        <span class="page-editbar-divider" aria-hidden="true"></span>
-        <button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr')"><ScanText :size="15"/> Run English OCR</button>
-        <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || (documentPosition ?? 0)<=0" aria-label="Move document up" title="Move document up in bundle order" @click="emit('moveDocument',-1)"><ArrowUp :size="16"/></button>
-        <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || (documentPosition ?? 0)>=(documentCount ?? 1)-1" aria-label="Move document down" title="Move document down in bundle order" @click="emit('moveDocument',1)"><ArrowDown :size="16"/></button>
-        <button class="text-tool page-icon-tool danger" :disabled="editing || loading || disabled" aria-label="Archive document" title="Archive document" @click="emit('archiveDocument')"><Archive :size="16"/></button>
-        <span class="page-editbar-divider" aria-hidden="true"></span>
-        <button class="text-tool" :aria-expanded="!!detailsOpen" @click="emit('toggleDetails')"><PanelRightClose v-if="detailsOpen" :size="15"/><PanelRightOpen v-else :size="15"/> Document details<span v-if="detailsDirty" class="details-unsaved-indicator">Unsaved</span></button>
+        </div>
       </div>
       <div v-if="pageBookmarks.length" class="page-bookmarks-present" role="region" :aria-label="`Bookmarks on page ${current}`">
         <BookMarked :size="15" aria-hidden="true"/>
@@ -943,6 +940,13 @@ async function applyReplacement() {
             </div>
           </div>
         </div>
+      </div>
+      <div class="document-actionbar" role="group" aria-label="Document tools"><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr')"><ScanText :size="15"/> Run English OCR</button>
+        <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || (documentPosition ?? 0)<=0" aria-label="Move document up" title="Move document up in bundle order" @click="emit('moveDocument',-1)"><ArrowUp :size="16"/></button>
+        <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || (documentPosition ?? 0)>=(documentCount ?? 1)-1" aria-label="Move document down" title="Move document down in bundle order" @click="emit('moveDocument',1)"><ArrowDown :size="16"/></button>
+        <button class="text-tool page-icon-tool danger" :disabled="editing || loading || disabled" aria-label="Archive document" title="Archive document" @click="emit('archiveDocument')"><Archive :size="16"/></button>
+        <span class="page-editbar-divider" aria-hidden="true"></span>
+        <button class="text-tool" :aria-expanded="!!detailsOpen" @click="emit('toggleDetails')"><PanelRightClose v-if="detailsOpen" :size="15"/><PanelRightOpen v-else :size="15"/> Document details<span v-if="detailsDirty" class="details-unsaved-indicator">Unsaved</span></button>
       </div>
     </template>
     <div v-else class="viewer-empty"><FileSearch :size="44"/><strong>Document preview</strong><span>Select a file to review its pages</span></div>

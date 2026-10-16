@@ -16,6 +16,7 @@ import BundlePreview from './components/BundlePreview.vue'
 import DocumentTable from './components/DocumentTable.vue'
 import ExportPdfReview from './components/ExportPdfReview.vue'
 import MatterForm from './components/MatterForm.vue'
+import MatterHome from './components/MatterHome.vue'
 import DelhiFilingGuide from './components/DelhiFilingGuide.vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { VueDraggable } from 'vue-draggable-plus'
@@ -25,7 +26,7 @@ import { applyAppearance, readAppearance, type Theme, type UiScale } from './lib
 import { confirmSignatureTransformation, signatureRiskDocuments, signatureStatusLabel } from './lib/signatures'
 import type { Check as PreflightCheck, CourtProfile, DocKind, ExportManifest, Job, ManualBookmark, Matter, MatterDocument, MatterNew, PageSearchResult } from './lib/types'
 
-type View = 'documents' | 'index' | 'build' | 'validation' | 'rules' | 'about'
+type View = 'matters' | 'overview' | 'documents' | 'index' | 'build' | 'validation' | 'rules' | 'about'
 const matterList = ref<Matter[]>([])
 const archivedMatters = ref<Matter[]>([])
 const currentMatterId = ref<string | null>(null)
@@ -47,12 +48,29 @@ const selectedDocId = ref<string | null>(null)
 const selectedDoc = computed(() => docs.value.find(d => d.id === selectedDocId.value) || null)
 const selectedDocumentPosition = computed(() => docs.value.findIndex(doc => doc.id === selectedDocId.value))
 const detailsOpen = ref(false)
+const readerFocus = ref(false)
+const editorExpanded = ref(false)
+let previousReaderFocus = false
+function toggleEditorExpanded() {
+  if (editorExpanded.value) {
+    editorExpanded.value = false
+    readerFocus.value = selectedDocId.value ? previousReaderFocus : false
+  } else {
+    previousReaderFocus = readerFocus.value
+    readerFocus.value = true
+    editorExpanded.value = true
+  }
+}
+
 const documentTableOpen = ref(false)
 const pageToolsOpen = ref(false)
 const pageToolsDialog = ref<HTMLDialogElement | null>(null)
 const documentsWorkspace = ref<HTMLElement | null>(null)
 const documentsWorkspaceHeight = ref<number | null>(null)
 const activeView = ref<View>('documents')
+watch([activeView, selectedDocId, documentTableOpen], () => {
+  if (editorExpanded.value && (activeView.value !== 'documents' || !selectedDocId.value || documentTableOpen.value)) toggleEditorExpanded()
+})
 const sidebarCollapsed = ref(false)
 const smallScreen = ref(window.matchMedia('(max-width: 900px)').matches)
 const mobileNavOpen = ref(false)
@@ -154,10 +172,10 @@ function openPreviewDocument(id: string) {
 function prepareIndexBookmark(id: string) {
   bookmarkPreset.value = {documentId:id,sequence:bookmarkPreset.value.sequence+1}
 }
-watch(selectedDocId, () => { pageToolsOpen.value = false })
+watch(selectedDocId, id => { pageToolsOpen.value = false; if (!id) readerFocus.value = false })
 function fitDocumentsWorkspace() {
   const workspace = documentsWorkspace.value
-  if (!workspace || window.innerWidth <= 700) {
+  if (!workspace || (window.innerWidth <= 700 && !editorExpanded.value)) {
     documentsWorkspaceHeight.value = null
     return
   }
@@ -165,7 +183,7 @@ function fitDocumentsWorkspace() {
   const minimum = window.innerWidth <= 1120 ? 240 : 320
   documentsWorkspaceHeight.value = Math.max(minimum, Math.floor((window.innerHeight - workspace.getBoundingClientRect().top - 8) / scale))
 }
-watch([uiScale, activeView, currentMatterId], async () => {
+watch([uiScale, activeView, currentMatterId, editorExpanded], async () => {
   await nextTick()
   window.requestAnimationFrame(fitDocumentsWorkspace)
 })
@@ -207,10 +225,12 @@ function onKeydown(event: KeyboardEvent) {
   if (event.defaultPrevented || modalOpen.value || event.altKey) return
   const target = event.target as HTMLElement | null
   const editingField = target?.isContentEditable || !!target?.closest('input, textarea, select, [contenteditable="true"]')
+  if (event.key === 'Escape' && editorExpanded.value && !pageToolsOpen.value && !editingField) { toggleEditorExpanded(); return }
   if (event.key === 'Escape' && toast.value) { toast.value = null; return }
   if (editingField) return
   if (event.key === '/' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k')) {
     event.preventDefault()
+    readerFocus.value = false
     if (activeView.value !== 'documents') showView('documents')
     if (activeView.value === 'documents') void nextTick(() => document.querySelector<HTMLInputElement>('input[aria-label="Search documents"]')?.focus())
   }
@@ -746,10 +766,10 @@ function reviewGeneratedPdf(exportId:string, filename:string, bytes:number) {
   }
   reviewingPdf.value = {exportId,filename}
 }
-function selectMatter(id:string){
-  if (currentMatterId.value === id) { mobileNavOpen.value = false; return }
+function selectMatter(id:string, view:View='documents'){
+  if (currentMatterId.value === id) { showView(view); return }
   if (!confirmDiscardDrafts()) return
-  currentMatterId.value=id;selectedDocId.value=null
+  currentMatterId.value=id;selectedDocId.value=null;activeView.value=view;readerFocus.value=false
   mobileNavOpen.value = false
 }
 async function removeMatter(){
@@ -818,7 +838,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       </div>
     </section>
   </main>
-  <div v-else class="app-shell">
+  <div v-else class="app-shell" :data-editor-expanded="editorExpanded">
     <a class="skip-link" href="#main-content">Skip to main content</a>
     <button v-if="smallScreen && mobileNavOpen" class="sidebar-backdrop" aria-label="Close navigation" @click="mobileNavOpen=false"></button>
     <aside class="sidebar" :class="{collapsed:sidebarCollapsed && !smallScreen, 'mobile-open':mobileNavOpen}" :inert="smallScreen && !mobileNavOpen">
@@ -828,7 +848,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       </div>
       <div class="side-label">WORKSPACE</div>
       <nav class="side-nav">
-        <button class="side-link" aria-label="Matters" title="Matters" :class="{active:activeView!=='rules'&&activeView!=='about'}" @click="showView('documents')"><BriefcaseBusiness :size="18"/><span class="nav-label">Matters</span><span class="side-count">{{matterList.length}}</span></button>
+        <button class="side-link" aria-label="Matters" title="Matters" :class="{active:activeView!=='rules'&&activeView!=='about'}" @click="showView('matters')"><BriefcaseBusiness :size="18"/><span class="nav-label">Matters</span><span class="side-count">{{matterList.length}}</span></button>
         <button class="side-link" aria-label="Court rules" title="Court rules" :class="{active:activeView==='rules'}" @click="showView('rules')"><BookOpen :size="18"/><span class="nav-label">Court rules</span></button>
         <button class="side-link" aria-label="About POC" title="About POC" :class="{active:activeView==='about'}" @click="showView('about')"><CircleHelp :size="18"/><span class="nav-label">About POC</span></button>
       </nav>
@@ -860,7 +880,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
 
     <div class="app-main" :class="{'workspace-main':currentMatter && activeView!=='rules' && activeView!=='about'}">
       <header class="topbar">
-        <div class="topbar-left"><button class="icon-btn nav-toggle" :aria-label="smallScreen ? (mobileNavOpen ? 'Close navigation' : 'Open navigation') : (sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar')" :aria-expanded="smallScreen ? mobileNavOpen : !sidebarCollapsed" @click="toggleNavigation"><Menu v-if="smallScreen" :size="20"/><PanelLeftOpen v-else-if="sidebarCollapsed" :size="20"/><PanelLeftClose v-else :size="20"/></button><div class="breadcrumb"><span>Workspace</span><ChevronRight :size="14"/><strong>{{activeView==='rules'?'Court rules':activeView==='about'?'About POC':(currentMatter?.name||'Matters')}}</strong></div></div>
+        <div class="topbar-left"><button class="icon-btn nav-toggle" :aria-label="smallScreen ? (mobileNavOpen ? 'Close navigation' : 'Open navigation') : (sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar')" :aria-expanded="smallScreen ? mobileNavOpen : !sidebarCollapsed" @click="toggleNavigation"><Menu v-if="smallScreen" :size="20"/><PanelLeftOpen v-else-if="sidebarCollapsed" :size="20"/><PanelLeftClose v-else :size="20"/></button><div class="breadcrumb"><span>Workspace</span><ChevronRight :size="14"/><strong>{{activeView==='rules'?'Court rules':activeView==='about'?'About POC':(activeView==='matters'?'Matters':currentMatter?.name||'Matters')}}</strong></div></div>
         <div class="topbar-right"><span class="desktop-tag">DESKTOP POC</span><span class="user-badge">CB</span></div>
       </header>
 
@@ -886,6 +906,8 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
         <div class="card about-card"><h2>What is included?</h2><p>Matters, PDF/JPEG/PNG import, working-copy page operations, English OCR, drag-drop ordering, annexure/part metadata, auto index, volume splitting, linked bookmarks, technical validation and ZIP export.</p><h2>What is not included?</h2><p>Actual court submission, legally approved templates, digital signing, Word/Excel/PPT conversion, comprehensive PDF text editing, cloud sharing or guaranteed legal compliance.</p></div>
       </main>
 
+      <MatterHome v-else-if="activeView==='matters'" :matters="matterList" :creating="creating" @open="id=>selectMatter(id,'overview')" @create="modalOpen=true" @sample="createSampleMatter"/>
+
       <main v-else-if="!currentMatter" id="main-content" tabindex="-1" class="page-content welcome-page">
         <div class="welcome-icon"><FolderOpen :size="32"/></div><div class="page-eyebrow">YOUR FIRST MATTER</div><h1>From scattered files to<br/>a structured court bundle.</h1>
         <p>Create a matter to import documents, organise annexures, generate indexes and prepare a complete PDF package—offline.</p>
@@ -908,12 +930,22 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
           </div>
         </div>
         <div class="matter-summary" aria-label="Matter summary"><span><strong>{{docs.length}}</strong> documents</span><span><strong>{{totalPages}}</strong> source pages</span><span><strong>{{warningChecks.length+errorChecks.length}}</strong> review flags</span><span><strong>{{exportsList.length}}</strong> prepared packages</span></div>
-        <div class="workspace-tabs"><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='index'}" @click="showView('index')"><BookMarked :size="16"/> Index & bookmarks</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></div>
+        <nav class="workspace-tabs" aria-label="Matter preparation"><button :class="{active:activeView==='overview'}" @click="showView('overview')"><BriefcaseBusiness :size="16"/> Overview</button><button :class="{active:activeView==='documents'}" @click="showView('documents')"><FileStack :size="16"/> Documents</button><button :class="{active:activeView==='index'}" @click="showView('index')"><BookMarked :size="16"/> Index & bookmarks</button><button :class="{active:activeView==='build'}" @click="showView('build')"><Layers3 :size="16"/> Build bundle</button><button :class="{active:activeView==='validation'}" @click="showView('validation')"><ShieldCheck :size="16"/> Preflight checks <span v-if="warningChecks.length+errorChecks.length" class="count-bubble">{{warningChecks.length+errorChecks.length}}</span></button></nav>
 
         <Transition name="section" mode="out-in" @after-enter="fitDocumentsWorkspace">
-        <DocumentTable v-if="activeView==='documents' && documentTableOpen" :matter-id="currentMatterId!" :documents="docs" :busy="busy || isJobActive" :keep-groups="currentMatter.keep_groups_intact" @modified="documentTableModified" @open-document="openDocumentFromTable" @error="issue" @close="documentTableOpen=false"/>
-        <div v-else-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :class="{'details-open':detailsOpen && !!selectedDoc}" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
-          <section class="panel docs-panel">
+        <section v-if="activeView==='overview'" class="matter-overview" aria-label="Matter overview">
+          <div class="overview-lead panel"><div><div class="eyebrow">PREPARE YOUR BUNDLE</div><h2>{{docs.length ? 'Continue preparing this matter' : 'Begin with your source documents'}}</h2><p>Review working copies, arrange the index, check the result and build your filing package.</p></div><button class="btn primary" @click="showView('documents')"><FolderOpen :size="17"/> {{docs.length ? 'Open documents' : 'Add documents'}}</button></div>
+          <div class="overview-steps">
+            <button class="panel overview-step" @click="showView('documents')"><span class="step-number">01</span><h3>Documents</h3><p>Import, read and edit working copies.</p><strong>{{docs.length}} documents · {{totalPages}} pages <ArrowRight :size="16"/></strong></button>
+            <button class="panel overview-step" @click="showView('index')"><span class="step-number">02</span><h3>Index & bookmarks</h3><p>Arrange bundle order and review page destinations.</p><strong>Review page map <ArrowRight :size="16"/></strong></button>
+            <button class="panel overview-step" @click="showView('validation')"><span class="step-number">03</span><h3>Preflight checks</h3><p>Run technical checks and inspect flagged items.</p><strong>Run checks <ArrowRight :size="16"/></strong></button>
+            <button class="panel overview-step" @click="showView('build')"><span class="step-number">04</span><h3>Build & export</h3><p>Generate, review and save the finished PDFs.</p><strong>{{exportsList.length}} prepared packages <ArrowRight :size="16"/></strong></button>
+          </div>
+          <div class="overview-bottom"><section class="panel overview-context"><h2>Case details</h2><dl><dt>Petitioner</dt><dd>{{currentMatter.petitioner || 'Not entered'}}</dd><dt>Respondent</dt><dd>{{currentMatter.respondent || 'Not entered'}}</dd><dt>Advocate</dt><dd>{{currentMatter.advocate || 'Not entered'}}</dd><dt>Court profile</dt><dd>{{selectedProfile?.name}}</dd></dl></section><section class="panel overview-context"><h2>Latest package</h2><template v-if="activeExport"><p>{{prettyDate(activeExport.created_at)}} · {{activeExport.volumes}} volume(s) · {{activeExport.pages}} pages</p><p>{{activeExport.stale ? 'Inputs changed. Rebuild before using this package.' : 'Review the generated PDF before use.'}}</p><button class="btn secondary" @click="showView('build')">Review exports</button></template><p v-else>No package built yet. Start with documents and review the page map before building.</p></section></div>
+        </section>
+        <DocumentTable v-else-if="activeView==='documents' && documentTableOpen" :matter-id="currentMatterId!" :documents="docs" :busy="busy || isJobActive" :keep-groups="currentMatter.keep_groups_intact" @modified="documentTableModified" @open-document="openDocumentFromTable" @error="issue" @close="documentTableOpen=false"/>
+        <div v-else-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :class="{'details-open':detailsOpen && !!selectedDoc,'reader-focus':readerFocus}" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
+          <section v-show="!readerFocus" class="panel docs-panel">
             <div class="panel-header"><div><h2>Source documents</h2><span>Drag documents to set bundle order</span></div><div class="panel-header-actions"><button class="text-tool" :disabled="!docs.length" @click="documentTableOpen=true">Open table</button><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div></div>
             <div class="docs-search"><Search :size="16"/><input v-model="searching" placeholder="Search documents..." aria-label="Search documents"/></div>
             <div class="docs-search"><Search :size="16"/><input v-model="pageQuery" placeholder="Find text on pages..." aria-label="Find text on pages"/></div>
@@ -942,7 +974,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             <div class="docs-help"><LockKeyhole :size="14"/> Original files are never overwritten.</div>
           </section>
 
-          <section class="panel preview-panel"><PdfViewer :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :details-open="detailsOpen" :details-dirty="documentDirty" :document-position="selectedDocumentPosition" :document-count="docs.length" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @move-document="moveDocument" @archive-document="deleteDocument" @open-internal-link="openSearchMatch" @open-external-link="openReviewedExternalLink"/></section>
+          <section class="panel preview-panel"><PdfViewer :expanded="editorExpanded" @toggle-expanded="toggleEditorExpanded" :focus-mode="readerFocus" @toggle-focus="readerFocus=!readerFocus" :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :details-open="detailsOpen" :details-dirty="documentDirty" :document-position="selectedDocumentPosition" :document-count="docs.length" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @move-document="moveDocument" @archive-document="deleteDocument" @open-internal-link="openSearchMatch" @open-external-link="openReviewedExternalLink"/></section>
 
           <Transition name="inspector">
           <section v-if="detailsOpen && selectedDoc" id="document-details-panel" class="panel inspector-panel" aria-label="Document details">

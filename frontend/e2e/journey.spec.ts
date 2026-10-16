@@ -634,6 +634,7 @@ test('selectable text can be dragged vertically and saved to the working copy', 
   await expect(page.locator('.preview-status')).toHaveCount(0)
   const preview = page.locator('.pdf-placement-surface')
   await expect.poll(async () => (await preview.boundingBox())!.y - (await page.locator('.canvas-scroll').boundingBox())!.y).toBeCloseTo(20, 0)
+  await run.scrollIntoViewIfNeeded()
   const previewTop = (await preview.boundingBox())!.y
   await page.route('**/documents/*/pdf?revision=*', async route => {
     await new Promise(resolve => setTimeout(resolve, 350))
@@ -768,9 +769,9 @@ test('reviewed link and output-mark preview persist through the matter workspace
   await expect(paper).toBeVisible()
   const bounds = await paper.boundingBox()
   expect(bounds).toBeTruthy()
-  await page.mouse.move(bounds!.x + 90, bounds!.y + 120)
+  await page.mouse.move(bounds!.x + 90, bounds!.y + 12)
   await page.mouse.down()
-  await page.mouse.move(bounds!.x + 230, bounds!.y + 155, {steps:5})
+  await page.mouse.move(bounds!.x + 230, bounds!.y + 47, {steps:5})
   await page.mouse.up()
   await page.getByRole('button', {name:'Save reviewed link'}).click()
   await expect(page.getByText('Reviewed link saved.')).toBeVisible()
@@ -878,6 +879,7 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await expect(page.locator('.topbar')).toHaveCSS('height', headerHeight)
   await expect(page.locator('.feature-strip > div').first()).toHaveCSS('background-color', 'rgb(29, 41, 58)')
   await page.getByRole('button', { name: 'Matters', exact: true }).click()
+  await page.locator('.matter-home-card').filter({hasText:'E2E Appearance Matter'}).click()
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
   await expect(page.locator('.topbar')).toHaveCSS('height', headerHeight)
   await expect(page.locator('.checkbox-line')).toHaveCSS('background-color', 'rgb(43, 60, 82)')
