@@ -3,9 +3,11 @@ import io
 import math
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import zipfile
+from zoneinfo import ZoneInfo
 
 import pymupdf
 
@@ -241,6 +243,106 @@ def add_text_overlay(path: Path, page_index: int, x: float, y: float,
         if remaining < 0:
             raise ProcessingError('Text does not fit from this point; move it or reduce the font size')
         replace_pdf_atomically(path, doc)
+
+
+def _mark_timestamp(settings: dict, at: datetime | str | None) -> str:
+    if isinstance(at, str):
+        at = datetime.fromisoformat(at.replace('Z', '+00:00'))
+    if at is None:
+        at = datetime.now(timezone.utc)
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    local = at.astimezone(ZoneInfo(settings['timestamp_timezone']))
+    value = local.strftime('%Y-%m-%d' if settings['timestamp_format'] == 'date'
+                           else '%Y-%m-%d %H:%M %Z')
+    prefix = settings['timestamp_prefix'].strip()
+    return f'{prefix} {value}'.strip()
+
+
+def _positioned_rect(page_rect: pymupdf.Rect, text: str, font_size: float,
+                     position: str) -> pymupdf.Rect:
+    margin = max(12.0, min(page_rect.width, page_rect.height) * .02)
+    width = min(page_rect.width - margin * 2,
+                max(font_size * 3, pymupdf.get_text_length(
+                    text, fontname='helv', fontsize=font_size) + 10))
+    height = font_size * 1.6
+    if position.endswith('left'):
+        x0 = page_rect.x0 + margin
+    elif position.endswith('right'):
+        x0 = page_rect.x1 - margin - width
+    else:
+        x0 = page_rect.x0 + (page_rect.width - width) / 2
+    if position.startswith('top'):
+        y0 = page_rect.y0 + margin
+    elif position.startswith('bottom'):
+        y0 = page_rect.y1 - margin - height
+    else:
+        y0 = page_rect.y0 + (page_rect.height - height) / 2
+    return pymupdf.Rect(x0, y0, x0 + width, y0 + height)
+
+
+def page_output_mark_plan(page: pymupdf.Page, settings: dict,
+                          at: datetime | str | None = None) -> list[dict]:
+    """Return display-relative mark boxes and conservative overlap warnings."""
+    candidates = []
+    if settings.get('watermark_enabled'):
+        candidates.append(('watermark', settings['watermark_text'].strip(),
+                           float(settings['watermark_font_size']),
+                           settings['watermark_position'],
+                           float(settings['watermark_opacity'])))
+    if settings.get('timestamp_enabled'):
+        candidates.append(('timestamp', _mark_timestamp(settings, at),
+                           float(settings['timestamp_font_size']),
+                           settings['timestamp_position'], 1.0))
+    obstacles = [pymupdf.Rect(block['bbox']) for block in page.get_text('dict')['blocks']
+                 if block.get('bbox')]
+    obstacles.extend(pymupdf.Rect(item['rect']) for item in page.get_drawings()
+                     if item.get('rect'))
+    obstacles.extend(pymupdf.Rect(link['from']) for link in page.get_links()
+                     if link.get('from'))
+    results = []
+    for kind, text, font_size, position, opacity in candidates:
+        displayed = _positioned_rect(page.rect, text, font_size, position)
+        pdf_rect = displayed * page.derotation_matrix
+        overlap = any(pdf_rect.intersects(obstacle) for obstacle in obstacles)
+        align = (pymupdf.TEXT_ALIGN_LEFT if position.endswith('left') else
+                 pymupdf.TEXT_ALIGN_RIGHT if position.endswith('right') else
+                 pymupdf.TEXT_ALIGN_CENTER)
+        results.append({
+            'kind': kind, 'text': text, 'font_size': font_size,
+            'position': position, 'opacity': opacity, 'overlaps_content': overlap,
+            'relative_rect': [(displayed.x0 - page.rect.x0) / page.rect.width,
+                              (displayed.y0 - page.rect.y0) / page.rect.height,
+                              displayed.width / page.rect.width,
+                              displayed.height / page.rect.height],
+            '_pdf_rect': pdf_rect, '_align': align,
+        })
+    return results
+
+
+def preview_output_marks(path: Path, page_index: int, settings: dict,
+                         at: datetime | str | None = None) -> list[dict]:
+    with open_pdf(path) as doc:
+        if not 0 <= page_index < doc.page_count:
+            raise ProcessingError('Invalid page number')
+        return [{key: value for key, value in item.items() if not key.startswith('_')}
+                for item in page_output_mark_plan(doc[page_index], settings, at)]
+
+
+def apply_output_marks(page: pymupdf.Page, settings: dict,
+                       at: datetime | str | None = None) -> list[dict]:
+    """Insert configured visible output marks and report their planned collisions."""
+    plan = page_output_mark_plan(page, settings, at)
+    for item in plan:
+        color = (.42, .42, .42) if item['kind'] == 'watermark' else (.22, .25, .3)
+        remaining = page.insert_textbox(
+            item['_pdf_rect'], item['text'], fontsize=item['font_size'], fontname='helv',
+            rotate=page.rotation, align=item['_align'], color=color,
+            fill_opacity=item['opacity'], overlay=True)
+        if remaining < 0:
+            raise ProcessingError(f'{item["kind"].title()} does not fit the selected position')
+    return [{key: value for key, value in item.items() if not key.startswith('_')}
+            for item in plan]
 
 
 def editable_text_runs(path: Path, page_index: int) -> list[dict]:

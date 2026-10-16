@@ -25,8 +25,8 @@ from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
                       rotate_page, delete_page, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
                       replace_text_run, move_text_run, compress_pdf,
-                      ocr_pdf, make_cover_pdf)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, SignatureRiskAcknowledgement
+                      ocr_pdf, make_cover_pdf, preview_output_marks)
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, SignatureRiskAcknowledgement
 from .storage import Store, new_id
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
 from .schemas import CompressionRequest
@@ -709,6 +709,34 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    @app.get('/matters/{matter_id}/links')
+    def reviewed_links(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        return store.list_reviewed_links(matter_id)
+
+    @app.put('/matters/{matter_id}/links')
+    def update_reviewed_links(matter_id: str, payload: ReviewedLinksUpdate,
+                              _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                return store.set_reviewed_links(
+                    matter_id, [entry.model_dump() for entry in payload.entries])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get('/matters/{matter_id}/output-marks')
+    def output_marks(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        return store.get_output_marks(matter_id)
+
+    @app.put('/matters/{matter_id}/output-marks')
+    def update_output_marks(matter_id: str, payload: OutputMarks,
+                            _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        with store.matter_lock(matter_id):
+            return store.set_output_marks(matter_id, payload.model_dump())
+
     @app.post('/matters/{matter_id}/history/{direction}')
     def traverse_history(matter_id: str, direction: str, _: None = Depends(auth)):
         matter_or_404(matter_id)
@@ -875,6 +903,19 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 current = doc_or_404(doc_id)
                 return {'revision': current['revision'],
                         'runs': editable_text_runs(store.working_path(current), page_index)}
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/{page_index}/output-marks-preview')
+    def page_output_marks_preview(doc_id: str, page_index: int, payload: OutputMarks,
+                                  _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        try:
+            with store.matter_lock(doc['matter_id']):
+                current = doc_or_404(doc_id)
+                return {'revision': current['revision'], 'page_index': page_index,
+                        'marks': preview_output_marks(store.working_path(current), page_index,
+                                                      payload.model_dump())}
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

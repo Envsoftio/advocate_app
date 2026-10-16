@@ -683,6 +683,54 @@ test('visible text overlay is placed from the preview and becomes searchable', a
   }).toBe(1)
 })
 
+test('reviewed link and output-mark preview persist through the matter workspace', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Links And Marks', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  for (const name of ['01_petition.pdf', '02_impugned_order.pdf']) {
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+      multipart: { files: { name, mimeType: 'application/pdf',
+        buffer: await readFile(resolve(samples, name)) } },
+    })
+    expect(uploaded.ok()).toBeTruthy()
+  }
+  const documents = await (await request.get(`${backend}/matters/${matterId}/documents`, {headers})).json()
+
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name:'E2E Links And Marks'})).toBeVisible()
+  await page.getByRole('button', {name:'Links', exact:true}).click()
+  await page.getByRole('textbox', {name:'Readable label'}).fill('Open supporting order')
+  await page.getByRole('combobox', {name:'Target document'}).selectOption(documents[1].id)
+  const paper = page.locator('.pdf-paper')
+  await expect(paper).toBeVisible()
+  const bounds = await paper.boundingBox()
+  expect(bounds).toBeTruthy()
+  await page.mouse.move(bounds!.x + 90, bounds!.y + 120)
+  await page.mouse.down()
+  await page.mouse.move(bounds!.x + 230, bounds!.y + 155, {steps:5})
+  await page.mouse.up()
+  await page.getByRole('button', {name:'Save reviewed link'}).click()
+  await expect(page.getByText('Reviewed link saved.')).toBeVisible()
+  const links = await (await request.get(`${backend}/matters/${matterId}/links`, {headers})).json()
+  expect(links).toHaveLength(1)
+  expect(links[0].target_document_id).toBe(documents[1].id)
+  expect(links[0].resolved).toBeTruthy()
+
+  await page.getByRole('button', {name:'Output marks', exact:true}).click()
+  await page.getByRole('checkbox', {name:/Watermark/}).check()
+  await page.getByRole('textbox', {name:'Watermark text'}).fill('REVIEW COPY')
+  await page.getByRole('checkbox', {name:/Build timestamp/}).check()
+  await page.getByRole('textbox', {name:'Timezone'}).fill('Asia/Kolkata')
+  await expect(page.locator('.pdf-output-mark-preview.watermark')).toContainText('REVIEW COPY')
+  await expect(page.locator('.pdf-output-mark-preview.timestamp')).toContainText('IST')
+  await page.getByRole('button', {name:'Save output marks'}).click()
+  await expect(page.getByText('Output marks saved.')).toBeVisible()
+  const marks = await (await request.get(`${backend}/matters/${matterId}/output-marks`, {headers})).json()
+  expect(marks.watermark_text).toBe('REVIEW COPY')
+  expect(marks.timestamp_timezone).toBe('Asia/Kolkata')
+})
+
 test('appearance persists and keyboard search respects text editing', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Appearance Matter', court_profile: 'delhi-hc-illustrative',

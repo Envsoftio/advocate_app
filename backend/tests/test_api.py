@@ -395,6 +395,7 @@ def test_source_annotations_and_links_are_reported_and_omitted(client, auth, mat
         report = json.loads(package.read('validation-report.json'))
         assert report['interactive_content_policy'] == {
             'source_annotations': 'omitted', 'source_links': 'omitted',
+            'reviewed_user_links': 'retained when both revision-anchored endpoints resolve',
             'generated_index_links': 'retained'}
         assert {c['code'] for c in report['checks']} >= set(policy_checks)
         readme = package.read('READ_ME_FIRST.txt').decode()

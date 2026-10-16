@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Archive, ArrowDown, ArrowUp, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose } from 'lucide-vue-next'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { Archive, ArrowDown, ArrowUp, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink } from 'lucide-vue-next'
 import * as pdfjs from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
-import type { MatterDocument } from '../lib/types'
+import type { MatterDocument, OutputMarkPreview, OutputMarks, ReviewedLink } from '../lib/types'
 import { api, pdfBytes } from '../lib/api'
 import { friendlyError } from '../lib/format'
 import { confirmSignatureTransformation } from '../lib/signatures'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
-const props = defineProps<{ document: MatterDocument | null, disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, documentPosition?: number, documentCount?: number, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
-const emit = defineEmits<{ modified: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [], moveDocument: [direction: number], archiveDocument: [] }>()
+const props = defineProps<{ document: MatterDocument | null, documents?: MatterDocument[], disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, documentPosition?: number, documentCount?: number, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
+const emit = defineEmits<{ modified: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [], moveDocument: [direction: number], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const canvasWrap = ref<HTMLDivElement | null>(null)
 const thumbnailWrap = ref<HTMLDivElement | null>(null)
@@ -22,6 +22,7 @@ const switchingPage = ref(false)
 const rotatingPage = ref(false)
 const viewerError = ref('')
 const scalePct = ref(100)
+const pageZoom = ref(1)
 const showThumbnails = ref(false)
 const draggingPage = ref<number | null>(null)
 const dropTargetPage = ref<number | null>(null)
@@ -58,6 +59,40 @@ const inlineReplacementInput = ref<HTMLTextAreaElement | null>(null)
 const editSnapshot = ref('')
 const editSnapshotFading = ref(false)
 const replacingText = ref(false)
+const linkPanelOpen = ref(false)
+const linkDrawing = ref(false)
+const linkRegion = ref<{x:number,y:number,width:number,height:number} | null>(null)
+let linkStart: {x:number,y:number} | null = null
+let linkPointerId: number | null = null
+const reviewedLinks = ref<ReviewedLink[]>([])
+const linksBusy = ref(false)
+const linkError = ref('')
+const linkNotice = ref('')
+const linkDraft = reactive({title:'',kind:'internal' as 'internal'|'external',target_document_id:'',target_page:1,uri:''})
+const currentPageLinks = computed(() => reviewedLinks.value.filter(item =>
+  item.source_document_id === props.document?.id && item.source_page_index === current.value - 1))
+const marksPanelOpen = ref(false)
+const marksBusy = ref(false)
+const marksError = ref('')
+const marksNotice = ref('')
+const markPreview = ref<OutputMarkPreview[]>([])
+const defaultMarks: OutputMarks = {
+  watermark_enabled:false,watermark_text:'DRAFT',watermark_position:'center',
+  watermark_font_size:32,watermark_opacity:.16,timestamp_enabled:false,
+  timestamp_format:'datetime',timestamp_timezone:'UTC',timestamp_position:'bottom_right',
+  timestamp_font_size:8,timestamp_prefix:'Built',
+}
+const markSettings = reactive<OutputMarks>({...defaultMarks})
+let savedMarks = JSON.stringify(defaultMarks)
+let markPreviewTimer: ReturnType<typeof setTimeout> | null = null
+let markLoadSequence = 0
+let markPreviewSequence = 0
+const marksDirty = computed(() => JSON.stringify(markSettings) !== savedMarks)
+const markPositions = [
+  ['top_left','Top left'],['top_center','Top centre'],['top_right','Top right'],
+  ['center','Centre'],['bottom_left','Bottom left'],['bottom_center','Bottom centre'],
+  ['bottom_right','Bottom right'],
+] as const
 const inlineEditorStyle = computed(() => {
   const box = selectedRun.value?.relative_bbox
   if (!box) return {}
@@ -137,6 +172,7 @@ async function renderPage() {
     const base = page.getViewport({ scale: 1 })
     const limit = Math.max(320, canvasWrap.value.clientWidth - 45)
     const zoom = Math.min(2.2, Math.max(.35, limit / base.width)) * scalePct.value / 100
+    pageZoom.value = zoom
     const viewport = page.getViewport({ scale: zoom })
     const deviceScale = Math.min(window.devicePixelRatio || 1, 2)
     const element = canvas.value
@@ -246,8 +282,27 @@ watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}|${pro
     if (sequence === bookmarkLoadSequence) manualBookmarks.value = entries
   } catch { if (sequence === bookmarkLoadSequence) manualBookmarks.value = [] }
 }, {immediate:true})
+watch(() => `${props.document?.matter_id || ''}|${(props.documents || []).map(item => `${item.id}:${item.revision}:${item.archived_at || ''}`).join(',')}|${props.bookmarkRefreshKey || 0}`, async () => {
+  const doc = props.document
+  if (!doc) { reviewedLinks.value = []; return }
+  try { reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`) }
+  catch { reviewedLinks.value = [] }
+}, {immediate:true})
+watch(() => props.document?.matter_id || '', async matterId => {
+  const sequence = ++markLoadSequence
+  if (!matterId) { Object.assign(markSettings, defaultMarks); savedMarks = JSON.stringify(defaultMarks); return }
+  try {
+    const settings = await api<OutputMarks>(`/matters/${matterId}/output-marks`)
+    if (sequence !== markLoadSequence) return
+    Object.assign(markSettings, settings)
+    savedMarks = JSON.stringify(settings)
+  } catch (err) { if (sequence === markLoadSequence) marksError.value = friendlyError(err) }
+}, {immediate:true})
+watch(() => [marksPanelOpen.value, props.document?.id, props.document?.revision, current.value,
+  JSON.stringify(markSettings)] as const, () => scheduleMarkPreview())
 watch(current, () => { bookmarkOpen.value = false; bookmarkError.value = ''; bookmarkNotice.value = '' })
-onBeforeUnmount(() => { epoch++; resizeObserver?.disconnect(); thumbnailSequence++; renderTask?.cancel(); thumbnailTasks.forEach(task => task.cancel()); if (pdf) void pdf.destroy() })
+watch(current, () => { linkRegion.value = null; linkDrawing.value = false; linkError.value = ''; linkNotice.value = '' })
+onBeforeUnmount(() => { epoch++; resizeObserver?.disconnect(); thumbnailSequence++; renderTask?.cancel(); thumbnailTasks.forEach(task => task.cancel()); if (markPreviewTimer) clearTimeout(markPreviewTimer); if (pdf) void pdf.destroy() })
 
 async function addPageBookmark() {
   const doc = props.document
@@ -269,6 +324,132 @@ async function addPageBookmark() {
     emit('modified')
   } catch (err) { bookmarkError.value = friendlyError(err) }
   finally { bookmarkSaving.value = false }
+}
+
+function linkPayload(item: ReviewedLink) {
+  return {
+    id:item.id,title:item.title,source_document_id:item.source_document_id,
+    source_page_index:item.source_page_index,source_revision:item.source_revision,
+    rect_x:item.rect_x,rect_y:item.rect_y,rect_width:item.rect_width,
+    rect_height:item.rect_height,kind:item.kind,target_document_id:item.target_document_id,
+    target_page_index:item.target_page_index,target_revision:item.target_revision,uri:item.uri,
+  }
+}
+
+function normalizedPointer(event: PointerEvent) {
+  const rect = canvas.value?.getBoundingClientRect()
+  if (!rect) return null
+  return {x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),
+    y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))}
+}
+function beginLinkRegion(event: PointerEvent) {
+  if (!linkPanelOpen.value || props.disabled || editing.value || event.button !== 0) return
+  const point = normalizedPointer(event)
+  if (!point) return
+  linkStart = point
+  linkPointerId = event.pointerId
+  linkDrawing.value = true
+  linkRegion.value = {x:point.x,y:point.y,width:0,height:0}
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  event.preventDefault()
+}
+function updateLinkRegion(event: PointerEvent) {
+  if (!linkDrawing.value || linkPointerId !== event.pointerId || !linkStart) return
+  const point = normalizedPointer(event)
+  if (!point) return
+  linkRegion.value = {x:Math.min(linkStart.x,point.x),y:Math.min(linkStart.y,point.y),
+    width:Math.abs(point.x-linkStart.x),height:Math.abs(point.y-linkStart.y)}
+  event.preventDefault()
+}
+function finishLinkRegion(event: PointerEvent) {
+  if (linkPointerId !== event.pointerId) return
+  linkDrawing.value = false
+  linkPointerId = null
+  linkStart = null
+  if (!linkRegion.value || linkRegion.value.width < .01 || linkRegion.value.height < .01) {
+    linkRegion.value = null
+    linkError.value = 'Drag a visible rectangular link area on the page.'
+  } else linkError.value = ''
+}
+async function saveReviewedLink() {
+  const doc = props.document
+  const region = linkRegion.value
+  if (!doc || !region || !linkDraft.title.trim() || linksBusy.value) return
+  linkError.value = ''
+  linksBusy.value = true
+  try {
+    const existing = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`)
+    let target: MatterDocument | undefined
+    if (linkDraft.kind === 'internal') {
+      target = (props.documents || []).find(item => item.id === linkDraft.target_document_id)
+      if (!target) throw new Error('Choose a target document.')
+      if (!Number.isInteger(linkDraft.target_page) || linkDraft.target_page < 1 || linkDraft.target_page > target.page_count)
+        throw new Error(`Choose target page 1 to ${target.page_count}.`)
+    }
+    const entries = existing.map(linkPayload)
+    entries.push({id:crypto.randomUUID().replace(/-/g,''),title:linkDraft.title.trim(),
+      source_document_id:doc.id,source_page_index:current.value-1,source_revision:doc.revision,
+      rect_x:region.x,rect_y:region.y,rect_width:region.width,rect_height:region.height,
+      kind:linkDraft.kind,target_document_id:target?.id || null,
+      target_page_index:target ? linkDraft.target_page-1 : null,
+      target_revision:target?.revision || null,
+      uri:linkDraft.kind === 'external' ? linkDraft.uri.trim() : ''})
+    reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`, 'PUT', {entries})
+    linkRegion.value = null
+    linkDraft.title = ''; linkDraft.uri = ''
+    linkNotice.value = 'Reviewed link saved. It will export only while its revision-anchored endpoints resolve.'
+    emit('modified')
+  } catch (err) { linkError.value = friendlyError(err) }
+  finally { linksBusy.value = false }
+}
+async function removeReviewedLink(id: string) {
+  const doc = props.document
+  if (!doc || linksBusy.value || !window.confirm('Remove this reviewed link?')) return
+  linksBusy.value = true
+  try {
+    const existing = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`)
+    reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`, 'PUT',
+      {entries:existing.filter(item => item.id !== id).map(linkPayload)})
+    emit('modified')
+  } catch (err) { linkError.value = friendlyError(err) }
+  finally { linksBusy.value = false }
+}
+function followReviewedLink(item: ReviewedLink) {
+  if (!item.resolved) { linkError.value = 'This link needs review because a source or target revision changed.'; return }
+  if (item.kind === 'external') emit('openExternalLink', item.uri)
+  else if (item.target_document_id !== null && item.target_page_index !== null)
+    emit('openInternalLink', item.target_document_id, item.target_page_index + 1)
+}
+
+function scheduleMarkPreview() {
+  if (markPreviewTimer) clearTimeout(markPreviewTimer)
+  if (!marksPanelOpen.value || !props.document) { markPreview.value = []; return }
+  markPreviewTimer = setTimeout(() => void previewMarks(), 250)
+}
+async function previewMarks() {
+  const doc = props.document
+  if (!doc || !marksPanelOpen.value) return
+  const sequence = ++markPreviewSequence
+  marksError.value = ''
+  try {
+    const result = await api<{revision:number,marks:OutputMarkPreview[]}>(
+      `/documents/${doc.id}/pages/${current.value-1}/output-marks-preview`, 'POST', {...markSettings})
+    if (sequence === markPreviewSequence && result.revision === doc.revision) markPreview.value = result.marks
+  } catch (err) { if (sequence === markPreviewSequence) { markPreview.value = []; marksError.value = friendlyError(err) } }
+}
+async function saveMarks() {
+  const doc = props.document
+  if (!doc || marksBusy.value) return
+  marksBusy.value = true
+  marksError.value = ''
+  try {
+    const saved = await api<OutputMarks>(`/matters/${doc.matter_id}/output-marks`, 'PUT', {...markSettings})
+    Object.assign(markSettings, saved)
+    savedMarks = JSON.stringify(saved)
+    marksNotice.value = 'Output marks saved. Existing exports remain unchanged; rebuild to apply them.'
+    emit('modified')
+  } catch (err) { marksError.value = friendlyError(err) }
+  finally { marksBusy.value = false }
 }
 
 async function edit(action: 'rotate' | 'delete' | 'reorder', params: unknown, focusPage?: number): Promise<boolean> {
@@ -333,7 +514,7 @@ function deleteCurrent() {
   void edit('delete', { page_index: current.value - 1 })
 }
 function choosePlacement(event: MouseEvent) {
-  if (!textMode.value || props.disabled || editing.value || loading.value || !canvas.value) return
+  if (!textMode.value || linkPanelOpen.value || props.disabled || editing.value || loading.value || !canvas.value) return
   const rect = canvas.value.getBoundingClientRect()
   const x = (event.clientX - rect.left) / rect.width
   const y = (event.clientY - rect.top) / rect.height
@@ -482,8 +663,10 @@ async function applyReplacement() {
       <div class="page-editbar">
         <button class="text-tool" :disabled="editing || loading || disabled" title="Open page tools for this document" @click="emit('pageTools')"><FilePenLine :size="15"/> Page tools</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-expanded="bookmarkOpen" @click="bookmarkOpen=!bookmarkOpen;bookmarkTitle=document?.title+' — page '+current;bookmarkError=''"><BookMarked :size="15"/> Bookmark page<span v-if="pageBookmarks.length" class="page-bookmark-count">{{pageBookmarks.length}}</span></button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="textMode=!textMode; editTextMode=false; placement=null"><Type :size="15"/> Add text</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="editTextMode=!editTextMode; textMode=false; placement=null"><Pencil :size="15"/> Edit text</button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="textMode=!textMode; editTextMode=false; linkPanelOpen=false; marksPanelOpen=false; placement=null"><Type :size="15"/> Add text</button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="editTextMode=!editTextMode; textMode=false; linkPanelOpen=false; marksPanelOpen=false; placement=null"><Pencil :size="15"/> Edit text</button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="linkPanelOpen=!linkPanelOpen; textMode=false; editTextMode=false; marksPanelOpen=false; placement=null; linkDraft.target_document_id ||= document.id"><Link2 :size="15"/> Links<span v-if="currentPageLinks.length" class="page-bookmark-count">{{currentPageLinks.length}}</span></button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="marksPanelOpen" @click="marksPanelOpen=!marksPanelOpen; textMode=false; editTextMode=false; linkPanelOpen=false; placement=null"><Stamp :size="15"/> Output marks<span v-if="marksDirty" class="details-unsaved-indicator">Unsaved</span></button>
         <button class="text-tool" :disabled="editing || loading || disabled" title="Rotate this page 90° counterclockwise in the working PDF" @click="edit('rotate', {page_index:current-1,degrees:270})"><RotateCcw :size="16"/> Rotate left</button>
         <button class="text-tool" :disabled="editing || loading || disabled" title="Rotate this page 90° clockwise in the working PDF" @click="edit('rotate', {page_index:current-1,degrees:90})"><RotateCw :size="16"/> Rotate right</button>
         <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || current<=1" aria-label="Move page left" title="Move page left" @click="move(-1)"><ChevronLeft :size="16"/></button>
@@ -524,6 +707,39 @@ async function applyReplacement() {
         <p class="edit-status-slot" role="status">{{editNotice}}</p>
         <p v-if="!textRuns.length && !editNotice">No selectable horizontal text found on this page. Scanned text needs OCR and review.</p>
       </div></Transition>
+      <Transition name="soft"><div v-if="linkPanelOpen" class="review-link-panel" aria-label="Reviewed PDF links">
+        <div class="review-tool-heading"><strong>Reviewed link</strong><span>Drag a rectangle on this page, then choose its destination. Imported PDF actions remain excluded.</span></div>
+        <div class="review-link-grid">
+          <label>Readable label<input v-model="linkDraft.title" maxlength="200" :disabled="linksBusy || disabled" placeholder="Open supporting passage"/></label>
+          <label>Destination<select v-model="linkDraft.kind" :disabled="linksBusy || disabled"><option value="internal">Matter document page</option><option value="external">Web or email address</option></select></label>
+          <template v-if="linkDraft.kind==='internal'">
+            <label>Target document<select v-model="linkDraft.target_document_id" :disabled="linksBusy || disabled"><option value="">Choose document</option><option v-for="item in documents || []" :key="item.id" :value="item.id">{{item.title}}</option></select></label>
+            <label>Target page<input v-model.number="linkDraft.target_page" type="number" min="1" :max="(documents || []).find(item=>item.id===linkDraft.target_document_id)?.page_count || 1" :disabled="linksBusy || disabled"/></label>
+          </template>
+          <label v-else class="review-link-uri">HTTPS, HTTP or mailto address<input v-model="linkDraft.uri" maxlength="2000" :disabled="linksBusy || disabled" placeholder="https://example.org/source"/></label>
+        </div>
+        <div class="page-tool-actions"><span>{{linkRegion ? `${Math.round(linkRegion.width*100)}% × ${Math.round(linkRegion.height*100)}% region selected` : 'Drag a link region on the page'}}</span><button class="btn secondary small" :disabled="linksBusy || disabled || !linkRegion || !linkDraft.title.trim() || (linkDraft.kind==='internal' ? !linkDraft.target_document_id : !linkDraft.uri.trim())" @click="saveReviewedLink">{{linksBusy?'Saving…':'Save reviewed link'}}</button></div>
+        <p v-if="linkError" class="error-msg" role="alert">{{linkError}}</p><p v-if="linkNotice" class="review-tool-notice" role="status">{{linkNotice}}</p>
+        <div v-if="currentPageLinks.length" class="reviewed-link-list"><div v-for="item in currentPageLinks" :key="item.id" :class="['reviewed-link-row',{unresolved:!item.resolved}]"><button class="reviewed-link-open" :disabled="!item.resolved" @click="followReviewedLink(item)"><ExternalLink v-if="item.kind==='external'" :size="14"/><Link2 v-else :size="14"/><span><strong>{{item.title}}</strong><small>{{item.resolved ? (item.kind==='external' ? item.uri : 'Matter page target') : 'Needs review after a revision change'}}</small></span></button><button class="icon-btn small danger" aria-label="Remove reviewed link" :disabled="linksBusy" @click="removeReviewedLink(item.id)"><Trash2 :size="14"/></button></div></div>
+      </div></Transition>
+      <Transition name="soft"><div v-if="marksPanelOpen" class="output-marks-panel" aria-label="Output watermark and timestamp settings">
+        <div class="review-tool-heading"><strong>Output watermark and timestamp</strong><span>Previewed on the actual working page; inserted only into newly built source-document pages. Originals, working copies and completed exports stay unchanged.</span></div>
+        <div class="output-marks-grid">
+          <label class="checkbox-line"><input v-model="markSettings.watermark_enabled" type="checkbox"/><span><strong>Watermark</strong><small>Visible technical mark, not court approval.</small></span></label>
+          <label>Watermark text<input v-model="markSettings.watermark_text" maxlength="120" :disabled="!markSettings.watermark_enabled"/></label>
+          <label>Watermark position<select v-model="markSettings.watermark_position" :disabled="!markSettings.watermark_enabled"><option v-for="item in markPositions" :key="item[0]" :value="item[0]">{{item[1]}}</option></select></label>
+          <label>Watermark size<input v-model.number="markSettings.watermark_font_size" type="number" min="8" max="72" :disabled="!markSettings.watermark_enabled"/></label>
+          <label>Opacity<input v-model.number="markSettings.watermark_opacity" type="number" min=".05" max=".8" step=".05" :disabled="!markSettings.watermark_enabled"/></label>
+          <label class="checkbox-line"><input v-model="markSettings.timestamp_enabled" type="checkbox"/><span><strong>Build timestamp</strong><small>Uses the chosen timezone.</small></span></label>
+          <label>Timezone<input v-model="markSettings.timestamp_timezone" maxlength="64" :disabled="!markSettings.timestamp_enabled" placeholder="Asia/Kolkata"/></label>
+          <label>Format<select v-model="markSettings.timestamp_format" :disabled="!markSettings.timestamp_enabled"><option value="date">Date</option><option value="datetime">Date, time and zone</option></select></label>
+          <label>Timestamp position<select v-model="markSettings.timestamp_position" :disabled="!markSettings.timestamp_enabled"><option v-for="item in markPositions" :key="item[0]" :value="item[0]">{{item[1]}}</option></select></label>
+          <label>Timestamp prefix<input v-model="markSettings.timestamp_prefix" maxlength="40" :disabled="!markSettings.timestamp_enabled"/></label>
+        </div>
+        <div v-if="markPreview.some(item=>item.overlaps_content)" class="notice amber"><span>One or more preview boxes intersect detectable page content. Choose another position or accept only after visual review; signatures and seals cannot be reliably detected.</span></div>
+        <div class="page-tool-actions"><span>Preview time is current; the export records one fixed build time.</span><button class="btn secondary small" :disabled="marksBusy || disabled || !marksDirty" @click="saveMarks">{{marksBusy?'Saving…':'Save output marks'}}</button></div>
+        <p v-if="marksError" class="error-msg" role="alert">{{marksError}}</p><p v-if="marksNotice" class="review-tool-notice" role="status">{{marksNotice}}</p>
+      </div></Transition>
       <Transition name="soft"><div v-if="total > 0 && showThumbnails" ref="thumbnailWrap" class="thumbnail-strip" aria-label="Page thumbnails">
         <span class="thumbnail-hint">Drag to reorder working-copy pages</span>
         <button v-for="number in thumbnailPages" :key="number" class="thumbnail-button" :class="{selected:number===current,dragging:draggingPage===number,'drop-target':dropTargetPage===number}" :aria-label="'Go to page '+number" :draggable="!disabled && !editing" @dragstart="startPageDrag($event,number)" @dragend="draggingPage=null;dropTargetPage=null" @dragover="overPage($event,number)" @drop.prevent="dropPage($event,number)" @click="current=number"><canvas :data-page="number"></canvas><span>{{number}}</span></button>
@@ -531,10 +747,13 @@ async function applyReplacement() {
       <div ref="canvasWrap" class="canvas-scroll" :aria-busy="loading || editing">
         <div v-if="(loading || editing) && !(replacingText && editSnapshot)" class="preview-status"><LoaderCircle :size="18" class="spin"/> {{ editing ? 'Updating PDF…' : 'Loading PDF…' }}</div>
         <div v-if="viewerError" class="preview-status error-msg">{{ viewerError }}</div>
-        <div class="pdf-placement-surface" :class="{'placing-text':textMode && !disabled, 'is-busy':(loading || editing) && !replacingText, 'is-edit-refreshing':replacingText, 'is-switching':switchingPage, 'is-rotating':rotatingPage}" @click="choosePlacement">
+        <div class="pdf-placement-surface" :class="{'placing-text':textMode && !disabled, 'drawing-link':linkPanelOpen && !disabled, 'is-busy':(loading || editing) && !replacingText, 'is-edit-refreshing':replacingText, 'is-switching':switchingPage, 'is-rotating':rotatingPage}" @click="choosePlacement" @pointerdown="beginLinkRegion" @pointermove="updateLinkRegion" @pointerup="finishLinkRegion" @pointercancel="finishLinkRegion">
           <canvas ref="canvas" class="pdf-paper" :style="{visibility: viewerError ? 'hidden' : 'visible'}" />
           <img v-if="editSnapshot" class="pdf-edit-snapshot" :class="{'is-fading':editSnapshotFading}" :src="editSnapshot" alt="" aria-hidden="true" />
           <span v-if="placement && placement.page===current" class="pdf-placement-marker" :style="{left:`${placement.x*100}%`,top:`${placement.y*100}%`}" aria-hidden="true"></span>
+          <button v-for="item in currentPageLinks" :key="item.id" type="button" :class="['pdf-reviewed-link',{unresolved:!item.resolved}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`}" :title="item.resolved ? item.title : item.title+' — needs review'" @pointerdown.stop @click.stop="followReviewedLink(item)"><span>{{item.title}}</span></button>
+          <span v-if="linkPanelOpen && linkRegion" class="pdf-link-region" :style="{left:`${linkRegion.x*100}%`,top:`${linkRegion.y*100}%`,width:`${linkRegion.width*100}%`,height:`${linkRegion.height*100}%`}" aria-hidden="true"></span>
+          <span v-for="item in markPreview" :key="item.kind" :class="['pdf-output-mark-preview',item.kind,{overlap:item.overlaps_content}]" :style="{left:`${item.relative_rect[0]*100}%`,top:`${item.relative_rect[1]*100}%`,width:`${item.relative_rect[2]*100}%`,height:`${item.relative_rect[3]*100}%`,fontSize:`${item.font_size*pageZoom}px`,opacity:item.opacity,textAlign:item.position.endsWith('left')?'left':item.position.endsWith('right')?'right':'center'}"><span>{{item.text}}</span></span>
           <template v-if="editTextMode">
             <button v-for="run in textRuns" :key="run.index" class="pdf-text-run" :class="{selected:selectedRun?.index===run.index, 'move-target':movingRun?.index===run.index}"
               :style="{left:`${run.relative_bbox[0]*100}%`,top:`${(run.relative_bbox[1]+(movingRun?.index===run.index ? verticalOffset : 0))*100}%`,width:`${(run.relative_bbox[2]-run.relative_bbox[0])*100}%`,height:`${(run.relative_bbox[3]-run.relative_bbox[1])*100}%`}"

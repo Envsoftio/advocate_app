@@ -2,6 +2,8 @@ from typing import Literal
 from datetime import date
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 import re
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 DocKind = Literal['petition', 'affidavit', 'order', 'annexure', 'application', 'evidence', 'other']
 DocumentDateStatus = Literal['unknown', 'ambiguous', 'suggested', 'confirmed']
@@ -264,6 +266,92 @@ class ManualBookmark(BaseModel):
 
 class ManualBookmarksUpdate(BaseModel):
     entries: list[ManualBookmark] = Field(max_length=500)
+
+
+class ReviewedLink(BaseModel):
+    """A user-reviewed PDF action anchored to a specific working revision."""
+    model_config = ConfigDict(extra='forbid')
+    id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    title: str = Field(min_length=1, max_length=200)
+    source_document_id: str
+    source_page_index: int = Field(ge=0)
+    source_revision: int = Field(ge=1)
+    rect_x: float = Field(ge=0, lt=1)
+    rect_y: float = Field(ge=0, lt=1)
+    rect_width: float = Field(gt=0, le=1)
+    rect_height: float = Field(gt=0, le=1)
+    kind: Literal['internal', 'external']
+    target_document_id: str | None = None
+    target_page_index: int | None = Field(default=None, ge=0)
+    target_revision: int | None = Field(default=None, ge=1)
+    uri: str = Field(default='', max_length=2000)
+
+    @model_validator(mode='after')
+    def validate_target(self):
+        if self.rect_x + self.rect_width > 1 or self.rect_y + self.rect_height > 1:
+            raise ValueError('Link region must stay within the displayed page')
+        if self.kind == 'internal':
+            if (not self.target_document_id or self.target_page_index is None or
+                    self.target_revision is None or self.uri):
+                raise ValueError('Internal links require one current document page and no URL')
+        else:
+            if (self.target_document_id is not None or self.target_page_index is not None or
+                    self.target_revision is not None):
+                raise ValueError('External links cannot also have an internal target')
+            parsed = urlparse(self.uri)
+            if parsed.scheme.lower() not in ('https', 'http', 'mailto'):
+                raise ValueError('External links support only https, http or mailto destinations')
+            if parsed.scheme.lower() in ('https', 'http') and not parsed.netloc:
+                raise ValueError('External web links require a host name')
+            if parsed.scheme.lower() == 'mailto' and not parsed.path:
+                raise ValueError('Mail links require an address')
+        return self
+
+
+class ReviewedLinksUpdate(BaseModel):
+    entries: list[ReviewedLink] = Field(max_length=500)
+
+
+MarkPosition = Literal['top_left', 'top_center', 'top_right', 'center',
+                       'bottom_left', 'bottom_center', 'bottom_right']
+
+
+class OutputMarks(BaseModel):
+    """Matter-level technical output marks. This is not a court-rule preset."""
+    model_config = ConfigDict(extra='forbid')
+    watermark_enabled: bool = False
+    watermark_text: str = Field(default='DRAFT', max_length=120)
+    watermark_position: MarkPosition = 'center'
+    watermark_font_size: float = Field(default=32, ge=8, le=72)
+    watermark_opacity: float = Field(default=.16, ge=.05, le=.8)
+    timestamp_enabled: bool = False
+    timestamp_format: Literal['date', 'datetime'] = 'datetime'
+    timestamp_timezone: str = Field(default='UTC', min_length=1, max_length=64)
+    timestamp_position: MarkPosition = 'bottom_right'
+    timestamp_font_size: float = Field(default=8, ge=6, le=24)
+    timestamp_prefix: str = Field(default='Built', max_length=40)
+
+    @field_validator('watermark_text', 'timestamp_prefix')
+    @classmethod
+    def printable_ascii(cls, value: str) -> str:
+        if any(ord(char) < 32 or ord(char) > 126 for char in value):
+            raise ValueError('Output marks currently support printable ASCII only')
+        return value
+
+    @field_validator('timestamp_timezone')
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError('Use an installed IANA timezone such as UTC or Asia/Kolkata') from exc
+        return value
+
+    @model_validator(mode='after')
+    def require_mark_text(self):
+        if self.watermark_enabled and not self.watermark_text.strip():
+            raise ValueError('Enabled watermark requires visible text')
+        return self
 
 
 class CropPages(SignatureRiskAcknowledgement):

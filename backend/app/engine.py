@@ -9,6 +9,7 @@ import io
 import json
 import math
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 import tempfile
@@ -16,7 +17,7 @@ import zipfile
 
 import pymupdf
 
-from .pdf_ops import ProcessingError, validate_pdf
+from .pdf_ops import ProcessingError, validate_pdf, apply_output_marks
 from .file_io import open_pdf, read_bytes, save_pdf, size as file_size, write_bytes
 from .storage import Store, utcnow
 from .signatures import (CERTIFICATE_SIGNATURE_DETECTED,
@@ -28,6 +29,7 @@ A4_W, A4_H = 595, 842
 EXPORT_INTERACTIVE_CONTENT_POLICY = {
     'source_annotations': 'omitted',
     'source_links': 'omitted',
+    'reviewed_user_links': 'retained when both revision-anchored endpoints resolve',
     'generated_index_links': 'retained',
 }
 
@@ -286,8 +288,66 @@ def validate_navigation(path: Path, pages: int, toc: list, links: dict[int, list
                 raise ProcessingError('Written PDF index destinations differ from the deterministic page map')
 
 
+def _reviewed_link_rect(page: pymupdf.Page, link: dict) -> pymupdf.Rect:
+    displayed = pymupdf.Rect(
+        page.rect.x0 + page.rect.width * link['rect_x'],
+        page.rect.y0 + page.rect.height * link['rect_y'],
+        page.rect.x0 + page.rect.width * (link['rect_x'] + link['rect_width']),
+        page.rect.y0 + page.rect.height * (link['rect_y'] + link['rect_height']))
+    return displayed * page.derotation_matrix
+
+
+def insert_reviewed_links(output: pymupdf.Document, reviewed_links: list[dict],
+                          document_starts: dict[str, int]) -> dict:
+    """Resolve only app-reviewed actions; imported PDF actions remain omitted."""
+    expected_goto: dict[int, list[int]] = {}
+    expected_uri: dict[int, list[str]] = {}
+    retained = omitted_cross_output = unresolved = 0
+    for link in reviewed_links:
+        source_start = document_starts.get(link['source_document_id'])
+        if not link.get('resolved'):
+            unresolved += 1
+            continue
+        if source_start is None:
+            continue
+        source_page_index = source_start + link['source_page_index']
+        if not 0 <= source_page_index < output.page_count:
+            raise ProcessingError('Reviewed link source differs from the deterministic page map')
+        page = output[source_page_index]
+        action = {'from': _reviewed_link_rect(page, link)}
+        if link['kind'] == 'external':
+            action.update(kind=pymupdf.LINK_URI, uri=link['uri'])
+            expected_uri.setdefault(source_page_index, []).append(link['uri'])
+        else:
+            target_start = document_starts.get(link['target_document_id'])
+            if target_start is None:
+                omitted_cross_output += 1
+                continue
+            destination = target_start + link['target_page_index']
+            action.update(kind=pymupdf.LINK_GOTO, page=destination,
+                          to=pymupdf.Point(0, 0))
+            expected_goto.setdefault(source_page_index, []).append(destination)
+        page.insert_link(action)
+        retained += 1
+    return {'retained': retained, 'omitted_cross_output': omitted_cross_output,
+            'unresolved': unresolved, 'expected_goto': expected_goto,
+            'expected_uri': expected_uri}
+
+
+def validate_reviewed_links(path: Path, expected_uri: dict[int, list[str]]) -> None:
+    with open_pdf(path) as pdf:
+        for index, page in enumerate(pdf):
+            actual = [link.get('uri') for link in page.get_links()
+                      if link['kind'] == pymupdf.LINK_URI]
+            if actual != expected_uri.get(index, []):
+                raise ProcessingError('Written PDF external links differ from reviewed link inputs')
+
+
 def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: int,
-                  cancelled=None, bookmarks: list[dict] | None = None):
+                  cancelled=None, bookmarks: list[dict] | None = None,
+                  reviewed_links: list[dict] | None = None,
+                  output_marks: dict | None = None,
+                  mark_at: datetime | str | None = None):
     """Create an indexed, paginated, bookmarked volume and return page-map records."""
     rows, index_count = volume_rows(documents, volume_no)
 
@@ -349,6 +409,19 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                                     str(i + 1), fontsize=9, align=pymupdf.TEXT_ALIGN_CENTER,
                                     color=(.24,.28,.33))
 
+        mark_count = mark_overlap_count = 0
+        document_starts = {row['id']: row['start_page'] - 1 for row in rows}
+        if output_marks and (output_marks.get('watermark_enabled') or
+                             output_marks.get('timestamp_enabled')):
+            for row, document in zip(rows, documents):
+                for source_page in range(document['page_count']):
+                    if cancelled and cancelled():
+                        raise ProcessingError('Operation cancelled')
+                    results = apply_output_marks(
+                        output[row['start_page'] - 1 + source_page], output_marks, mark_at)
+                    mark_count += len(results)
+                    mark_overlap_count += sum(bool(item['overlaps_content']) for item in results)
+
         # Link each index row to its true 0-based destination.
         for i in range(index_count):
             page = output[i]
@@ -358,6 +431,8 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                 page.insert_link({'kind': pymupdf.LINK_GOTO,
                                   'from': pymupdf.Rect(90, ypos - 14, 545, ypos + 8),
                                   'page': row['start_page'] - 1, 'to': pymupdf.Point(0, 0)})
+        reviewed_summary = insert_reviewed_links(
+            output, reviewed_links or [], document_starts)
         toc.extend(manual_toc(bookmarks or [], {row['id']: row['start_page'] for row in rows}))
         output.set_toc(toc)
         output.set_metadata({'title': f'{matter["name"]} - Volume {volume_no}',
@@ -368,14 +443,21 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
     expected_links = {}
     for index, row in enumerate(rows):
         expected_links.setdefault(index // INDEX_ROWS_PER_PAGE, []).append(row['start_page'] - 1)
+    for page_index, destinations in reviewed_summary['expected_goto'].items():
+        expected_links.setdefault(page_index, []).extend(destinations)
     validate_navigation(path, index_count + sum(d['page_count'] for d in documents), toc, expected_links)
+    validate_reviewed_links(path, reviewed_summary['expected_uri'])
 
     with open_pdf(path) as check:
         if check.page_count > matter['max_pages_per_volume']:
             raise ProcessingError('Internal error: resulting volume exceeded page cap')
         if len(check.get_toc()) < 2 or sum(len(check[i].get_links()) for i in range(index_count)) != len(rows):
             raise ProcessingError('Internal index/bookmark validation failed')
-    return rows, index_count
+    return rows, index_count, {
+        'reviewed_links': {key: reviewed_summary[key] for key in
+                           ('retained', 'omitted_cross_output', 'unresolved')},
+        'marks': {'inserted': mark_count, 'overlaps_content': mark_overlap_count},
+    }
 
 
 def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancelled,
@@ -390,6 +472,10 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
     if signature_risks and not signature_acknowledged:
         raise ProcessingError('Signature-risk acknowledgment is required before building transformed bundle PDFs')
     bookmarks = store.list_manual_bookmarks(matter_id)
+    reviewed_links = store.list_reviewed_links(matter_id)
+    output_marks = store.get_output_marks(matter_id)
+    mark_at = datetime.now(timezone.utc)
+    mark_at_iso = mark_at.isoformat(timespec='seconds')
     progress(5, 'Checking source documents')
     problems = preflight(store, matter_id, profile)
     if any(x['severity'] == 'error' for x in problems):
@@ -401,6 +487,12 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
     bookmark_inputs = [{key: item[key] for key in ('id', 'title', 'document_id',
                         'page_index', 'target_revision', 'parent_id', 'position')}
                        for item in bookmarks]
+    reviewed_link_inputs = [{key: item[key] for key in ('id', 'title',
+                            'source_document_id', 'source_page_index', 'source_revision',
+                            'rect_x', 'rect_y', 'rect_width', 'rect_height', 'kind',
+                            'target_document_id', 'target_page_index', 'target_revision',
+                            'uri', 'position')} | {'resolved': item['resolved']}
+                            for item in reviewed_links]
     input_revisions = [{'document_id': d['id'], 'revision': d['revision'],
                         'working_sha256': store.sha256(store.working_path(d))}
                        for d in documents]
@@ -431,9 +523,11 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                 raise ProcessingError('Operation cancelled')
             progress(10 + int((vno - 1) / len(plans) * 55), f'Building volume {vno} of {len(plans)}')
             filename = f'volume-{vno:02}.pdf'
-            rows, index_count = render_volume(group, matter, staging / filename, vno,
-                                               cancelled, bookmarks)
-            volume_rows.append(dict(filename=filename, rows=rows, index_count=index_count))
+            rows, index_count, content_summary = render_volume(
+                group, matter, staging / filename, vno, cancelled, bookmarks,
+                reviewed_links, output_marks, mark_at)
+            volume_rows.append(dict(filename=filename, rows=rows, index_count=index_count,
+                                    content_summary=content_summary))
             all_rows.extend(rows)
 
         progress(70, 'Creating combined bookmarked PDF')
@@ -442,6 +536,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             global_toc = []
             global_links = {}
             combined_destinations = {}
+            combined_document_starts = {}
             offset = 0
             for vno, volume in enumerate(volume_rows, start=1):
                 with open_pdf(staging / volume['filename']) as part:
@@ -458,6 +553,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                 for rno, row in enumerate(volume['rows']):
                     destination = offset + row['start_page'] - 1
                     combined_destinations[row['id']] = destination + 1
+                    combined_document_starts[row['id']] = destination
                     if current_part != row['part']:
                         current_part = row['part']
                         global_toc.append([2, f'Part {current_part}', destination + 1])
@@ -469,6 +565,10 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                         'from': pymupdf.Rect(90, ypos-14, 545, ypos+8),
                         'page': destination, 'to': pymupdf.Point(0, 0)})
                 offset += count
+            combined_link_summary = insert_reviewed_links(
+                combined, reviewed_links, combined_document_starts)
+            for page_index, destinations in combined_link_summary['expected_goto'].items():
+                global_links.setdefault(page_index, []).extend(destinations)
             global_toc.extend(manual_toc(bookmarks, combined_destinations))
             combined.set_toc(global_toc)
             combined.set_metadata({'title': f'{matter["name"]} - Combined Filing Bundle',
@@ -477,6 +577,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             save_pdf(combined, combined_file, garbage=4, deflate=True)
 
         validate_navigation(combined_file, offset, global_toc, global_links)
+        validate_reviewed_links(combined_file, combined_link_summary['expected_uri'])
 
         progress(83, 'Checking bookmarks and generating index CSV')
         with open_pdf(combined_file) as final:
@@ -501,6 +602,24 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             problems.append(dict(severity='warning', code='UNRESOLVED_MANUAL_BOOKMARKS',
                                  document_id=None,
                                  message=f'{len(unresolved)} manual bookmark(s) target an older revision, removed document, or missing page and were omitted from this export. Resolve them before use.'))
+        unresolved_links = [link for link in reviewed_links if not link['resolved']]
+        if unresolved_links:
+            problems.append(dict(severity='warning', code='UNRESOLVED_REVIEWED_LINKS',
+                                 document_id=None,
+                                 message=f'{len(unresolved_links)} reviewed link(s) target an older revision, removed document, or missing page and were omitted from this export. Resolve them before use.'))
+        cross_volume_omissions = sum(
+            volume['content_summary']['reviewed_links']['omitted_cross_output']
+            for volume in volume_rows)
+        if cross_volume_omissions:
+            problems.append(dict(severity='warning', code='CROSS_VOLUME_LINKS_COMBINED_ONLY',
+                                 document_id=None,
+                                 message=f'{cross_volume_omissions} reviewed internal link occurrence(s) crossed a volume boundary. They are active in combined.pdf and omitted from standalone volumes to avoid broken destinations.'))
+        mark_overlap_count = sum(
+            volume['content_summary']['marks']['overlaps_content'] for volume in volume_rows)
+        if mark_overlap_count:
+            problems.append(dict(severity='warning', code='OUTPUT_MARK_OVERLAP',
+                                 document_id=None,
+                                 message=f'{mark_overlap_count} output mark placement(s) intersect detectable text, image, drawing, link or generated page-number content. Review every marked page; signatures and seals are not reliably detectable.'))
         problems.append(dict(severity='info', code='NOT_A_FILING_APPROVAL', document_id=None,
                              message='Technical checks passed or reported. Filing acceptance, legal validity and registry objections need human review.'))
         report = {'matter_id': matter_id, 'export_id': export_id, 'profile': profile['id'],
@@ -511,6 +630,15 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'signature_risk_acknowledged': bool(signature_risks and signature_acknowledged),
                   'build_input_digest': build_input_digest,
                   'build_settings': build_settings, 'manual_bookmark_inputs': bookmark_inputs,
+                  'reviewed_link_inputs': reviewed_link_inputs,
+                  'output_marks': output_marks, 'output_mark_timestamp': mark_at_iso,
+                  'reviewed_link_summary': {
+                      'combined_retained': combined_link_summary['retained'],
+                      'standalone_cross_volume_omissions': cross_volume_omissions,
+                      'unresolved': len(unresolved_links)},
+                  'output_mark_summary': {'overlaps_content': mark_overlap_count,
+                      'inserted': sum(volume['content_summary']['marks']['inserted']
+                                      for volume in volume_rows)},
                   'interactive_content_policy': EXPORT_INTERACTIVE_CONTENT_POLICY,
                   'total_input_documents': len(documents), 'volume_count': len(plans),
                   'combined_pages': combined_pages, 'combined_bytes': file_bytes,
@@ -522,7 +650,9 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'Original evidence and signed files must be reviewed independently.\n'
                   'Working-copy PDF annotation objects and link actions are omitted from volume and combined PDFs.\n'
                   'Flattened marks already in page content remain visible.\n'
-                  'Generated index links and bookmarks are retained. See validation-report.json for affected documents.\n'
+                  'Generated index links, bookmarks and explicitly reviewed CourtBundle links are retained when their revision-anchored targets resolve.\n'
+                  'Cross-volume reviewed links are available only in combined.pdf; configured output marks apply to source document pages, not index pages.\n'
+                  'See validation-report.json for omissions, mark settings and detectable overlap warnings.\n'
                   'Every PDF page number in an index is the 1-based page position WITHIN that volume.\n'
                   'combined.pdf concatenates all generated volumes, including their separate indexes.\n')
         write_bytes(staging / 'READ_ME_FIRST.txt', readme.encode('utf-8'))
@@ -550,6 +680,8 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                                signature_risk_acknowledged=bool(signature_risks and signature_acknowledged),
                                build_input_digest=build_input_digest,
                                build_settings=build_settings, manual_bookmark_inputs=bookmark_inputs,
+                               reviewed_link_inputs=reviewed_link_inputs,
+                               output_marks=output_marks, output_mark_timestamp=mark_at_iso,
                                interactive_content_policy=EXPORT_INTERACTIVE_CONTENT_POLICY,
                                files=[{'name':name,'bytes':file_size(staging/name),
                                        'sha256':store.sha256(staging/name)} for name in filenames],

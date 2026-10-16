@@ -58,6 +58,48 @@ export interface ManualBookmark {
   position: number
   resolved: boolean
 }
+export interface ReviewedLink {
+  id: string
+  title: string
+  source_document_id: string
+  source_page_index: number
+  source_revision: number
+  rect_x: number
+  rect_y: number
+  rect_width: number
+  rect_height: number
+  kind: 'internal' | 'external'
+  target_document_id: string | null
+  target_page_index: number | null
+  target_revision: number | null
+  uri: string
+  position: number
+  resolved: boolean
+}
+export type MarkPosition = 'top_left' | 'top_center' | 'top_right' | 'center' |
+  'bottom_left' | 'bottom_center' | 'bottom_right'
+export interface OutputMarks {
+  watermark_enabled: boolean
+  watermark_text: string
+  watermark_position: MarkPosition
+  watermark_font_size: number
+  watermark_opacity: number
+  timestamp_enabled: boolean
+  timestamp_format: 'date' | 'datetime'
+  timestamp_timezone: string
+  timestamp_position: MarkPosition
+  timestamp_font_size: number
+  timestamp_prefix: string
+}
+export interface OutputMarkPreview {
+  kind: 'watermark' | 'timestamp'
+  text: string
+  font_size: number
+  position: MarkPosition
+  opacity: number
+  overlaps_content: boolean
+  relative_rect: [number, number, number, number]
+}
 export interface PageSearchMatch {
   document_id: string
   title: string

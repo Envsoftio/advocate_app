@@ -317,6 +317,19 @@ async function openOfficialReference(url: string) {
     issue(err)
   }
 }
+async function openReviewedExternalLink(url: string) {
+  let parsed: URL
+  try { parsed = new URL(url) }
+  catch { notify('This reviewed external link is invalid.', 'error'); return }
+  if (!['https:', 'http:', 'mailto:'].includes(parsed.protocol)) {
+    notify('Blocked a reviewed link with an unsafe URL scheme.', 'error')
+    return
+  }
+  try {
+    if (inTauri()) await openUrl(parsed.href)
+    else window.open(parsed.href, '_blank', 'noopener,noreferrer')
+  } catch (err) { issue(err) }
+}
 
 async function init() {
   if (connecting) return
@@ -929,7 +942,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             <div class="docs-help"><LockKeyhole :size="14"/> Original files are never overwritten.</div>
           </section>
 
-          <section class="panel preview-panel"><PdfViewer :document="selectedDoc" :disabled="busy || isJobActive || documentDirty" :details-open="detailsOpen" :details-dirty="documentDirty" :document-position="selectedDocumentPosition" :document-count="docs.length" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @move-document="moveDocument" @archive-document="deleteDocument"/></section>
+          <section class="panel preview-panel"><PdfViewer :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :details-open="detailsOpen" :details-dirty="documentDirty" :document-position="selectedDocumentPosition" :document-count="docs.length" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @move-document="moveDocument" @archive-document="deleteDocument" @open-internal-link="openSearchMatch" @open-external-link="openReviewedExternalLink"/></section>
 
           <Transition name="inspector">
           <section v-if="detailsOpen && selectedDoc" id="document-details-panel" class="panel inspector-panel" aria-label="Document details">
@@ -977,7 +990,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <label class="checkbox-line"><input v-model="matterEditor.keep_groups_intact" type="checkbox"/><div><strong>Keep document groups together</strong><span>Grouped adjacent documents must fit in the same volume.</span></div></label>
                 <button class="btn secondary" :disabled="!settingsDirty || isJobActive" @click="savePolicy"><Check :size="16"/> Save bundle settings</button>
                 <div class="checklist"><div><CheckCircle2 :size="17"/> Generate index pages in every volume</div><div><CheckCircle2 :size="17"/> Include clickable index links and PDF bookmarks</div><div><CheckCircle2 :size="17"/> Generate combined PDF + separate volumes</div><div><CheckCircle2 :size="17"/> Archive in ZIP with validation report</div></div>
-                <div class="notice amber"><ShieldAlert :size="18"/><span>Working-copy PDF annotation objects and link actions are omitted from volume and combined PDFs; flattened marks in page content remain. Generated index links and bookmarks remain. Review validation warnings for affected documents; signature integrity and filing acceptance are not certified.</span></div>
+                <div class="notice amber"><ShieldAlert :size="18"/><span>Working-copy PDF annotation objects and imported/source link actions are omitted from volume and combined PDFs; flattened marks remain. Generated index links, bookmarks and explicitly reviewed CourtBundle links are retained only when their revision-anchored targets resolve. Cross-volume reviewed links work in the combined PDF and are omitted from standalone volumes. Review all warnings; signature integrity and filing acceptance are not certified.</span></div>
                 <div v-if="signatureRiskDocs.length" class="notice amber"><ShieldAlert :size="18"/><span><strong>{{signatureRiskDocs.length}} signature-risk document(s) require acknowledgment before build.</strong><small>Bundle generation rewrites pages and cannot preserve certificate protections. Imported originals remain unchanged; no signature validity is asserted.</small></span></div>
                 <p v-if="settingsDirty" role="status" class="hint">Unsaved bundle settings. Building saves these settings first.</p>
                 <button class="btn primary large" :disabled="!docs.length || isJobActive" @click="startBuild"><Layers3 :size="19"/> {{isJobActive?'Processing…':'Build filing bundle'}}</button>

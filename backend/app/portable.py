@@ -13,11 +13,12 @@ from pathlib import Path, PurePosixPath
 from .storage import Store, new_id, utcnow
 from .file_io import protected, read_bytes, size as file_size, write_bytes
 from .vault import encrypted_sink
-from .schemas import MatterCreate, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate, ManualBookmark
+from .schemas import (MatterCreate, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate,
+                      ManualBookmark, ReviewedLink, OutputMarks)
 from .engine import load_profiles
 from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 8
+PACKAGE_VERSION = 9
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -96,6 +97,12 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
                 'manual_bookmarks': [{key: item[key] for key in ('id', 'title',
                     'document_id', 'page_index', 'target_revision', 'parent_id', 'position')}
                     for item in store.list_manual_bookmarks(matter_id)],
+                'reviewed_links': [{key: item[key] for key in ('id', 'title',
+                    'source_document_id', 'source_page_index', 'source_revision',
+                    'rect_x', 'rect_y', 'rect_width', 'rect_height', 'kind',
+                    'target_document_id', 'target_page_index', 'target_revision',
+                    'uri', 'position')} for item in store.list_reviewed_links(matter_id)],
+                'output_marks': store.get_output_marks(matter_id),
                 'files': files}
     destination.parent.mkdir(parents=True, exist_ok=True)
     candidate = destination.with_name(destination.name + '.partial-' + new_id())
@@ -134,7 +141,7 @@ def restore_package(store: Store, package: Path | bytes) -> dict:
             if archive.getinfo('manifest.json').file_size > 10 * 1024 * 1024:
                 raise PortableMatterError('Manifest is too large')
             manifest = json.loads(archive.read('manifest.json'))
-            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, 2, 3, 4, 5, 6, 7, PACKAGE_VERSION):
+            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, 2, 3, 4, 5, 6, 7, 8, PACKAGE_VERSION):
                 raise PortableMatterError('Unsupported portable matter package')
             files = manifest.get('files')
             if not isinstance(files, list):
@@ -255,6 +262,32 @@ def restore_package(store: Store, package: Path | bytes) -> dict:
                      item['parent_id'] not in bookmark_ids[:index])):
                 raise PortableMatterError('Invalid manual bookmark target or hierarchy')
         bookmark_id_map = {old: new_id() for old in bookmark_ids}
+        links = manifest.get('reviewed_links', [])
+        marks = manifest.get('output_marks', Store.default_output_marks())
+        if manifest['version'] >= 9 and ('reviewed_links' not in manifest or
+                                         'output_marks' not in manifest):
+            raise PortableMatterError('Missing PDF-04 settings in v9 package')
+        if not isinstance(links, list) or len(links) > 500:
+            raise PortableMatterError('Invalid reviewed links')
+        link_ids = [item.get('id') for item in links]
+        if len(link_ids) != len(set(link_ids)):
+            raise PortableMatterError('Duplicate reviewed link IDs')
+        for index, item in enumerate(links):
+            ReviewedLink.model_validate({key: item.get(key) for key in (
+                'id', 'title', 'source_document_id', 'source_page_index', 'source_revision',
+                'rect_x', 'rect_y', 'rect_width', 'rect_height', 'kind',
+                'target_document_id', 'target_page_index', 'target_revision', 'uri')})
+            if (item.get('position') != index or item['source_document_id'] not in old_ids or
+                    item['source_page_index'] >= revision_pages.get(
+                        (item['source_document_id'], item['source_revision']), 0)):
+                raise PortableMatterError('Invalid reviewed link source')
+            if item['kind'] == 'internal' and (
+                    item['target_document_id'] not in old_ids or
+                    item['target_page_index'] >= revision_pages.get(
+                        (item['target_document_id'], item['target_revision']), 0)):
+                raise PortableMatterError('Invalid reviewed link target')
+        validated_marks = OutputMarks.model_validate(marks).model_dump()
+        link_id_map = {old: new_id() for old in link_ids}
         os.replace(stage, final)
         with store.connect() as con:
             con.execute('BEGIN IMMEDIATE')
@@ -294,6 +327,22 @@ def restore_package(store: Store, package: Path | bytes) -> dict:
                     (bookmark_id_map[item['id']], matter_id, item['title'],
                      id_map[item['document_id']], item['page_index'], item['target_revision'],
                      bookmark_id_map.get(item['parent_id']), item['position']))
+            for item in links:
+                con.execute('''INSERT INTO reviewed_links
+                    (id,matter_id,title,source_document_id,source_page_index,source_revision,
+                    rect_x,rect_y,rect_width,rect_height,kind,target_document_id,
+                    target_page_index,target_revision,uri,position)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    (link_id_map[item['id']], matter_id, item['title'],
+                     id_map[item['source_document_id']], item['source_page_index'],
+                     item['source_revision'], item['rect_x'], item['rect_y'],
+                     item['rect_width'], item['rect_height'], item['kind'],
+                     id_map.get(item['target_document_id']), item['target_page_index'],
+                     item['target_revision'], item['uri'], item['position']))
+            if manifest['version'] >= 9:
+                con.execute('''INSERT INTO output_marks
+                    (matter_id,payload_json,updated_at) VALUES (?,?,?)''',
+                    (matter_id, json.dumps(validated_marks, sort_keys=True), utcnow()))
             store._audit(con, 'matter_restored_from_package', matter_id)
     except (KeyError, TypeError, ValueError, zipfile.BadZipFile, sqlite3.Error, OSError) as exc:
         shutil.rmtree(stage, ignore_errors=True)

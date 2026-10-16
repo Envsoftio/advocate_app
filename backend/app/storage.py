@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 11:
+            if version > 12:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -192,6 +192,23 @@ class Store:
                 parent_id TEXT, position INTEGER NOT NULL
             )''')
             con.execute('CREATE INDEX IF NOT EXISTS idx_bookmarks_matter ON manual_bookmarks(matter_id,position)')
+            con.execute('''CREATE TABLE IF NOT EXISTS reviewed_links (
+                id TEXT PRIMARY KEY, matter_id TEXT NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                source_document_id TEXT NOT NULL REFERENCES documents(id),
+                source_page_index INTEGER NOT NULL, source_revision INTEGER NOT NULL,
+                rect_x REAL NOT NULL, rect_y REAL NOT NULL,
+                rect_width REAL NOT NULL, rect_height REAL NOT NULL,
+                kind TEXT NOT NULL,
+                target_document_id TEXT REFERENCES documents(id),
+                target_page_index INTEGER, target_revision INTEGER,
+                uri TEXT NOT NULL, position INTEGER NOT NULL
+            )''')
+            con.execute('CREATE INDEX IF NOT EXISTS idx_reviewed_links_matter ON reviewed_links(matter_id,position)')
+            con.execute('''CREATE TABLE IF NOT EXISTS output_marks (
+                matter_id TEXT PRIMARY KEY REFERENCES matters(id) ON DELETE CASCADE,
+                payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
+            )''')
             if version < 3:
                 matter_columns = {row['name'] for row in con.execute('PRAGMA table_info(matters)')}
                 document_columns = {row['name'] for row in con.execute('PRAGMA table_info(documents)')}
@@ -239,6 +256,8 @@ class Store:
                     if column not in document_columns:
                         con.execute(f'ALTER TABLE documents ADD COLUMN {column} {definition}')
                 con.execute('PRAGMA user_version=11')
+            if version < 12:
+                con.execute('PRAGMA user_version=12')
 
     def matter_dir(self, matter_id: str) -> Path:
         # Never accept caller-controlled paths. All ids must have been found in DB.
@@ -466,6 +485,140 @@ class Store:
             self._audit(con, 'manual_bookmarks_updated', matter_id)
         self.touch(matter_id)
         return self.list_manual_bookmarks(matter_id)
+
+    def list_reviewed_links(self, matter_id: str) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute('''SELECT l.*,
+                source.revision AS source_current_revision,
+                source.page_count AS source_page_count,
+                source.archived_at AS source_archived_at,
+                target.revision AS target_current_revision,
+                target.page_count AS target_page_count,
+                target.archived_at AS target_archived_at
+                FROM reviewed_links l
+                LEFT JOIN documents source ON source.id=l.source_document_id
+                LEFT JOIN documents target ON target.id=l.target_document_id
+                WHERE l.matter_id=? ORDER BY l.position''', (matter_id,)).fetchall()
+        entries = []
+        fields = ('id', 'title', 'source_document_id', 'source_page_index',
+                  'source_revision', 'rect_x', 'rect_y', 'rect_width', 'rect_height',
+                  'kind', 'target_document_id', 'target_page_index',
+                  'target_revision', 'uri', 'position')
+        for row in rows:
+            item = {key: row[key] for key in fields}
+            source_ok = (row['source_current_revision'] == row['source_revision'] and
+                         row['source_archived_at'] is None and
+                         row['source_page_count'] is not None and
+                         row['source_page_index'] < row['source_page_count'])
+            target_ok = item['kind'] == 'external' or (
+                row['target_current_revision'] == row['target_revision'] and
+                row['target_archived_at'] is None and
+                row['target_page_count'] is not None and
+                row['target_page_index'] < row['target_page_count'])
+            item['resolved'] = bool(source_ok and target_ok)
+            entries.append(item)
+        return entries
+
+    def set_reviewed_links(self, matter_id: str, entries: list[dict]) -> list[dict]:
+        if len(entries) > 500:
+            raise ValueError('At most 500 reviewed links are supported')
+        ids = [entry['id'] for entry in entries]
+        if len(ids) != len(set(ids)):
+            raise ValueError('Reviewed link IDs must be unique')
+        fields = ('id', 'title', 'source_document_id', 'source_page_index',
+                  'source_revision', 'rect_x', 'rect_y', 'rect_width', 'rect_height',
+                  'kind', 'target_document_id', 'target_page_index',
+                  'target_revision', 'uri', 'position')
+        anchor_fields = ('source_document_id', 'source_page_index', 'source_revision',
+                         'rect_x', 'rect_y', 'rect_width', 'rect_height', 'kind',
+                         'target_document_id', 'target_page_index', 'target_revision', 'uri')
+        with self.connect() as con:
+            current = [dict(row) for row in con.execute(
+                '''SELECT id,title,source_document_id,source_page_index,source_revision,
+                rect_x,rect_y,rect_width,rect_height,kind,target_document_id,
+                target_page_index,target_revision,uri,position FROM reviewed_links
+                WHERE matter_id=? ORDER BY position''', (matter_id,))]
+            old = {entry['id']: entry for entry in current}
+            foreign_ids = set(ids) - set(old)
+            if foreign_ids and con.execute(
+                'SELECT 1 FROM reviewed_links WHERE id IN (' +
+                ','.join('?' for _ in foreign_ids) + ') LIMIT 1', tuple(foreign_ids)).fetchone():
+                raise ValueError('Reviewed link ID already belongs to another matter')
+            docs = {row['id']: row for row in con.execute(
+                'SELECT id,revision,page_count,archived_at FROM documents WHERE matter_id=?',
+                (matter_id,))}
+            normalized = []
+            for position, entry in enumerate(entries):
+                item = dict(entry, position=position)
+                previous = old.get(item['id'])
+                unchanged_anchor = previous and all(previous[key] == item[key]
+                                                    for key in anchor_fields)
+                source = docs.get(item['source_document_id'])
+                if not unchanged_anchor and (not source or source['archived_at'] is not None or
+                        source['revision'] != item['source_revision'] or
+                        item['source_page_index'] >= source['page_count']):
+                    raise ValueError('Choose a current source region in an active document')
+                if item['kind'] == 'internal':
+                    target = docs.get(item['target_document_id'])
+                    if not unchanged_anchor and (not target or target['archived_at'] is not None or
+                            target['revision'] != item['target_revision'] or
+                            item['target_page_index'] >= target['page_count']):
+                        raise ValueError('Choose a current target page in an active document')
+                normalized.append({key: item[key] for key in fields})
+            if current == normalized:
+                return self.list_reviewed_links(matter_id)
+            con.execute('DELETE FROM reviewed_links WHERE matter_id=?', (matter_id,))
+            self._write_reviewed_links(con, matter_id, normalized)
+            self._record_edit(con, matter_id, 'reviewed_links', {'entries': current},
+                              {'entries': normalized})
+            self._audit(con, 'reviewed_links_updated', matter_id)
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (utcnow(), matter_id))
+        return self.list_reviewed_links(matter_id)
+
+    @staticmethod
+    def _write_reviewed_links(con, matter_id: str, entries: list[dict]):
+        for entry in entries:
+            con.execute('''INSERT INTO reviewed_links
+                (id,matter_id,title,source_document_id,source_page_index,source_revision,
+                rect_x,rect_y,rect_width,rect_height,kind,target_document_id,
+                target_page_index,target_revision,uri,position)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (entry['id'], matter_id, entry['title'], entry['source_document_id'],
+                 entry['source_page_index'], entry['source_revision'], entry['rect_x'],
+                 entry['rect_y'], entry['rect_width'], entry['rect_height'], entry['kind'],
+                 entry['target_document_id'], entry['target_page_index'],
+                 entry['target_revision'], entry['uri'], entry['position']))
+
+    @staticmethod
+    def default_output_marks() -> dict:
+        return {'watermark_enabled': False, 'watermark_text': 'DRAFT',
+                'watermark_position': 'center', 'watermark_font_size': 32.0,
+                'watermark_opacity': .16, 'timestamp_enabled': False,
+                'timestamp_format': 'datetime', 'timestamp_timezone': 'UTC',
+                'timestamp_position': 'bottom_right', 'timestamp_font_size': 8.0,
+                'timestamp_prefix': 'Built'}
+
+    def get_output_marks(self, matter_id: str) -> dict:
+        with self.connect() as con:
+            row = con.execute('SELECT payload_json FROM output_marks WHERE matter_id=?',
+                              (matter_id,)).fetchone()
+        return json.loads(row[0]) if row else self.default_output_marks()
+
+    def set_output_marks(self, matter_id: str, settings: dict) -> dict:
+        before = self.get_output_marks(matter_id)
+        if before == settings:
+            return settings
+        now = utcnow()
+        with self.connect() as con:
+            con.execute('''INSERT INTO output_marks (matter_id,payload_json,updated_at)
+                VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
+                payload_json=excluded.payload_json,updated_at=excluded.updated_at''',
+                (matter_id, json.dumps(settings, sort_keys=True), now))
+            self._record_edit(con, matter_id, 'output_marks', {'settings': before},
+                              {'settings': settings})
+            self._audit(con, 'output_marks_updated', matter_id)
+            con.execute('UPDATE matters SET updated_at=? WHERE id=?', (now, matter_id))
+        return settings
 
     @staticmethod
     def _write_manual_bookmarks(con, matter_id: str, entries: list[dict]):
@@ -943,6 +1096,14 @@ class Store:
             elif row['kind'] == 'bookmarks':
                 con.execute('DELETE FROM manual_bookmarks WHERE matter_id=?', (matter_id,))
                 self._write_manual_bookmarks(con, matter_id, state['entries'])
+            elif row['kind'] == 'reviewed_links':
+                con.execute('DELETE FROM reviewed_links WHERE matter_id=?', (matter_id,))
+                self._write_reviewed_links(con, matter_id, state['entries'])
+            elif row['kind'] == 'output_marks':
+                con.execute('''INSERT INTO output_marks (matter_id,payload_json,updated_at)
+                    VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
+                    payload_json=excluded.payload_json,updated_at=excluded.updated_at''',
+                    (matter_id, json.dumps(state['settings'], sort_keys=True), now))
             elif row['kind'] in ('memo_parties', 'matter_values'):
                 table = row['kind']
                 field = 'parties' if table == 'memo_parties' else 'values'
@@ -1020,11 +1181,17 @@ class Store:
         profile = next((p for p in profiles if p['id'] == matter['court_profile']), None)
         if profile is None:
             raise ValueError('Court profile is missing')
-        payload = {'schema': 1, 'matter': {key: matter[key] for key in fields},
+        payload = {'schema': 2, 'matter': {key: matter[key] for key in fields},
                    'documents': documents, 'profile': profile,
                    'manual_bookmarks': [{key: entry[key] for key in ('id', 'title',
                        'document_id', 'page_index', 'target_revision', 'parent_id', 'position')}
-                       for entry in self.list_manual_bookmarks(matter_id)]}
+                       for entry in self.list_manual_bookmarks(matter_id)],
+                   'reviewed_links': [{key: entry[key] for key in ('id', 'title',
+                       'source_document_id', 'source_page_index', 'source_revision',
+                       'rect_x', 'rect_y', 'rect_width', 'rect_height', 'kind',
+                       'target_document_id', 'target_page_index', 'target_revision',
+                       'uri', 'position')} for entry in self.list_reviewed_links(matter_id)],
+                   'output_marks': self.get_output_marks(matter_id)}
         encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'),
                              ensure_ascii=False).encode('utf-8')
         return hashlib.sha256(encoded).hexdigest()

@@ -18,6 +18,8 @@ Use **Open table** on Documents to review filename, display title, label, docume
 
 The same table can preview policy-neutral label mappings for an explicit selection: user-chosen sequential values, configurable grouped suffixes over existing group keys, or conservative filename candidates. A group may designate one technical parent, including a parent that is not first in document order. Group formatting supports lower/upper-case letters, numeric or parenthesized suffixes, a custom separator, and an option for the designated parent to retain the base label. Reviewers choose whether a new proposal compacts the selected sequence or preserves existing labels for manual completion. The preview remains editable and cancelable. Applying it requires review of existing-label changes, searchable-text citation candidates and prior generated builds; it is one undoable transaction. Prior artifacts and originals remain unchanged. Citation matches show source page and revision but are incomplete text candidates—not verified legal citations—and neither hierarchy nor a selected pattern is represented as a court-approved convention. Reusable named court/chamber presets remain scoped under FIL-09.
 
+The PDF viewer can also author explicitly reviewed internal or `http`/`https`/`mailto` links and preview matter-wide output watermarks and build timestamps on the actual page. Internal destinations are tied to a document revision and resolved through the deterministic page map: later page edits leave the link visibly unresolved instead of silently retargeting it. Combined exports retain resolved cross-document links; a standalone volume retains only destinations available inside that volume and reports omitted cross-volume links. Watermarks and timestamps are applied only to source-document pages, warn when their configured area overlaps existing content, and are recorded with the reviewed link inputs in build reports and manifests. These primitives unlock FIL-09, but reusable named presets, Bates identifiers and filing-specific stamp layouts remain separate work.
+
 The Delhi High Court profile also includes a source-linked preparation guide,
 official form/template links, explicit handling of the 2026 Rule 3.4 size
 amendment, and a Memo of Parties CSV review helper. The helper does not replace
@@ -177,6 +179,8 @@ All routes require `Authorization: Bearer <local-token>`.
 - `GET /matters/{id}/portable`; `POST /matters/restore` (versioned local matter backup/restore; protected mode streams `application/octet-stream`)
 - `GET /matters/{id}/history`; `POST /matters/{id}/history/undo|redo`
 - `GET|PUT /matters/{id}/bookmarks` (revision-aware manual outline entries)
+- `GET|PUT /matters/{id}/links` (reviewed revision-aware internal/external links)
+- `GET|PUT /matters/{id}/output-marks` (watermark and build-timestamp settings)
 - `GET /matters/archived`; `POST /matters/{id}/restore`; `GET /matters/{id}/archived-documents|storage|audit`
 - `GET /matters/{id}/documents`; `POST /matters/{id}/documents/raw` (streamed file with `X-CourtBundle-Filename`); legacy multipart `POST /matters/{id}/documents` is for plaintext development mode; `POST /matters/{id}/cover`
 - `GET|PUT /matters/{id}/memo-parties` (matter-scoped review data)
@@ -185,6 +189,7 @@ All routes require `Authorization: Bearer <local-token>`.
 - `PATCH /matters/{id}/documents/batch`; `POST /matters/{id}/documents/sort-preview`
 - `PATCH|DELETE /documents/{id}`; `GET /documents/{id}/pdf`
 - `POST /documents/{id}/pages/reorder|rotate|delete`; `POST /documents/{id}/ocr`
+- `POST /documents/{id}/pages/{pageIndex}/output-marks-preview`
 - `POST /documents/{id}/replace` (whole working-copy replacement from another matter document)
 - `GET /matters/{id}/validate`; `POST /matters/{id}/bundle-preview`; `POST /matters/{id}/build`
 - `GET /jobs/{id}`; `POST /jobs/{id}/cancel`
@@ -202,6 +207,7 @@ Full request/response examples and architecture notes are in `CourtBundle_Projec
 - Browser export uses authenticated fetch and browser-style download. Tauri export uses a native Save dialog and streams to a temporary file before replacing the destination. Apple Silicon native Save has local device evidence; validate save and failure behaviour on every target system.
 - Job state and progress persist in SQLite. After a restart, unfinished jobs are shown as interrupted and can be retried from a new job; abandoned build staging is removed. Working-copy revisions and a process-wide processing lock keep PDF requests and jobs from running concurrently. Late cancellation cannot relabel a committed output as cancelled. Restart recovery recognizes a published build only after verifying its artifact hashes. Large-job cancellation and native crash recovery still need device testing.
 - Manual bookmarks persist with document/page/revision targets. A later edit or archive leaves an affected bookmark visible as unresolved until reviewed; unresolved entries are omitted from generated outlines with a report warning. The v3 portable matter package includes bookmarks and reusable draft matter values and accepts legacy v1/v2 packages. Build manifests fingerprint matter inputs, current working-copy hashes, manual bookmarks and the selected profile; older manifests are conservatively marked stale.
+- Reviewed links and output marks are matter-scoped, undoable and portable. Link targets use exact document revisions; unresolved or unavailable destinations are omitted with explicit warnings. Output marks affect newly generated source-document pages only, not imported originals, working copies, indexes or completed exports. Overlap detection is conservative and must still be visually reviewed.
 - Memo of Parties helper rows autosave to the selected local matter and show save failures. Document-detail and bundle-setting forms use explicit Save, show unsaved indicators, and prompt before discarding drafts during navigation or reload. A failed bundle-settings save stops the build.
 - The packaged desktop app requires a password-protected local vault. Its SQLite database, matter files, internal exports and new `.cbmatter` backups are encrypted at rest. Browser development mode remains plaintext, and explicitly saved PDF/ZIP downloads are plaintext at their chosen destination. Matter/document removal archives records and keeps files; there is no in-app permanent delete. See [local security and retention](docs/LOCAL_SECURITY_AND_RETENTION.md). Use synthetic matters until native macOS and Windows security checks are complete.
 - Vue build, Vitest, Apple Silicon Rust compile and local package tests passed on 13 October 2026; see the acceptance log for exact runs. Other target builds and clean-device tests are still required.
