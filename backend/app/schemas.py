@@ -16,7 +16,7 @@ VisibleSignatureStatus = Literal['unreviewed', 'present', 'absent']
 
 class MatterCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
-    court_profile: str = 'delhi-hc-illustrative'
+    court_profile: str = 'general-demo'
     case_type: str = Field(default='Demonstration filing', max_length=150)
     petitioner: str = Field(default='', max_length=300)
     respondent: str = Field(default='', max_length=300)
@@ -429,6 +429,22 @@ class MoveTextRun(SignatureRiskAcknowledgement):
     expected_revision: int = Field(ge=1)
     expected_text: str = Field(min_length=1, max_length=2000)
     vertical_offset: float = Field(ge=-1, le=1)
+
+
+class PermanentRedaction(SignatureRiskAcknowledgement):
+    model_config = ConfigDict(extra='forbid')
+    page_index: int = Field(ge=0)
+    expected_revision: int = Field(ge=1)
+    rect_x: float = Field(ge=0, lt=1)
+    rect_y: float = Field(ge=0, lt=1)
+    rect_width: float = Field(gt=0, le=1)
+    rect_height: float = Field(gt=0, le=1)
+
+    @model_validator(mode='after')
+    def validate_region(self):
+        if self.rect_x + self.rect_width > 1 or self.rect_y + self.rect_height > 1:
+            raise ValueError('Redaction region must stay within the displayed page')
+        return self
 
 
 class JobView(BaseModel):

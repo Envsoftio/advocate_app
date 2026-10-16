@@ -220,6 +220,44 @@ def crop_pages(path: Path, pages: list[int], left: float, top: float, right: flo
         return doc.page_count
 
 
+def permanently_redact_region(path: Path, page_index: int, x: float, y: float,
+                              width: float, height: float) -> dict:
+    """Remove a reviewed display-relative region from a fresh working revision.
+
+    Rebuild the PDF from its pages after applying redactions. This drops document
+    metadata, attachments, outlines, actions, links and annotations, including
+    potentially sensitive labels outside the selected page region.
+    """
+    if not all(math.isfinite(v) for v in (x, y, width, height)) or not (
+            0 <= x < 1 and 0 <= y < 1 and 0 < width <= 1 - x and 0 < height <= 1 - y):
+        raise ProcessingError('Choose a finite region inside the displayed page')
+    with open_pdf(path) as source:
+        if not 0 <= page_index < source.page_count:
+            raise ProcessingError('Invalid page number')
+        for page in source:
+            if any(annot.type[0] == pymupdf.PDF_ANNOT_REDACT for annot in (page.annots() or ())):
+                raise ProcessingError('PDF contains pending redaction marks; resolve them before applying a new redaction')
+        page = source[page_index]
+        display = page.rect
+        selected = pymupdf.Rect(display.x0 + display.width * x,
+                                display.y0 + display.height * y,
+                                display.x0 + display.width * (x + width),
+                                display.y0 + display.height * (y + height))
+        box = selected * page.derotation_matrix
+        page.add_redact_annot(box, fill=(0, 0, 0), cross_out=False)
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
+                              graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+                              text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+        # Copy only rendered page content into a fresh file. The original PDF's
+        # metadata, embedded files, annotations and navigation are not copied.
+        with pymupdf.open() as clean:
+            clean.insert_pdf(source, annots=False, links=False, widgets=False)
+            if clean.embfile_names() or any(clean.get_toc()):
+                raise ProcessingError('Redaction sanitisation retained embedded content')
+            replace_pdf_atomically(path, clean)
+        return {'page_count': source.page_count, 'removed_navigation_and_metadata': True}
+
+
 def add_text_overlay(path: Path, page_index: int, x: float, y: float,
                      text: str, font_size: float) -> None:
     """Place visible text on a working-copy page; source content is not replaced."""

@@ -117,6 +117,9 @@
 .annotation-kind-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}.annotation-kind-row button{display:flex;align-items:center;gap:5px;border:1px solid var(--border,#ccd8e6);border-radius:7px;padding:7px 9px;background:var(--panel,#fff);color:var(--muted,#61758d)}.annotation-kind-row button.active{border-color:#2b78c6;background:#eaf4ff;color:#175c9d}.annotation-form-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}.annotation-form-grid label{display:grid;gap:4px;color:var(--muted,#61758d)}.annotation-form-grid input,.annotation-form-grid select,.annotation-form-grid textarea{width:100%;min-width:0;border:1px solid var(--border,#ccd8e6);border-radius:6px;background:var(--panel,#fff);color:var(--text,#19283c);padding:7px;font:inherit}.annotation-note{grid-column:1/-1}.page-annotation-panel .page-tool-actions{align-items:center;justify-content:space-between;margin:10px 0 0;color:var(--muted,#61758d)}.page-annotation-panel .page-tool-actions>div{display:flex;gap:6px}.page-annotation-list{display:grid;gap:6px;margin-top:10px}.page-annotation-row{display:flex;align-items:center;gap:7px;border:1px solid var(--border,#d8e2ed);border-radius:7px;padding:6px;color:var(--text,#19283c)}.page-annotation-row>span{min-width:0;flex:1}.page-annotation-row strong,.page-annotation-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.page-annotation-row small{margin-top:3px;color:var(--muted,#61758d)}.page-annotation-row.unresolved{border-color:#e8c890;background:#fff8ed}.pdf-placement-surface.drawing-annotation{cursor:crosshair;touch-action:none}.pdf-image-overlay,.pdf-review-highlight,.pdf-review-comment,.pdf-stale-image-overlay,.pdf-annotation-region{position:absolute;z-index:3}.pdf-image-overlay{object-fit:fill;border:1px dashed transparent;cursor:pointer}.pdf-image-overlay:hover{border-color:#1f72bf}.pdf-review-highlight{border:0;padding:0;cursor:pointer;mix-blend-mode:multiply}.pdf-review-highlight.yellow{background:#ffea4f70}.pdf-review-highlight.green{background:#73dc8270}.pdf-review-highlight.blue{background:#65b9f070}.pdf-review-highlight.pink{background:#f58fbb70}.pdf-review-highlight.unresolved{background:transparent;border:2px dashed #c17a28;mix-blend-mode:normal}.pdf-review-comment{display:grid;place-items:center;border:1px solid #805a17;border-radius:4px;padding:0;color:#5a3c09;background:#ffd45e;line-height:1}.pdf-review-comment.green{background:#8de39a}.pdf-review-comment.blue{background:#89c9f4}.pdf-review-comment.pink{background:#f3a6c6}.pdf-review-comment.unresolved{background:#fff8ed;border-style:dashed;border-color:#c17a28}.pdf-stale-image-overlay{border:2px dashed #c17a28;background:#fff8edaa;color:#925d1f;font-size:9px;line-height:1.2;padding:3px;overflow:hidden}.pdf-annotation-region{pointer-events:none;border:2px dashed #7b4db1;background:#aa79dc28}
 @media(max-width:700px){.review-link-grid,.output-marks-grid,.annotation-form-grid{grid-template-columns:1fr}.review-link-uri,.annotation-note{grid-column:auto}.review-tool-heading{display:grid}}
 .pdf-placement-surface.is-edit-refreshing{opacity:1;filter:none;pointer-events:none}
+.pdf-placement-surface.drawing-redaction{cursor:crosshair;touch-action:none}
+.pdf-redaction-region{position:absolute;z-index:5;pointer-events:none;border:2px dashed #d7263d;background:#1c1c1c88}
+.pdf-placement-surface.drawing-redaction .pdf-reviewed-link,.pdf-placement-surface.drawing-redaction .pdf-image-overlay,.pdf-placement-surface.drawing-redaction .pdf-review-highlight,.pdf-placement-surface.drawing-redaction .pdf-review-comment,.pdf-placement-surface.drawing-redaction .pdf-stale-image-overlay{pointer-events:none}
 .pdf-edit-snapshot{position:absolute;inset:0;z-index:4;width:100%;height:100%;pointer-events:none;opacity:1;transition:opacity .2s ease}
 .pdf-edit-snapshot.is-fading{opacity:0}
 @keyframes pdf-inline-appear{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
@@ -252,7 +255,7 @@
 .bookmark-row-actions{display:flex;align-items:end;justify-content:flex-end;gap:6px}
 .bookmark-row-actions label,.bookmark-create-fields label{display:grid;gap:4px;color:var(--muted);font-size:10px;font-weight:700}
 .bookmark-row-actions select{max-width:155px;min-width:110px}
-.bookmark-keyboard-action,.bookmark-delete{height:36px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text);padding:0 10px}
+.bookmark-delete{height:36px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--text);padding:0 10px}
 .bookmark-delete{color:#a34449}
 .bookmark-create{margin-top:20px;padding:16px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--panel) 94%,#3279c7)}
 .bookmark-create h4{margin:0 0 12px;color:var(--text);font-size:12px}
@@ -267,8 +270,6 @@
 .drag-handle{display:inline-flex;align-items:center;justify-content:center;min-width:24px;min-height:30px;cursor:grab;flex:0 0 auto;touch-action:none}
 .drag-handle svg{pointer-events:none}
 .drag-handle:active{cursor:grabbing}
-.doc-order-actions{display:flex;flex-direction:column;gap:1px;flex:0 0 auto}
-.doc-order-actions .icon-btn{width:24px;height:22px}
 .index-order-panel{margin-bottom:16px}
 .index-order-list{padding:8px 14px}
 .index-order-row{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;border-bottom:1px solid #edf1f5;cursor:grab}
@@ -277,7 +278,7 @@
 .index-order-row span{font-size:11px;color:#73869c;white-space:nowrap}
 .index-order-row.dragging{opacity:.4}
 .manual-bookmark-row.dragging{opacity:.4}
-.manual-bookmark-row .grip{display:grid;place-items:center;width:28px;height:36px;border:1px solid var(--border);border-radius:7px;color:var(--muted);cursor:grab;flex:0 0 auto}
+.manual-bookmark-row .grip{display:grid;place-items:center;width:28px;height:44px;border:1px solid var(--border);border-radius:7px;color:var(--muted);cursor:grab;flex:0 0 auto}
 .manual-bookmark-row .grip{touch-action:none;user-select:none;-webkit-user-select:none}
 .manual-bookmark-row .grip:hover,.drag-handle:hover{background:color-mix(in srgb,var(--panel) 85%,#3279c7);color:var(--primary)}
 .manual-bookmark-row .grip svg{pointer-events:none}
@@ -477,7 +478,7 @@
 
 .workspace-page .editor-tool-group .text-tool{padding:3px 5px}
 
-.document-actionbar{display:flex;align-items:center;flex-wrap:wrap;gap:2px;padding:6px 8px;border-top:1px solid var(--border);background:var(--panel);flex-shrink:0}.document-actionbar .text-tool{font-size:10px;padding:5px}.document-actionbar .page-editbar-divider{margin-left:auto}
+.document-actionbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:6px 8px;border-top:1px solid var(--border);background:var(--panel);flex-shrink:0}.document-actionbar .text-tool{font-size:11px;min-height:32px;padding:5px}.document-actionbar .page-editbar-divider{margin-left:auto}
 
 /* Expanded editor uses the app window without remounting the PDF or its drafts. */
 .app-shell[data-editor-expanded="true"]>.sidebar,
@@ -532,3 +533,88 @@
 .task-footer .task-preview{padding:10px}.task-footer .task-preview p{font-size:11px;margin-top:3px}
 @media(max-width:650px){.page-tools-dialog .task-tools{grid-template-rows:150px minmax(0,1fr)}.pdf-task-content{padding:16px}.task-submit-row>span{display:none}.task-submit-row .btn{width:100%}.task-footer{padding:10px 16px}}
 @media(max-height:800px) and (min-width:651px){.pdf-task-list small{display:none}.pdf-task-list>button{padding:11px 10px}.pdf-task-list strong{margin:0}}
+
+/* Keep editable controls legible and aligned throughout the workspace. */
+:root input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="hidden"]):not(.docs-search input):not(.home-search input),
+:root select{
+  height:44px;
+  min-height:44px;
+  font-size:13px;
+  line-height:1.3;
+}
+:root textarea{font-size:13px;line-height:1.45}
+.docs-search,.home-search{min-height:44px;align-items:center;padding-top:0;padding-bottom:0}
+.docs-search input,.home-search input{font-size:13px}
+.viewer-toolbar{padding-top:7px;padding-bottom:7px}
+
+/* Search and reader controls use a compact row; form controls retain the 44px size. */
+.workspace-page .docs-search{height:36px;min-height:36px;margin:7px 10px;padding:0 10px}
+.workspace-page .docs-search+.docs-search{margin-top:0}
+.viewer-toolbar .zoom-select{height:36px;min-height:36px;padding:0 6px}
+.viewer-toolbar :is(.btn.small,.icon-btn){height:36px;min-height:36px}
+.docs-list .drag-handle,.index-order-list .drag-handle{min-width:32px;min-height:40px;border-radius:7px}
+
+/* Keep actions level with their fields in metadata, register, and bookmark forms. */
+.batch-bar>label,.label-proposal-bar>label,.bookmark-create-fields label{font-size:11px}
+.batch-bar .btn,.label-proposal-bar .btn,.sort-bar .btn,.bookmark-create-fields .btn,
+.bookmark-delete{min-height:44px}
+
+/* Give the build controls distinct groups at every window size. */
+.build-body>.checkbox-line+.btn{margin-top:14px}
+.build-body>.checklist{padding:0 4px;margin:18px 0}
+.build-body>.checklist>div{align-items:flex-start;line-height:1.45}
+.build-body>.checklist svg{margin-top:1px}
+.build-body>.notice+.notice{margin-top:12px}
+.build-body>.hint{margin:14px 0 0}
+.export-body>.notice+.export-summary,.export-body>.notice+.notice,
+.export-body>.notice+.export-file{margin-top:14px}
+.export-file>svg{flex:none}
+.export-file .text-tool{white-space:nowrap}
+@media(max-width:700px){
+  .workspace-page .matter-heading{display:grid;grid-template-columns:minmax(0,1fr)}
+  .workspace-page .matter-heading h1{white-space:normal;overflow-wrap:anywhere;line-height:1.25;margin:0 0 4px}
+  .workspace-page .matter-description{white-space:normal;line-height:1.45}
+  .workspace-page .matter-heading-actions{justify-content:flex-start}
+}
+@media(max-width:520px){
+  .build-body{padding:20px}
+  .build-body>.field{max-width:none}
+  .build-body>.checklist{grid-template-columns:minmax(0,1fr);gap:12px}
+  .build-body>.btn.large{width:100%;min-width:0}
+  .export-file{flex-wrap:wrap;gap:8px 10px}
+  .export-file>div{flex-basis:calc(100% - 30px)}
+  .export-file .text-tool{margin-left:28px}
+}
+@media(max-width:900px){
+  .batch-bar>label,.label-proposal-bar>label,.sort-bar>select{width:100%}
+  .batch-bar select,.batch-group>input,.label-proposal-bar :is(input:not([type="checkbox"]),select),.sort-bar select{width:100%;max-width:none}
+  .label-proposal-bar .group-base-choice{max-width:none}
+}
+@media(max-width:620px){.bookmark-create-fields .btn{width:100%}}
+
+/* Court profile reference material needs the same contrast as the workspace. */
+.rules-page .profile-scope{margin:0 0 20px}
+.rules-page .profile-scope strong{color:inherit}
+.rules-page .rule-icon{color:var(--primary)}
+.rules-page .profile-selected{display:inline-block;margin-left:8px;padding:4px 7px;border-radius:5px;background:#e7f2ff;color:#165a9e;font-size:10px;font-weight:800;letter-spacing:.02em}
+:root[data-effective-theme="dark"] .rules-page .profile-selected{background:#183c62;color:#b9dfff}
+:root[data-effective-theme="dark"] .rules-page .review-chip{background:#29415f;color:#e6f0fb}
+:root[data-effective-theme="dark"] .rules-page .template-row,
+:root[data-effective-theme="dark"] .rules-page .party-form{background:#26384f;color:#e6f0fb;border-color:#536a87}
+:root[data-effective-theme="dark"] .rules-page .template-row strong span{background:#17283e;color:#e2edfb}
+:root[data-effective-theme="dark"] .rules-page .remove-party{color:#ffafb6}
+:root[data-effective-theme="dark"] .rules-page .rule-sources a,
+:root[data-effective-theme="dark"] .rules-page .source-link{color:#a9d2ff}
+:root[data-effective-theme="dark"] .notice.amber{background:#4a3c25;border-color:#8d7138;color:#ffe7a7}
+:root[data-effective-theme="dark"] .notice.error{background:#4d2f38;border-color:#88515b;color:#ffd5d8}
+:root[data-effective-theme="dark"] .notice.subtle{background:#2b3c52;border-color:#4e6380;color:#dceaff}
+
+/* Keep source warnings readable without turning the whole card amber. */
+.rules-page .conflict-box>div{min-width:0}
+.rules-page .conflict-box p{line-height:1.6;margin-top:9px}
+.rules-page .conflict-box p+p{border-top:1px solid #e9c66d66;padding-top:9px}
+:root[data-effective-theme="dark"] .rules-page .conflict-box{background:#26364a;border:1px solid #6d7c90;border-left:4px solid #e0ad53;color:#edf4ff;padding:17px 19px}
+:root[data-effective-theme="dark"] .rules-page .conflict-box>svg{color:#ffd485;flex:none}
+:root[data-effective-theme="dark"] .rules-page .conflict-box strong{color:#ffdfa1}
+:root[data-effective-theme="dark"] .rules-page .conflict-box p{color:#e3ecf7}
+:root[data-effective-theme="dark"] .rules-page .conflict-box p+p{border-color:#53667f}

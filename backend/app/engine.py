@@ -563,10 +563,12 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
     build_settings = {'max_pages_per_volume': matter['max_pages_per_volume'],
                       'keep_groups_intact': matter['keep_groups_intact'],
                       'court_profile': matter['court_profile']}
-    bookmark_inputs = [{key: item[key] for key in ('id', 'title', 'document_id',
+    bookmark_inputs = [{key: (item[key] if item['resolved'] or key != 'title' else None)
+                        for key in ('id', 'title', 'document_id',
                         'page_index', 'target_revision', 'parent_id', 'position')}
                        for item in bookmarks]
-    reviewed_link_inputs = [{key: item[key] for key in ('id', 'title',
+    reviewed_link_inputs = [{key: (item[key] if item['resolved'] or key not in ('title', 'uri') else None)
+                            for key in ('id', 'title',
                             'source_document_id', 'source_page_index', 'source_revision',
                             'rect_x', 'rect_y', 'rect_width', 'rect_height', 'kind',
                             'target_document_id', 'target_page_index', 'target_revision',

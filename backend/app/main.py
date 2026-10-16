@@ -24,9 +24,9 @@ from .jobs import JobManager
 from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
                       rotate_page, delete_page, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
-                      replace_text_run, move_text_run, compress_pdf,
+                      replace_text_run, move_text_run, permanently_redact_region, compress_pdf,
                       ocr_pdf, make_cover_pdf, preview_output_marks, validate_overlay_image)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, SignatureRiskAcknowledgement, PageAnnotationCreate, PageAnnotationUpdate
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, PermanentRedaction, SignatureRiskAcknowledgement, PageAnnotationCreate, PageAnnotationUpdate
 from .storage import Store, new_id
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
 from .schemas import CompressionRequest
@@ -1051,6 +1051,20 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                               payload.expected_text, payload.vertical_offset)
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
             return edit_working_copy(doc_id, move, payload.acknowledge_signature_risk)
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/redact')
+    def page_redact(doc_id: str, payload: PermanentRedaction, _: None = Depends(auth)):
+        try:
+            def redact(path, doc):
+                if doc['revision'] != payload.expected_revision:
+                    raise HTTPException(status_code=409, detail='Document changed; mark the region again')
+                result = permanently_redact_region(path, payload.page_index,
+                                                   payload.rect_x, payload.rect_y,
+                                                   payload.rect_width, payload.rect_height)
+                return {'page_count': result['page_count'], 'ocr_status': 'modified'}
+            return edit_working_copy(doc_id, redact, payload.acknowledge_signature_risk)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

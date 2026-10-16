@@ -143,11 +143,11 @@ function resolve(index: number) {
 
 <template>
   <section class="card manual-bookmarks" aria-label="Manual bookmarks">
-    <div class="manual-bookmark-heading"><div><h3>Manual bookmarks <span class="bookmark-count">{{entries.length}}</span></h3><p>Drag a handle to reorder bookmarks within the same level. Choose a parent to nest one.</p></div></div>
+    <div class="manual-bookmark-heading"><div><h3>Manual bookmarks <span class="bookmark-count">{{entries.length}}</span></h3><p>Drag a handle or focus it and press ↑/↓ to reorder within the same level. Choose a parent to nest one.</p></div></div>
     <p v-if="!entries.length" class="bookmark-empty">No manual bookmarks yet. Mark a page in the document preview, or add one below.</p>
     <VueDraggable v-model="entries" class="manual-bookmark-list" item-key="id" handle=".bookmark-drag-handle" :disabled="busy || disabled" :animation="160" :force-fallback="true" :fallback-tolerance="5" :fallback-on-body="true" ghost-class="sortable-ghost" chosen-class="sortable-chosen" drag-class="sortable-drag" fallback-class="sortable-fallback" @start="startBookmarkSort" @end="endBookmarkSort">
     <div v-for="(entry, index) in entries" :key="entry.id" class="manual-bookmark-row" :data-bookmark-id="entry.id">
-      <span class="grip bookmark-drag-handle" :aria-label="'Drag bookmark '+entry.title" title="Drag to reorder"><GripVertical :size="17"/></span>
+      <span class="grip bookmark-drag-handle" role="button" :tabindex="busy || disabled ? -1 : 0" :aria-label="'Reorder bookmark '+(index+1)+': '+entry.title+'. Press Up or Down arrow keys.'" title="Drag or press Up/Down to reorder" @keydown.up.prevent="move(index,-1)" @keydown.down.prevent="move(index,1)"><GripVertical :size="17"/></span>
       <div class="bookmark-row-main">
         <div class="bookmark-title-line"><span class="bookmark-number">{{index+1}}</span><input :value="entry.title" :aria-label="'Bookmark title '+(index+1)" maxlength="200"
              :disabled="busy || disabled" @change="change(index,{title:($event.target as HTMLInputElement).value.trim()})"/><span v-if="!entry.resolved" class="bookmark-needs-review" role="status">Needs review</span></div>
@@ -159,8 +159,6 @@ function resolve(index: number) {
         <option v-for="parent in entries.slice(0,index)" :key="parent.id" :value="parent.id">Under {{parent.title}}</option>
       </select></label>
       <button v-if="!entry.resolved" class="btn secondary small" :disabled="busy || disabled" @click="resolve(index)">Resolve to current page</button>
-      <button class="bookmark-keyboard-action" :aria-label="'Move bookmark '+(index+1)+' up'" :disabled="busy || disabled || siblingIndex(index,-1)<0" @click="move(index,-1)" title="Move up">↑</button>
-      <button class="bookmark-keyboard-action" :aria-label="'Move bookmark '+(index+1)+' down'" :disabled="busy || disabled || siblingIndex(index,1)<0" @click="move(index,1)" title="Move down">↓</button>
       <button class="bookmark-delete" :aria-label="'Delete bookmark '+(index+1)" :disabled="busy || disabled" @click="remove(index)">Delete</button></div>
     </div>
     </VueDraggable>

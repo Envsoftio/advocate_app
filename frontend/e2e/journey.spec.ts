@@ -454,8 +454,8 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
   await page.getByRole('textbox', { name: 'New bookmark title' }).fill('Second')
   await page.getByRole('button', { name: 'Add bookmark' }).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark title 2' })).toHaveValue('Second')
-  await page.getByRole('button', { name: 'Move bookmark 2 up' }).focus()
-  await page.keyboard.press('Enter')
+  await page.getByRole('button', { name: /Reorder bookmark 2:/ }).focus()
+  await page.keyboard.press('ArrowUp')
   await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Second')
   await page.reload()
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
@@ -688,6 +688,49 @@ test('visible text overlay is placed from the preview and becomes searchable', a
   }).toBe(1)
 })
 
+test('redaction requires region review and removes selected text from the working copy', async ({ page, request }) => {
+  await page.setViewportSize({width: 1440, height: 1000})
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Permanent Redaction', court_profile: 'delhi-hc-illustrative',
+    case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
+      buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
+  })
+  expect(uploaded.ok()).toBeTruthy()
+  const document = (await uploaded.json())[0]
+  const runsResponse = await request.get(`${backend}/documents/${document.id}/pages/0/text-runs`, { headers })
+  const run = (await runsResponse.json()).runs.find((item: {text:string}) => item.text.includes('DRAFT PETITION'))
+  expect(run).toBeDefined()
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Permanent Redaction' })).toBeVisible()
+  await page.getByRole('button', { name: 'Redact', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50')
+  const apply = page.getByRole('button', { name: 'Apply redaction' })
+  await expect(apply).toBeDisabled()
+  await page.locator('.canvas-scroll').evaluate(element => { element.scrollTop = 0 })
+  const canvas = await page.locator('.pdf-paper').boundingBox()
+  expect(canvas).not.toBeNull()
+  const [x0,y0,x1,y1] = run.relative_bbox as number[]
+  await page.mouse.move(canvas!.x + Math.max(0,x0-.01)*canvas!.width,
+    canvas!.y + Math.max(0,y0-.01)*canvas!.height)
+  await page.mouse.down()
+  await page.mouse.move(canvas!.x + Math.min(1,x1+.01)*canvas!.width,
+    canvas!.y + Math.min(1,y1+.01)*canvas!.height, {steps:8})
+  await page.mouse.up()
+  await expect(page.locator('.pdf-redaction-region')).toBeVisible()
+  await expect(apply).toBeDisabled()
+  await page.getByRole('checkbox', { name: 'I reviewed this area and the document-wide cleanup.' }).check()
+  await apply.click()
+  await expect(page.getByText('Applied to the working copy.', { exact: false })).toBeVisible()
+  await expect.poll(async () => {
+    const result = await request.get(`${backend}/matters/${matterId}/search?q=DRAFT%20PETITION`, { headers })
+    return (await result.json()).matches.filter((match: {page:number}) => match.page === 1).length
+  }).toBe(0)
+})
+
 test('image overlays, highlights and comments can be placed, edited and removed', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E PDF Annotations', court_profile: 'general-demo', max_pages_per_volume: 10,
@@ -866,8 +909,10 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await expect(page.locator('.party-form').first()).toHaveCSS('background-color', 'rgb(43, 60, 82)')
   await expect(page.locator('.party-form textarea').first()).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(page.locator('.party-form select').first()).toHaveCSS('color-scheme', 'dark')
-  await expect(page.locator('.party-form select').first()).toHaveCSS('height', '40px')
-  await expect(page.locator('.party-form input').first()).toHaveCSS('height', '40px')
+  await expect(page.locator('.party-form select').first()).toHaveCSS('height', '44px')
+  await expect(page.locator('.party-form input').first()).toHaveCSS('height', '44px')
+  await expect(page.locator('.party-form select').first()).toHaveCSS('font-size', '13px')
+  await expect(page.locator('.party-form input').first()).toHaveCSS('font-size', '13px')
   await page.getByRole('button', { name: 'New matter' }).click()
   await expect(page.getByRole('dialog', { name: 'Create matter' })).toHaveCSS('background-color', 'rgb(29, 41, 58)')
   await expect(page.getByRole('dialog', { name: 'Create matter' }).getByPlaceholder('Example: ABC Pvt Ltd v. XYZ'))
@@ -1027,11 +1072,21 @@ test('preview owns document actions while details stay collapsed until toggled',
   await expect(page.getByRole('button', { name: 'Document details', exact: true })).toHaveAttribute('aria-expanded', 'true')
   await page.getByRole('button', { name: 'Close document details' }).click()
   await expect(page.locator('.inspector-panel')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Move document down' }).click()
+  await expect(page.getByRole('button', { name: 'Move document down' })).toHaveCount(0)
+  await page.getByRole('button', { name: /Reorder document 01_petition/ }).focus()
+  await page.keyboard.press('ArrowDown')
   await expect.poll(async () => {
     const response = await request.get(`${backend}/matters/${id}/documents`, { headers })
     return (await response.json() as {original_name:string}[]).map(doc => doc.original_name)
   }).toEqual(['02_impugned_order.pdf', '01_petition.pdf'])
+  await page.getByRole('button', { name: 'Index & bookmarks' }).click()
+  await page.getByRole('region', { name: 'Index document order' })
+    .getByRole('button', { name: /Reorder document 02_impugned_order/ }).focus()
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(async () => {
+    const response = await request.get(`${backend}/matters/${id}/documents`, { headers })
+    return (await response.json() as {original_name:string}[]).map(doc => doc.original_name)
+  }).toEqual(['01_petition.pdf', '02_impugned_order.pdf'])
 })
 
 test('visible rotation controls turn the selected PDF page in either direction', async ({ page, request }) => {

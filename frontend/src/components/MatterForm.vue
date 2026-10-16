@@ -6,7 +6,7 @@ import type { CourtProfile, MatterNew } from '../lib/types'
 const props = defineProps<{ profiles: CourtProfile[], working: boolean }>()
 const emit = defineEmits<{ close: [], create: [value: MatterNew] }>()
 const form = reactive<MatterNew>({
-  name: '', court_profile: 'delhi-hc-illustrative', case_type: 'Demonstration filing',
+  name: '', court_profile: 'general-demo', case_type: 'Demonstration filing',
   petitioner: '', respondent: '', advocate: '', case_number: '',
   max_pages_per_volume: 300, keep_groups_intact: true,
 })

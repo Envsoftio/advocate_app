@@ -37,6 +37,9 @@ def test_authentication_and_matter(client, auth):
     assert delhi['max_file_mb'] == 300
     assert delhi['filing_guidance']['status'] == 'SOURCE_LINKED_DRAFT_REQUIRES_ADVOCATE_REVIEW'
     assert any(template['format'] == 'XLS' for template in delhi['filing_guidance']['templates'])
+    created = client.post('/matters', headers=auth, json={'name': 'Default profile example'})
+    assert created.status_code == 201, created.text
+    assert created.json()['court_profile'] == 'general-demo'
 
 
 def test_malformed_pdf_import_leaves_no_document_or_source_file(client, auth, matter):

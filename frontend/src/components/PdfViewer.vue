@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { Maximize2, Minimize2, Archive, ArrowDown, ArrowUp, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare } from 'lucide-vue-next'
+import { Maximize2, Minimize2, Archive, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare, Eraser } from 'lucide-vue-next'
 import * as pdfjs from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
@@ -10,8 +10,8 @@ import { friendlyError } from '../lib/format'
 import { confirmSignatureTransformation } from '../lib/signatures'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
-const props = defineProps<{ expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, documentPosition?: number, documentCount?: number, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
-const emit = defineEmits<{ toggleExpanded: [], toggleFocus: [], modified: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [], moveDocument: [direction: number], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string] }>()
+const props = defineProps<{ expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
+const emit = defineEmits<{ toggleExpanded: [], toggleFocus: [], modified: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const canvasWrap = ref<HTMLDivElement | null>(null)
 const thumbnailWrap = ref<HTMLDivElement | null>(null)
@@ -72,6 +72,15 @@ const linkDraft = reactive({title:'',kind:'internal' as 'internal'|'external',ta
 const currentPageLinks = computed(() => reviewedLinks.value.filter(item =>
   item.source_document_id === props.document?.id && item.source_page_index === current.value - 1))
 const annotationPanelOpen = ref(false)
+const redactionOpen = ref(false)
+const redactionRegion = ref<{x:number,y:number,width:number,height:number} | null>(null)
+const redactionReviewed = ref(false)
+const redactionBusy = ref(false)
+const redactionError = ref('')
+const redactionNotice = ref('')
+let redactionStart: {x:number,y:number} | null = null
+let redactionPointerId: number | null = null
+let redactionRevision = 0
 const annotationDrawing = ref(false)
 const annotationRegion = ref<{x:number,y:number,width:number,height:number} | null>(null)
 let annotationStart: {x:number,y:number} | null = null
@@ -320,6 +329,9 @@ watch(() => [marksPanelOpen.value, props.document?.id, props.document?.revision,
   JSON.stringify(markSettings)] as const, () => scheduleMarkPreview())
 watch(current, () => { bookmarkOpen.value = false; bookmarkError.value = ''; bookmarkNotice.value = '' })
 watch(current, () => { linkRegion.value = null; linkDrawing.value = false; linkError.value = ''; linkNotice.value = ''; resetAnnotationDraft(false) })
+watch([current, () => props.document?.id, () => props.document?.revision], () => {
+  redactionRegion.value = null; redactionReviewed.value = false; redactionError.value = ''
+})
 onBeforeUnmount(() => { epoch++; resizeObserver?.disconnect(); thumbnailSequence++; renderTask?.cancel(); thumbnailTasks.forEach(task => task.cancel()); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (pdf) void pdf.destroy() })
 
 async function addPageBookmark() {
@@ -418,6 +430,58 @@ function finishAnnotationRegion(event: PointerEvent) {
     annotationRegion.value = null
     annotationError.value = 'Drag a visible rectangular area on the page.'
   } else annotationError.value = ''
+}
+function beginRedactionRegion(event: PointerEvent) {
+  if (!redactionOpen.value || props.disabled || editing.value || event.button !== 0) return
+  const point = normalizedPointer(event)
+  if (!point) return
+  redactionStart = point
+  redactionPointerId = event.pointerId
+  redactionRegion.value = {x:point.x,y:point.y,width:0,height:0}
+  redactionReviewed.value = false
+  redactionRevision = props.document?.revision || 0
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  event.preventDefault()
+}
+function updateRedactionRegion(event: PointerEvent) {
+  if (redactionPointerId !== event.pointerId || !redactionStart) return
+  const point = normalizedPointer(event)
+  if (!point) return
+  redactionRegion.value = {x:Math.min(redactionStart.x,point.x),y:Math.min(redactionStart.y,point.y),
+    width:Math.abs(point.x-redactionStart.x),height:Math.abs(point.y-redactionStart.y)}
+  event.preventDefault()
+}
+function finishRedactionRegion(event: PointerEvent) {
+  if (redactionPointerId !== event.pointerId) return
+  redactionPointerId = null
+  redactionStart = null
+  if (!redactionRegion.value || redactionRegion.value.width < .01 || redactionRegion.value.height < .01) {
+    redactionRegion.value = null
+    redactionError.value = 'Drag a visible rectangular area on the page.'
+  } else redactionError.value = ''
+}
+async function applyRedaction() {
+  const doc = props.document
+  const region = redactionRegion.value
+  if (!doc || !region || !redactionReviewed.value || redactionBusy.value || props.disabled) return
+  const signature = confirmSignatureTransformation([doc], 'Permanently redacting a working page')
+  if (!signature.proceed) return
+  redactionBusy.value = true
+  editing.value = true
+  redactionError.value = ''
+  try {
+    const result = await api<MatterDocument>(`/documents/${doc.id}/pages/redact`, 'POST', {
+      page_index: current.value - 1, expected_revision: redactionRevision,
+      rect_x: region.x, rect_y: region.y, rect_width: region.width, rect_height: region.height,
+      acknowledge_signature_risk: signature.acknowledged,
+    }, 120_000)
+    redactionRegion.value = null
+    redactionReviewed.value = false
+    redactionNotice.value = 'Applied to the working copy. Inspect the page and rebuild exports. Original and undo history remain recoverable.'
+    await loadPdf(result)
+    emit('modified')
+  } catch (err) { redactionError.value = friendlyError(err) }
+  finally { editing.value = false; redactionBusy.value = false }
 }
 function clearAnnotationImageUrls() {
   for (const url of Object.values(annotationImageUrls)) URL.revokeObjectURL(url)
@@ -813,11 +877,12 @@ async function applyReplacement() {
         <div class="editor-tool-group" role="group" aria-label="Read and annotate"><span class="editor-group-label">Read & annotate</span>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-expanded="bookmarkOpen" @click="bookmarkOpen=!bookmarkOpen;bookmarkTitle=document?.title+' — page '+current;bookmarkError=''"><BookMarked :size="15"/> Bookmark page<span v-if="pageBookmarks.length" class="page-bookmark-count">{{pageBookmarks.length}}</span></button>
         </div><div class="editor-tool-group" role="group" aria-label="Edit PDF"><span class="editor-group-label">Edit & mark</span>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="textMode=!textMode; editTextMode=false; linkPanelOpen=false; marksPanelOpen=false; annotationPanelOpen=false; placement=null"><Type :size="15"/> Add text</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="editTextMode=!editTextMode; textMode=false; linkPanelOpen=false; marksPanelOpen=false; annotationPanelOpen=false; placement=null"><Pencil :size="15"/> Edit text</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" aria-label="Images & notes" title="Image overlays, highlights and comments" :aria-pressed="annotationPanelOpen" @click="annotationPanelOpen=!annotationPanelOpen; textMode=false; editTextMode=false; linkPanelOpen=false; marksPanelOpen=false; placement=null; resetAnnotationDraft()"><Highlighter :size="15"/> Notes<span v-if="currentPageAnnotations.length" class="page-bookmark-count">{{currentPageAnnotations.length}}</span></button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="linkPanelOpen=!linkPanelOpen; textMode=false; editTextMode=false; marksPanelOpen=false; annotationPanelOpen=false; placement=null; linkDraft.target_document_id ||= document.id"><Link2 :size="15"/> Links<span v-if="currentPageLinks.length" class="page-bookmark-count">{{currentPageLinks.length}}</span></button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="marksPanelOpen" @click="marksPanelOpen=!marksPanelOpen; textMode=false; editTextMode=false; linkPanelOpen=false; annotationPanelOpen=false; placement=null"><Stamp :size="15"/> Output marks<span v-if="marksDirty" class="details-unsaved-indicator">Unsaved</span></button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="textMode=!textMode; editTextMode=false; linkPanelOpen=false; marksPanelOpen=false; annotationPanelOpen=false; redactionOpen=false; placement=null"><Type :size="15"/> Add text</button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="editTextMode=!editTextMode; textMode=false; linkPanelOpen=false; marksPanelOpen=false; annotationPanelOpen=false; redactionOpen=false; placement=null"><Pencil :size="15"/> Edit text</button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="redactionOpen" @click="redactionOpen=!redactionOpen; textMode=false; editTextMode=false; linkPanelOpen=false; marksPanelOpen=false; annotationPanelOpen=false; redactionRegion=null; redactionReviewed=false"><Eraser :size="15"/> Redact</button>
+        <button class="text-tool" :disabled="editing || loading || disabled" aria-label="Images & notes" title="Image overlays, highlights and comments" :aria-pressed="annotationPanelOpen" @click="annotationPanelOpen=!annotationPanelOpen; textMode=false; editTextMode=false; linkPanelOpen=false; marksPanelOpen=false; redactionOpen=false; placement=null; resetAnnotationDraft()"><Highlighter :size="15"/> Notes<span v-if="currentPageAnnotations.length" class="page-bookmark-count">{{currentPageAnnotations.length}}</span></button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="linkPanelOpen=!linkPanelOpen; textMode=false; editTextMode=false; marksPanelOpen=false; annotationPanelOpen=false; redactionOpen=false; placement=null; linkDraft.target_document_id ||= document.id"><Link2 :size="15"/> Links<span v-if="currentPageLinks.length" class="page-bookmark-count">{{currentPageLinks.length}}</span></button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="marksPanelOpen" @click="marksPanelOpen=!marksPanelOpen; textMode=false; editTextMode=false; linkPanelOpen=false; annotationPanelOpen=false; redactionOpen=false; placement=null"><Stamp :size="15"/> Output marks<span v-if="marksDirty" class="details-unsaved-indicator">Unsaved</span></button>
         </div><div class="editor-tool-group" role="group" aria-label="Organise pages"><span class="editor-group-label">Pages</span>
         <button class="text-tool" :disabled="editing || loading || disabled" title="Open page tools for this document" @click="emit('pageTools')"><FilePenLine :size="15"/> Page tools</button>
         <button class="text-tool" :disabled="editing || loading || disabled" title="Rotate this page 90° counterclockwise in the working PDF" @click="edit('rotate', {page_index:current-1,degrees:270})"><RotateCcw :size="16"/> Rotate left</button>
@@ -853,6 +918,14 @@ async function applyReplacement() {
         <p v-if="runsError && !selectedRun" class="error-msg" role="alert">{{runsError}}</p>
         <p class="edit-status-slot" role="status">{{editNotice}}</p>
         <p v-if="!textRuns.length && !editNotice">No selectable horizontal text found on this page. Scanned text needs OCR and review.</p>
+      </div></Transition>
+      <Transition name="soft"><div v-if="redactionOpen" class="text-overlay-panel" aria-label="Permanent redaction">
+        <strong>Permanent redaction · page {{current}}</strong>
+        <p>Drag over content, inspect the marked area, then apply. Text and image pixels in the area are removed from a new working copy. Applying also strips imported PDF metadata, attachments, bookmarks, links and annotations from this working document.</p>
+        <p>Imported originals, prior revisions, existing exports and matter history can still contain the content. Review linked titles, notes and document details separately before sharing.</p>
+        <label class="checkbox-line" :style="{visibility:redactionRegion ? 'visible' : 'hidden'}"><input v-model="redactionReviewed" type="checkbox" :disabled="!redactionRegion"/> I reviewed this area and the document-wide cleanup.</label>
+        <div class="page-tool-actions"><span>{{redactionRegion ? `Marked ${Math.round(redactionRegion.width*100)}% × ${Math.round(redactionRegion.height*100)}% of page` : 'Drag a region on the page'}}</span><button class="btn secondary small" :disabled="!redactionRegion || !redactionReviewed || redactionBusy || disabled" @click="applyRedaction">{{redactionBusy ? 'Applying…' : 'Apply redaction'}}</button></div>
+        <p v-if="redactionError" class="error-msg" role="alert">{{redactionError}}</p><p v-if="redactionNotice" class="review-tool-notice" role="status">{{redactionNotice}}</p>
       </div></Transition>
       <Transition name="soft"><div v-if="annotationPanelOpen" class="page-annotation-panel" aria-label="Image overlays, highlights and comments">
         <div class="review-tool-heading"><strong>Images and review notes</strong><span>Draw a region on the page. Images are flattened into new builds; private highlights/comments are excluded by default and recorded in the report.</span></div>
@@ -910,7 +983,7 @@ async function applyReplacement() {
       <div ref="canvasWrap" class="canvas-scroll" :aria-busy="loading || editing">
         <div v-if="(loading || editing) && !(replacingText && editSnapshot)" class="preview-status"><LoaderCircle :size="18" class="spin"/> {{ editing ? 'Updating PDF…' : 'Loading PDF…' }}</div>
         <div v-if="viewerError" class="preview-status error-msg">{{ viewerError }}</div>
-        <div class="pdf-placement-surface" :class="{'placing-text':textMode && !disabled, 'drawing-link':linkPanelOpen && !disabled, 'drawing-annotation':annotationPanelOpen && !disabled, 'is-busy':(loading || editing) && !replacingText, 'is-edit-refreshing':replacingText, 'is-switching':switchingPage, 'is-rotating':rotatingPage}" @click="choosePlacement" @pointerdown="beginLinkRegion($event);beginAnnotationRegion($event)" @pointermove="updateLinkRegion($event);updateAnnotationRegion($event)" @pointerup="finishLinkRegion($event);finishAnnotationRegion($event)" @pointercancel="finishLinkRegion($event);finishAnnotationRegion($event)">
+        <div class="pdf-placement-surface" :class="{'placing-text':textMode && !disabled, 'drawing-link':linkPanelOpen && !disabled, 'drawing-annotation':annotationPanelOpen && !disabled, 'drawing-redaction':redactionOpen && !disabled, 'is-busy':(loading || editing) && !replacingText, 'is-edit-refreshing':replacingText, 'is-switching':switchingPage, 'is-rotating':rotatingPage}" @click="choosePlacement" @pointerdown="beginLinkRegion($event);beginAnnotationRegion($event);beginRedactionRegion($event)" @pointermove="updateLinkRegion($event);updateAnnotationRegion($event);updateRedactionRegion($event)" @pointerup="finishLinkRegion($event);finishAnnotationRegion($event);finishRedactionRegion($event)" @pointercancel="finishLinkRegion($event);finishAnnotationRegion($event);finishRedactionRegion($event)">
           <canvas ref="canvas" class="pdf-paper" :style="{visibility: viewerError ? 'hidden' : 'visible'}" />
           <img v-if="editSnapshot" class="pdf-edit-snapshot" :class="{'is-fading':editSnapshotFading}" :src="editSnapshot" alt="" aria-hidden="true" />
           <span v-if="placement && placement.page===current" class="pdf-placement-marker" :style="{left:`${placement.x*100}%`,top:`${placement.y*100}%`}" aria-hidden="true"></span>
@@ -923,6 +996,7 @@ async function applyReplacement() {
             <button v-else-if="item.kind==='image'" type="button" class="pdf-stale-image-overlay" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`}" title="Image overlay needs review after a revision change" @pointerdown.stop @click.stop="editPageAnnotation(item)">Image needs review</button>
           </template>
           <span v-if="annotationPanelOpen && annotationRegion" class="pdf-annotation-region" :style="{left:`${annotationRegion.x*100}%`,top:`${annotationRegion.y*100}%`,width:`${annotationRegion.width*100}%`,height:`${annotationRegion.height*100}%`}" aria-hidden="true"></span>
+          <span v-if="redactionOpen && redactionRegion" class="pdf-redaction-region" :style="{left:`${redactionRegion.x*100}%`,top:`${redactionRegion.y*100}%`,width:`${redactionRegion.width*100}%`,height:`${redactionRegion.height*100}%`}" aria-hidden="true"></span>
           <span v-for="item in markPreview" :key="item.kind" :class="['pdf-output-mark-preview',item.kind,{overlap:item.overlaps_content}]" :style="{left:`${item.relative_rect[0]*100}%`,top:`${item.relative_rect[1]*100}%`,width:`${item.relative_rect[2]*100}%`,height:`${item.relative_rect[3]*100}%`,fontSize:`${item.font_size*pageZoom}px`,opacity:item.opacity,textAlign:item.position.endsWith('left')?'left':item.position.endsWith('right')?'right':'center'}"><span>{{item.text}}</span></span>
           <template v-if="editTextMode">
             <button v-for="run in textRuns" :key="run.index" class="pdf-text-run" :class="{selected:selectedRun?.index===run.index, 'move-target':movingRun?.index===run.index}"
@@ -942,8 +1016,6 @@ async function applyReplacement() {
         </div>
       </div>
       <div class="document-actionbar" role="group" aria-label="Document tools"><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr')"><ScanText :size="15"/> Run English OCR</button>
-        <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || (documentPosition ?? 0)<=0" aria-label="Move document up" title="Move document up in bundle order" @click="emit('moveDocument',-1)"><ArrowUp :size="16"/></button>
-        <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || (documentPosition ?? 0)>=(documentCount ?? 1)-1" aria-label="Move document down" title="Move document down in bundle order" @click="emit('moveDocument',1)"><ArrowDown :size="16"/></button>
         <button class="text-tool page-icon-tool danger" :disabled="editing || loading || disabled" aria-label="Archive document" title="Archive document" @click="emit('archiveDocument')"><Archive :size="16"/></button>
         <span class="page-editbar-divider" aria-hidden="true"></span>
         <button class="text-tool" :aria-expanded="!!detailsOpen" @click="emit('toggleDetails')"><PanelRightClose v-if="detailsOpen" :size="15"/><PanelRightOpen v-else :size="15"/> Document details<span v-if="detailsDirty" class="details-unsaved-indicator">Unsaved</span></button>

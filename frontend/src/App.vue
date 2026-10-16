@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
-  Archive, ArrowDown, ArrowDownToLine, ArrowRight, ArrowUp, BookMarked, BookOpen, BriefcaseBusiness,
+  Archive, ArrowDownToLine, ArrowRight, BookMarked, BookOpen, BriefcaseBusiness,
   Check, CheckCircle2, ChevronRight, CircleAlert, CircleHelp, CloudOff,
   Ellipsis, FileCheck2, FilePlus2, FileStack, FileText, FolderOpen, GripVertical, Info,
   Layers3, LoaderCircle, LockKeyhole, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw,
@@ -17,7 +17,7 @@ import DocumentTable from './components/DocumentTable.vue'
 import ExportPdfReview from './components/ExportPdfReview.vue'
 import MatterForm from './components/MatterForm.vue'
 import MatterHome from './components/MatterHome.vue'
-import DelhiFilingGuide from './components/DelhiFilingGuide.vue'
+import CourtProfileGuide from './components/CourtProfileGuide.vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { VueDraggable } from 'vue-draggable-plus'
 import { ApiError, api, downloadExport, downloadMatter, inTauri, restoreMatter, uploadDocuments } from './lib/api'
@@ -41,12 +41,11 @@ const previewRefreshKey = ref(0)
 const bookmarkPreset = ref<{documentId:string,sequence:number}>({documentId:'',sequence:0})
 const history = ref({can_undo:false,can_redo:false,undo_count:0,redo_count:0})
 const guideReloadKey = ref(0)
-const filingGuide = ref<InstanceType<typeof DelhiFilingGuide> | null>(null)
+const filingGuide = ref<InstanceType<typeof CourtProfileGuide> | null>(null)
 const checks = ref<PreflightCheck[]>([])
 const manualBookmarks = ref<ManualBookmark[]>([])
 const selectedDocId = ref<string | null>(null)
 const selectedDoc = computed(() => docs.value.find(d => d.id === selectedDocId.value) || null)
-const selectedDocumentPosition = computed(() => docs.value.findIndex(doc => doc.id === selectedDocId.value))
 const detailsOpen = ref(false)
 const readerFocus = ref(false)
 const editorExpanded = ref(false)
@@ -665,8 +664,9 @@ async function moveDocumentById(id: string, direction: number) {
   ;[ids[position],ids[next]]=[ids[next],ids[position]]
   await submitDocumentOrder(ids)
 }
-async function moveDocument(direction: number) {
-  if (selectedDoc.value) await moveDocumentById(selectedDoc.value.id, direction)
+function moveDocumentFromHandle(id: string, direction: number, filtered = false) {
+  if (busy.value || (filtered && searching.value.trim())) return
+  void moveDocumentById(id, direction)
 }
 async function refreshDocument() { await loadMatterResources() }
 async function startOcr() {
@@ -889,13 +889,14 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       <Transition name="view" mode="out-in" @after-enter="fitDocumentsWorkspace">
       <main v-if="activeView==='rules'" id="main-content" tabindex="-1" class="page-content rules-page">
         <div class="page-eyebrow">LEGAL KNOWLEDGE</div><h1>Court rules & technical profiles</h1><p class="page-description">Source-linked preparation checks. These do not replace registry instructions or an advocate's review.</p>
+        <div class="notice subtle profile-scope"><Info :size="18"/><span><strong v-if="currentMatter">{{selectedProfile?.name}} is selected for {{currentMatter.name}}. </strong>Profiles currently affect searchable-page warnings and the export file size cap. The filing guidance and linked forms below are references for advocate review; they are not applied automatically.</span></div>
         <div class="rules-grid"><div v-for="profile in profileList" :key="profile.id" class="card rule-card">
-          <div class="rule-icon"><BookMarked :size="24" /></div><div class="badge muted">{{profile.status==='DEMO_ONLY'?'DEMO ONLY':'NOT LEGALLY APPROVED'}}</div>
+          <div class="rule-icon"><BookMarked :size="24" /></div><div class="badge muted">{{profile.status==='DEMO_ONLY'?'DEMO ONLY':'NOT LEGALLY APPROVED'}}</div><div v-if="currentMatter?.court_profile===profile.id" class="badge profile-selected">SELECTED FOR THIS MATTER</div>
           <h2>{{profile.name}}</h2><p>{{profile.description}}</p>
           <div class="rule-facts"><div><span>File size setting</span><strong>{{profile.max_file_mb ? profile.max_file_mb+' MB' : 'None'}}</strong></div><div><span>Searchable text check</span><strong>{{profile.require_searchable_text?'Enabled':'Off'}}</strong></div><div><span>Source review date</span><strong>{{profile.last_checked}}</strong></div></div>
           <div class="rule-sources" v-if="profile.sources.length"><span>OFFICIAL REFERENCE LINKS</span><a v-for="source in profile.sources" :key="source.url" :href="source.url" target="_blank" rel="noopener noreferrer" @click.prevent="openOfficialReference(source.url)">{{source.title}} <ArrowRight :size="13"/></a></div>
         </div></div>
-        <DelhiFilingGuide v-if="delhiGuidance" :key="guideReloadKey" ref="filingGuide" :guidance="delhiGuidance" :matter-id="currentMatterId" :can-undo="history.can_undo" :can-redo="history.can_redo" @open-url="openOfficialReference" @modified="refreshHistory" @undo="traverseHistory('undo')" @redo="traverseHistory('redo')"/>
+        <CourtProfileGuide v-if="delhiGuidance" :key="guideReloadKey" ref="filingGuide" :guidance="delhiGuidance" :matter-id="currentMatterId" :can-undo="history.can_undo" :can-redo="history.can_redo" @open-url="openOfficialReference" @modified="refreshHistory" @undo="traverseHistory('undo')" @redo="traverseHistory('redo')"/>
         <div class="notice amber"><ShieldAlert :size="19"/> These rules are only a selected technical subset. Case-type documents, notarisation, signatures, fees, limitation and court acceptance are outside the POC's validation scope.</div>
       </main>
 
@@ -946,7 +947,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
         <DocumentTable v-else-if="activeView==='documents' && documentTableOpen" :matter-id="currentMatterId!" :documents="docs" :busy="busy || isJobActive" :keep-groups="currentMatter.keep_groups_intact" @modified="documentTableModified" @open-document="openDocumentFromTable" @error="issue" @close="documentTableOpen=false"/>
         <div v-else-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :class="{'details-open':detailsOpen && !!selectedDoc,'reader-focus':readerFocus}" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
           <section v-show="!readerFocus" class="panel docs-panel">
-            <div class="panel-header"><div><h2>Source documents</h2><span>Drag documents to set bundle order</span></div><div class="panel-header-actions"><button class="text-tool" :disabled="!docs.length" @click="documentTableOpen=true">Open table</button><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div></div>
+            <div class="panel-header"><div><h2>Source documents</h2><span>Drag or use ↑/↓ to reorder</span></div><div class="panel-header-actions"><button class="text-tool" :disabled="!docs.length" @click="documentTableOpen=true">Open table</button><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div></div>
             <div class="docs-search"><Search :size="16"/><input v-model="searching" placeholder="Search documents..." aria-label="Search documents"/></div>
             <div class="docs-search"><Search :size="16"/><input v-model="pageQuery" placeholder="Find text on pages..." aria-label="Find text on pages"/></div>
             <div v-if="pageQuery.trim().length >= 2" class="page-search-results" aria-live="polite">
@@ -959,10 +960,9 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             </div>
             <VueDraggable v-if="filteredDocs.length" :model-value="filteredDocs" class="docs-list" item-key="id" handle=".drag-handle" :disabled="busy || !!searching.trim()" :animation="220" easing="cubic-bezier(.2,.7,.2,1)" :force-fallback="true" :fallback-tolerance="5" :fallback-on-body="true" ghost-class="sortable-ghost" chosen-class="sortable-chosen" drag-class="sortable-drag" fallback-class="sortable-fallback" @update:model-value="applyDocumentSort">
               <div v-for="doc in filteredDocs" :key="doc.id" class="doc-item" :data-document-id="doc.id" :class="{selected:selectedDocId===doc.id}" @click="selectDocument(doc.id)">
-                <span class="grip drag-handle" :aria-label="'Drag '+doc.title+' to reorder'" @click.stop><GripVertical :size="16"/></span>
+                <span class="grip drag-handle" role="button" :tabindex="busy || !!searching.trim() ? -1 : 0" :aria-label="'Reorder document '+doc.title+'. Press Up or Down arrow keys.'" @click.stop @keydown.up.prevent="moveDocumentFromHandle(doc.id,-1,true)" @keydown.down.prevent="moveDocumentFromHandle(doc.id,1,true)"><GripVertical :size="16"/></span>
                 <div class="doc-icon"><FileText :size="20"/></div>
                 <div class="doc-info"><strong :title="doc.title">{{doc.title}}</strong><span><span v-if="doc.label" class="doc-label">{{doc.label}} · </span>Part {{doc.part}} · {{doc.page_count}} {{doc.page_count===1?'page':'pages'}}</span></div>
-                <div class="doc-order-actions"><button class="icon-btn small" :aria-label="'Move '+doc.title+' up'" :disabled="busy || docs[0]?.id===doc.id" @click.stop="moveDocumentById(doc.id,-1)"><ArrowUp :size="14"/></button><button class="icon-btn small" :aria-label="'Move '+doc.title+' down'" :disabled="busy || docs[docs.length-1]?.id===doc.id" @click.stop="moveDocumentById(doc.id,1)"><ArrowDown :size="14"/></button></div>
                 <ChevronRight :size="16" class="doc-arrow"/>
               </div>
             </VueDraggable>
@@ -974,7 +974,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             <div class="docs-help"><LockKeyhole :size="14"/> Original files are never overwritten.</div>
           </section>
 
-          <section class="panel preview-panel"><PdfViewer :expanded="editorExpanded" @toggle-expanded="toggleEditorExpanded" :focus-mode="readerFocus" @toggle-focus="readerFocus=!readerFocus" :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :details-open="detailsOpen" :details-dirty="documentDirty" :document-position="selectedDocumentPosition" :document-count="docs.length" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @move-document="moveDocument" @archive-document="deleteDocument" @open-internal-link="openSearchMatch" @open-external-link="openReviewedExternalLink"/></section>
+          <section class="panel preview-panel"><PdfViewer :expanded="editorExpanded" @toggle-expanded="toggleEditorExpanded" :focus-mode="readerFocus" @toggle-focus="readerFocus=!readerFocus" :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :details-open="detailsOpen" :details-dirty="documentDirty" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @archive-document="deleteDocument" @open-internal-link="openSearchMatch" @open-external-link="openReviewedExternalLink"/></section>
 
           <Transition name="inspector">
           <section v-if="detailsOpen && selectedDoc" id="document-details-panel" class="panel inspector-panel" aria-label="Document details">
@@ -1007,8 +1007,8 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
 
         <div v-else-if="activeView==='index'" class="index-preparation">
           <div class="notice subtle"><Info :size="17"/> Prepare the index and manual bookmarks as you arrange documents. Page ranges update from current matter order and the saved volume settings; review all destinations before export.</div>
-          <section v-if="docs.length" class="panel index-order-panel" aria-label="Index document order"><div class="panel-header"><div><h2>Index order</h2><span>Drag documents to change index rows, bookmarks and page ranges together.</span></div></div>
-            <VueDraggable :model-value="docs" class="index-order-list" item-key="id" handle=".drag-handle" :disabled="busy" :animation="160" :force-fallback="true" :fallback-tolerance="5" :fallback-on-body="true" ghost-class="sortable-ghost" chosen-class="sortable-chosen" drag-class="sortable-drag" fallback-class="sortable-fallback" @update:model-value="applyDocumentSort"><div v-for="(doc,index) in docs" :key="doc.id" class="index-order-row" :data-document-id="doc.id"><span class="grip drag-handle" :aria-label="'Drag '+doc.title+' to reorder'" @click.stop><GripVertical :size="16"/></span><strong>{{index+1}}. {{doc.label ? doc.label+' · ' : ''}}{{doc.title}}</strong><span>{{doc.page_count}} page(s)</span><button class="icon-btn small" :aria-label="'Move '+doc.title+' up'" :disabled="busy || index===0" @click="moveDocumentById(doc.id,-1)"><ArrowUp :size="14"/></button><button class="icon-btn small" :aria-label="'Move '+doc.title+' down'" :disabled="busy || index===docs.length-1" @click="moveDocumentById(doc.id,1)"><ArrowDown :size="14"/></button></div></VueDraggable>
+          <section v-if="docs.length" class="panel index-order-panel" aria-label="Index document order"><div class="panel-header"><div><h2>Index order</h2><span>Drag or focus a handle and press ↑/↓ to change order and page ranges.</span></div></div>
+            <VueDraggable :model-value="docs" class="index-order-list" item-key="id" handle=".drag-handle" :disabled="busy" :animation="160" :force-fallback="true" :fallback-tolerance="5" :fallback-on-body="true" ghost-class="sortable-ghost" chosen-class="sortable-chosen" drag-class="sortable-drag" fallback-class="sortable-fallback" @update:model-value="applyDocumentSort"><div v-for="(doc,index) in docs" :key="doc.id" class="index-order-row" :data-document-id="doc.id"><span class="grip drag-handle" role="button" :tabindex="busy ? -1 : 0" :aria-label="'Reorder document '+doc.title+'. Press Up or Down arrow keys.'" @click.stop @keydown.up.prevent="moveDocumentFromHandle(doc.id,-1)" @keydown.down.prevent="moveDocumentFromHandle(doc.id,1)"><GripVertical :size="16"/></span><strong>{{index+1}}. {{doc.label ? doc.label+' · ' : ''}}{{doc.title}}</strong><span>{{doc.page_count}} page(s)</span></div></VueDraggable>
           </section>
           <BundlePreview :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" @open-document="openPreviewDocument" @bookmark-document="prepareIndexBookmark"/>
           <ManualBookmarks :key="currentMatterId!" :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :preset="bookmarkPreset" :disabled="busy || isJobActive" @modified="loadMatterResources"/>
