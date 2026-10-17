@@ -36,7 +36,7 @@ def combined_signature_status(certificate_status: str, visible_status: str) -> s
     return NO_CERTIFICATE_SIGNATURE_DETECTED
 
 
-def inspect_source_signature(path: Path, suffix: str) -> dict:
+def inspect_source_signature(path: Path, suffix: str, password: str | None = None) -> dict:
     """Return certificate-signature indicators for an immutable import.
 
     Visible handwriting or a scanned autograph cannot be determined reliably
@@ -58,7 +58,8 @@ def inspect_source_signature(path: Path, suffix: str) -> dict:
     try:
         with open_pdf(path) as document:
             if document.needs_pass:
-                raise ValueError('password-protected PDF')
+                if not password or not document.authenticate(password):
+                    raise ValueError('password-protected PDF could not be inspected')
             strong_xrefs: set[int] = set()
             suspicious = False
             read_failed = False

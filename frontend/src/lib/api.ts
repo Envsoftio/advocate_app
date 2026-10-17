@@ -56,7 +56,17 @@ async function request(path: string, init?: RequestInit, timeoutMs = REQUEST_TIM
   }
   if (!res.ok) {
     let detail = res.statusText
-    try { const body = await res.json(); detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail) }
+    try {
+      const body = await res.json()
+      if (typeof body.detail === 'string') detail = body.detail
+      else if (Array.isArray(body.detail)) {
+        detail = body.detail.map((item: {loc?: unknown, msg?: unknown}) => {
+          const field = Array.isArray(item.loc) ? item.loc.filter(part => part !== 'body').join('.') : ''
+          const message = typeof item.msg === 'string' ? item.msg : 'Invalid value'
+          return field ? `${field}: ${message}` : message
+        }).join('; ') || 'Invalid request'
+      } else if (body.detail != null) detail = String(body.detail)
+    }
     catch { /* retain status */ }
     throw new ApiError(res.status, detail)
   }
@@ -70,13 +80,20 @@ export async function api<T>(path: string, method = 'GET', body?: unknown, timeo
   return response.json() as Promise<T>
 }
 
-export async function uploadDocuments(matterId: string, files: File[]): Promise<void> {
-  for (const file of files) {
-    await request(`/matters/${matterId}/documents/raw`, { method: 'POST', body: file,
-      headers: { 'Content-Type': 'application/octet-stream',
-        'X-CourtBundle-Filename': encodeURIComponent(file.name),
-        'X-CourtBundle-File-Mtime': file.lastModified ? new Date(file.lastModified).toISOString() : '' } }, 5 * 60_000)
+export async function uploadDocument(matterId: string, file: File, password?: string,
+                                     acknowledgeSignatureRisk = false): Promise<void> {
+  const headers: Record<string,string> = {
+    'Content-Type': 'application/octet-stream',
+    'X-CourtBundle-Filename': encodeURIComponent(file.name),
+    'X-CourtBundle-File-Mtime': file.lastModified ? new Date(file.lastModified).toISOString() : '',
   }
+  if (password) headers['X-CourtBundle-Pdf-Password'] = encodeURIComponent(password)
+  if (acknowledgeSignatureRisk) headers['X-CourtBundle-Signature-Acknowledge'] = 'true'
+  await request(`/matters/${matterId}/documents/raw`, { method: 'POST', body: file, headers }, 5 * 60_000)
+}
+
+export async function uploadDocuments(matterId: string, files: File[]): Promise<void> {
+  for (const file of files) await uploadDocument(matterId, file)
 }
 
 export async function restoreMatter(file: File, credential?: string, recovery = false): Promise<Matter> {
@@ -159,6 +176,25 @@ export async function downloadExport(matterId: string, exportId: string, filenam
   const anchor = document.createElement('a')
   anchor.href = fileUrl
   anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(fileUrl), 30_000)
+  return true
+}
+
+export async function downloadProtectedPdf(matterId: string, exportId: string,
+                                           filename: string, password: string): Promise<boolean> {
+  if (inTauri()) {
+    return invoke<boolean>('save_protected_export', {matterId, exportId, filename, password})
+  }
+  const response = await request(
+    `/matters/${matterId}/exports/${exportId}/${encodeURIComponent(filename)}/protected`,
+    {method:'POST', body:JSON.stringify({password})}, 5 * 60_000)
+  const fileUrl = URL.createObjectURL(await response.blob())
+  const anchor = document.createElement('a')
+  anchor.href = fileUrl
+  anchor.download = filename.replace(/\.pdf$/i, '-protected.pdf')
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()

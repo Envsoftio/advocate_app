@@ -52,7 +52,8 @@ def main():
                         assert client.get('/matters').status_code == 423
                         setup = client.post('/vault/setup', json={'password': 'synthetic packaged password 123'})
                         setup.raise_for_status()
-                        assert len(setup.json()['recovery_key']) == 64
+                        recovery_key = setup.json()['recovery_key']
+                        assert len(recovery_key) == 64
                     matter = client.post('/matters', json={'name': 'Synthetic packaged PDF QA',
                                                           'court_profile': 'general-demo'}).json()
                     base = f'/matters/{matter["id"]}'
@@ -103,11 +104,33 @@ def main():
                     if protected:
                         assert original_path.read_bytes().startswith(b'CBENC1\n')
                         assert original_path.read_bytes() != original
+                        backup = client.get(base + '/portable')
+                        backup.raise_for_status()
+                        assert backup.content.startswith(b'CBMAT4\n')
+                        assert b'PACKAGED SCANNED EVIDENCE' not in backup.content
+                        restored = client.post('/matters/restore', content=backup.content,
+                                               headers={'Content-Type': 'application/octet-stream'})
+                        restored.raise_for_status()
+                        assert restored.json()['id'] != matter['id']
+                        assert len(client.get('/matters').json()) == 2
+                        rotated = client.post('/vault/rotate',
+                                              json={'new_password': 'replacement synthetic password 123'})
+                        rotated.raise_for_status()
+                        new_recovery_key = rotated.json()['recovery_key']
+                        assert len(new_recovery_key) == 64
+                        forbidden = (b'PACKAGED SCANNED EVIDENCE',
+                                     b'synthetic packaged password 123',
+                                     b'replacement synthetic password 123',
+                                     recovery_key.encode(), new_recovery_key.encode())
+                        assert all(all(secret not in path.read_bytes() for secret in forbidden)
+                                   for path in root.rglob('*') if path.is_file())
                     else:
                         assert hashlib.sha256(original_path.read_bytes()).digest() == hashlib.sha256(original).digest()
                     print(json.dumps({'startup_seconds': round(startup, 2), 'bundled_ocr': 'passed',
                                       'compression': compressed['result'], 'bookmarked_export': 'passed',
-                                      'original_integrity': 'passed'}, indent=2))
+                                      'original_integrity': 'passed',
+                                      'protected_backup_restore_rotation': 'passed' if protected else 'not run'},
+                                     indent=2))
             finally:
                 process.terminate()
                 try:

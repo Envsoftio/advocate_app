@@ -219,6 +219,10 @@ class SignatureRiskAcknowledgement(BaseModel):
     acknowledge_signature_risk: bool = False
 
 
+class OcrRequest(SignatureRiskAcknowledgement):
+    language: Literal['eng', 'hin', 'eng+hin'] = 'eng'
+
+
 class ReorderPages(SignatureRiskAcknowledgement):
     order: list[int]
 

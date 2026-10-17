@@ -1,7 +1,7 @@
 """Build a native PyInstaller sidecar for the current host only.
 
 Usage: python backend/scripts/build_sidecar.py
-Requires pyinstaller, rustc, and an English tessdata file. Run on the target OS.
+Requires pyinstaller, rustc, and English and Hindi tessdata files. Run on the target OS.
 """
 from __future__ import annotations
 import os
@@ -20,26 +20,26 @@ def detect_triple():
     return next(line.partition(': ')[2].strip() for line in output.splitlines() if line.startswith('host:'))
 
 
-def locate_tessdata():
+def locate_tessdata(language: str):
     custom = os.getenv('TESSDATA_SOURCE')
     possibilities = [Path(custom)] if custom else []
     possibilities += [
-        Path('/usr/share/tesseract-ocr/5/tessdata/eng.traineddata'),
-        Path('/opt/homebrew/share/tessdata/eng.traineddata'),
-        Path('/usr/local/share/tessdata/eng.traineddata'),
-        Path(r'C:\Program Files\Tesseract-OCR\tessdata\eng.traineddata'),
+        Path('/usr/share/tesseract-ocr/5/tessdata'),
+        Path('/opt/homebrew/share/tessdata'),
+        Path('/usr/local/share/tessdata'),
+        Path(r'C:\Program Files\Tesseract-OCR\tessdata'),
     ]
     for path in possibilities:
         if path.is_dir():
-            path = path / 'eng.traineddata'
-        if path.is_file():
+            path = path / f'{language}.traineddata'
+        if path.is_file() and path.name == f'{language}.traineddata':
             return path
-    raise SystemExit('Missing English OCR model. Set TESSDATA_SOURCE=/path/to/eng.traineddata. Without it the installed app cannot OCR offline.')
+    raise SystemExit(f'Missing {language} OCR model. Set TESSDATA_SOURCE to a tessdata directory containing eng.traineddata and hin.traineddata.')
 
 
 def main():
     triple = detect_triple()
-    tessdata = locate_tessdata()
+    tessdata = [locate_tessdata(language) for language in ('eng', 'hin')]
     addition = os.pathsep
     out = ROOT / '.build-sidecar'
     build_env = os.environ.copy()
@@ -48,7 +48,8 @@ def main():
            '--name', 'filing-api', '--distpath', str(out / 'dist'), '--workpath', str(out / 'work'),
            '--specpath', str(out), '--paths', str(BACKEND), '--collect-all', 'pymupdf',
            '--add-data', f'{BACKEND / "app" / "rules" / "profiles.json"}{addition}app/rules',
-           '--add-data', f'{tessdata}{addition}tessdata', str(BACKEND / 'launcher.py')]
+           *(item for path in tessdata for item in ('--add-data', f'{path}{addition}tessdata')),
+           str(BACKEND / 'launcher.py')]
     print('Building native sidecar for', triple)
     subprocess.check_call(cmd, cwd=ROOT, env=build_env)
     extension = '.exe' if sys.platform == 'win32' else ''

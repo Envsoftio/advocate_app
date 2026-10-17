@@ -11,7 +11,8 @@ import { confirmSignatureTransformation } from '../lib/signatures'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
 const props = defineProps<{ expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], disabled?: boolean, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
-const emit = defineEmits<{ toggleExpanded: [], toggleFocus: [], modified: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string] }>()
+const emit = defineEmits<{ toggleExpanded: [], toggleFocus: [], modified: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [language: 'eng' | 'hin' | 'eng+hin'], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string] }>()
+const ocrLanguage = ref<'eng' | 'hin' | 'eng+hin'>('eng')
 const canvas = ref<HTMLCanvasElement | null>(null)
 const canvasWrap = ref<HTMLDivElement | null>(null)
 const thumbnailWrap = ref<HTMLDivElement | null>(null)
@@ -368,9 +369,12 @@ function linkPayload(item: ReviewedLink) {
 
 function normalizedPointer(event: PointerEvent) {
   const rect = canvas.value?.getBoundingClientRect()
-  if (!rect) return null
-  return {x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),
-    y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))}
+  if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height) ||
+      rect.width <= 0 || rect.height <= 0) return null
+  const x = (event.clientX-rect.left)/rect.width
+  const y = (event.clientY-rect.top)/rect.height
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  return {x:Math.max(0,Math.min(1,x)), y:Math.max(0,Math.min(1,y))}
 }
 function beginLinkRegion(event: PointerEvent) {
   if (!linkPanelOpen.value || props.disabled || editing.value || event.button !== 0) return
@@ -432,7 +436,8 @@ function finishAnnotationRegion(event: PointerEvent) {
   } else annotationError.value = ''
 }
 function beginRedactionRegion(event: PointerEvent) {
-  if (!redactionOpen.value || props.disabled || editing.value || event.button !== 0) return
+  if (!redactionOpen.value || props.disabled || editing.value || loading.value ||
+      switchingPage.value || event.button !== 0) return
   const point = normalizedPointer(event)
   if (!point) return
   redactionStart = point
@@ -455,7 +460,10 @@ function finishRedactionRegion(event: PointerEvent) {
   if (redactionPointerId !== event.pointerId) return
   redactionPointerId = null
   redactionStart = null
-  if (!redactionRegion.value || redactionRegion.value.width < .01 || redactionRegion.value.height < .01) {
+  if (!redactionRegion.value || !Number.isFinite(redactionRegion.value.x) ||
+      !Number.isFinite(redactionRegion.value.y) || !Number.isFinite(redactionRegion.value.width) ||
+      !Number.isFinite(redactionRegion.value.height) || redactionRegion.value.width < .01 ||
+      redactionRegion.value.height < .01) {
     redactionRegion.value = null
     redactionError.value = 'Drag a visible rectangular area on the page.'
   } else redactionError.value = ''
@@ -464,6 +472,14 @@ async function applyRedaction() {
   const doc = props.document
   const region = redactionRegion.value
   if (!doc || !region || !redactionReviewed.value || redactionBusy.value || props.disabled) return
+  if (!Number.isFinite(region.x) || !Number.isFinite(region.y) ||
+      !Number.isFinite(region.width) || !Number.isFinite(region.height) ||
+      region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0 ||
+      region.x + region.width > 1 || region.y + region.height > 1 ||
+      !Number.isInteger(redactionRevision) || redactionRevision < 1) {
+    redactionError.value = 'The marked area is no longer valid. Reload the page and draw it again.'
+    return
+  }
   const signature = confirmSignatureTransformation([doc], 'Permanently redacting a working page')
   if (!signature.proceed) return
   redactionBusy.value = true
@@ -1015,7 +1031,7 @@ async function applyReplacement() {
           </div>
         </div>
       </div>
-      <div class="document-actionbar" role="group" aria-label="Document tools"><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr')"><ScanText :size="15"/> Run English OCR</button>
+      <div class="document-actionbar" role="group" aria-label="Document tools"><label for="ocr-language">OCR language</label><select id="ocr-language" v-model="ocrLanguage" :disabled="editing || loading || disabled"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr', ocrLanguage)"><ScanText :size="15"/> Run {{ ocrLanguage === 'eng' ? 'English' : ocrLanguage === 'hin' ? 'Hindi' : 'English + Hindi' }} OCR</button>
         <button class="text-tool page-icon-tool danger" :disabled="editing || loading || disabled" aria-label="Archive document" title="Archive document" @click="emit('archiveDocument')"><Archive :size="16"/></button>
         <span class="page-editbar-divider" aria-hidden="true"></span>
         <button class="text-tool" :aria-expanded="!!detailsOpen" @click="emit('toggleDetails')"><PanelRightClose v-if="detailsOpen" :size="15"/><PanelRightOpen v-else :size="15"/> Document details<span v-if="detailsDirty" class="details-unsaved-indicator">Unsaved</span></button>

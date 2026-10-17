@@ -18,19 +18,47 @@ class ProcessingError(Exception):
     pass
 
 
-def normalize_to_pdf(source: Path, destination: Path):
+def check_pdf_password(source: Path, password: str | None) -> bool:
+    """Authenticate an imported PDF and enforce rights needed for working copies."""
+    if source.suffix.lower() != '.pdf':
+        return False
+    try:
+        with open_pdf(source) as doc:
+            if not doc.needs_pass:
+                return False
+            if not password:
+                raise ProcessingError('PDF password required')
+            if not doc.authenticate(password):
+                raise ProcessingError('Incorrect PDF password')
+            required = (pymupdf.PDF_PERM_COPY | pymupdf.PDF_PERM_MODIFY |
+                        pymupdf.PDF_PERM_ASSEMBLE)
+            if doc.permissions & required != required:
+                raise ProcessingError('PDF permissions do not allow copying, modification and assembly')
+            return True
+    except ProcessingError:
+        raise
+    except Exception as exc:
+        raise ProcessingError(f'Unable to inspect PDF protection: {type(exc).__name__}') from exc
+
+
+def normalize_to_pdf(source: Path, destination: Path, password: str | None = None):
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         if source.suffix.lower() == '.pdf':
             with open_pdf(source) as doc:
-                if doc.needs_pass:
-                    raise ProcessingError('Password-protected PDFs are not supported in this POC; decrypt a lawful working copy first')
+                was_protected = bool(doc.needs_pass)
+                if was_protected:
+                    check_pdf_password(source, password)
+                    doc.authenticate(password)
                 if doc.page_count == 0:
                     raise ProcessingError('PDF has no pages')
-                # Keep the initial working PDF byte-identical to the imported PDF.
-                # Re-saving here could disturb certificate-signature byte ranges
-                # before the user has seen and acknowledged the warning.
-            copy_file(source, destination)
+                if was_protected:
+                    # The immutable imported bytes remain encrypted and unchanged.
+                    save_pdf(doc, destination, encryption=pymupdf.PDF_ENCRYPT_NONE)
+                else:
+                    # Preserve byte-identical initial working copies for ordinary
+                    # PDFs, including certificate-signature byte ranges.
+                    copy_file(source, destination)
         else:
             with open_pdf(source) as image_doc:
                 content = image_doc.convert_to_pdf()

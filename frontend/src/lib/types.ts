@@ -144,6 +144,7 @@ export interface CourtProfile {
   max_file_mb: number | null
   require_searchable_text: boolean
   require_bookmarks: boolean
+  disallow_pdf_encryption: boolean
   sources: Array<{ title: string, url: string }>
   filing_guidance?: {
     title: string

@@ -19,8 +19,10 @@ import pymupdf
 
 from .pdf_ops import (ProcessingError, validate_pdf, apply_output_marks,
                       validate_overlay_image)
-from .file_io import open_pdf, read_bytes, save_pdf, size as file_size, write_bytes
+from .file_io import (iter_plain_chunks, open_pdf, protected, read_bytes,
+                      save_pdf, size as file_size, write_bytes)
 from .storage import Store, utcnow
+from .vault import EncryptedReader, encrypted_sink
 from .signatures import (CERTIFICATE_SIGNATURE_DETECTED,
                          SIGNATURE_INSPECTION_INCONCLUSIVE,
                          VISIBLE_SIGNATURE_ONLY, risk_summary)
@@ -760,16 +762,29 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         write_bytes(staging / 'READ_ME_FIRST.txt', readme.encode('utf-8'))
         progress(90, 'Packaging export ZIP')
         zip_file = staging / 'filing-package.zip'
-        zip_stream = io.BytesIO()
-        with zipfile.ZipFile(zip_stream, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-            for filename in ['combined.pdf', *[v['filename'] for v in volume_rows], 'index.csv', 'validation-report.json', 'READ_ME_FIRST.txt']:
-                if cancelled():
-                    raise ProcessingError('Operation cancelled')
-                z.writestr(filename, read_bytes(staging / filename))
-        write_bytes(zip_file, zip_stream.getvalue())
-        with zipfile.ZipFile(io.BytesIO(read_bytes(zip_file))) as archive:
-            if archive.testzip() is not None:
-                raise ProcessingError('Export ZIP integrity verification failed')
+        def fill_zip(output):
+            with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+                for filename in ['combined.pdf', *[v['filename'] for v in volume_rows],
+                                 'index.csv', 'validation-report.json', 'READ_ME_FIRST.txt']:
+                    if cancelled():
+                        raise ProcessingError('Operation cancelled')
+                    with z.open(filename, 'w') as member:
+                        for chunk in iter_plain_chunks(staging / filename):
+                            if cancelled():
+                                raise ProcessingError('Operation cancelled')
+                            member.write(chunk)
+        if protected(zip_file):
+            with encrypted_sink(zip_file, store._data_key) as output:
+                fill_zip(output)
+            with EncryptedReader(zip_file, store._data_key) as source:
+                with zipfile.ZipFile(source) as archive:
+                    if archive.testzip() is not None:
+                        raise ProcessingError('Export ZIP integrity verification failed')
+        else:
+            fill_zip(zip_file)
+            with zipfile.ZipFile(zip_file) as archive:
+                if archive.testzip() is not None:
+                    raise ProcessingError('Export ZIP integrity verification failed')
         filenames = ['filing-package.zip', 'combined.pdf', *[v['filename'] for v in volume_rows], 'index.csv', 'validation-report.json']
         # The ZIP may exceed the cap even when each PDF fits. Check everything offered
         # for download before the staging directory can be published as an export.

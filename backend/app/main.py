@@ -21,22 +21,23 @@ import pymupdf
 
 from .engine import load_profiles, preflight, build_bundle, bundle_preview
 from .jobs import JobManager
-from .pdf_ops import (ProcessingError, normalize_to_pdf, reorder_pages,
+from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reorder_pages,
                       rotate_page, delete_page, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
                       replace_text_run, move_text_run, permanently_redact_region, compress_pdf,
                       ocr_pdf, make_cover_pdf, preview_output_marks, validate_overlay_image)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, PermanentRedaction, SignatureRiskAcknowledgement, PageAnnotationCreate, PageAnnotationUpdate
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, PermanentRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate
 from .storage import Store, new_id
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
 from .schemas import CompressionRequest
 from .portable import (create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES,
-                       PROTECTED_PACKAGE_MAGIC, protected_package_header, parse_protected_package)
-from .vault import VaultError, decrypt_blob, encrypted_sink, unlock_key
+                       PROTECTED_PACKAGE_MAGIC, protected_package_header,
+                       parse_protected_package_stream)
+from .vault import EncryptedReader, VaultError, encrypted_sink, unlock_key
 from .vault_store import VaultStore
 from .labels import propose_labels, extract_label_references
 from .signatures import (combined_signature_status, inspect_source_signature,
-                         risk_summary)
+                         risk_summary, transformation_risk)
 
 FILE_LIMIT_BYTES = 80 * 1024 * 1024
 OVERLAY_IMAGE_LIMIT_BYTES = 10 * 1024 * 1024
@@ -127,7 +128,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                        allow_origins=allowed_origins,
                        allow_methods=['GET','POST','PUT','PATCH','DELETE'],
                        allow_headers=['Authorization','Content-Type', 'X-CourtBundle-Filename',
-                                      'X-CourtBundle-File-Mtime',
+                                      'X-CourtBundle-File-Mtime', 'X-CourtBundle-Pdf-Password',
+                                      'X-CourtBundle-Signature-Acknowledge',
                                       'X-CourtBundle-Backup-Credential', 'X-CourtBundle-Backup-Recovery'])
 
     def auth(request: Request):
@@ -342,30 +344,35 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 file = form.get('file')
                 if not isinstance(file, ParsedUploadFile):
                     raise HTTPException(status_code=422, detail='Select a portable matter file')
-                chunks = []
-                while chunk := await file.read(1024 * 1024):
-                    size += len(chunk)
-                    if size > MAX_PACKAGE_BYTES:
-                        raise HTTPException(status_code=413, detail='Portable package exceeds 4 GiB')
-                    chunks.append(chunk)
-                write_bytes(path, b''.join(chunks))
+                with path.open('wb') as output:
+                    while chunk := await file.read(1024 * 1024):
+                        size += len(chunk)
+                        if size > MAX_PACKAGE_BYTES:
+                            raise HTTPException(status_code=413, detail='Portable package exceeds 4 GiB')
+                        output.write(chunk)
                 credential = form.get('credential')
                 recovery = form.get('recovery') == 'true'
             try:
-                raw = read_bytes(path)
-                if raw.startswith(PROTECTED_PACKAGE_MAGIC):
-                    if vault is None:
+                if vault is not None:
+                    with EncryptedReader(path, store._data_key) as uploaded:
+                        if uploaded.read(len(PROTECTED_PACKAGE_MAGIC)) == PROTECTED_PACKAGE_MAGIC:
+                            envelope, offset = parse_protected_package_stream(uploaded)
+                            try:
+                                package_source = EncryptedReader(uploaded, store._data_key, offset=offset)
+                            except VaultError:
+                                if not credential:
+                                    raise PortableMatterError('This backup needs its password or recovery key')
+                                package_key = unlock_key(envelope, credential, recovery=recovery)
+                                package_source = EncryptedReader(uploaded, package_key, offset=offset)
+                            with package_source:
+                                return restore_package(store, package_source)
+                        uploaded.seek(0)
+                        return restore_package(store, uploaded)
+                with path.open('rb') as uploaded:
+                    if uploaded.read(len(PROTECTED_PACKAGE_MAGIC)) == PROTECTED_PACKAGE_MAGIC:
                         raise PortableMatterError('Unlock a protected store before restoring this backup')
-                    envelope, ciphertext = parse_protected_package(raw)
-                    try:
-                        package_bytes = decrypt_blob(ciphertext, store._data_key)
-                    except VaultError:
-                        if not credential:
-                            raise PortableMatterError('This backup needs its password or recovery key')
-                        package_key = unlock_key(envelope, credential, recovery=recovery)
-                        package_bytes = decrypt_blob(ciphertext, package_key)
-                    return restore_package(store, package_bytes)
-                return restore_package(store, path)
+                    uploaded.seek(0)
+                    return restore_package(store, uploaded)
             except (PortableMatterError, VaultError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:
@@ -432,7 +439,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
 
     async def import_document(matter_id: str, filename: str,
                               file: UploadFile | None = None, request: Request | None = None,
-                              source_file_mtime: str = ''):
+                              source_file_mtime: str = '', password: str | None = None,
+                              acknowledge_signature_risk: bool = False):
         suffix = Path(filename).suffix.lower()
         if suffix not in SUPPORTED:
             raise HTTPException(status_code=415, detail='Only PDF, PNG and JPEG documents are supported in this POC')
@@ -471,8 +479,15 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                         raise HTTPException(status_code=413, detail='POC import limit is 80 MB per file')
                     chunks.append(chunk)
                 write_bytes(source, b''.join(chunks))
-            signature = await asyncio.to_thread(inspect_source_signature, source, suffix)
-            conversion = asyncio.create_task(asyncio.to_thread(normalize_to_pdf, source, target))
+            protected_pdf = await asyncio.to_thread(check_pdf_password, source, password)
+            signature = await asyncio.to_thread(inspect_source_signature, source, suffix,
+                                                password if protected_pdf else None)
+            if protected_pdf and transformation_risk(signature) and not acknowledge_signature_risk:
+                raise HTTPException(status_code=409, detail=(
+                    'Protected PDF signature review required before creating a decrypted working copy. '
+                    'Certificate validity is not verified; the imported original will remain unchanged.'))
+            conversion = asyncio.create_task(asyncio.to_thread(normalize_to_pdf, source, target,
+                                                                 password if protected_pdf else None))
             try:
                 pages = await asyncio.shield(conversion)
             except asyncio.CancelledError:
@@ -512,6 +527,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         if not filename or len(filename) > 500 or '/' in filename or '\\' in filename:
             raise HTTPException(status_code=422, detail='Invalid document filename')
         source_file_mtime = request.headers.get('x-courtbundle-file-mtime', '')
+        password_header = request.headers.get('x-courtbundle-pdf-password')
+        password = unquote(password_header) if password_header is not None else None
+        acknowledge_signature_risk = request.headers.get('x-courtbundle-signature-acknowledge') == 'true'
         if source_file_mtime:
             try:
                 if len(source_file_mtime) > 40:
@@ -524,7 +542,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             await asyncio.sleep(.05)
         try:
             return [await import_document(matter_id, filename, request=request,
-                                          source_file_mtime=source_file_mtime)]
+                                          source_file_mtime=source_file_mtime,
+                                          password=password,
+                                          acknowledge_signature_risk=acknowledge_signature_risk)]
         finally:
             lock.release()
 
@@ -1105,7 +1125,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     def submit_ocr(doc: dict, job_id: str | None = None,
-                   acknowledge_signature_risk: bool = False):
+                   acknowledge_signature_risk: bool = False, language: str = 'eng'):
         doc_id = doc['id']
         require_signature_acknowledgement([doc], acknowledge_signature_risk, 'running OCR')
         def task(job_id, progress, cancelled):
@@ -1119,7 +1139,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 committed = False
                 try:
                     copy_file(store.working_path(current), candidate)
-                    total, changed = ocr_pdf(candidate, progress=progress, cancelled=cancelled)
+                    total, changed = ocr_pdf(candidate, language=language, progress=progress,
+                                             cancelled=cancelled)
                     if cancelled():
                         raise ProcessingError('Operation cancelled')
                     if changed:
@@ -1131,14 +1152,16 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 finally:
                     if not committed:
                         store.discard_uncommitted_working(doc_id, rel, candidate)
-                return {'document_id': doc_id, 'pages_checked': total, 'pages_ocr_applied': changed}
+                return {'document_id': doc_id, 'pages_checked': total,
+                        'pages_ocr_applied': changed, 'language': language}
         return jobs.submit(doc['matter_id'], 'ocr', task, target_id=doc_id, job_id=job_id)
 
     @app.post('/documents/{doc_id}/ocr', status_code=202)
-    def start_ocr(doc_id: str, payload: SignatureRiskAcknowledgement | None = None,
+    def start_ocr(doc_id: str, payload: OcrRequest | None = None,
                   _: None = Depends(auth)):
         return submit_ocr(doc_or_404(doc_id), acknowledge_signature_risk=(
-            payload.acknowledge_signature_risk if payload else False))
+            payload.acknowledge_signature_risk if payload else False),
+            language=payload.language if payload else 'eng')
 
     @app.post('/documents/{doc_id}/compress', status_code=202)
     def start_compression(doc_id: str, payload: CompressionRequest, _: None = Depends(auth)):
@@ -1223,7 +1246,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         return {'cancel_requested': True}
 
     @app.post('/jobs/{job_id}/retry', status_code=202)
-    def retry_job(job_id: str, payload: SignatureRiskAcknowledgement | None = None,
+    def retry_job(job_id: str, payload: OcrRequest | None = None,
                   _: None = Depends(auth)):
         prior = jobs.get(job_id)
         if not prior:
@@ -1244,7 +1267,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         new_job_id = new_id()
         if not jobs.claim_retry(job_id, new_job_id):
             raise HTTPException(status_code=409, detail='Only an interrupted job may be retried once')
-        return (submit_ocr(doc, new_job_id, acknowledged) if prior['kind'] == 'ocr'
+        return (submit_ocr(doc, new_job_id, acknowledged,
+                           payload.language if payload else 'eng') if prior['kind'] == 'ocr'
                 else submit_build(prior['matter_id'], new_job_id, acknowledged))
 
     @app.get('/matters/{matter_id}/exports')
@@ -1260,5 +1284,38 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=404, detail='Export file not found')
         media = 'application/pdf' if filename.endswith('.pdf') else ('application/zip' if filename.endswith('.zip') else 'application/octet-stream')
         return file_response(path, media, filename)
+
+    @app.post('/matters/{matter_id}/exports/{export_id}/{filename}/protected')
+    def protected_pdf_export(matter_id: str, export_id: str, filename: str,
+                             payload: dict, _: None = Depends(auth)):
+        matter = matter_or_404(matter_id)
+        if profiles[matter['court_profile']].get('disallow_pdf_encryption'):
+            raise HTTPException(status_code=409, detail=(
+                'This illustrative profile disables encrypted PDF output as an unapproved '
+                'technical setting. Choose a reviewed workflow before saving a protected PDF.'))
+        if not filename.endswith('.pdf'):
+            raise HTTPException(status_code=422, detail='Only PDF output can be password protected')
+        password = payload.get('password')
+        if not isinstance(password, str) or not 1 <= len(password.encode('utf-8')) <= 40:
+            raise HTTPException(status_code=422, detail='Enter a PDF password of 1 to 40 UTF-8 bytes')
+        path = store.get_export_file(matter_id, export_id, filename)
+        if not path:
+            raise HTTPException(status_code=404, detail='Export PDF not found')
+        try:
+            with open_pdf(path) as document:
+                encrypted = document.tobytes(
+                    encryption=pymupdf.PDF_ENCRYPT_AES_256,
+                    owner_pw=secrets.token_hex(20), user_pw=password,
+                    permissions=4095, garbage=4, deflate=True)
+                expected_pages = document.page_count
+            with pymupdf.open(stream=encrypted, filetype='pdf') as check:
+                if not check.needs_pass or not check.authenticate(password) or check.page_count != expected_pages:
+                    raise ProcessingError('Protected PDF could not be reopened')
+            output_name = filename[:-4] + '-protected.pdf'
+            return Response(content=encrypted, media_type='application/pdf',
+                            headers={'Content-Disposition': f'attachment; filename="{output_name}"',
+                                     'Cache-Control': 'no-store'})
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return app

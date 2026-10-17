@@ -20,7 +20,7 @@ import MatterHome from './components/MatterHome.vue'
 import CourtProfileGuide from './components/CourtProfileGuide.vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { VueDraggable } from 'vue-draggable-plus'
-import { ApiError, api, downloadExport, downloadMatter, inTauri, restoreMatter, uploadDocuments } from './lib/api'
+import { ApiError, api, downloadExport, downloadProtectedPdf, downloadMatter, inTauri, restoreMatter, uploadDocument } from './lib/api'
 import { bytesLabel, friendlyError, prettyDate } from './lib/format'
 import { applyAppearance, readAppearance, type Theme, type UiScale } from './lib/appearance'
 import { confirmSignatureTransformation, signatureRiskDocuments, signatureStatusLabel } from './lib/signatures'
@@ -103,8 +103,16 @@ const protectedRestoreRecovery = ref(false)
 const protectedRestoreError = ref('')
 const toast = ref<{message:string, kind:'success'|'error'|'info'} | null>(null)
 const activeJob = ref<Job | null>(null)
+const retryOcrLanguage = ref<'eng' | 'hin' | 'eng+hin'>('eng')
 const savingExport = ref(false)
 const reviewingPdf = ref<{exportId:string,filename:string} | null>(null)
+const pdfImportRequest = ref<{name:string,error:string} | null>(null)
+const pdfImportPassword = ref('')
+let pdfImportResolve: ((password:string|null)=>void) | null = null
+const protectedExportRequest = ref<{exportId:string,filename:string} | null>(null)
+const protectedExportPassword = ref('')
+const protectedExportConfirm = ref('')
+const protectedExportError = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const matterFileInput = ref<HTMLInputElement | null>(null)
 const docEditor = reactive({ title: '', kind: 'other' as DocKind, part: 1, label: '', group_key: '',
@@ -356,7 +364,7 @@ async function init() {
   apiStatus.value = 'connecting'
   try {
     let connected = false
-    const deadline = Date.now() + (inTauri() ? 30_000 : 12_000)
+    const deadline = Date.now() + (inTauri() ? 60_000 : 12_000)
     while (Date.now() < deadline) {
       try {
         await api('/health', 'GET', undefined, 1_500)
@@ -566,12 +574,52 @@ async function onUpload(files: FileList | File[]) {
   const incoming=Array.from(files).filter(f => /\.(pdf|png|jpe?g)$/i.test(f.name))
   if (!incoming.length) { notify('Choose PDF, JPG or PNG files.', 'error'); return }
   busy.value=true
+  let imported = 0
   try {
-    await uploadDocuments(currentMatterId.value, incoming)
+    for (const file of incoming) {
+      let password: string | undefined
+      let acknowledged = false
+      while (true) {
+        try {
+          await uploadDocument(currentMatterId.value, file, password, acknowledged)
+          imported++
+          break
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 422 &&
+              /PDF password required|Incorrect PDF password/.test(err.message)) {
+            const supplied = await askPdfImportPassword(file.name,
+              err.message.includes('Incorrect') ? 'Incorrect PDF password. Try again or cancel.' : '')
+            password = supplied === null ? undefined : supplied
+            if (supplied === null) { notify(`${file.name} import cancelled.`, 'info'); break }
+            continue
+          }
+          if (err instanceof ApiError && err.status === 409 &&
+              err.message.includes('Protected PDF signature review required')) {
+            acknowledged = window.confirm('This protected PDF may contain certificate signatures. Creating a decrypted working copy can invalidate them. Certificate validity is not verified. The encrypted original is preserved. Continue importing?')
+            if (!acknowledged) { notify(`${file.name} import cancelled.`, 'info'); break }
+            continue
+          }
+          throw err
+        }
+      }
+      password = undefined
+    }
     await loadMatterResources()
-    notify(`${incoming.length} document(s) imported. Original files preserved.`, 'success')
+    if (imported) notify(`${imported} document(s) imported. Original files preserved.`, 'success')
   } catch(err) { issue(err); await loadMatterResources() }
   finally { busy.value=false; if(fileInput.value) fileInput.value.value='' }
+}
+function askPdfImportPassword(name:string, error:string): Promise<string|null> {
+  pdfImportPassword.value = ''
+  pdfImportRequest.value = {name,error}
+  return new Promise(resolve => { pdfImportResolve = resolve })
+}
+function finishPdfImportPassword(password:string|null) {
+  const resolve = pdfImportResolve
+  pdfImportResolve = null
+  pdfImportPassword.value = ''
+  pdfImportRequest.value = null
+  resolve?.(password)
 }
 function onDropUpload(e: DragEvent) {
   hoverUpload.value=false
@@ -669,16 +717,17 @@ function moveDocumentFromHandle(id: string, direction: number, filtered = false)
   void moveDocumentById(id, direction)
 }
 async function refreshDocument() { await loadMatterResources() }
-async function startOcr() {
+async function startOcr(language: 'eng' | 'hin' | 'eng+hin') {
   if(!selectedDoc.value || isJobActive.value) return
   const signature = confirmSignatureTransformation([selectedDoc.value], 'OCR')
   if (!signature.proceed) return
   try {
     const job=await api<Job>(`/documents/${selectedDoc.value.id}/ocr`,'POST',{
       acknowledge_signature_risk:signature.acknowledged,
+      language,
     })
     watchJob(job)
-    notify('OCR started on scanned and mixed-content pages.', 'info')
+    notify('OCR started on scanned and mixed-content pages. Review recognized text.', 'info')
   } catch(err){issue(err)}
 }
 async function validate(): Promise<PreflightCheck[]> {
@@ -744,6 +793,7 @@ async function retryInterrupted(job: Job) {
     if (!signature.proceed) return
     const retry = await api<Job>(`/jobs/${job.id}/retry`, 'POST', {
       acknowledge_signature_risk: signature.acknowledged,
+      ...(job.kind === 'ocr' ? { language: retryOcrLanguage.value } : {}),
     })
     watchJob(retry)
     await loadMatterResources()
@@ -758,6 +808,38 @@ async function download(exportId:string, filename:string, saveAs=false){
     if(saved && inTauri()) notify(`${filename} saved.`, 'success')
   }catch(err){issue(err)}
   finally{savingExport.value = false}
+}
+function beginProtectedExport(exportId:string, filename:string) {
+  protectedExportPassword.value = ''
+  protectedExportConfirm.value = ''
+  protectedExportError.value = ''
+  protectedExportRequest.value = {exportId,filename}
+}
+function cancelProtectedExport() {
+  protectedExportPassword.value = ''
+  protectedExportConfirm.value = ''
+  protectedExportError.value = ''
+  protectedExportRequest.value = null
+}
+async function saveProtectedExport() {
+  const request = protectedExportRequest.value
+  if (!request || !currentMatterId.value || savingExport.value) return
+  if (protectedExportPassword.value !== protectedExportConfirm.value) {
+    protectedExportError.value = 'Passwords do not match.'
+    return
+  }
+  if (!protectedExportPassword.value || new TextEncoder().encode(protectedExportPassword.value).length > 40) {
+    protectedExportError.value = 'Enter a password of 1 to 40 UTF-8 bytes.'
+    return
+  }
+  savingExport.value = true
+  protectedExportError.value = ''
+  try {
+    const saved = await downloadProtectedPdf(currentMatterId.value, request.exportId,
+      request.filename, protectedExportPassword.value)
+    if (saved) { cancelProtectedExport(); notify('Password-protected PDF saved. Reopen it with the password before use.', 'success') }
+  } catch (err) { protectedExportError.value = friendlyError(err) }
+  finally { savingExport.value = false }
 }
 function reviewGeneratedPdf(exportId:string, filename:string, bytes:number) {
   if (bytes > 25 * 1024 * 1024) {
@@ -904,7 +986,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
         <div class="page-eyebrow">PRODUCT DEMONSTRATION</div><h1>Built for structured legal filing preparation.</h1>
         <p class="page-description">A local-first proof of concept connecting Tauri, Vue and Python to convert source documents into indexed legal bundles.</p>
         <div class="feature-strip"><div><FileStack :size="23"/><h3>Preserve originals</h3><p>Working copies are edited separately from imported source documents.</p></div><div><WandSparkles :size="23"/><h3>Deterministic assembly</h3><p>Volume splitting, bookmarks and indexes share the same page map.</p></div><div><ShieldCheck :size="23"/><h3>Visible limitations</h3><p>Illustrative rules and a validation report, not a filing approval.</p></div></div>
-        <div class="card about-card"><h2>What is included?</h2><p>Matters, PDF/JPEG/PNG import, working-copy page operations, English OCR, drag-drop ordering, annexure/part metadata, auto index, volume splitting, linked bookmarks, technical validation and ZIP export.</p><h2>What is not included?</h2><p>Actual court submission, legally approved templates, digital signing, Word/Excel/PPT conversion, comprehensive PDF text editing, cloud sharing or guaranteed legal compliance.</p></div>
+        <div class="card about-card"><h2>What is included?</h2><p>Matters, PDF/JPEG/PNG import, working-copy page operations, English and Hindi OCR, drag-drop ordering, annexure/part metadata, auto index, volume splitting, linked bookmarks, technical validation and ZIP export.</p><h2>What is not included?</h2><p>Actual court submission, legally approved templates, digital signing, Word/Excel/PPT conversion, comprehensive PDF text editing, cloud sharing or guaranteed legal compliance.</p></div>
       </main>
 
       <MatterHome v-else-if="activeView==='matters'" :matters="matterList" :creating="creating" @open="id=>selectMatter(id,'overview')" @create="modalOpen=true" @sample="createSampleMatter"/>
@@ -1028,13 +1110,14 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <button class="btn primary large" :disabled="!docs.length || isJobActive" @click="startBuild"><Layers3 :size="19"/> {{isJobActive?'Processing…':'Build filing bundle'}}</button>
                 <div v-if="isJobActive && activeJob" class="job-progress"><div class="job-progress-line"><span>{{activeJob.message}}</span><strong>{{activeJob.progress}}%</strong></div><div class="progress-track"><div :style="{width:activeJob.progress+'%'}"></div></div><button class="text-tool danger" @click="cancelJob">Cancel operation</button></div>
                 <div v-else-if="activeJob?.status==='failed'" class="notice error"><CircleAlert :size="18"/> {{activeJob.error}}</div>
-                <div v-for="job in interruptedJobs" :key="job.id" class="notice amber"><CircleAlert :size="18"/><span>{{job.kind === 'ocr' ? 'OCR' : job.kind === 'compress' ? 'Compression' : 'Bundle build'}} was interrupted by an engine restart. Review the current revision and exports before retrying.</span><span v-if="job.kind === 'compress'">Choose compression again in page tools.</span><button v-else class="text-tool" :disabled="isJobActive" @click="retryInterrupted(job)">Retry</button></div>
+                <div v-for="job in interruptedJobs" :key="job.id" class="notice amber"><CircleAlert :size="18"/><span>{{job.kind === 'ocr' ? 'OCR' : job.kind === 'compress' ? 'Compression' : 'Bundle build'}} was interrupted by an engine restart. Review the current revision and exports before retrying.</span><span v-if="job.kind === 'compress'">Choose compression again in page tools.</span><label v-if="job.kind === 'ocr'">OCR language <select v-model="retryOcrLanguage"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select></label><button v-if="job.kind !== 'compress'" class="text-tool" :disabled="isJobActive" @click="retryInterrupted(job)">Retry</button></div>
               </div>
             </div>
             <BundlePreview :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" @open-document="openPreviewDocument"/>
             <div class="panel exports-panel"><div class="panel-header"><div><h2>Generated exports</h2><span>Stored locally for repeat downloads</span></div><Archive :size="18" class="muted-icon"/></div>
               <div v-if="activeExport" class="export-body"><div v-if="activeExport.stale" class="notice amber"><ShieldAlert :size="18"/> Matter inputs changed since this export. Rebuild before using it.</div><div v-if="activeJob?.kind==='build' && activeJob.status==='failed'" class="notice amber"><ShieldAlert :size="18"/> The latest build failed. These files are from an earlier completed export; review them before use.</div><div class="export-summary"><div class="export-icon"><FileCheck2 :size="25"/></div><div><strong>{{activeJob?.kind==='build' && activeJob.status==='failed' ? 'Previous filing package' : 'Latest filing package'}}</strong><span>{{prettyDate(activeExport.created_at)}} · {{activeExport.volumes}} volume(s) · {{activeExport.pages}} pages</span></div></div><div v-if="activeExport.checks.some(check => check.code==='SOURCE_ANNOTATIONS_OMITTED' || check.code==='SOURCE_LINKS_OMITTED')" class="notice amber"><ShieldAlert :size="18"/> This export omitted source annotations or links. See validation-report.json for affected documents; generated index links remain.</div>
-                <div v-for="file in activeExport.files" :key="file.name" class="export-file"><FileText :size="18"/><div><strong>{{file.name}}</strong><small>{{bytesLabel(file.bytes)}}</small></div><button v-if="file.name.endsWith('.pdf')" class="text-tool" :aria-label="'Review '+file.name" @click="reviewGeneratedPdf(activeExport.id,file.name,file.bytes)">Review PDF</button><button class="icon-btn" :disabled="savingExport" :title="inTauri() ? 'Save '+file.name : 'Download '+file.name" :aria-label="inTauri() ? 'Save '+file.name : 'Download '+file.name" @click="download(activeExport.id,file.name)"><ArrowDownToLine :size="18"/></button><button v-if="inTauri()" class="text-tool" :disabled="savingExport" :title="'Save '+file.name+' as'" @click="download(activeExport.id,file.name,true)">Save As</button></div>
+                <div v-for="file in activeExport.files" :key="file.name" class="export-file"><FileText :size="18"/><div><strong>{{file.name}}</strong><small>{{bytesLabel(file.bytes)}}</small></div><button v-if="file.name.endsWith('.pdf')" class="text-tool" :aria-label="'Review '+file.name" @click="reviewGeneratedPdf(activeExport.id,file.name,file.bytes)">Review PDF</button><button class="icon-btn" :disabled="savingExport" :title="inTauri() ? 'Save '+file.name : 'Download '+file.name" :aria-label="inTauri() ? 'Save '+file.name : 'Download '+file.name" @click="download(activeExport.id,file.name)"><ArrowDownToLine :size="18"/></button><button v-if="inTauri()" class="text-tool" :disabled="savingExport" :title="'Save '+file.name+' as'" @click="download(activeExport.id,file.name,true)">Save As</button><button v-if="file.name.endsWith('.pdf') && !selectedProfile?.disallow_pdf_encryption" class="text-tool" :disabled="savingExport" :aria-label="'Save password-protected '+file.name" @click="beginProtectedExport(activeExport.id,file.name)">Protect PDF…</button></div>
+                <p v-if="selectedProfile?.disallow_pdf_encryption" class="export-footnote">Encrypted PDF output is disabled by this illustrative profile as an unapproved technical setting. This is not a reviewed court rule.</p>
                 <p class="export-footnote">The ZIP contains PDFs, an index CSV, and a technical validation report. It is not submitted to a court.</p>
               </div><div v-else class="empty-export"><Archive :size="28"/><strong>No exports yet</strong><span>Build a bundle to see generated files.</span></div>
             </div>
@@ -1057,6 +1140,31 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       <PageTools :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :job="activeJob" expanded @modified="refreshDocument" @job-started="watchJob" @cancel="cancelJob"/>
     </dialog>
     <ExportPdfReview v-if="reviewingPdf && currentMatterId" :matter-id="currentMatterId" :export-id="reviewingPdf.exportId" :filename="reviewingPdf.filename" @close="reviewingPdf=null"/>
+    <div v-if="pdfImportRequest" class="vault-restore-overlay" role="presentation">
+      <section class="vault-card" role="dialog" aria-modal="true" aria-labelledby="pdf-import-password-title">
+        <h2 id="pdf-import-password-title">Open protected PDF</h2>
+        <p>{{pdfImportRequest.name}} requires a password. The encrypted original will be preserved.</p>
+        <p v-if="pdfImportRequest.error" class="notice amber" role="alert">{{pdfImportRequest.error}}</p>
+        <form @submit.prevent="finishPdfImportPassword(pdfImportPassword)">
+          <PasswordInput v-model="pdfImportPassword" label="PDF password" autocomplete="off"/>
+          <button class="btn primary" type="submit">Open and import</button>
+          <button class="btn secondary" type="button" @click="finishPdfImportPassword(null)">Cancel import</button>
+        </form>
+      </section>
+    </div>
+    <div v-if="protectedExportRequest" class="vault-restore-overlay" role="presentation">
+      <section class="vault-card" role="dialog" aria-modal="true" aria-labelledby="pdf-export-password-title">
+        <h2 id="pdf-export-password-title">Save protected PDF</h2>
+        <p>Choose a password for {{protectedExportRequest.filename}}. You will need it to reopen the saved PDF.</p>
+        <p v-if="protectedExportError" class="notice amber" role="alert">{{protectedExportError}}</p>
+        <form @submit.prevent="saveProtectedExport">
+          <PasswordInput v-model="protectedExportPassword" label="PDF password" autocomplete="new-password"/>
+          <PasswordInput v-model="protectedExportConfirm" label="Confirm PDF password" autocomplete="new-password"/>
+          <button class="btn primary" type="submit" :disabled="savingExport">{{savingExport?'Saving…':'Save protected PDF'}}</button>
+          <button class="btn secondary" type="button" :disabled="savingExport" @click="cancelProtectedExport">Cancel</button>
+        </form>
+      </section>
+    </div>
     <div v-if="protectedRestoreFile" class="vault-restore-overlay" role="presentation">
       <section class="vault-card" role="dialog" aria-modal="true" aria-labelledby="restore-vault-title">
         <h2 id="restore-vault-title">Unlock protected backup</h2>

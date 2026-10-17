@@ -107,14 +107,20 @@ async fn transfer(
     connection: &crate::BackendConnection,
     path: &str,
     destination: &Path,
+    password: Option<&str>,
 ) -> Result<(), String> {
     let url = format!("{}{}", connection.base_url.trim_end_matches('/'), path);
     let client = reqwest::Client::builder()
         .no_proxy()
         .build()
         .map_err(|e| format!("Cannot initialize local export transfer: {e}"))?;
-    let mut response = client
-        .get(url)
+    let request = match password {
+        Some(value) => client
+            .post(url)
+            .json(&serde_json::json!({"password": value})),
+        None => client.get(url),
+    };
+    let mut response = request
         .bearer_auth(&connection.token)
         .send()
         .await
@@ -212,6 +218,7 @@ pub(crate) async fn save_export(
         &backend.connection,
         &format!("/matters/{matter_id}/exports/{export_id}/{filename}"),
         &destination,
+        None,
     )
     .await?;
     saves
@@ -219,6 +226,63 @@ pub(crate) async fn save_export(
         .lock()
         .map_err(|e| e.to_string())?
         .insert(key, destination.clone());
+    *saves.last_directory.lock().map_err(|e| e.to_string())? =
+        destination.parent().map(Path::to_path_buf);
+    Ok(true)
+}
+
+#[tauri::command]
+pub(crate) async fn save_protected_export(
+    app: AppHandle,
+    backend: State<'_, BackendState>,
+    saves: State<'_, SaveState>,
+    matter_id: String,
+    export_id: String,
+    filename: String,
+    password: String,
+) -> Result<bool, String> {
+    if !valid_id(&matter_id)
+        || !valid_id(&export_id)
+        || !valid_filename(&filename)
+        || !filename.ends_with(".pdf")
+    {
+        return Err("Invalid PDF export selection".into());
+    }
+    if password.is_empty() || password.len() > 40 {
+        return Err("Enter a PDF password of 1 to 40 UTF-8 bytes".into());
+    }
+    let output_name = format!("{}-protected.pdf", &filename[..filename.len() - 4]);
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Save password-protected CourtBundle PDF")
+        .set_file_name(&output_name)
+        .add_filter("PDF", &["pdf"]);
+    if let Some(directory) = saves
+        .last_directory
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+    {
+        dialog = dialog.set_directory(directory);
+    }
+    let Some(path) = dialog.blocking_save_file() else {
+        return Ok(false);
+    };
+    let destination = path
+        .into_path()
+        .map_err(|e| format!("Unsupported save location: {e}"))?;
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if destination.is_dir() || destination.starts_with(&app_data) {
+        return Err("Choose a file outside CourtBundle's internal data folder".into());
+    }
+    transfer(
+        &backend.connection,
+        &format!("/matters/{matter_id}/exports/{export_id}/{filename}/protected"),
+        &destination,
+        Some(&password),
+    )
+    .await?;
     *saves.last_directory.lock().map_err(|e| e.to_string())? =
         destination.parent().map(Path::to_path_buf);
     Ok(true)
@@ -262,6 +326,7 @@ pub(crate) async fn save_matter(
         &backend.connection,
         &format!("/matters/{matter_id}/portable"),
         &destination,
+        None,
     )
     .await?;
     *saves.last_directory.lock().map_err(|e| e.to_string())? =
@@ -330,6 +395,7 @@ pub(crate) async fn save_page_output(
         &backend.connection,
         &format!("/documents/{document_id}/pages/{operation}?{query}={selection}&acknowledge_signature_risk={acknowledge_signature_risk}"),
         &destination,
+        None,
     )
     .await?;
     *saves.last_directory.lock().map_err(|e| e.to_string())? =
@@ -387,13 +453,71 @@ mod tests {
         let path = "/synthetic-export";
 
         let complete = test_response(b"new export", 10);
-        tauri::async_runtime::block_on(transfer(&complete, path, &destination)).unwrap();
+        tauri::async_runtime::block_on(transfer(&complete, path, &destination, None)).unwrap();
         assert_eq!(fs::read(&destination).unwrap(), b"new export");
 
         let incomplete = test_response(b"partial", 99);
-        assert!(tauri::async_runtime::block_on(transfer(&incomplete, path, &destination)).is_err());
+        assert!(
+            tauri::async_runtime::block_on(transfer(&incomplete, path, &destination, None))
+                .is_err()
+        );
         assert_eq!(fs::read(&destination).unwrap(), b"new export");
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn protected_transfer_posts_password_and_saves_response_only() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 4096];
+            loop {
+                let count = stream.read(&mut buffer).unwrap();
+                request.extend_from_slice(&buffer[..count]);
+                let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n")
+                else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&request[..header_end]).to_lowercase();
+                let length = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length: "))
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(0);
+                if request.len() >= header_end + 4 + length {
+                    break;
+                }
+            }
+            let text = String::from_utf8_lossy(&request);
+            assert!(text.starts_with("POST /synthetic-protected HTTP/1.1"));
+            assert!(text.contains("synthetic password"));
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 14\r\nConnection: close\r\n\r\n%PDF-encrypted").unwrap();
+        });
+        let directory = std::env::temp_dir().join(format!(
+            "courtbundle-protected-test-{}",
+            rand::random::<u64>()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let destination = directory.join("protected.pdf");
+        let connection = crate::BackendConnection {
+            base_url: format!("http://{address}"),
+            token: "test-token".into(),
+        };
+        tauri::async_runtime::block_on(transfer(
+            &connection,
+            "/synthetic-protected",
+            &destination,
+            Some("synthetic password"),
+        ))
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"%PDF-encrypted");
         fs::remove_dir_all(directory).unwrap();
     }
 }

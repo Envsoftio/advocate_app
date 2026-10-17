@@ -1,9 +1,11 @@
 import copy
+import os
 
 import pytest
 
-from app.vault import (VaultError, create_key_envelope, decrypt_bytes, decrypt_file,
-                       encrypt_file, encrypted_sink, rotate_key_envelope, unlock_key)
+from app.vault import (EncryptedReader, VaultError, create_key_envelope, decrypt_bytes,
+                       decrypt_file, encrypt_bytes, encrypt_file, encrypted_sink,
+                       rotate_key_envelope, unlock_key)
 
 
 def test_password_recovery_rotation_and_tamper():
@@ -80,3 +82,30 @@ def test_streamed_encryption_publishes_only_complete_output(tmp_path):
             raise RuntimeError('synthetic interruption')
     assert destination.read_bytes() == previous
     assert not list(tmp_path.glob('.backup.cbmatter.encrypted-*'))
+
+
+def test_seekable_encrypted_reader_supports_nested_zip_access_and_rejects_tamper(tmp_path):
+    _, _, key = create_key_envelope('synthetic password 123')
+    plaintext = os.urandom(2 * 1024 * 1024 + 37)
+    inner = tmp_path / 'inner.enc'
+    outer = tmp_path / 'outer.enc'
+    encrypt_bytes(plaintext, inner, key)
+    prefix = b'protected package header'
+    encrypt_bytes(prefix + inner.read_bytes(), outer, key)
+    with EncryptedReader(outer, key) as uploaded:
+        assert uploaded.read(len(prefix)) == prefix
+        with EncryptedReader(uploaded, key, offset=len(prefix)) as package:
+            assert package.seek(-37, 2) == len(plaintext) - 37
+            assert package.read() == plaintext[-37:]
+            package.seek(1024 * 1024 - 7)
+            assert package.read(32) == plaintext[1024 * 1024 - 7:1024 * 1024 + 25]
+            package.seek(0)
+            assert package.read(47) == plaintext[:47]
+            package.seek(len(plaintext) + 10)
+            assert package.read() == b''
+    damaged = tmp_path / 'damaged.enc'
+    content = bytearray(outer.read_bytes())
+    content[7 + 4 + 12 + 100] ^= 1
+    damaged.write_bytes(content)
+    with pytest.raises(VaultError, match='authentication failed'):
+        EncryptedReader(damaged, key)

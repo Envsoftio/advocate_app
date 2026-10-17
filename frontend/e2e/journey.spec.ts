@@ -7,6 +7,25 @@ const samples = resolve(import.meta.dirname, '../../samples')
 const backend = 'http://127.0.0.1:8768'
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 
+test('Hindi OCR selection reaches the local engine', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Hindi OCR', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '05_hindi_scan.pdf', mimeType: 'application/pdf',
+      buffer: await readFile(resolve(samples, '05_hindi_scan.pdf')) } },
+  })
+  expect(uploaded.ok()).toBeTruthy()
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Hindi OCR' })).toBeVisible()
+  await page.getByRole('combobox', { name: 'OCR language' }).selectOption('eng+hin')
+  const submitted = page.waitForRequest(request => request.url().endsWith('/ocr') &&
+    request.method() === 'POST')
+  await page.getByRole('button', { name: 'Run English + Hindi OCR' }).click()
+  expect((await submitted).postDataJSON().language).toBe('eng+hin')
+})
+
 async function dragWithPointer(page: import('@playwright/test').Page,
                                source: import('@playwright/test').Locator,
                                target: import('@playwright/test').Locator) {
@@ -710,6 +729,17 @@ test('redaction requires region review and removes selected text from the workin
   await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50')
   const apply = page.getByRole('button', { name: 'Apply redaction' })
   await expect(apply).toBeDisabled()
+  await page.locator('.pdf-placement-surface').evaluate(surface => {
+    const canvas = surface.querySelector('canvas')!
+    const original = canvas.getBoundingClientRect.bind(canvas)
+    canvas.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0)
+    surface.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true, button: 0, pointerId: 42, clientX: 100, clientY: 100,
+    }))
+    canvas.getBoundingClientRect = original
+  })
+  await expect(page.locator('.pdf-redaction-region')).toHaveCount(0)
+  await expect(apply).toBeDisabled()
   await page.locator('.canvas-scroll').evaluate(element => { element.scrollTop = 0 })
   const canvas = await page.locator('.pdf-paper').boundingBox()
   expect(canvas).not.toBeNull()
@@ -729,6 +759,42 @@ test('redaction requires region review and removes selected text from the workin
     const result = await request.get(`${backend}/matters/${matterId}/search?q=DRAFT%20PETITION`, { headers })
     return (await result.json()).matches.filter((match: {page:number}) => match.page === 1).length
   }).toBe(0)
+})
+
+test('redaction applies to a rotated synthetic scan', async ({ page, request }) => {
+  page.setDefaultTimeout(10_000)
+  await page.setViewportSize({width: 1280, height: 1100})
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Rotated Scan Redaction', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '04_scanned_annexure.jpg', mimeType: 'image/jpeg',
+      buffer: await readFile(resolve(samples, '04_scanned_annexure.jpg')) } },
+  })
+  expect(uploaded.ok()).toBeTruthy()
+  const document = (await uploaded.json())[0]
+  const rotated = await request.post(`${backend}/documents/${document.id}/pages/rotate`, {
+    headers, data: { page_index: 0, degrees: 90 },
+  })
+  expect(rotated.ok()).toBeTruthy()
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Rotated Scan Redaction' })).toBeVisible()
+  await page.getByRole('button', { name: 'Redact', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50')
+  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-switching/)
+  await page.locator('.canvas-scroll').evaluate(element => { element.scrollTop = 0 })
+  const canvas = await page.locator('.pdf-paper').boundingBox()
+  expect(canvas).not.toBeNull()
+  await page.mouse.move(canvas!.x + canvas!.width * .2, canvas!.y + canvas!.height * .2)
+  await page.mouse.down()
+  await page.mouse.move(canvas!.x + canvas!.width * .35, canvas!.y + canvas!.height * .35, { steps: 8 })
+  await page.mouse.up()
+  await page.getByRole('checkbox', { name: 'I reviewed this area and the document-wide cleanup.' }).check()
+  await page.getByRole('button', { name: 'Apply redaction' }).click()
+  await expect(page.getByText('Applied to the working copy.', { exact: false })).toBeVisible()
+  const current = await request.get(`${backend}/matters/${matterId}/documents`, { headers })
+  expect((await current.json())[0].revision).toBe(3)
 })
 
 test('image overlays, highlights and comments can be placed, edited and removed', async ({ page, request }) => {
@@ -905,8 +971,8 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await page.getByRole('button', { name: 'Court rules' }).click()
   await expect(page.locator('.topbar')).toHaveCSS('height', headerHeight)
   await expect(page.locator('.guide-card').first()).toHaveCSS('background-color', 'rgb(29, 41, 58)')
-  await expect(page.locator('.template-row').first()).toHaveCSS('background-color', 'rgb(43, 60, 82)')
-  await expect(page.locator('.party-form').first()).toHaveCSS('background-color', 'rgb(43, 60, 82)')
+  await expect(page.locator('.template-row').first()).toHaveCSS('background-color', 'rgb(38, 56, 79)')
+  await expect(page.locator('.party-form').first()).toHaveCSS('background-color', 'rgb(38, 56, 79)')
   await expect(page.locator('.party-form textarea').first()).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(page.locator('.party-form select').first()).toHaveCSS('color-scheme', 'dark')
   await expect(page.locator('.party-form select').first()).toHaveCSS('height', '44px')

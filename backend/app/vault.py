@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from bisect import bisect_right
 import hashlib
 import io
 import os
@@ -180,10 +181,134 @@ def decrypt_bytes(source: Path, data_key: bytes) -> bytes:
         return b''.join(_decrypt_chunks(reader, data_key))
 
 
+def decrypted_chunks(source: Path, data_key: bytes):
+    """Yield authenticated plaintext chunks without buffering the whole file."""
+    if len(data_key) != 32:
+        raise VaultError('Invalid data key')
+    with source.open('rb') as reader:
+        yield from _decrypt_chunks(reader, data_key)
+
+
 def decrypt_blob(data: bytes, data_key: bytes) -> bytes:
     if len(data_key) != 32:
         raise VaultError('Invalid data key')
     return b''.join(_decrypt_chunks(io.BytesIO(data), data_key))
+
+
+class EncryptedReader:
+    """Seekable, authenticated view of a chunk-encrypted file.
+
+    ZIP needs seeks into its central directory. Indexing authenticates every
+    chunk and the final marker without publishing plaintext to disk; later
+    reads hold at most one decrypted chunk in memory. A nested reader can be
+    used for an encrypted portable package inside encrypted upload scratch.
+    """
+
+    def __init__(self, source, data_key: bytes, *, offset: int = 0):
+        if len(data_key) != 32:
+            raise VaultError('Invalid data key')
+        self._owned = isinstance(source, (str, Path))
+        self._source = Path(source).open('rb') if self._owned else source
+        self._cipher = AESGCM(data_key)
+        self._offset = offset
+        self._position = 0
+        self._starts: list[int] = []
+        self._chunks: list[tuple[int, int]] = []
+        self._cached_index = -1
+        self._cached = b''
+        self._length = 0
+        try:
+            self._index()
+        except BaseException:
+            self.close()
+            raise
+
+    def _index(self) -> None:
+        source = self._source
+        source.seek(self._offset)
+        if source.read(len(MAGIC)) != MAGIC:
+            raise VaultError('Unsupported encrypted file format')
+        index = 0
+        while True:
+            length_bytes = source.read(4)
+            if len(length_bytes) != 4:
+                raise VaultError('Truncated encrypted file')
+            length = struct.unpack('>I', length_bytes)[0]
+            if not 16 <= length <= CHUNK + 16:
+                raise VaultError('Invalid encrypted chunk length')
+            payload_offset = source.tell()
+            nonce = source.read(12)
+            encrypted = source.read(length)
+            if len(nonce) != 12 or len(encrypted) != length:
+                raise VaultError('Truncated encrypted file')
+            final = length == 16
+            try:
+                plaintext = self._cipher.decrypt(nonce, encrypted, _aad(index, final))
+            except InvalidTag as exc:
+                raise VaultError('Encrypted file authentication failed') from exc
+            if final:
+                if source.read(1):
+                    raise VaultError('Trailing encrypted data')
+                return
+            self._starts.append(self._length)
+            self._chunks.append((payload_offset, length))
+            self._length += len(plaintext)
+            index += 1
+
+    def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            size = self._length - self._position
+        size = max(0, min(size, self._length - self._position))
+        parts = []
+        while size:
+            index = bisect_right(self._starts, self._position) - 1
+            if index != self._cached_index:
+                payload_offset, length = self._chunks[index]
+                self._source.seek(payload_offset)
+                nonce = self._source.read(12)
+                encrypted = self._source.read(length)
+                if len(nonce) != 12 or len(encrypted) != length:
+                    raise VaultError('Truncated encrypted file')
+                try:
+                    self._cached = self._cipher.decrypt(nonce, encrypted, _aad(index, False))
+                except InvalidTag as exc:
+                    raise VaultError('Encrypted file authentication failed') from exc
+                self._cached_index = index
+            within = self._position - self._starts[index]
+            part = self._cached[within:within + size]
+            parts.append(part)
+            self._position += len(part)
+            size -= len(part)
+        return b''.join(parts)
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        base = 0 if whence == 0 else self._position if whence == 1 else self._length if whence == 2 else None
+        if base is None:
+            raise ValueError('Invalid seek mode')
+        position = base + offset
+        if position < 0:
+            raise ValueError('Negative seek position')
+        self._position = position
+        return position
+
+    def tell(self) -> int:
+        return self._position
+
+    def seekable(self) -> bool:
+        return True
+
+    def readable(self) -> bool:
+        return True
+
+    def close(self) -> None:
+        if self._owned:
+            self._source.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
 
 
 def encrypt_file(source: Path, destination: Path, data_key: bytes) -> None:

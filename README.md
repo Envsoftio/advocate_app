@@ -156,7 +156,7 @@ Tauri CLI expects `frontend/src-tauri/`. First make a native Python executable f
 python backend/scripts/build_sidecar.py
 ```
 
-**Run from the repository root**. The script detects the local Rust host target and copies a correctly suffixed executable into `frontend/src-tauri/binaries/`. It bundles the English Tesseract traineddata alongside the Python API. Set `TESSDATA_SOURCE` to the full path of `eng.traineddata` if it cannot find the model automatically.
+**Run from the repository root**. The script detects the local Rust host target and copies a correctly suffixed executable into `frontend/src-tauri/binaries/`. It bundles English and Hindi Tesseract traineddata alongside the Python API. Set `TESSDATA_SOURCE` to a tessdata directory containing `eng.traineddata` and `hin.traineddata` if it cannot find both models automatically. See [Hindi OCR fixtures](docs/PDF06_HINDI_OCR_FIXTURES.md) for the synthetic test scope.
 
 Next:
 

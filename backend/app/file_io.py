@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pymupdf
 
-from .vault import MAGIC, VaultError, decrypt_bytes, encrypt_bytes
+from .vault import MAGIC, VaultError, decrypt_bytes, decrypted_chunks, encrypt_bytes, encrypted_sink
 
 _keys: dict[Path, bytes] = {}
 _registry_lock = threading.RLock()
@@ -51,6 +51,39 @@ def read_bytes(path: Path) -> bytes:
     return decrypt_bytes(path, key)
 
 
+def iter_plain_chunks(path: Path, chunk_size: int = 1024 * 1024):
+    path = Path(path)
+    key = _key(path)
+    if key is not None:
+        yield from decrypted_chunks(path, key)
+    else:
+        with path.open('rb') as stream:
+            while chunk := stream.read(chunk_size):
+                yield chunk
+
+
+def write_chunks(path: Path, chunks) -> tuple[int, str]:
+    """Write plaintext chunks, encrypting protected destinations atomically."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = _key(path)
+    digest = hashlib.sha256()
+    size = 0
+    if key is not None:
+        with encrypted_sink(path, key) as output:
+            for chunk in chunks:
+                output.write(chunk)
+                digest.update(chunk)
+                size += len(chunk)
+    else:
+        with path.open('wb') as output:
+            for chunk in chunks:
+                output.write(chunk)
+                digest.update(chunk)
+                size += len(chunk)
+    return size, digest.hexdigest()
+
+
 def write_bytes(path: Path, data: bytes) -> None:
     path = Path(path)
     key = _key(path)
@@ -72,13 +105,16 @@ def copy_file(source: Path, destination: Path) -> None:
 
 
 def sha256(path: Path) -> str:
-    return hashlib.sha256(read_bytes(path)).hexdigest()
+    digest = hashlib.sha256()
+    for chunk in iter_plain_chunks(path):
+        digest.update(chunk)
+    return digest.hexdigest()
 
 
 def size(path: Path) -> int:
     if not protected(path):
         return Path(path).stat().st_size
-    return len(read_bytes(path))
+    return sum(len(chunk) for chunk in iter_plain_chunks(path))
 
 
 def open_pdf(path: Path | str):
