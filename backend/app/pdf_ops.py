@@ -1,8 +1,11 @@
 from __future__ import annotations
 import io
+import hashlib
 import math
 import os
 import re
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
@@ -16,6 +19,34 @@ from .file_io import copy_file, open_pdf, protected, save_pdf, size as file_size
 
 class ProcessingError(Exception):
     pass
+
+
+def ocr_provenance(language: str) -> dict:
+    """Identify the actual OCR models selected by PyMuPDF without storing local paths."""
+    tessdata = Path(pymupdf.get_tessdata())
+    model_hashes = {}
+    for code in language.split('+'):
+        model = tessdata / f'{code}.traineddata'
+        try:
+            digest = hashlib.sha256()
+            with model.open('rb') as source:
+                for block in iter(lambda: source.read(1024 * 1024), b''):
+                    digest.update(block)
+            model_hashes[code] = digest.hexdigest()
+        except OSError as exc:
+            raise ProcessingError(f'OCR model {code} is unavailable; no working revision was published') from exc
+    tesseract_cli_version = None
+    if shutil.which('tesseract'):
+        try:
+            result = subprocess.run(['tesseract', '--version'], capture_output=True,
+                                    text=True, timeout=3, check=True)
+            tesseract_cli_version = result.stdout.splitlines()[0].strip() or None
+        except (OSError, subprocess.SubprocessError, IndexError):
+            pass
+    return {'language': language, 'provider': 'PyMuPDF+Tesseract',
+            'pymupdf_version': pymupdf.VersionBind,
+            'tesseract_cli_version': tesseract_cli_version,
+            'model_sha256': model_hashes}
 
 
 def check_pdf_password(source: Path, password: str | None) -> bool:
@@ -349,7 +380,9 @@ def _positioned_rect(page_rect: pymupdf.Rect, text: str, font_size: float,
     width = min(page_rect.width - margin * 2,
                 max(font_size * 3, pymupdf.get_text_length(
                     text, fontname='helv', fontsize=font_size) + 10))
-    height = font_size * 1.6
+    # PyMuPDF textbox layout needs additional ascender/descender room at small
+    # sizes; the same box is used for preview and final placement.
+    height = font_size * 2.1
     if position.endswith('left'):
         x0 = page_rect.x0 + margin
     elif position.endswith('right'):
@@ -366,7 +399,9 @@ def _positioned_rect(page_rect: pymupdf.Rect, text: str, font_size: float,
 
 
 def page_output_mark_plan(page: pymupdf.Page, settings: dict,
-                          at: datetime | str | None = None) -> list[dict]:
+                          at: datetime | str | None = None, *,
+                          bates_text: str | None = None,
+                          label_text: str | None = None) -> list[dict]:
     """Return display-relative mark boxes and conservative overlap warnings."""
     candidates = []
     if settings.get('watermark_enabled'):
@@ -378,6 +413,14 @@ def page_output_mark_plan(page: pymupdf.Page, settings: dict,
         candidates.append(('timestamp', _mark_timestamp(settings, at),
                            float(settings['timestamp_font_size']),
                            settings['timestamp_position'], 1.0))
+    if bates_text:
+        candidates.append(('bates', bates_text,
+                           float(settings.get('bates_font_size', 8)),
+                           settings.get('bates_position', 'bottom_left'), 1.0))
+    if label_text:
+        candidates.append(('annexure_label', label_text,
+                           float(settings.get('annexure_stamp_font_size', 10)),
+                           settings.get('annexure_stamp_position', 'top_right'), 1.0))
     obstacles = [pymupdf.Rect(block['bbox']) for block in page.get_text('dict')['blocks']
                  if block.get('bbox')]
     obstacles.extend(pymupdf.Rect(item['rect']) for item in page.get_drawings()
@@ -388,7 +431,8 @@ def page_output_mark_plan(page: pymupdf.Page, settings: dict,
     for kind, text, font_size, position, opacity in candidates:
         displayed = _positioned_rect(page.rect, text, font_size, position)
         pdf_rect = displayed * page.derotation_matrix
-        overlap = any(pdf_rect.intersects(obstacle) for obstacle in obstacles)
+        overlap = (any(pdf_rect.intersects(obstacle) for obstacle in obstacles) or
+                   any(pdf_rect.intersects(item['_pdf_rect']) for item in results))
         align = (pymupdf.TEXT_ALIGN_LEFT if position.endswith('left') else
                  pymupdf.TEXT_ALIGN_RIGHT if position.endswith('right') else
                  pymupdf.TEXT_ALIGN_CENTER)
@@ -405,18 +449,25 @@ def page_output_mark_plan(page: pymupdf.Page, settings: dict,
 
 
 def preview_output_marks(path: Path, page_index: int, settings: dict,
-                         at: datetime | str | None = None) -> list[dict]:
+                         at: datetime | str | None = None, *,
+                         bates_text: str | None = None,
+                         label_text: str | None = None) -> list[dict]:
     with open_pdf(path) as doc:
         if not 0 <= page_index < doc.page_count:
             raise ProcessingError('Invalid page number')
         return [{key: value for key, value in item.items() if not key.startswith('_')}
-                for item in page_output_mark_plan(doc[page_index], settings, at)]
+                for item in page_output_mark_plan(doc[page_index], settings, at,
+                                                  bates_text=bates_text,
+                                                  label_text=label_text)]
 
 
 def apply_output_marks(page: pymupdf.Page, settings: dict,
-                       at: datetime | str | None = None) -> list[dict]:
+                       at: datetime | str | None = None, *,
+                       bates_text: str | None = None,
+                       label_text: str | None = None) -> list[dict]:
     """Insert configured visible output marks and report their planned collisions."""
-    plan = page_output_mark_plan(page, settings, at)
+    plan = page_output_mark_plan(page, settings, at,
+                                 bates_text=bates_text, label_text=label_text)
     for item in plan:
         color = (.42, .42, .42) if item['kind'] == 'watermark' else (.22, .25, .3)
         remaining = page.insert_textbox(

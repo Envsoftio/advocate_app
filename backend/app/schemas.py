@@ -334,13 +334,35 @@ class OutputMarks(BaseModel):
     timestamp_position: MarkPosition = 'bottom_right'
     timestamp_font_size: float = Field(default=8, ge=6, le=24)
     timestamp_prefix: str = Field(default='Built', max_length=40)
+    bates_enabled: bool = False
+    bates_prefix: str = Field(default='', max_length=24)
+    bates_start: int = Field(default=1, ge=1, le=999999999)
+    bates_padding: int = Field(default=6, ge=1, le=12)
+    bates_position: MarkPosition = 'bottom_left'
+    bates_font_size: float = Field(default=8, ge=6, le=24)
+    bates_include_index: bool = False
+    bates_include_separator: bool = False
+    bates_restart_per_volume: bool = False
+    annexure_mode: Literal['none', 'label_stamp', 'separator'] = 'none'
+    annexure_stamp_scope: Literal['first', 'all'] = 'first'
+    annexure_stamp_position: MarkPosition = 'top_right'
+    annexure_stamp_font_size: float = Field(default=10, ge=6, le=24)
+    annexure_overrides: dict[str, Literal['none', 'label_stamp', 'separator']] = Field(
+        default_factory=dict, max_length=1000)
 
-    @field_validator('watermark_text', 'timestamp_prefix')
+    @field_validator('watermark_text', 'timestamp_prefix', 'bates_prefix')
     @classmethod
     def printable_ascii(cls, value: str) -> str:
         if any(ord(char) < 32 or ord(char) > 126 for char in value):
             raise ValueError('Output marks currently support printable ASCII only')
         return value
+
+    @field_validator('annexure_overrides')
+    @classmethod
+    def valid_override_ids(cls, values: dict[str, str]) -> dict[str, str]:
+        if any(not re.fullmatch(r'[0-9a-f]{32}', key) for key in values):
+            raise ValueError('Annexure exceptions require valid document IDs')
+        return values
 
     @field_validator('timestamp_timezone')
     @classmethod
@@ -355,6 +377,29 @@ class OutputMarks(BaseModel):
     def require_mark_text(self):
         if self.watermark_enabled and not self.watermark_text.strip():
             raise ValueError('Enabled watermark requires visible text')
+        return self
+
+
+class OutputPresetCreate(BaseModel):
+    """A reusable technical snapshot. Versions are immutable once saved."""
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(min_length=1, max_length=80)
+    max_pages_per_volume: int = Field(ge=2, le=2000)
+    keep_groups_intact: bool = True
+    output_marks: OutputMarks = Field(default_factory=OutputMarks)
+
+    @field_validator('name')
+    @classmethod
+    def nonblank_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError('Preset name is required')
+        return value
+
+    @model_validator(mode='after')
+    def no_matter_specific_documents(self):
+        if self.output_marks.annexure_overrides:
+            raise ValueError('Reusable presets cannot contain matter-specific document exceptions')
         return self
 
 

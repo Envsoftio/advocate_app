@@ -12,6 +12,11 @@ interface Row {
   end_page: number
   combined_start_page: number
   combined_end_page: number
+  separator_page: number | null
+  annexure_mode: 'none' | 'label_stamp' | 'separator'
+  bates_first: string | null
+  bates_last: string | null
+  separator_bates: string | null
 }
 interface Volume {
   number: number
@@ -20,12 +25,14 @@ interface Volume {
   combined_start_page: number
   combined_end_page: number
   rows: Row[]
+  bates_labels: Array<string | null>
 }
 interface Preview {
   volumes: Volume[]
   combined_pages: number
   manual_bookmarks: Array<{id:string,title:string,document_title:string,document_page:number,resolved:boolean,volume:number|null,volume_page:number|null,combined_page:number|null}>
   numbering: string
+  bates_policy: {enabled:boolean;include_index:boolean;include_separator:boolean;restart_per_volume:boolean}
 }
 const props = defineProps<{
   matterId: string
@@ -73,11 +80,12 @@ watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey]
       <div v-if="preview && !loading">
         <p v-if="!preview.volumes.length" class="hint">Import documents to see index rows and page numbers.</p>
         <p v-else class="bundle-preview-summary">{{preview.volumes.length}} volume(s) · {{preview.volumes.reduce((sum, volume) => sum + volume.index_pages, 0)}} index page(s) · {{preview.combined_pages}} combined pages</p>
+        <p v-if="preview.bates_policy.enabled" class="hint">Bates: {{preview.bates_policy.restart_per_volume ? 'restarts per volume' : 'continuous across volumes'}} · index pages {{preview.bates_policy.include_index ? 'included' : 'excluded'}} · separator pages {{preview.bates_policy.include_separator ? 'included' : 'excluded'}}. Physical volume page numbers remain separate.</p>
         <div v-for="volume in preview.volumes" :key="volume.number" class="bundle-preview-volume">
           <h3>Volume {{volume.number}} <small>{{volume.page_count}} pages · {{volume.index_pages}} index page(s)</small></h3>
           <p class="hint">Index: printed volume pages 1–{{volume.index_pages}} · combined starts at page {{volume.combined_start_page}} and ends at page {{volume.combined_end_page}}</p>
-          <div class="bundle-preview-scroll"><table><thead><tr><th scope="col">Index entry / bookmark</th><th scope="col">Printed volume pages</th><th scope="col">Combined PDF pages</th></tr></thead>
-            <tbody><tr v-for="row in volume.rows" :key="row.id"><td><button class="bundle-preview-doc" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">Part {{row.part}} · {{row.label ? row.label+' · ' : '' }}{{row.title}}</button><button class="bundle-preview-bookmark" :aria-label="'Bookmark '+row.title+' first page'" @click="emit('bookmarkDocument',row.id)">+ Bookmark</button></td><td>{{row.start_page}}–{{row.end_page}}</td><td>{{row.combined_start_page}}–{{row.combined_end_page}}</td></tr></tbody></table></div>
+          <div class="bundle-preview-scroll"><table><thead><tr><th scope="col">Index entry / bookmark</th><th scope="col">Printed volume pages</th><th scope="col">Combined PDF pages</th><th v-if="preview.bates_policy.enabled" scope="col">Bates on source</th></tr></thead>
+            <tbody><tr v-for="row in volume.rows" :key="row.id"><td><button class="bundle-preview-doc" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">Part {{row.part}} · {{row.label ? row.label+' · ' : '' }}{{row.title}}</button><button class="bundle-preview-bookmark" :aria-label="'Bookmark '+row.title+' first page'" @click="emit('bookmarkDocument',row.id)"><span>+ Bookmark</span></button><small v-if="row.separator_page">Separator: printed page {{row.separator_page}}<span v-if="row.separator_bates"> · {{row.separator_bates}}</span></small><small v-else-if="row.annexure_mode==='label_stamp'">Confirmed label stamp on source {{row.start_page===row.end_page ? 'page' : 'page(s)'}}</small></td><td>{{row.start_page}}–{{row.end_page}}</td><td>{{row.combined_start_page}}–{{row.combined_end_page}}</td><td v-if="preview.bates_policy.enabled">{{row.bates_first}}<span v-if="row.bates_last!==row.bates_first">–{{row.bates_last}}</span></td></tr></tbody></table></div>
         </div>
         <div v-if="preview.manual_bookmarks.length" class="bundle-preview-manual"><h3>Manual bookmark destinations</h3>
           <ul><li v-for="bookmark in preview.manual_bookmarks" :key="bookmark.id"><strong>{{bookmark.title}}</strong> · {{bookmark.document_title}}, source page {{bookmark.document_page}} — <span v-if="bookmark.resolved">Volume {{bookmark.volume}}, printed page {{bookmark.volume_page}} · combined page {{bookmark.combined_page}}</span><strong v-else>Needs review; omitted from export</strong></li></ul>

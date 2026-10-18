@@ -19,15 +19,17 @@ from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile as ParsedUploadFile
 import pymupdf
 
-from .engine import load_profiles, preflight, build_bundle, bundle_preview
+from .engine import (load_profiles, preflight, build_bundle, bundle_preview,
+                     volume_plan, volume_rows, bates_page_labels, annexure_mode)
 from .jobs import JobManager
 from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reorder_pages,
                       rotate_page, delete_page, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
                       replace_text_run, move_text_run, permanently_redact_region, compress_pdf,
-                      ocr_pdf, make_cover_pdf, preview_output_marks, validate_overlay_image)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, PermanentRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate
-from .storage import Store, new_id
+                      ocr_pdf, ocr_provenance, make_cover_pdf, preview_output_marks,
+                      validate_overlay_image)
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, PermanentRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate
+from .storage import Store, new_id, utcnow
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
 from .schemas import CompressionRequest
 from .portable import (create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES,
@@ -751,12 +753,38 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         matter_or_404(matter_id)
         return store.get_output_marks(matter_id)
 
+    @app.get('/output-presets')
+    def list_output_presets(_: None = Depends(auth)):
+        return store.list_output_presets()
+
+    @app.post('/output-presets', status_code=201)
+    def create_output_preset(payload: OutputPresetCreate, _: None = Depends(auth)):
+        return store.create_output_preset(payload.model_dump())
+
+    @app.get('/matters/{matter_id}/output-preset')
+    def applied_output_preset(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        return store.get_applied_output_preset(matter_id)
+
+    @app.post('/matters/{matter_id}/output-preset/{preset_id}')
+    def apply_output_preset(matter_id: str, preset_id: str,
+                            _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                return store.apply_output_preset(matter_id, preset_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.put('/matters/{matter_id}/output-marks')
     def update_output_marks(matter_id: str, payload: OutputMarks,
                             _: None = Depends(auth)):
         matter_or_404(matter_id)
-        with store.matter_lock(matter_id):
-            return store.set_output_marks(matter_id, payload.model_dump())
+        try:
+            with store.matter_lock(matter_id):
+                return store.set_output_marks(matter_id, payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get('/matters/{matter_id}/annotations')
     def page_annotations(matter_id: str, _: None = Depends(auth)):
@@ -1040,9 +1068,30 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         try:
             with store.matter_lock(doc['matter_id']):
                 current = doc_or_404(doc_id)
+                matter = matter_or_404(doc['matter_id'])
+                settings = payload.model_dump()
+                plans = volume_plan(store.get_documents(doc['matter_id']),
+                                    matter['max_pages_per_volume'],
+                                    matter['keep_groups_intact'], settings)
+                bates_by_volume = bates_page_labels(plans, settings)
+                bates_text = None
+                label_text = None
+                for number, group in enumerate(plans, start=1):
+                    rows, _ = volume_rows(group, number, settings)
+                    row = next((entry for entry in rows if entry['id'] == doc_id), None)
+                    if row is None:
+                        continue
+                    if not 0 <= page_index < current['page_count']:
+                        raise ProcessingError('Invalid page number')
+                    bates_text = bates_by_volume[number - 1][row['start_page'] - 1 + page_index]
+                    if (annexure_mode(current, settings) == 'label_stamp' and
+                            (page_index == 0 or settings['annexure_stamp_scope'] == 'all')):
+                        label_text = current['label']
+                    break
                 return {'revision': current['revision'], 'page_index': page_index,
                         'marks': preview_output_marks(store.working_path(current), page_index,
-                                                      payload.model_dump())}
+                                                      settings, bates_text=bates_text,
+                                                      label_text=label_text)}
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1138,14 +1187,20 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 rel, candidate = store.next_working_path(current)
                 committed = False
                 try:
+                    provenance = ocr_provenance(language)
                     copy_file(store.working_path(current), candidate)
                     total, changed = ocr_pdf(candidate, language=language, progress=progress,
                                              cancelled=cancelled)
                     if cancelled():
                         raise ProcessingError('Operation cancelled')
                     if changed:
+                        previous_runs = json.loads(current['ocr_provenance_json'])
+                        run = dict(provenance, pages_ocr_applied=changed,
+                                   applied_at=utcnow(), applied_revision=current['revision'] + 1)
                         store.update_document(doc_id, {'working_relpath': rel,
-                                                       'ocr_status': 'processed', 'page_count': total})
+                                                       'ocr_status': 'processed', 'page_count': total,
+                                                       'ocr_provenance_json': json.dumps(
+                                                           [*previous_runs, run], sort_keys=True)})
                         committed = True
                     else:
                         store.update_document(doc_id, {'ocr_status': 'no_new_text', 'page_count': total})
@@ -1153,7 +1208,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                     if not committed:
                         store.discard_uncommitted_working(doc_id, rel, candidate)
                 return {'document_id': doc_id, 'pages_checked': total,
-                        'pages_ocr_applied': changed, 'language': language}
+                        'pages_ocr_applied': changed, 'language': language,
+                        'provenance': run if changed else None}
         return jobs.submit(doc['matter_id'], 'ocr', task, target_id=doc_id, job_id=job_id)
 
     @app.post('/documents/{doc_id}/ocr', status_code=202)

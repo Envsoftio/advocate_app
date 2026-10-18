@@ -22,7 +22,7 @@ def test_legacy_document_schema_migrates_without_changing_records(tmp_path):
     with store.connect() as con:
         row = con.execute('SELECT * FROM documents WHERE id=?', ('d',)).fetchone()
         revision = con.execute('SELECT * FROM document_revisions WHERE document_id=?', ('d',)).fetchone()
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 13
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 15
     assert row['revision'] == 1
     assert row['working_relpath'] == 'working/d.pdf'
     assert row['document_date'] == ''
@@ -35,7 +35,9 @@ def test_legacy_document_schema_migrates_without_changing_records(tmp_path):
     assert row['certificate_signature_status'] == 'unknown'
     assert row['visible_signature_status'] == 'unreviewed'
     assert row['signature_status'] == 'inspection_inconclusive'
+    assert row['ocr_provenance_json'] == '[]'
     assert revision['working_relpath'] == row['working_relpath']
+    assert revision['ocr_provenance_json'] == '[]'
     store.close()
 
 
@@ -52,7 +54,7 @@ def test_v5_store_gains_reusable_values_without_changing_matter(tmp_path):
     assert reopened.get_matter(matter['id'])['name'] == 'Synthetic matter'
     assert reopened.get_matter_values(matter['id']) == {}
     with reopened.connect() as con:
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 13
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 15
     reopened.close()
 
 

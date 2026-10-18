@@ -566,6 +566,21 @@
 .build-body>.checklist svg{margin-top:1px}
 .build-body>.notice+.notice{margin-top:12px}
 .build-body>.hint{margin:14px 0 0}
+.preset-body{padding:24px;display:grid;gap:12px}
+.preset-body .field{margin:0}
+.preset-body .setting-description{margin:0}
+.sidebar{overflow-y:auto;overflow-x:hidden}
+.sidebar>.matter-list,.sidebar>.sidebar-bottom{flex-shrink:0}
+.preset-formatting{display:grid;gap:12px;padding-bottom:20px;border-bottom:1px solid #e5eaf1}
+.preset-formatting h3{font-size:13px;margin:10px 0 0;color:#223448}
+.preset-formatting>label,.preset-fields label{display:grid;gap:5px;font-size:11px;font-weight:700;color:#52647a}
+.preset-formatting .checkbox-line{display:flex;align-items:center;gap:8px}
+.preset-formatting input:not([type=checkbox]),.preset-formatting select{min-width:0;width:100%;padding:8px;border:1px solid #dfe6ee;border-radius:7px;background:#fff;color:#263d55}
+.preset-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px}
+.preset-exceptions{display:grid;gap:8px}
+.preset-exceptions>div{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,190px) auto;align-items:center;gap:9px;font-size:11px}
+.preset-exceptions small{display:block;color:#b47236}
+@media(max-width:700px){.preset-exceptions>div{grid-template-columns:minmax(0,1fr)}.preset-exceptions>div .text-tool{justify-self:start}}
 .export-body>.notice+.export-summary,.export-body>.notice+.notice,
 .export-body>.notice+.export-file{margin-top:14px}
 .export-file>svg{flex:none}
@@ -608,6 +623,7 @@
 :root[data-effective-theme="dark"] .notice.amber{background:#4a3c25;border-color:#8d7138;color:#ffe7a7}
 :root[data-effective-theme="dark"] .notice.error{background:#4d2f38;border-color:#88515b;color:#ffd5d8}
 :root[data-effective-theme="dark"] .notice.subtle{background:#2b3c52;border-color:#4e6380;color:#dceaff}
+.ocr-provenance{min-width:0}.ocr-provenance>span{min-width:0}.ocr-provenance small{display:block;overflow-wrap:anywhere;margin-top:5px}.ocr-provenance small span{display:block}
 
 /* Keep source warnings readable without turning the whole card amber. */
 .rules-page .conflict-box>div{min-width:0}

@@ -7,6 +7,70 @@ const samples = resolve(import.meta.dirname, '../../samples')
 const backend = 'http://127.0.0.1:8768'
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 
+test('Bates and annexure policy update the page-map preview and actual-page mark preview', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Bates and separators', court_profile: 'general-demo',
+    max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '03_affidavit.pdf', mimeType: 'application/pdf',
+      buffer: await readFile(resolve(samples, '03_affidavit.pdf')) } },
+  })
+  expect(uploaded.ok()).toBeTruthy()
+  const document = (await uploaded.json())[0]
+  const labelled = await request.patch(`${backend}/documents/${document.id}`, { headers,
+    data: {kind:'annexure',label:'E2E-1',label_status:'confirmed',label_source:'user'},
+  })
+  expect(labelled.ok()).toBeTruthy()
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name:'E2E Bates and separators'})).toBeVisible()
+  await page.getByRole('button', {name:'Build bundle',exact:true}).click()
+  const presets = page.getByRole('region', {name:'Reusable output presets'})
+  await presets.getByRole('checkbox', {name:'Bates identifiers'}).check()
+  await presets.getByRole('textbox', {name:'Prefix'}).fill('E2E-')
+  await presets.getByRole('spinbutton', {name:'Start'}).fill('42')
+  await presets.getByRole('checkbox', {name:'Number index pages'}).check()
+  await presets.getByRole('checkbox', {name:'Number separator pages'}).check()
+  await presets.getByRole('combobox', {name:'Default for annexures'}).selectOption('separator')
+  await presets.getByRole('button', {name:'Save numbering & annexure policy'}).click()
+  await expect(presets.getByText('Output policy saved.', {exact:false})).toBeVisible()
+  await expect(page.getByText('Separator: printed page 2', {exact:false})).toBeVisible()
+  const policy = await (await request.get(`${backend}/matters/${matterId}/output-marks`, {headers})).json()
+  expect(policy.bates_start).toBe(42)
+  expect(policy.annexure_mode).toBe('separator')
+  await presets.getByRole('button', {name:'Preview page'}).click()
+  await page.getByRole('button', {name:/Output marks/}).click()
+  await expect(page.locator('.pdf-output-mark-preview.bates')).toContainText('E2E-000044')
+})
+
+test('technical output preset is saved and explicitly applied in the build workspace', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Output Preset', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
+      buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
+  })
+  expect(uploaded.ok()).toBeTruthy()
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'E2E Output Preset' })).toBeVisible()
+  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  const presets = page.getByRole('region', { name: 'Reusable output presets' })
+  await presets.getByRole('textbox', { name: 'Save current matter settings as a new version' }).fill('E2E chamber technical')
+  await presets.getByRole('button', { name: 'Save new version' }).click()
+  await expect(presets.getByText('E2E chamber technical v1 saved as a technical preset.', {exact:false})).toBeVisible()
+  await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('6')
+  await page.getByRole('button', { name: 'Save bundle settings' }).click()
+  await expect(page.getByRole('spinbutton', { name: /Maximum pages per volume/ })).toHaveValue('6')
+  await presets.getByRole('button', { name: 'Apply selected version to this matter' }).click()
+  await expect(page.getByRole('spinbutton', { name: /Maximum pages per volume/ })).toHaveValue('10')
+  await expect(presets.getByText('Applied:')).toContainText('E2E chamber technical v1')
+  const snapshot = await request.get(`${backend}/matters/${matterId}/output-preset`, {headers})
+  expect((await snapshot.json()).version).toBe(1)
+})
+
 test('Hindi OCR selection reaches the local engine', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Hindi OCR', court_profile: 'general-demo', max_pages_per_volume: 10,
@@ -997,7 +1061,7 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await page.locator('.matter-home-card').filter({hasText:'E2E Appearance Matter'}).click()
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
   await expect(page.locator('.topbar')).toHaveCSS('height', headerHeight)
-  await expect(page.locator('.checkbox-line')).toHaveCSS('background-color', 'rgb(43, 60, 82)')
+  await expect(page.locator('.checkbox-line').first()).toHaveCSS('background-color', 'rgb(43, 60, 82)')
   await page.getByRole('button', { name: /Preflight checks/ }).click()
   await expect(page.locator('.validation-intro')).toHaveCSS('background-color', 'rgb(43, 60, 82)')
   await page.getByRole('button', { name: 'Documents', exact: true }).click()
@@ -1006,6 +1070,7 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await expect(page.getByRole('combobox', { name: 'Interface size' })).toHaveValue('125')
   await page.getByRole('link', { name: 'Skip to main content' }).focus()
   await page.keyboard.press('Enter')
+  await expect(page.locator('#main-content')).toHaveCount(1)
   await expect(page.locator('#main-content')).toBeFocused()
   await page.locator('#main-content').click({ position: { x: 20, y: 20 } })
   await page.keyboard.press('/')
@@ -1269,6 +1334,8 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await page.getByRole('button', { name: 'Run English OCR' }).click()
   await page.getByRole('button', { name: 'Document details' }).click()
   await expect(page.locator('.inspector-heading')).toContainText('processed', { timeout: 90_000 })
+  await expect(page.locator('.ocr-provenance')).toContainText('Revision 2: eng')
+  await expect(page.locator('.ocr-provenance')).toContainText('eng model SHA-256:')
   await page.getByRole('textbox', { name: 'Display title' }).fill('Synthetic OCR Annexure')
   await page.getByRole('button', { name: 'Save document details' }).click()
   await expect(page.getByText('Document details updated.')).toBeVisible()
@@ -1277,6 +1344,7 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await page.locator('.doc-item', { hasText: 'Synthetic OCR Annexure' }).click()
   await page.getByRole('button', { name: 'Document details' }).click()
   await expect(page.locator('.inspector-heading')).toContainText('processed')
+  await expect(page.locator('.ocr-provenance')).toContainText('Revision 2: eng')
 
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
   await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('6')
@@ -1431,6 +1499,13 @@ test('portable matter backup restores a separate local copy', async ({ page, req
 })
 
 test('archived document and matter remain recoverable', async ({ page, request }) => {
+  for (let index = 0; index < 30; index++) {
+    const extra = await request.post(`${backend}/matters`, { headers, data: {
+      name: `Archive sidebar fixture ${index}`, court_profile: 'general-demo',
+      max_pages_per_volume: 10,
+    } })
+    expect(extra.ok()).toBeTruthy()
+  }
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Archive Matter', court_profile: 'delhi-hc-illustrative',
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,

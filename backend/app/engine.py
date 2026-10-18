@@ -68,6 +68,7 @@ def original_integrity_issues(store: Store, docs: list[dict]) -> list[dict]:
 
 def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
     docs = store.get_documents(matter_id)
+    output_settings = store.get_output_marks(matter_id)
     issues = []
     if not docs:
         issues.append(dict(severity='error', code='NO_DOCUMENTS', message='Import at least one document before building.', document_id=None))
@@ -79,6 +80,20 @@ def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
     seen_labels = set()
     for doc in docs:
         common = dict(document_id=doc['id'])
+        mode = annexure_mode(doc, output_settings)
+        if mode != 'none':
+            if doc['label_status'] != 'confirmed' or not doc['label'].strip():
+                issues.append(dict(severity='error', code='UNCONFIRMED_ANNEXURE_MARK',
+                                   message=f'{doc["title"]} needs a confirmed register label before {mode.replace("_", " ")} output.',
+                                   **common))
+            elif any(ord(char) < 32 or ord(char) > 126 for char in doc['label']):
+                issues.append(dict(severity='error', code='UNSUPPORTED_ANNEXURE_MARK_SCRIPT',
+                                   message=f'{doc["title"]} has a label that the technical stamp font cannot render.',
+                                   **common))
+            if mode == 'separator' and any(ord(char) < 32 or ord(char) > 126 for char in doc['title']):
+                issues.append(dict(severity='error', code='UNSUPPORTED_SEPARATOR_TITLE_SCRIPT',
+                                   message=f'{doc["title"]} has a title that the technical separator font cannot render.',
+                                   **common))
         signature_status = doc.get('signature_status', SIGNATURE_INSPECTION_INCONCLUSIVE)
         if signature_status == CERTIFICATE_SIGNATURE_DETECTED:
             issues.append(dict(severity='warning', code='CERTIFICATE_SIGNATURE_INDICATORS',
@@ -169,42 +184,85 @@ def index_pages_for(doc_count: int) -> int:
     return max(1, math.ceil(doc_count / INDEX_ROWS_PER_PAGE))
 
 
-def volume_rows(documents: list[dict], volume_no: int) -> tuple[list[dict], int]:
+def annexure_mode(document: dict, settings: dict) -> str:
+    if document.get('kind') != 'annexure':
+        return 'none'
+    return settings.get('annexure_overrides', {}).get(
+        document['id'], settings.get('annexure_mode', 'none'))
+
+
+def volume_rows(documents: list[dict], volume_no: int,
+                settings: dict | None = None) -> tuple[list[dict], int]:
     """The single page map used by preview, PDF rendering, links and CSV."""
+    settings = settings or {}
     index_count = index_pages_for(len(documents))
     position = index_count
     rows = []
     for doc in documents:
+        mode = annexure_mode(doc, settings)
+        separator_page = position + 1 if mode == 'separator' else None
+        if separator_page is not None:
+            position += 1
         start = position + 1
         end = position + doc['page_count']
         rows.append(dict(id=doc['id'], part=doc['part'], kind=doc['kind'],
                          label=doc['label'], title=doc['title'], start_page=start,
-                         end_page=end, volume=volume_no, total_pages=doc['page_count']))
+                         end_page=end, volume=volume_no, total_pages=doc['page_count'],
+                         annexure_mode=mode, separator_page=separator_page))
         position = end
     return rows, index_count
+
+
+def bates_page_labels(plans: list[list[dict]], settings: dict) -> list[list[str | None]]:
+    """Number selected physical pages from the same volume rows as CSV/bookmarks."""
+    all_labels = []
+    next_number = settings.get('bates_start', 1)
+    for volume_number, group in enumerate(plans, start=1):
+        if settings.get('bates_restart_per_volume'):
+            next_number = settings.get('bates_start', 1)
+        rows, index_count = volume_rows(group, volume_number, settings)
+        labels: list[str | None] = [None] * (rows[-1]['end_page'] if rows else index_count)
+        if settings.get('bates_enabled'):
+            included = set(range(index_count)) if settings.get('bates_include_index') else set()
+            for row in rows:
+                if row['separator_page'] is not None and settings.get('bates_include_separator'):
+                    included.add(row['separator_page'] - 1)
+                included.update(range(row['start_page'] - 1, row['end_page']))
+            for index in sorted(included):
+                labels[index] = (settings.get('bates_prefix', '') +
+                                 str(next_number).zfill(settings.get('bates_padding', 6)))
+                next_number += 1
+        all_labels.append(labels)
+    return all_labels
 
 
 def bundle_preview(store: Store, matter_id: str, max_pages: int,
                    keep_groups: bool) -> dict:
     """Read-only view of the exact current volume/index/page-number plan."""
     documents = store.get_documents(matter_id)
+    settings = store.get_output_marks(matter_id)
     bookmarks = store.list_manual_bookmarks(matter_id)
     document_titles = {document['id']: document['title'] for document in documents}
-    plans = volume_plan(documents, max_pages, keep_groups) if documents else []
+    plans = volume_plan(documents, max_pages, keep_groups, settings) if documents else []
+    bates_labels = bates_page_labels(plans, settings)
     volumes = []
     destinations = {}
     combined_offset = 0
     for number, group in enumerate(plans, start=1):
-        rows, index_count = volume_rows(group, number)
-        page_count = index_count + sum(doc['page_count'] for doc in group)
+        rows, index_count = volume_rows(group, number, settings)
+        page_count = rows[-1]['end_page'] if rows else index_count
         for row in rows:
             destinations[row['id']] = (number, row['start_page'], combined_offset)
             row['combined_start_page'] = combined_offset + row['start_page']
             row['combined_end_page'] = combined_offset + row['end_page']
+            row['bates_first'] = bates_labels[number - 1][row['start_page'] - 1]
+            row['bates_last'] = bates_labels[number - 1][row['end_page'] - 1]
+            row['separator_bates'] = (bates_labels[number - 1][row['separator_page'] - 1]
+                                      if row['separator_page'] is not None else None)
         volumes.append(dict(number=number, index_pages=index_count,
                             page_count=page_count, combined_start_page=combined_offset + 1,
                             combined_end_page=combined_offset + page_count,
-                            rows=rows))
+                            rows=rows, bates_labels=bates_labels[number - 1]))
         combined_offset += page_count
     manual = []
     for item in bookmarks:
@@ -217,6 +275,10 @@ def bundle_preview(store: Store, matter_id: str, max_pages: int,
                            volume_page=destination[1] + item['page_index'] if resolved else None,
                            combined_page=destination[2] + destination[1] + item['page_index'] if resolved else None))
     return dict(volumes=volumes, combined_pages=combined_offset, manual_bookmarks=manual,
+                bates_policy={'enabled': settings.get('bates_enabled', False),
+                    'include_index': settings.get('bates_include_index', False),
+                    'include_separator': settings.get('bates_include_separator', False),
+                    'restart_per_volume': settings.get('bates_restart_per_volume', False)},
                 numbering='Physical page numbers restart at 1 in each volume; the combined PDF retains those printed numbers.')
 
 
@@ -249,12 +311,15 @@ def make_units(docs: list[dict], keep_groups: bool) -> list[list[dict]]:
     return units
 
 
-def volume_plan(docs: list[dict], max_pages: int, keep_groups: bool) -> list[list[dict]]:
+def volume_plan(docs: list[dict], max_pages: int, keep_groups: bool,
+                settings: dict | None = None) -> list[list[dict]]:
+    settings = settings or {}
     volumes = []
     current = []
     page_count = 0
     for unit in make_units(docs, keep_groups):
-        unit_pages = sum(d['page_count'] for d in unit)
+        unit_pages = sum(d['page_count'] + int(annexure_mode(d, settings) == 'separator')
+                         for d in unit)
         next_index_pages = index_pages_for(len(current) + len(unit))
         if page_count + unit_pages + next_index_pages <= max_pages:
             current.extend(unit)
@@ -420,9 +485,12 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                   reviewed_links: list[dict] | None = None,
                   page_annotations: list[dict] | None = None,
                   output_marks: dict | None = None,
-                  mark_at: datetime | str | None = None):
+                  mark_at: datetime | str | None = None,
+                  bates_labels: list[str | None] | None = None):
     """Create an indexed, paginated, bookmarked volume and return page-map records."""
-    rows, index_count = volume_rows(documents, volume_no)
+    output_marks = output_marks or {}
+    rows, index_count = volume_rows(documents, volume_no, output_marks)
+    bates_labels = bates_labels or [None] * (rows[-1]['end_page'] if rows else index_count)
 
     with pymupdf.open() as output:
         for i in range(index_count):
@@ -454,6 +522,18 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
         for row, d in zip(rows, documents):
             if cancelled and cancelled():
                 raise ProcessingError('Operation cancelled')
+            if row['separator_page'] is not None:
+                separator = output.new_page(width=A4_W, height=A4_H)
+                separator.insert_text((50, 52), 'COURTBUNDLE / TECHNICAL SEPARATOR',
+                                      fontsize=10, fontname='hebo', color=(.12, .32, .58))
+                separator.insert_textbox(pymupdf.Rect(60, 170, 535, 275),
+                                         clean_title(d['label'], 60), fontsize=28,
+                                         fontname='hebo', align=pymupdf.TEXT_ALIGN_CENTER)
+                separator.insert_textbox(pymupdf.Rect(60, 290, 535, 390),
+                                         clean_title(d['title'], 120), fontsize=16,
+                                         align=pymupdf.TEXT_ALIGN_CENTER)
+                separator.insert_text((60, 770),
+                                      'DRAFT technical separator - review before filing', fontsize=8)
             with open_pdf(d['_working_path']) as source:
                 if source.page_count != d['page_count']:
                     raise ProcessingError(f'Page count changed for {d["title"]} while building. Retry.')
@@ -468,6 +548,8 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
             if row['part'] != current_part:
                 current_part = row['part']
                 toc.append([1, f'Part {current_part}', row['start_page']])
+            if row['separator_page'] is not None:
+                toc.append([2, f'{d["label"]} separator', row['separator_page']])
             title = (row['label'] + ' - ' if row['label'] else '') + row['title']
             toc.append([2, title, row['start_page']])
 
@@ -487,16 +569,31 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                                     color=(.24,.28,.33))
 
         mark_count = mark_overlap_count = 0
-        if output_marks and (output_marks.get('watermark_enabled') or
-                             output_marks.get('timestamp_enabled')):
-            for row, document in zip(rows, documents):
-                for source_page in range(document['page_count']):
-                    if cancelled and cancelled():
-                        raise ProcessingError('Operation cancelled')
-                    results = apply_output_marks(
-                        output[row['start_page'] - 1 + source_page], output_marks, mark_at)
+        if output_marks.get('bates_enabled'):
+            bates_only = {**output_marks, 'watermark_enabled': False,
+                          'timestamp_enabled': False}
+            for page_index, label in enumerate(bates_labels):
+                if cancelled and cancelled():
+                    raise ProcessingError('Operation cancelled')
+                if label and (page_index < index_count or any(
+                        row['separator_page'] == page_index + 1 for row in rows)):
+                    results = apply_output_marks(output[page_index], bates_only,
+                                                 bates_text=label)
                     mark_count += len(results)
                     mark_overlap_count += sum(bool(item['overlaps_content']) for item in results)
+        for row, document in zip(rows, documents):
+            for source_page in range(document['page_count']):
+                if cancelled and cancelled():
+                    raise ProcessingError('Operation cancelled')
+                label_text = (document['label'] if row['annexure_mode'] == 'label_stamp' and
+                              (source_page == 0 or output_marks.get('annexure_stamp_scope') == 'all')
+                              else None)
+                results = apply_output_marks(
+                    output[row['start_page'] - 1 + source_page], output_marks, mark_at,
+                    bates_text=bates_labels[row['start_page'] - 1 + source_page],
+                    label_text=label_text)
+                mark_count += len(results)
+                mark_overlap_count += sum(bool(item['overlaps_content']) for item in results)
 
         # Link each index row to its true 0-based destination.
         for i in range(index_count):
@@ -521,7 +618,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
         expected_links.setdefault(index // INDEX_ROWS_PER_PAGE, []).append(row['start_page'] - 1)
     for page_index, destinations in reviewed_summary['expected_goto'].items():
         expected_links.setdefault(page_index, []).extend(destinations)
-    validate_navigation(path, index_count + sum(d['page_count'] for d in documents), toc, expected_links)
+    validate_navigation(path, rows[-1]['end_page'] if rows else index_count, toc, expected_links)
     validate_reviewed_links(path, reviewed_summary['expected_uri'])
 
     with open_pdf(path) as check:
@@ -555,6 +652,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         if item['kind'] == 'image' and item['asset_relpath']:
             item['_asset_path'] = str(store.matter_dir(matter_id) / item['asset_relpath'])
     output_marks = store.get_output_marks(matter_id)
+    output_preset = store.get_applied_output_preset(matter_id)
     mark_at = datetime.now(timezone.utc)
     mark_at_iso = mark_at.isoformat(timespec='seconds')
     progress(5, 'Checking source documents')
@@ -603,7 +701,9 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                          'visible_signature_status': d['visible_signature_status']}
                         for d in documents]
     docs = [dict(d, _working_path=str(store.working_path(d))) for d in documents]
-    plans = volume_plan(docs, matter['max_pages_per_volume'], matter['keep_groups_intact'])
+    plans = volume_plan(docs, matter['max_pages_per_volume'], matter['keep_groups_intact'],
+                        output_marks)
+    bates_labels = bates_page_labels(plans, output_marks)
     if cancelled():
         raise ProcessingError('Operation cancelled')
     export_root = store.exports_root(matter_id)
@@ -619,7 +719,8 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             filename = f'volume-{vno:02}.pdf'
             rows, index_count, content_summary = render_volume(
                 group, matter, staging / filename, vno, cancelled, bookmarks,
-                reviewed_links, page_annotations, output_marks, mark_at)
+                reviewed_links, page_annotations, output_marks, mark_at,
+                bates_labels[vno - 1])
             volume_rows.append(dict(filename=filename, rows=rows, index_count=index_count,
                                     content_summary=content_summary))
             all_rows.extend(rows)
@@ -651,6 +752,9 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                     if current_part != row['part']:
                         current_part = row['part']
                         global_toc.append([2, f'Part {current_part}', destination + 1])
+                    if row['separator_page'] is not None:
+                        global_toc.append([3, f'{row["label"]} separator',
+                                           offset + row['separator_page']])
                     global_toc.append([3, (row['label'] + ' - ' if row['label'] else '') + row['title'], destination + 1])
                     idx_page = offset + rno // INDEX_ROWS_PER_PAGE
                     global_links.setdefault(idx_page, []).append(destination)
@@ -683,7 +787,8 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
 
         csvpath = staging / 'index.csv'
         csv_stream = io.StringIO(newline='')
-        writer = csv.DictWriter(csv_stream, fieldnames=['volume','part','kind','label','title','start_page','end_page','total_pages'])
+        writer = csv.DictWriter(csv_stream, fieldnames=['volume','part','kind','label','title',
+            'separator_page','start_page','end_page','total_pages'])
         writer.writeheader()
         writer.writerows({key:r[key] for key in writer.fieldnames} for r in all_rows)
         write_bytes(csvpath, csv_stream.getvalue().encode('utf-8-sig'))
@@ -730,7 +835,13 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'build_settings': build_settings, 'manual_bookmark_inputs': bookmark_inputs,
                   'reviewed_link_inputs': reviewed_link_inputs,
                   'page_annotation_inputs': annotation_inputs,
-                  'output_marks': output_marks, 'output_mark_timestamp': mark_at_iso,
+                  'output_marks': output_marks, 'output_preset': output_preset,
+                  'output_mark_timestamp': mark_at_iso,
+                  'page_map': all_rows,
+                  'bates_policy': {'enabled': output_marks['bates_enabled'],
+                      'include_index': output_marks['bates_include_index'],
+                      'include_separator': output_marks['bates_include_separator'],
+                      'restart_per_volume': output_marks['bates_restart_per_volume']},
                   'reviewed_link_summary': {
                       'combined_retained': combined_link_summary['retained'],
                       'standalone_cross_volume_omissions': cross_volume_omissions,
@@ -799,7 +910,8 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                                build_settings=build_settings, manual_bookmark_inputs=bookmark_inputs,
                                reviewed_link_inputs=reviewed_link_inputs,
                                page_annotation_inputs=annotation_inputs,
-                               output_marks=output_marks, output_mark_timestamp=mark_at_iso,
+                               output_marks=output_marks, output_preset=output_preset,
+                               output_mark_timestamp=mark_at_iso,
                                interactive_content_policy=EXPORT_INTERACTIVE_CONTENT_POLICY,
                                files=[{'name':name,'bytes':file_size(staging/name),
                                        'sha256':store.sha256(staging/name)} for name in filenames],

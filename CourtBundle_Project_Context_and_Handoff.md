@@ -376,7 +376,7 @@ For each selected volume, the engine:
 
 #### 6.2.1 Reusable output presets and stamp previews (FIL-09)
 
-**Status:** Approved scope, 15 October 2026; TODO. Enhancement priority 2 of 5.
+**Status:** Engineering implemented for the current technical layout, 18 October 2026; FIL-09 acceptance remains open. Immutable named technical versions capture volume settings and output marks; explicit matter application, Undo/Redo, export snapshots and portable restore are implemented. Separate Bates identifiers, annexure label stamps, technical separator sheets, per-document exceptions and actual-page preview are implemented on the shared page map. The existing linked index is fixed; covers are ordinary source documents. Reviewed court-specific cover/index variants need DEC-02/FIL-03 specifications, and supported native-device visual/export review remains pending. Enhancement priority 2 of 5.
 
 **Need:** Reuse chamber preferences and inspect formatting before generating the complete bundle.
 

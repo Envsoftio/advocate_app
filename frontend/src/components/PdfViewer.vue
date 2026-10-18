@@ -107,6 +107,12 @@ const defaultMarks: OutputMarks = {
   watermark_font_size:32,watermark_opacity:.16,timestamp_enabled:false,
   timestamp_format:'datetime',timestamp_timezone:'UTC',timestamp_position:'bottom_right',
   timestamp_font_size:8,timestamp_prefix:'Built',
+  bates_enabled:false,bates_prefix:'',bates_start:1,bates_padding:6,
+  bates_position:'bottom_left',bates_font_size:8,bates_include_index:false,
+  bates_include_separator:false,bates_restart_per_volume:false,
+  annexure_mode:'none',annexure_stamp_scope:'first',
+  annexure_stamp_position:'top_right',annexure_stamp_font_size:10,
+  annexure_overrides:{},
 }
 const markSettings = reactive<OutputMarks>({...defaultMarks})
 let savedMarks = JSON.stringify(defaultMarks)
@@ -316,7 +322,7 @@ watch(() => `${props.document?.matter_id || ''}|${(props.documents || []).map(it
 }, {immediate:true})
 watch(() => `${props.document?.matter_id || ''}|${props.document?.revision || ''}|${props.bookmarkRefreshKey || 0}`, () => void loadPageAnnotations(), {immediate:true})
 watch([current, pageAnnotations], () => void loadCurrentAnnotationImages())
-watch(() => props.document?.matter_id || '', async matterId => {
+watch(() => [props.document?.matter_id || '', props.bookmarkRefreshKey || 0] as const, async ([matterId]) => {
   const sequence = ++markLoadSequence
   if (!matterId) { Object.assign(markSettings, defaultMarks); savedMarks = JSON.stringify(defaultMarks); return }
   try {

@@ -16,12 +16,12 @@ from .file_io import (iter_plain_chunks, protected, read_bytes, size as file_siz
                       write_bytes, write_chunks)
 from .vault import EncryptedReader, encrypted_sink
 from .schemas import (MatterCreate, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate,
-                      ManualBookmark, ReviewedLink, OutputMarks)
+                      ManualBookmark, ReviewedLink, OutputMarks, OutputPresetCreate)
 from .engine import load_profiles
 from .pdf_ops import ProcessingError, validate_overlay_image
 from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 10
+PACKAGE_VERSION = 12
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -29,6 +29,33 @@ MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
 
 class PortableMatterError(ValueError):
     pass
+
+
+def _validate_ocr_provenance(value: str) -> None:
+    try:
+        runs = json.loads(value)
+        if not isinstance(runs, list) or len(runs) > 1000:
+            raise ValueError
+        for run in runs:
+            if (not isinstance(run, dict) or
+                    run.get('language') not in ('eng', 'hin', 'eng+hin') or
+                    run.get('provider') != 'PyMuPDF+Tesseract' or
+                    not isinstance(run.get('pymupdf_version'), str) or
+                    not isinstance(run.get('tesseract_cli_version'), (str, type(None))) or
+                    not isinstance(run.get('applied_at'), str) or
+                    type(run.get('applied_revision')) is not int or
+                    type(run.get('pages_ocr_applied')) is not int or
+                    run['pages_ocr_applied'] < 1):
+                raise ValueError
+            hashes = run.get('model_sha256')
+            if not isinstance(hashes, dict) or set(hashes) != set(run['language'].split('+')):
+                raise ValueError
+            if any(not isinstance(digest, str) or len(digest) != 64 or
+                   any(char not in '0123456789abcdef' for char in digest)
+                   for digest in hashes.values()):
+                raise ValueError
+    except (TypeError, ValueError, KeyError) as exc:
+        raise PortableMatterError('Invalid OCR provenance in package') from exc
 
 
 def protected_package_header(envelope: dict) -> bytes:
@@ -129,6 +156,7 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
                     'target_document_id', 'target_page_index', 'target_revision',
                     'uri', 'position')} for item in store.list_reviewed_links(matter_id)],
                 'output_marks': store.get_output_marks(matter_id),
+                'output_preset': store.get_applied_output_preset(matter_id),
                 'page_annotations': [{key: item[key] for key in store._annotation_fields()}
                                      for item in annotations],
                 'files': files}
@@ -182,7 +210,7 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
             if archive.getinfo('manifest.json').file_size > 10 * 1024 * 1024:
                 raise PortableMatterError('Manifest is too large')
             manifest = json.loads(archive.read('manifest.json'))
-            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in (1, 2, 3, 4, 5, 6, 7, 8, 9, PACKAGE_VERSION):
+            if manifest.get('format') != 'courtbundle-matter' or manifest.get('version') not in range(1, PACKAGE_VERSION + 1):
                 raise PortableMatterError('Unsupported portable matter package')
             files = manifest.get('files')
             if not isinstance(files, list):
@@ -248,6 +276,9 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                                'Legacy package was not inspected for PDF certificate-signature indicators.')
                 doc.setdefault('visible_signature_status', 'unreviewed')
                 doc.setdefault('signature_status', 'inspection_inconclusive')
+            if manifest['version'] < 11:
+                doc.setdefault('ocr_provenance_json', '[]')
+            _validate_ocr_provenance(doc['ocr_provenance_json'])
             DocumentPatch.model_validate({key: doc[key] for key in
                 ('title', 'kind', 'part', 'label', 'label_status', 'label_source',
                  'group_key', 'group_role', 'document_date',
@@ -278,6 +309,9 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                     by_path[doc['source_relpath']]['sha256'] != doc['source_sha256']):
                 raise PortableMatterError('Document source or working copy is invalid')
         for rev in revisions:
+            if manifest['version'] < 11:
+                rev.setdefault('ocr_provenance_json', '[]')
+            _validate_ocr_provenance(rev['ocr_provenance_json'])
             if any(type(rev[key]) is not int for key in ('revision', 'page_count')) or \
                     rev['revision'] < 1 or rev['page_count'] < 1:
                 raise PortableMatterError('Invalid revision counts in package')
@@ -309,6 +343,18 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
         bookmark_id_map = {old: new_id() for old in bookmark_ids}
         links = manifest.get('reviewed_links', [])
         marks = manifest.get('output_marks', Store.default_output_marks())
+        preset_snapshot = manifest.get('output_preset')
+        if manifest['version'] >= 12 and 'output_preset' not in manifest:
+            raise PortableMatterError('Missing output preset snapshot in v12 package')
+        if preset_snapshot is not None:
+            if (not isinstance(preset_snapshot, dict) or
+                    not isinstance(preset_snapshot.get('id'), str) or
+                    not isinstance(preset_snapshot.get('version'), int) or
+                    preset_snapshot['version'] < 1 or
+                    not isinstance(preset_snapshot.get('settings'), dict) or
+                    preset_snapshot.get('name') != preset_snapshot['settings'].get('name')):
+                raise PortableMatterError('Invalid output preset snapshot')
+            OutputPresetCreate.model_validate(preset_snapshot['settings'])
         if manifest['version'] >= 9 and ('reviewed_links' not in manifest or
                                          'output_marks' not in manifest):
             raise PortableMatterError('Missing PDF-04 settings in v9 package')
@@ -332,6 +378,11 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                         (item['target_document_id'], item['target_revision']), 0)):
                 raise PortableMatterError('Invalid reviewed link target')
         validated_marks = OutputMarks.model_validate(marks).model_dump()
+        overrides = validated_marks['annexure_overrides']
+        if any(document_id not in old_ids for document_id in overrides):
+            raise PortableMatterError('Invalid annexure override document reference')
+        validated_marks['annexure_overrides'] = {
+            id_map[document_id]: mode for document_id, mode in overrides.items()}
         link_id_map = {old: new_id() for old in link_ids}
         annotations = manifest.get('page_annotations', [])
         if manifest['version'] >= 10 and 'page_annotations' not in manifest:
@@ -392,7 +443,7 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                     'title', 'kind', 'part', 'label', 'label_status', 'label_source',
                     'group_key', 'group_role', 'position', 'page_count',
                     'document_date', 'date_status', 'date_source', 'date_note', 'source_file_mtime',
-                    'ocr_status', 'original_name', 'source_sha256', 'source_relpath',
+                    'ocr_status', 'ocr_provenance_json', 'original_name', 'source_sha256', 'source_relpath',
                     'working_relpath', 'certificate_signature_status',
                     'certificate_signature_count', 'signature_inspection_note',
                     'visible_signature_status', 'signature_status',
@@ -402,9 +453,10 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                             ','.join('?' for _ in fields) + ')', tuple(fields.values()))
             for rev in revisions:
                 con.execute('''INSERT INTO document_revisions
-                    (document_id,revision,working_relpath,page_count,ocr_status,created_at)
-                    VALUES (?,?,?,?,?,?)''', (id_map[rev['document_id']], rev['revision'],
-                    rev['working_relpath'], rev['page_count'], rev['ocr_status'], rev['created_at']))
+                    (document_id,revision,working_relpath,page_count,ocr_status,ocr_provenance_json,created_at)
+                    VALUES (?,?,?,?,?,?,?)''', (id_map[rev['document_id']], rev['revision'],
+                    rev['working_relpath'], rev['page_count'], rev['ocr_status'],
+                    rev['ocr_provenance_json'], rev['created_at']))
             if manifest['memo_parties']:
                 con.execute('INSERT INTO memo_parties (matter_id,payload_json,updated_at) VALUES (?,?,?)',
                             (matter_id, json.dumps(manifest['memo_parties'], ensure_ascii=False), utcnow()))
@@ -434,6 +486,10 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                 con.execute('''INSERT INTO output_marks
                     (matter_id,payload_json,updated_at) VALUES (?,?,?)''',
                     (matter_id, json.dumps(validated_marks, sort_keys=True), utcnow()))
+            if preset_snapshot is not None:
+                con.execute('''INSERT INTO matter_output_presets
+                    (matter_id,snapshot_json,updated_at) VALUES (?,?,?)''',
+                    (matter_id, json.dumps(preset_snapshot, sort_keys=True), utcnow()))
             for item in annotations:
                 con.execute('''INSERT INTO page_annotations
                     (id,matter_id,document_id,page_index,target_revision,kind,rect_x,rect_y,

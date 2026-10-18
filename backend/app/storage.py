@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 13:
+            if version > 15:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -129,6 +129,7 @@ class Store:
                     group_role TEXT NOT NULL DEFAULT 'member',
                     position INTEGER NOT NULL,
                     page_count INTEGER NOT NULL, ocr_status TEXT NOT NULL,
+                    ocr_provenance_json TEXT NOT NULL DEFAULT '[]',
                     original_name TEXT NOT NULL, source_sha256 TEXT NOT NULL,
                     source_relpath TEXT NOT NULL, working_relpath TEXT NOT NULL,
                     certificate_signature_status TEXT NOT NULL DEFAULT 'unknown',
@@ -153,7 +154,8 @@ class Store:
             con.execute('''CREATE TABLE IF NOT EXISTS document_revisions (
                 document_id TEXT NOT NULL, revision INTEGER NOT NULL,
                 working_relpath TEXT NOT NULL, page_count INTEGER NOT NULL,
-                ocr_status TEXT NOT NULL, created_at TEXT NOT NULL,
+                ocr_status TEXT NOT NULL, ocr_provenance_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
                 PRIMARY KEY(document_id, revision)
             )''')
             con.execute('''INSERT OR IGNORE INTO document_revisions
@@ -208,6 +210,15 @@ class Store:
             con.execute('''CREATE TABLE IF NOT EXISTS output_marks (
                 matter_id TEXT PRIMARY KEY REFERENCES matters(id) ON DELETE CASCADE,
                 payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
+            )''')
+            con.execute('''CREATE TABLE IF NOT EXISTS output_presets (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE,
+                version INTEGER NOT NULL, payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL, UNIQUE(name,version)
+            )''')
+            con.execute('''CREATE TABLE IF NOT EXISTS matter_output_presets (
+                matter_id TEXT PRIMARY KEY REFERENCES matters(id) ON DELETE CASCADE,
+                snapshot_json TEXT NOT NULL, updated_at TEXT NOT NULL
             )''')
             con.execute('''CREATE TABLE IF NOT EXISTS page_annotations (
                 id TEXT PRIMARY KEY, matter_id TEXT NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
@@ -270,6 +281,16 @@ class Store:
                 con.execute('PRAGMA user_version=12')
             if version < 13:
                 con.execute('PRAGMA user_version=13')
+            if version < 14:
+                document_columns = {row['name'] for row in con.execute('PRAGMA table_info(documents)')}
+                revision_columns = {row['name'] for row in con.execute('PRAGMA table_info(document_revisions)')}
+                if 'ocr_provenance_json' not in document_columns:
+                    con.execute("ALTER TABLE documents ADD COLUMN ocr_provenance_json TEXT NOT NULL DEFAULT '[]'")
+                if 'ocr_provenance_json' not in revision_columns:
+                    con.execute("ALTER TABLE document_revisions ADD COLUMN ocr_provenance_json TEXT NOT NULL DEFAULT '[]'")
+                con.execute('PRAGMA user_version=14')
+            if version < 15:
+                con.execute('PRAGMA user_version=15')
 
     def matter_dir(self, matter_id: str) -> Path:
         # Never accept caller-controlled paths. All ids must have been found in DB.
@@ -608,15 +629,107 @@ class Store:
                 'watermark_opacity': .16, 'timestamp_enabled': False,
                 'timestamp_format': 'datetime', 'timestamp_timezone': 'UTC',
                 'timestamp_position': 'bottom_right', 'timestamp_font_size': 8.0,
-                'timestamp_prefix': 'Built'}
+                'timestamp_prefix': 'Built', 'bates_enabled': False,
+                'bates_prefix': '', 'bates_start': 1, 'bates_padding': 6,
+                'bates_position': 'bottom_left', 'bates_font_size': 8.0,
+                'bates_include_index': False, 'bates_include_separator': False,
+                'bates_restart_per_volume': False, 'annexure_mode': 'none',
+                'annexure_stamp_scope': 'first',
+                'annexure_stamp_position': 'top_right',
+                'annexure_stamp_font_size': 10.0, 'annexure_overrides': {}}
 
     def get_output_marks(self, matter_id: str) -> dict:
         with self.connect() as con:
             row = con.execute('SELECT payload_json FROM output_marks WHERE matter_id=?',
                               (matter_id,)).fetchone()
-        return json.loads(row[0]) if row else self.default_output_marks()
+        return {**self.default_output_marks(), **json.loads(row[0])} if row else self.default_output_marks()
+
+    def list_output_presets(self) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute('''SELECT * FROM output_presets
+                ORDER BY name COLLATE NOCASE,version DESC''').fetchall()
+        return [dict(id=row['id'], name=row['name'], version=row['version'],
+                     settings=json.loads(row['payload_json']), created_at=row['created_at'])
+                for row in rows]
+
+    def create_output_preset(self, settings: dict) -> dict:
+        name = settings['name']
+        now = utcnow()
+        with self.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            version = con.execute('''SELECT COALESCE(MAX(version),0)+1 FROM output_presets
+                WHERE name=? COLLATE NOCASE''', (name,)).fetchone()[0]
+            preset_id = new_id()
+            con.execute('''INSERT INTO output_presets
+                (id,name,version,payload_json,created_at) VALUES (?,?,?,?,?)''',
+                (preset_id, name, version, json.dumps(settings, sort_keys=True), now))
+        return dict(id=preset_id, name=name, version=version, settings=settings,
+                    created_at=now)
+
+    def get_applied_output_preset(self, matter_id: str) -> dict | None:
+        with self.connect() as con:
+            row = con.execute('''SELECT snapshot_json FROM matter_output_presets
+                WHERE matter_id=?''', (matter_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def apply_output_preset(self, matter_id: str, preset_id: str) -> dict:
+        with self.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            row = con.execute('SELECT * FROM output_presets WHERE id=?',
+                              (preset_id,)).fetchone()
+            if row is None:
+                raise ValueError('Output preset not found')
+            matter = con.execute('SELECT * FROM matters WHERE id=?', (matter_id,)).fetchone()
+            if matter is None:
+                raise ValueError('Matter not found')
+            settings = json.loads(row['payload_json'])
+            old_marks = con.execute('SELECT payload_json FROM output_marks WHERE matter_id=?',
+                                    (matter_id,)).fetchone()
+            old_preset = con.execute('''SELECT snapshot_json FROM matter_output_presets
+                WHERE matter_id=?''', (matter_id,)).fetchone()
+            current_marks = ({**self.default_output_marks(), **json.loads(old_marks[0])}
+                             if old_marks else self.default_output_marks())
+            settings['output_marks'] = {**self.default_output_marks(),
+                                        **settings['output_marks'],
+                                        'annexure_overrides': {}}
+            applied_marks = {**settings['output_marks'],
+                             'annexure_overrides': current_marks['annexure_overrides']}
+            before = {'max_pages_per_volume': matter['max_pages_per_volume'],
+                      'keep_groups_intact': bool(matter['keep_groups_intact']),
+                      'output_marks': current_marks,
+                      'preset': json.loads(old_preset[0]) if old_preset else None}
+            snapshot = {'id': row['id'], 'name': row['name'], 'version': row['version'],
+                        'settings': settings}
+            after = {'max_pages_per_volume': settings['max_pages_per_volume'],
+                     'keep_groups_intact': settings['keep_groups_intact'],
+                     'output_marks': applied_marks, 'preset': snapshot}
+            if before == after:
+                return snapshot
+            now = utcnow()
+            con.execute('''UPDATE matters SET max_pages_per_volume=?,keep_groups_intact=?,
+                updated_at=? WHERE id=?''', (after['max_pages_per_volume'],
+                                             int(after['keep_groups_intact']), now, matter_id))
+            con.execute('''INSERT INTO output_marks (matter_id,payload_json,updated_at)
+                VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
+                payload_json=excluded.payload_json,updated_at=excluded.updated_at''',
+                (matter_id, json.dumps(after['output_marks'], sort_keys=True), now))
+            con.execute('''INSERT INTO matter_output_presets (matter_id,snapshot_json,updated_at)
+                VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
+                snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at''',
+                (matter_id, json.dumps(snapshot, sort_keys=True), now))
+            self._record_edit(con, matter_id, 'output_preset', before, after)
+            self._audit(con, 'output_preset_applied', matter_id)
+        return snapshot
 
     def set_output_marks(self, matter_id: str, settings: dict) -> dict:
+        overrides = settings.get('annexure_overrides', {})
+        if overrides:
+            with self.connect() as con:
+                rows = con.execute('SELECT id FROM documents WHERE matter_id=?',
+                                   (matter_id,)).fetchall()
+            valid = {row['id'] for row in rows}
+            if set(overrides) - valid:
+                raise ValueError('Annexure exceptions must target documents in this matter')
         before = self.get_output_marks(matter_id)
         if before == settings:
             return settings
@@ -847,9 +960,10 @@ class Store:
             item = dict(data, position=pos, created_at=utcnow(), updated_at=utcnow())
             con.execute('INSERT INTO documents (' + ','.join(item) + ') VALUES (' + ','.join('?' for _ in item) + ')', tuple(item.values()))
             con.execute('''INSERT INTO document_revisions
-                (document_id,revision,working_relpath,page_count,ocr_status,created_at)
-                VALUES (?,?,?,?,?,?)''',
-                (item['id'], 1, item['working_relpath'], item['page_count'], item['ocr_status'], item['updated_at']))
+                (document_id,revision,working_relpath,page_count,ocr_status,ocr_provenance_json,created_at)
+                VALUES (?,?,?,?,?,?,?)''',
+                (item['id'], 1, item['working_relpath'], item['page_count'], item['ocr_status'],
+                 item.get('ocr_provenance_json', '[]'), item['updated_at']))
             self._record_edit(con, data['matter_id'], 'document_presence',
                               {'id': data['id'], 'archived_at': item['created_at'], 'position': pos},
                               {'id': data['id'], 'archived_at': None, 'position': pos})
@@ -878,10 +992,12 @@ class Store:
             con.execute('UPDATE documents SET ' + ','.join(f'{k}=?' for k in changes) + ' WHERE id=?', (*changes.values(), doc_id))
             if 'working_relpath' in changes:
                 con.execute('''INSERT INTO document_revisions
-                    (document_id,revision,working_relpath,page_count,ocr_status,created_at)
-                    VALUES (?,?,?,?,?,?)''', (doc_id, changes['revision'], changes['working_relpath'],
+                    (document_id,revision,working_relpath,page_count,ocr_status,ocr_provenance_json,created_at)
+                    VALUES (?,?,?,?,?,?,?)''', (doc_id, changes['revision'], changes['working_relpath'],
                                             changes.get('page_count', current['page_count']),
-                                            changes.get('ocr_status', current['ocr_status']), changes['updated_at']))
+                                            changes.get('ocr_status', current['ocr_status']),
+                                            changes.get('ocr_provenance_json', current['ocr_provenance_json']),
+                                            changes['updated_at']))
             if record_history:
                 tracked = {key: value for key, value in changes.items()
                            if key not in ('updated_at', 'revision')}
@@ -1194,11 +1310,12 @@ class Store:
                         raise ValueError('Working copy is missing; this edit cannot be restored')
                     revision = doc['revision'] + 1
                     con.execute('''INSERT INTO document_revisions
-                        (document_id,revision,working_relpath,page_count,ocr_status,created_at)
-                        VALUES (?,?,?,?,?,?)''',
+                        (document_id,revision,working_relpath,page_count,ocr_status,ocr_provenance_json,created_at)
+                        VALUES (?,?,?,?,?,?,?)''',
                         (state['id'], revision, fields['working_relpath'],
                          fields.get('page_count', doc['page_count']),
-                         fields.get('ocr_status', doc['ocr_status']), now))
+                         fields.get('ocr_status', doc['ocr_status']),
+                         fields.get('ocr_provenance_json', doc['ocr_provenance_json']), now))
                     fields = dict(fields, revision=revision)
                 changes = dict(fields, updated_at=now)
                 con.execute('UPDATE documents SET ' + ','.join(f'{key}=?' for key in changes) +
@@ -1236,6 +1353,22 @@ class Store:
                     VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
                     payload_json=excluded.payload_json,updated_at=excluded.updated_at''',
                     (matter_id, json.dumps(state['settings'], sort_keys=True), now))
+            elif row['kind'] == 'output_preset':
+                con.execute('''UPDATE matters SET max_pages_per_volume=?,keep_groups_intact=?,
+                    updated_at=? WHERE id=?''', (state['max_pages_per_volume'],
+                                                 int(state['keep_groups_intact']), now, matter_id))
+                con.execute('''INSERT INTO output_marks (matter_id,payload_json,updated_at)
+                    VALUES (?,?,?) ON CONFLICT(matter_id) DO UPDATE SET
+                    payload_json=excluded.payload_json,updated_at=excluded.updated_at''',
+                    (matter_id, json.dumps(state['output_marks'], sort_keys=True), now))
+                if state['preset'] is None:
+                    con.execute('DELETE FROM matter_output_presets WHERE matter_id=?', (matter_id,))
+                else:
+                    con.execute('''INSERT INTO matter_output_presets
+                        (matter_id,snapshot_json,updated_at) VALUES (?,?,?)
+                        ON CONFLICT(matter_id) DO UPDATE SET
+                        snapshot_json=excluded.snapshot_json,updated_at=excluded.updated_at''',
+                        (matter_id, json.dumps(state['preset'], sort_keys=True), now))
             elif row['kind'] == 'page_annotations':
                 for entry in state['entries']:
                     self._validate_annotation_document(con, matter_id, entry, allow_stale=True)
@@ -1332,7 +1465,8 @@ class Store:
                        'rect_x', 'rect_y', 'rect_width', 'rect_height', 'kind',
                        'target_document_id', 'target_page_index', 'target_revision',
                        'uri', 'position')} for entry in self.list_reviewed_links(matter_id)],
-                   'output_marks': self.get_output_marks(matter_id)}
+                   'output_marks': self.get_output_marks(matter_id),
+                   'output_preset': self.get_applied_output_preset(matter_id)}
         annotations = []
         for entry in self.list_page_annotations(matter_id):
             item = {key: entry[key] for key in self._annotation_fields()}

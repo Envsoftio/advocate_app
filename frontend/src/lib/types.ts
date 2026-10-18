@@ -36,6 +36,7 @@ export interface MatterDocument {
   position: number
   page_count: number
   ocr_status: string
+  ocr_provenance_json: string
   original_name: string
   source_sha256: string
   certificate_signature_status: 'detected' | 'not_detected' | 'unknown'
@@ -107,9 +108,23 @@ export interface OutputMarks {
   timestamp_position: MarkPosition
   timestamp_font_size: number
   timestamp_prefix: string
+  bates_enabled: boolean
+  bates_prefix: string
+  bates_start: number
+  bates_padding: number
+  bates_position: MarkPosition
+  bates_font_size: number
+  bates_include_index: boolean
+  bates_include_separator: boolean
+  bates_restart_per_volume: boolean
+  annexure_mode: 'none' | 'label_stamp' | 'separator'
+  annexure_stamp_scope: 'first' | 'all'
+  annexure_stamp_position: MarkPosition
+  annexure_stamp_font_size: number
+  annexure_overrides: Record<string, 'none' | 'label_stamp' | 'separator'>
 }
 export interface OutputMarkPreview {
-  kind: 'watermark' | 'timestamp'
+  kind: 'watermark' | 'timestamp' | 'bates' | 'annexure_label'
   text: string
   font_size: number
   position: MarkPosition

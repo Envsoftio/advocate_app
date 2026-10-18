@@ -6,7 +6,7 @@ function document(signature_status: MatterDocument['signature_status']): MatterD
   return { id:'d', matter_id:'m', title:'Synthetic signed input', kind:'other', part:1,
     group_key:'', group_role:'member', label:'', label_status:'unreviewed', label_source:'none',
     document_date:'', date_status:'unknown', date_source:'none', date_note:'', source_file_mtime:'',
-    position:0, page_count:1, ocr_status:'not_requested', original_name:'source.pdf', source_sha256:'x',
+    position:0, page_count:1, ocr_status:'not_requested', ocr_provenance_json:'[]', original_name:'source.pdf', source_sha256:'x',
     certificate_signature_status: signature_status === 'certificate_signature_detected' ? 'detected' : 'not_detected',
     certificate_signature_count: signature_status === 'certificate_signature_detected' ? 1 : 0,
     signature_inspection_note:'Synthetic', visible_signature_status:'unreviewed', signature_status,

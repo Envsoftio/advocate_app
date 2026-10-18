@@ -5,7 +5,7 @@ import {
   Check, CheckCircle2, ChevronRight, CircleAlert, CircleHelp, CloudOff,
   Ellipsis, FileCheck2, FilePlus2, FileStack, FileText, FolderOpen, GripVertical, Info,
   Layers3, LoaderCircle, LockKeyhole, Menu, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw,
-  Redo2, Search, Settings2, ShieldAlert, ShieldCheck,
+  Redo2, ScanText, Search, Settings2, ShieldAlert, ShieldCheck,
   Undo2, UploadCloud, WandSparkles, X
 } from 'lucide-vue-next'
 import PdfViewer from './components/PdfViewer.vue'
@@ -13,6 +13,7 @@ import PasswordInput from './components/PasswordInput.vue'
 import PageTools from './components/PageTools.vue'
 import ManualBookmarks from './components/ManualBookmarks.vue'
 import BundlePreview from './components/BundlePreview.vue'
+import OutputPresets from './components/OutputPresets.vue'
 import DocumentTable from './components/DocumentTable.vue'
 import ExportPdfReview from './components/ExportPdfReview.vue'
 import MatterForm from './components/MatterForm.vue'
@@ -46,6 +47,15 @@ const checks = ref<PreflightCheck[]>([])
 const manualBookmarks = ref<ManualBookmark[]>([])
 const selectedDocId = ref<string | null>(null)
 const selectedDoc = computed(() => docs.value.find(d => d.id === selectedDocId.value) || null)
+type OcrRun = { language:string; provider:string; pymupdf_version:string;
+  tesseract_cli_version:string|null; model_sha256:Record<string,string>;
+  pages_ocr_applied:number; applied_at:string; applied_revision:number }
+const selectedOcrRuns = computed<OcrRun[]>(() => {
+  try {
+    const runs = JSON.parse(selectedDoc.value?.ocr_provenance_json || '[]')
+    return Array.isArray(runs) ? runs : []
+  } catch { return [] }
+})
 const detailsOpen = ref(false)
 const readerFocus = ref(false)
 const editorExpanded = ref(false)
@@ -67,6 +77,11 @@ const pageToolsDialog = ref<HTMLDialogElement | null>(null)
 const documentsWorkspace = ref<HTMLElement | null>(null)
 const documentsWorkspaceHeight = ref<number | null>(null)
 const activeView = ref<View>('documents')
+async function focusMain() {
+  await nextTick()
+  const regions = document.querySelectorAll<HTMLElement>('#main-content')
+  regions[regions.length - 1]?.focus()
+}
 watch([activeView, selectedDocId, documentTableOpen], () => {
   if (editorExpanded.value && (activeView.value !== 'documents' || !selectedDocId.value || documentTableOpen.value)) toggleEditorExpanded()
 })
@@ -119,6 +134,8 @@ const docEditor = reactive({ title: '', kind: 'other' as DocKind, part: 1, label
   document_date: '', date_confirmed: false,
   visible_signature_status: 'unreviewed' as MatterDocument['visible_signature_status'] })
 const matterEditor = reactive({max_pages_per_volume:300,keep_groups_intact:true})
+const formattingDirty = ref(false)
+const outputPresetsPanel = ref<InstanceType<typeof OutputPresets> | null>(null)
 let jobTimer: ReturnType<typeof setInterval> | null = null
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 let healthTimer: ReturnType<typeof setInterval> | null = null
@@ -161,9 +178,11 @@ function resetDrafts() {
   matterEditor.keep_groups_intact = matter?.keep_groups_intact ?? true
 }
 function confirmDiscardDrafts() {
-  if (!documentDirty.value && !settingsDirty.value) return true
-  if (!window.confirm('Discard unsaved document details or bundle settings?')) return false
+  if (!documentDirty.value && !settingsDirty.value && !formattingDirty.value) return true
+  if (!window.confirm('Discard unsaved document details, bundle settings or output policy?')) return false
   resetDrafts()
+  outputPresetsPanel.value?.discard()
+  formattingDirty.value = false
   return true
 }
 function selectDocument(id: string) {
@@ -749,9 +768,23 @@ async function savePolicy() {
     return true
   } catch(err){issue(err);return false}
 }
+async function applyOutputPreset(presetId: string) {
+  if (!currentMatterId.value || !confirmDiscardDrafts()) return
+  try {
+    await api(`/matters/${currentMatterId.value}/output-preset/${presetId}`, 'POST')
+    await refreshMatters()
+    resetDrafts()
+    await loadMatterResources()
+    notify('Preset version applied. Preview marks on actual pages before building.', 'success')
+  } catch (err) { issue(err) }
+}
 async function startBuild(): Promise<boolean> {
   if (!currentMatterId.value || isJobActive.value) return false
   try {
+    if (formattingDirty.value) {
+      notify('Save numbering and annexure policy before building.', 'error')
+      return false
+    }
     if (!await savePolicy()) return false
     const signature = confirmSignatureTransformation(docs.value, 'Bundle generation')
     if (!signature.proceed) return false
@@ -921,7 +954,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
     </section>
   </main>
   <div v-else class="app-shell" :data-editor-expanded="editorExpanded">
-    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <a class="skip-link" href="#main-content" @click.prevent="focusMain">Skip to main content</a>
     <button v-if="smallScreen && mobileNavOpen" class="sidebar-backdrop" aria-label="Close navigation" @click="mobileNavOpen=false"></button>
     <aside class="sidebar" :class="{collapsed:sidebarCollapsed && !smallScreen, 'mobile-open':mobileNavOpen}" :inert="smallScreen && !mobileNavOpen">
       <div class="brand-area">
@@ -968,7 +1001,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
 
       <div v-if="apiStatus==='offline'" class="backend-error"><CircleAlert :size="19"/><div><strong>Python engine unavailable</strong><p v-if="inTauri()">Quit and reopen CourtBundle to start a new local engine session. If it still fails, inspect the packaged sidecar and local port.</p><p v-else>Run <code>cd backend && ./dev.sh</code>, then retry. The browser development token is for local testing only.</p></div><button class="btn secondary" @click="init">Retry connection</button></div>
 
-      <Transition name="view" mode="out-in" @after-enter="fitDocumentsWorkspace">
+      <Transition name="view" @after-enter="fitDocumentsWorkspace">
       <main v-if="activeView==='rules'" id="main-content" tabindex="-1" class="page-content rules-page">
         <div class="page-eyebrow">LEGAL KNOWLEDGE</div><h1>Court rules & technical profiles</h1><p class="page-description">Source-linked preparation checks. These do not replace registry instructions or an advocate's review.</p>
         <div class="notice subtle profile-scope"><Info :size="18"/><span><strong v-if="currentMatter">{{selectedProfile?.name}} is selected for {{currentMatter.name}}. </strong>Profiles currently affect searchable-page warnings and the export file size cap. The filing guidance and linked forms below are references for advocate review; they are not applied automatically.</span></div>
@@ -1063,6 +1096,15 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             <div class="panel-header"><div><h2>Document details</h2><span>Metadata for collation</span></div><button class="icon-btn" aria-label="Close document details" @click="detailsOpen=false"><X :size="18"/></button></div>
               <div class="inspector-content">
                 <div class="inspector-heading"><div class="doc-icon big"><FileText :size="22"/></div><div><strong>{{selectedDoc.original_name}}</strong><small>{{selectedDoc.page_count}} pages · {{selectedDoc.ocr_status.split('_').join(' ')}}</small></div></div>
+                <div v-if="selectedOcrRuns.length" class="notice subtle ocr-provenance" role="note">
+                  <ScanText :size="18"/><span><strong>OCR provenance · unverified text</strong>
+                    <small v-for="run in selectedOcrRuns" :key="run.applied_revision">
+                      Revision {{run.applied_revision}}: {{run.language.split('+').join(' + ')}} · {{run.pages_ocr_applied}} {{run.pages_ocr_applied === 1 ? 'page' : 'pages'}} · PyMuPDF {{run.pymupdf_version}}<template v-if="run.tesseract_cli_version"> · {{run.tesseract_cli_version}} (CLI)</template><br/>
+                      <span v-for="(hash, language) in run.model_sha256" :key="language" :title="hash">{{language}} model SHA-256: {{hash}}</span>
+                    </small>
+                    <small>These identifiers describe the OCR software and model files. Recognized text still needs review against the page.</small>
+                  </span>
+                </div>
                 <label class="field">Display title<input v-model="docEditor.title" maxlength="250"/></label>
                 <label class="field">Document type<select v-model="docEditor.kind"><option v-for="kind in documentKindOptions" :key="kind" :value="kind">{{kind[0].toUpperCase()+kind.slice(1)}}</option></select></label>
                 <div class="field-row"><label class="field">Part<select v-model.number="docEditor.part"><option v-for="part in 4" :value="part">Part {{part}}</option></select></label><label class="field">Label<input v-model="docEditor.label" placeholder="P-1" maxlength="60"/></label></div>
@@ -1113,6 +1155,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <div v-for="job in interruptedJobs" :key="job.id" class="notice amber"><CircleAlert :size="18"/><span>{{job.kind === 'ocr' ? 'OCR' : job.kind === 'compress' ? 'Compression' : 'Bundle build'}} was interrupted by an engine restart. Review the current revision and exports before retrying.</span><span v-if="job.kind === 'compress'">Choose compression again in page tools.</span><label v-if="job.kind === 'ocr'">OCR language <select v-model="retryOcrLanguage"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select></label><button v-if="job.kind !== 'compress'" class="text-tool" :disabled="isJobActive" @click="retryInterrupted(job)">Retry</button></div>
               </div>
             </div>
+            <OutputPresets :key="currentMatterId!" ref="outputPresetsPanel" :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :settings-dirty="settingsDirty" :disabled="isJobActive" :refresh-key="previewRefreshKey" :documents="docs" @apply-requested="applyOutputPreset" @dirty-changed="formattingDirty=$event" @modified="loadMatterResources" @open-document="openPreviewDocument"/>
             <BundlePreview :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" @open-document="openPreviewDocument"/>
             <div class="panel exports-panel"><div class="panel-header"><div><h2>Generated exports</h2><span>Stored locally for repeat downloads</span></div><Archive :size="18" class="muted-icon"/></div>
               <div v-if="activeExport" class="export-body"><div v-if="activeExport.stale" class="notice amber"><ShieldAlert :size="18"/> Matter inputs changed since this export. Rebuild before using it.</div><div v-if="activeJob?.kind==='build' && activeJob.status==='failed'" class="notice amber"><ShieldAlert :size="18"/> The latest build failed. These files are from an earlier completed export; review them before use.</div><div class="export-summary"><div class="export-icon"><FileCheck2 :size="25"/></div><div><strong>{{activeJob?.kind==='build' && activeJob.status==='failed' ? 'Previous filing package' : 'Latest filing package'}}</strong><span>{{prettyDate(activeExport.created_at)}} · {{activeExport.volumes}} volume(s) · {{activeExport.pages}} pages</span></div></div><div v-if="activeExport.checks.some(check => check.code==='SOURCE_ANNOTATIONS_OMITTED' || check.code==='SOURCE_LINKS_OMITTED')" class="notice amber"><ShieldAlert :size="18"/> This export omitted source annotations or links. See validation-report.json for affected documents; generated index links remain.</div>

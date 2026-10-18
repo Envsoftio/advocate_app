@@ -126,7 +126,29 @@ def main():
                                    for path in root.rglob('*') if path.is_file())
                     else:
                         assert hashlib.sha256(original_path.read_bytes()).digest() == hashlib.sha256(original).digest()
+                    hindi_source = (Path(__file__).resolve().parents[2] / 'samples' /
+                                    '05_hindi_scan.pdf').read_bytes()
+                    hindi_response = (client.post(base + '/documents/raw', content=hindi_source,
+                        headers={'Content-Type': 'application/octet-stream',
+                                 'X-CourtBundle-Filename': '05_hindi_scan.pdf'})
+                        if protected else client.post(base + '/documents',
+                            files=[('files', ('05_hindi_scan.pdf', hindi_source, 'application/pdf'))]))
+                    hindi_response.raise_for_status()
+                    hindi_doc = hindi_response.json()[0]
+                    assert hindi_doc['source_sha256'] == hashlib.sha256(hindi_source).hexdigest()
+                    hindi_job = finish(client.post(f'/documents/{hindi_doc["id"]}/ocr',
+                                                   json={'language': 'eng+hin'}))
+                    assert hindi_job['result']['language'] == 'eng+hin'
+                    assert hindi_job['result']['pages_ocr_applied'] == 1
+                    hindi_pdf = client.get(f'/documents/{hindi_doc["id"]}/pdf')
+                    hindi_pdf.raise_for_status()
+                    with pymupdf.open(stream=hindi_pdf.content, filetype='pdf') as pdf:
+                        recognized = pdf[0].get_text().replace(' ', '')
+                        assert 'हिंदीपरीक्षणदस्तावेज' in recognized
+                        assert 'CASE2026' in recognized
+                        assert pdf[0].rect == pymupdf.Rect(0, 0, 595, 842)
                     print(json.dumps({'startup_seconds': round(startup, 2), 'bundled_ocr': 'passed',
+                                      'bundled_hindi_ocr': 'passed',
                                       'compression': compressed['result'], 'bookmarked_export': 'passed',
                                       'original_integrity': 'passed',
                                       'protected_backup_restore_rotation': 'passed' if protected else 'not run'},

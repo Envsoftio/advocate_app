@@ -1,5 +1,6 @@
 import io
 import hashlib
+import json
 import shutil
 import subprocess
 import time
@@ -7,6 +8,8 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 import pymupdf
+from fastapi.testclient import TestClient
+from app.main import create_app
 from test_api import wait_for_job
 
 SAMPLES = Path(__file__).resolve().parents[2] / 'samples'
@@ -89,3 +92,66 @@ def test_ocr_rejects_unlisted_language(client, auth, matter, make_pdf):
     response = client.post(f'/documents/{imported["id"]}/ocr', headers=auth,
                            json={'language': 'ara'})
     assert response.status_code == 422
+
+
+@pytest.mark.skipif(not shutil.which('tesseract'), reason='Tesseract not installed')
+def test_ocr_provenance_survives_history_restart_and_portable(tmp_path):
+    root = tmp_path / 'store'
+    auth = {'Authorization': 'Bearer test-token'}
+    source = (SAMPLES / '04_scanned_annexure.jpg').read_bytes()
+    with TestClient(create_app(data_dir=root, token='test-token')) as client:
+        matter = client.post('/matters', headers=auth, json={'name': 'OCR provenance fixture'}).json()
+        uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+            files=[('files', ('scan.jpg', source, 'image/jpeg'))])
+        assert uploaded.status_code == 201, uploaded.text
+        doc = uploaded.json()[0]
+        started = client.post(f'/documents/{doc["id"]}/ocr', headers=auth,
+                              json={'language': 'eng'})
+        assert started.status_code == 202, started.text
+        finished = wait_for_job(client, auth, started.json()['id'], timeout=40)
+        assert finished['status'] == 'completed', finished.get('error')
+        assert finished['result']['pages_ocr_applied'] == 1
+        current = client.get(f'/matters/{matter["id"]}/documents', headers=auth).json()[0]
+        run = json.loads(current['ocr_provenance_json'])[0]
+        assert run['language'] == 'eng'
+        assert run['provider'] == 'PyMuPDF+Tesseract'
+        assert run['pymupdf_version'] == pymupdf.VersionBind
+        assert run['model_sha256']['eng'] == hashlib.sha256(
+            (Path(pymupdf.get_tessdata()) / 'eng.traineddata').read_bytes()).hexdigest()
+        assert run['applied_revision'] == current['revision'] == 2
+        assert run['pages_ocr_applied'] == 1
+        with client.app.state.store.connect() as con:
+            saved = con.execute('''SELECT ocr_provenance_json FROM document_revisions
+                WHERE document_id=? AND revision=2''', (doc['id'],)).fetchone()[0]
+        assert json.loads(saved) == [run]
+        rotated = client.post(f'/documents/{doc["id"]}/pages/rotate', headers=auth,
+                              json={'page_index': 0, 'degrees': 90})
+        assert rotated.status_code == 200, rotated.text
+        assert json.loads(rotated.json()['ocr_provenance_json']) == [run]
+        undone = client.post(f'/matters/{matter["id"]}/history/undo', headers=auth)
+        assert undone.status_code == 200, undone.text
+        assert json.loads(client.get(f'/matters/{matter["id"]}/documents', headers=auth)
+                          .json()[0]['ocr_provenance_json']) == [run]
+        undone_ocr = client.post(f'/matters/{matter["id"]}/history/undo', headers=auth)
+        assert undone_ocr.status_code == 200, undone_ocr.text
+        assert json.loads(client.get(f'/matters/{matter["id"]}/documents', headers=auth)
+                          .json()[0]['ocr_provenance_json']) == []
+        redone_ocr = client.post(f'/matters/{matter["id"]}/history/redo', headers=auth)
+        assert redone_ocr.status_code == 200, redone_ocr.text
+        assert json.loads(client.get(f'/matters/{matter["id"]}/documents', headers=auth)
+                          .json()[0]['ocr_provenance_json']) == [run]
+        backup = client.get(f'/matters/{matter["id"]}/portable', headers=auth)
+        assert backup.status_code == 200, backup.text
+        restored = client.post('/matters/restore', headers=auth,
+            files={'file': ('ocr.cbmatter', backup.content, 'application/zip')})
+        assert restored.status_code == 201, restored.text
+        restored_doc = client.get(f'/matters/{restored.json()["id"]}/documents',
+                                  headers=auth).json()[0]
+        assert json.loads(restored_doc['ocr_provenance_json']) == [run]
+        assert client.app.state.store.original_path(current).read_bytes() == source
+    with TestClient(create_app(data_dir=root, token='test-token')) as reopened:
+        persisted = reopened.get(f'/matters/{matter["id"]}/documents', headers=auth).json()[0]
+        assert json.loads(persisted['ocr_provenance_json']) == [run]
+        imported = reopened.get(f'/matters/{restored.json()["id"]}/documents',
+                                headers=auth).json()[0]
+        assert json.loads(imported['ocr_provenance_json']) == [run]
