@@ -72,6 +72,13 @@ def main():
                             files=[('files', ('mixed.pdf', original, 'application/pdf'))]))
                     response.raise_for_status()
                     doc = response.json()[0]
+                    # The frozen service must treat malformed acknowledgment as false,
+                    # rather than reject an otherwise valid unsigned page edit.
+                    overlay = client.post(f'/documents/{doc["id"]}/pages/text-overlay', json={
+                        'page_index': 0, 'x': .15, 'y': .6, 'text': 'QA MARK',
+                        'acknowledge_signature_risk': {}})
+                    overlay.raise_for_status()
+                    assert overlay.json()['revision'] == doc['revision'] + 1
 
                     def finish(response):
                         response.raise_for_status()
@@ -86,7 +93,7 @@ def main():
                         return job
 
                     compressed = finish(client.post(f'/documents/{doc["id"]}/compress',
-                        json={'preset': 'small', 'expected_revision': 1}))
+                        json={'preset': 'small', 'expected_revision': overlay.json()['revision']}))
                     finish(client.post(f'/documents/{doc["id"]}/ocr'))
                     current = client.get(base + '/documents').json()[0]
                     client.put(base + '/bookmarks', json={'entries': [{

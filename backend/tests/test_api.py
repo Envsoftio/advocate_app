@@ -76,6 +76,23 @@ def test_document_page_actions(client, auth, matter, make_pdf):
     assert client.post(f'/documents/{doc_id}/pages/delete', headers=auth, json={'page_index':10}).status_code == 422
 
 
+def test_document_thumbnail_is_authenticated_and_revision_bound(client, auth, matter, make_pdf):
+    doc = upload(client, auth, matter, make_pdf)
+    url = f'/documents/{doc["id"]}/thumbnail?revision={doc["revision"]}'
+    assert client.get(url).status_code == 401
+    preview = client.get(url, headers=auth)
+    assert preview.status_code == 200
+    assert preview.headers['content-type'] == 'image/png'
+    assert preview.headers['cache-control'] == 'no-store'
+    image = pymupdf.Pixmap(preview.content)
+    assert image.width <= 180 and image.height <= 220
+    assert image.width > 0 and image.height > 0
+    changed = client.post(f'/documents/{doc["id"]}/pages/rotate', headers=auth,
+                          json={'page_index':0,'degrees':90})
+    assert changed.status_code == 200
+    assert client.get(url, headers=auth).status_code == 409
+
+
 def test_undo_redo_page_metadata_order_and_branch(client, auth, matter, make_pdf):
     first = upload(client, auth, matter, make_pdf, name='first.pdf', pages=2)
     second = upload(client, auth, matter, make_pdf, name='second.pdf', pages=1)

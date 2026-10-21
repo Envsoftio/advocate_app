@@ -220,9 +220,9 @@ class SignatureRiskAcknowledgement(BaseModel):
 
     @field_validator('acknowledge_signature_risk', mode='before')
     @classmethod
-    def null_is_not_acknowledged(cls, value):
-        # An optional acknowledgment cannot be granted by a missing UI value.
-        return False if value is None else value
+    def only_explicit_true_acknowledges(cls, value):
+        # A missing or malformed UI value cannot grant signature-risk consent.
+        return value is True
 
 
 class OcrRequest(SignatureRiskAcknowledgement):

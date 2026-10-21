@@ -5,7 +5,7 @@ import * as pdfjs from 'pdfjs-dist'
 import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import type { MatterDocument, OutputMarkPreview, OutputMarks, PageAnnotation, ReviewedLink } from '../lib/types'
-import { api, pageAnnotationAsset, pdfDocumentSource, uploadPageAnnotationImage, uploadWorkingPageImage } from '../lib/api'
+import { ApiError, api, pageAnnotationAsset, pdfDocumentSource, uploadPageAnnotationImage, uploadWorkingPageImage } from '../lib/api'
 import { friendlyError } from '../lib/format'
 import { confirmSignatureTransformation } from '../lib/signatures'
 
@@ -72,7 +72,6 @@ let dragStartY = 0
 let suppressNextClick = false
 const overlayText = ref('')
 const overlaySize = ref(12)
-const overlayError = ref('')
 const overlayValidation = computed(() => {
   if (!overlayText.value.trim()) return 'Enter text to add.'
   if (/[^\x20-\x7E\n]/.test(overlayText.value)) return 'Add text currently supports printable ASCII and line breaks only.'
@@ -80,7 +79,12 @@ const overlayValidation = computed(() => {
     return 'Choose a font size from 6 to 36 pt.'
   return ''
 })
-watch([overlayText, overlaySize], () => { overlayError.value = '' })
+let lastOverlayValidation = ''
+watch([overlayText, overlaySize], () => {
+  const validation = overlayText.value ? overlayValidation.value : ''
+  if (validation && validation !== lastOverlayValidation) emit('error', validation)
+  lastOverlayValidation = validation
+})
 const placement = ref<{x:number,y:number,page:number} | null>(null)
 const inlineAddInput = ref<HTMLTextAreaElement | null>(null)
 const inlineAddStyle = computed(() => {
@@ -152,7 +156,7 @@ const inspectorVisible = computed(() => marksPanelOpen.value ||
   (annotationPanelOpen.value && (!!annotationRegion.value || annotationDraft.kind === 'image' || !!editingAnnotationId.value)) ||
   (linkPanelOpen.value && !!linkRegion.value))
 const toolHint = computed(() => ({
-  'add-text': 'Click the page where text should start, then type directly on the page.',
+  'add-text': 'Click the page where text should start, then type in the editor card.',
   'edit-text': 'Click selectable text to edit it; drag a highlighted run to preview a move.',
   redact: 'Drag over the area to remove, then review and apply on the page.',
   notes: annotationDraft.kind === 'image' ? 'Choose an image, then drag its placement on the page.' : 'Drag over the passage to highlight or comment.',
@@ -315,7 +319,6 @@ watch(findOpen, () => highlightFindText())
 function toggleTool(tool: EditorTool) {
   activeTool.value = activeTool.value === tool ? 'select' : tool
   placement.value = null
-  overlayError.value = ''
   selectedRun.value = null
   paragraphPreviewSequence++
   cancelMove()
@@ -347,9 +350,25 @@ const toolTitle = computed(() => ({
 })[activeTool.value])
 const total = computed(() => loadedPageCount.value || props.document?.page_count || 0)
 const thumbnailPages = computed(() => {
+  if (props.expanded) return Array.from({length:total.value}, (_, index) => index + 1)
   const start = Math.max(1, Math.min(current.value - 3, total.value - 6))
   return Array.from({length: Math.min(total.value, 7)}, (_, index) => start + index)
 })
+let thumbnailScrollTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleThumbnailRender() {
+  if (thumbnailScrollTimer) clearTimeout(thumbnailScrollTimer)
+  thumbnailScrollTimer = setTimeout(() => void renderThumbnails(), 90)
+}
+function revealCurrentThumbnail() {
+  if (!props.expanded || !thumbnailWrap.value) return
+  const wrap = thumbnailWrap.value
+  const button = wrap.querySelector<HTMLElement>(`[data-thumbnail-page="${current.value}"]`)
+  if (!button) return
+  const top = button.offsetTop - wrap.offsetTop
+  if (top < wrap.scrollTop || top + button.offsetHeight > wrap.scrollTop + wrap.clientHeight)
+    wrap.scrollTop = Math.max(0, top - 14)
+  scheduleThumbnailRender()
+}
 
 async function renderThumbnails() {
   const sequence = ++thumbnailSequence
@@ -361,8 +380,13 @@ async function renderThumbnails() {
   if (currentPdf !== pdf || !thumbnailWrap.value) return
   for (const element of thumbnailWrap.value.querySelectorAll<HTMLCanvasElement>('canvas[data-page]')) {
     if (currentPdf !== pdf || sequence !== thumbnailSequence) return
+    if (props.expanded) {
+      const wrapRect = thumbnailWrap.value.getBoundingClientRect()
+      const elementRect = element.getBoundingClientRect()
+      if (elementRect.bottom < wrapRect.top - 190 || elementRect.top > wrapRect.bottom + 190) continue
+    }
     const number = Number(element.dataset.page)
-    if (renderedThumbnails.has(number) && element.width && element.height) continue
+    if (renderedThumbnails.has(number) && element.dataset.rendered === 'true' && element.width && element.height) continue
     try {
       const page = await currentPdf.getPage(number)
       if (currentPdf !== pdf || sequence !== thumbnailSequence) return
@@ -374,7 +398,10 @@ async function renderThumbnails() {
       const task = page.render({canvasContext:context, viewport})
       thumbnailTasks.push(task)
       await task.promise
-      if (currentPdf === pdf && sequence === thumbnailSequence) renderedThumbnails.add(number)
+      if (currentPdf === pdf && sequence === thumbnailSequence) {
+        renderedThumbnails.add(number)
+        element.dataset.rendered = 'true'
+      }
     } catch (err) {
     if (currentPdf === pdf && sequence === thumbnailSequence &&
         !(err instanceof Error && err.name === 'RenderingCancelledException'))
@@ -550,7 +577,9 @@ watch(canvasWrap, element => {
   resizeObserver.observe(element)
 })
 watch(current, () => { placement.value = null; selectedRun.value = null; cancelMove() })
-watch(placement, point => { if (point) void nextTick(() => inlineAddInput.value?.focus()) })
+watch(placement, (point, previous) => {
+  if (point && !previous) void nextTick(() => inlineAddInput.value?.focus())
+})
 watch([current, () => props.document?.id, () => props.document?.revision, editTextMode], async () => {
   const sequence = ++runsSequence
   textRuns.value = []
@@ -569,10 +598,20 @@ watch([current, () => props.document?.id, () => props.document?.revision, editTe
   } catch (err) { if (sequence === runsSequence) runsError.value = friendlyError(err) }
 })
 watch([current, () => props.document?.id, editTextMode], () => { editNotice.value = '' })
-watch(showThumbnails, shown => {
-  if (!shown) renderedThumbnails.clear()
-  else void renderQueue.catch(() => {}).then(() => renderThumbnails())
+watch([showThumbnails, activeTool, () => props.expanded], ([shown, tool, expanded]) => {
+  if (!shown || (tool !== 'select' && !expanded)) {
+    thumbnailSequence++
+    thumbnailTasks.forEach(task => task.cancel())
+    thumbnailTasks = []
+    renderedThumbnails.clear()
+    return
+  }
+  void nextTick(() => renderQueue.catch(() => {}).then(() => {
+    revealCurrentThumbnail()
+    return renderThumbnails()
+  }))
 })
+watch(current, () => void nextTick(revealCurrentThumbnail))
 watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}`, () => {
   bookmarkOpen.value = false
   bookmarkTitle.value = ''
@@ -612,7 +651,7 @@ watch(current, () => { linkRegion.value = null; linkDrawing.value = false; linkE
 watch([current, () => props.document?.id, () => props.document?.revision], () => {
   redactionRegion.value = null; redactionReviewed.value = false; redactionError.value = ''
 })
-onBeforeUnmount(() => { epoch++; findSequence++; if (findTimer) clearTimeout(findTimer); if (loadingTask) void loadingTask.destroy(); resizeObserver?.disconnect(); thumbnailSequence++; renderTask?.cancel(); textLayer?.cancel(); thumbnailTasks.forEach(task => task.cancel()); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value); if (pdf) void pdf.destroy() })
+onBeforeUnmount(() => { epoch++; findSequence++; if (findTimer) clearTimeout(findTimer); if (thumbnailScrollTimer) clearTimeout(thumbnailScrollTimer); if (loadingTask) void loadingTask.destroy(); resizeObserver?.disconnect(); thumbnailSequence++; renderTask?.cancel(); textLayer?.cancel(); thumbnailTasks.forEach(task => task.cancel()); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value); if (pdf) void pdf.destroy() })
 
 async function addPageBookmark() {
   const doc = props.document
@@ -1045,26 +1084,41 @@ function choosePlacement(event: MouseEvent) {
   const y = (event.clientY - rect.top) / rect.height
   if (x >= 0 && x < 1 && y >= 0 && y < 1) {
     placement.value = { x, y, page: current.value }
-    overlayError.value = ''
   }
 }
 async function placeText() {
   if (!props.document || !placement.value || editing.value || props.disabled) return
-  if (overlayValidation.value) { overlayError.value = overlayValidation.value; return }
-  const signature = confirmSignatureTransformation([props.document], 'Adding visible text')
-  if (!signature.proceed) return
+  if (overlayValidation.value) { emit('error', overlayValidation.value); return }
   editing.value = true
-  overlayError.value = ''
   try {
-    await api(`/documents/${props.document.id}/pages/text-overlay`, 'POST', {
+    const documentId = props.document.id
+    const documents = await api<MatterDocument[]>(`/matters/${props.document.matter_id}/documents`)
+    const currentDocument = documents.find(item => item.id === documentId)
+    if (!currentDocument) throw new Error('Document changed; reopen it before adding text.')
+    const signature = confirmSignatureTransformation([currentDocument], 'Adding visible text')
+    if (!signature.proceed) return
+    const payload = {
       page_index: placement.value.page - 1, x: placement.value.x, y: placement.value.y,
       text: overlayText.value, font_size: overlaySize.value,
       acknowledge_signature_risk: signature.acknowledged,
-    })
+    }
+    const endpoint = `/documents/${documentId}/pages/text-overlay`
+    try {
+      await api(endpoint, 'POST', payload)
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.status !== 409 ||
+          !err.message.startsWith('Signature-risk acknowledgment required') ||
+          payload.acknowledge_signature_risk) throw err
+      // The server can know about a signature risk that a stale document list does not.
+      // Never turn a failed edit into an acknowledged one without a fresh user decision.
+      const proceed = window.confirm(`${err.message}\n\nContinue adding visible text to the working copy?`)
+      if (!proceed) return
+      await api(endpoint, 'POST', {...payload, acknowledge_signature_risk: true})
+    }
     placement.value = null
     overlayText.value = ''
     emit('modified')
-  } catch (err) { overlayError.value = friendlyError(err) }
+  } catch (err) { emit('error', friendlyError(err)) }
   finally { editing.value = false }
 }
 async function selectRun(run: TextRun) {
@@ -1278,7 +1332,11 @@ async function applyReplacement() {
       </div>
       <p v-if="bookmarkNotice" class="page-bookmark-notice" role="status">{{bookmarkNotice}}</p>
       <Transition name="soft"><div v-if="detailsDirty" class="preview-draft-warning" role="status">Save document details to use PDF tools.<button v-if="!detailsOpen" class="text-tool" @click="emit('toggleDetails')">Open details</button></div></Transition>
-      <div class="viewer-edit-workspace" :class="{'has-tool-inspector':inspectorVisible}">
+      <div class="viewer-edit-workspace" :class="{'has-tool-inspector':inspectorVisible,'expanded-pages':expanded}">
+      <div v-if="expanded && total > 0 && showThumbnails" ref="thumbnailWrap" class="thumbnail-strip thumbnail-rail" aria-label="Page thumbnails" @scroll.passive="scheduleThumbnailRender">
+        <span class="thumbnail-hint">{{document.title}} · {{total}} pages</span>
+        <button v-for="number in thumbnailPages" :key="number" :data-thumbnail-page="number" class="thumbnail-button" :class="{selected:number===current,dragging:draggingPage===number,'drop-target':dropTargetPage===number}" :aria-label="'Go to page '+number" :aria-current="number===current?'page':undefined" :draggable="!disabled && !editing" @dragstart="startPageDrag($event,number)" @dragend="draggingPage=null;dropTargetPage=null" @dragover="overPage($event,number)" @drop.prevent="dropPage($event,number)" @click="current=number"><canvas :data-page="number" width="1" height="1"></canvas><span>{{number}}</span></button>
+      </div>
       <aside v-if="inspectorVisible" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen}" aria-label="PDF editing controls">
         <div class="viewer-tool-inspector-heading"><strong>{{toolTitle}}</strong><button class="icon-btn small" aria-label="Close PDF tool" title="Close tool" @click="toggleTool(activeTool)"><X :size="16"/></button></div>
       <Transition name="soft"><div v-if="editTextMode" class="text-overlay-panel" aria-label="Edit existing text">
@@ -1351,10 +1409,10 @@ async function applyReplacement() {
       </aside>
       <div class="viewer-page-column">
       <div v-if="activeTool!=='select'" class="pdf-tool-hint" role="status"><strong>{{toolTitle}}</strong><span>{{toolFeedback || toolHint}}</span><button class="icon-btn small" aria-label="Cancel PDF tool" title="Cancel tool (Esc)" @click="toggleTool(activeTool)"><X :size="14"/></button></div>
-      <Transition name="soft"><div v-if="total > 0 && showThumbnails" ref="thumbnailWrap" class="thumbnail-strip" aria-label="Page thumbnails">
+      <div v-if="!expanded && total > 0 && showThumbnails && activeTool==='select'" ref="thumbnailWrap" class="thumbnail-strip" aria-label="Page thumbnails">
         <span class="thumbnail-hint">Drag to reorder working-copy pages</span>
-        <button v-for="number in thumbnailPages" :key="number" class="thumbnail-button" :class="{selected:number===current,dragging:draggingPage===number,'drop-target':dropTargetPage===number}" :aria-label="'Go to page '+number" :draggable="!disabled && !editing" @dragstart="startPageDrag($event,number)" @dragend="draggingPage=null;dropTargetPage=null" @dragover="overPage($event,number)" @drop.prevent="dropPage($event,number)" @click="current=number"><canvas :data-page="number"></canvas><span>{{number}}</span></button>
-      </div></Transition>
+        <button v-for="number in thumbnailPages" :key="number" :data-thumbnail-page="number" class="thumbnail-button" :class="{selected:number===current,dragging:draggingPage===number,'drop-target':dropTargetPage===number}" :aria-label="'Go to page '+number" :aria-current="number===current?'page':undefined" :draggable="!disabled && !editing" @dragstart="startPageDrag($event,number)" @dragend="draggingPage=null;dropTargetPage=null" @dragover="overPage($event,number)" @drop.prevent="dropPage($event,number)" @click="current=number"><canvas :data-page="number" width="1" height="1"></canvas><span>{{number}}</span></button>
+      </div>
       <div ref="canvasWrap" class="canvas-scroll" :aria-busy="loading || editing">
         <div v-if="(loading || editing) && !(replacingText && editSnapshot)" class="preview-status"><LoaderCircle :size="18" class="spin"/> {{ editing ? 'Updating PDF…' : 'Loading PDF…' }}</div>
         <div v-if="viewerError" class="preview-status error-msg">{{ viewerError }}</div>
@@ -1365,11 +1423,11 @@ async function applyReplacement() {
           <div v-if="textMode && placement && placement.page===current" class="pdf-inline-add-card" :style="inlineAddStyle" @click.stop @pointerdown.stop>
             <label>Add text on page {{current}}<textarea ref="inlineAddInput" v-model="overlayText" maxlength="1000" rows="3" :disabled="editing || disabled" placeholder="Type text here" @keydown.esc.stop.prevent="placement=null" @keydown.meta.enter.prevent="placeText" @keydown.ctrl.enter.prevent="placeText"></textarea></label>
             <label>Size <input v-model.number="overlaySize" type="number" min="6" max="36" :disabled="editing || disabled"/> pt</label>
-            <p v-if="overlayError || (overlayText && overlayValidation)" class="error-msg" role="alert">{{overlayError || overlayValidation}}</p>
-            <div class="pdf-inline-add-actions"><button class="btn secondary small" :disabled="editing" @click="placement=null;overlayError=''">Cancel</button><button class="btn primary small" :disabled="!!overlayValidation || editing || disabled" @click="placeText">Apply text</button></div>
+            <small class="pdf-add-text-guidance">Printable ASCII · 6–36 pt</small>
+            <div class="pdf-inline-add-actions"><button class="btn secondary small" :disabled="editing" @click="placement=null">Cancel</button><button class="btn primary small" :disabled="!!overlayValidation || editing || disabled" :title="overlayValidation || undefined" @click="placeText">Apply text</button></div>
           </div>
-          <img v-if="editSnapshot" class="pdf-edit-snapshot" :class="{'is-fading':editSnapshotFading}" :src="editSnapshot" alt="" aria-hidden="true" />
           <span v-if="placement && placement.page===current && !overlayText" class="pdf-placement-marker" :style="{left:`${placement.x*100}%`,top:`${placement.y*100}%`}" aria-hidden="true"></span>
+          <img v-if="editSnapshot" class="pdf-edit-snapshot" :class="{'is-fading':editSnapshotFading}" :src="editSnapshot" alt="" aria-hidden="true" />
           <button v-for="item in currentPageLinks" :key="item.id" type="button" :class="['pdf-reviewed-link',{unresolved:!item.resolved}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`}" :title="item.resolved ? item.title : item.title+' — needs review'" @pointerdown.stop @click.stop="followReviewedLink(item)"><span>{{item.title}}</span></button>
           <span v-if="linkPanelOpen && linkRegion" class="pdf-link-region" :style="{left:`${linkRegion.x*100}%`,top:`${linkRegion.y*100}%`,width:`${linkRegion.width*100}%`,height:`${linkRegion.height*100}%`}" aria-hidden="true"></span>
           <template v-for="item in currentPageAnnotations" :key="item.id">

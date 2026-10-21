@@ -9,6 +9,7 @@ import {
   Undo2, UploadCloud, WandSparkles, X
 } from 'lucide-vue-next'
 import PdfViewer from './components/PdfViewer.vue'
+import DocumentThumbnail from './components/DocumentThumbnail.vue'
 import PasswordInput from './components/PasswordInput.vue'
 import PageTools from './components/PageTools.vue'
 import ManualBookmarks from './components/ManualBookmarks.vue'
@@ -345,7 +346,7 @@ function highlightedSnippet(snippet: string, query: string) {
 function notify(message:string, kind:'success'|'error'|'info'='info') {
   toast.value={message,kind}
   if (toastTimer) clearTimeout(toastTimer)
-  toastTimer=setTimeout(()=>toast.value=null,6500)
+  toastTimer=setTimeout(()=>toast.value=null,kind === 'error' && message.length > 140 ? 12000 : 6500)
 }
 function issue(err: unknown) { notify(friendlyError(err), 'error') }
 
@@ -1061,7 +1062,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
         </section>
         <DocumentTable v-else-if="activeView==='documents' && documentTableOpen" :matter-id="currentMatterId!" :documents="docs" :busy="busy || isJobActive" :keep-groups="currentMatter.keep_groups_intact" @modified="documentTableModified" @open-document="openDocumentFromTable" @error="issue" @close="documentTableOpen=false"/>
         <div v-else-if="activeView==='documents'" ref="documentsWorkspace" class="documents-workspace" :class="{'details-open':detailsOpen && !!selectedDoc,'reader-focus':readerFocus}" :style="documentsWorkspaceHeight ? {height:documentsWorkspaceHeight+'px'} : undefined">
-          <section v-show="!readerFocus" class="panel docs-panel">
+          <section v-show="!readerFocus" class="panel docs-panel" :class="{'has-documents':docs.length>0}">
             <div class="panel-header"><div><h2>Source documents</h2><span>Drag or use ↑/↓ to reorder</span></div><div class="panel-header-actions"><button class="text-tool" :disabled="!docs.length" @click="documentTableOpen=true">Open table</button><button class="icon-btn" title="Generate draft cover sheet" :disabled="busy" @click="generateCover"><FilePlus2 :size="19"/></button></div></div>
             <div class="docs-search"><Search :size="16"/><input v-model="searching" placeholder="Search documents..." aria-label="Search documents"/></div>
             <div class="docs-search"><Search :size="16"/><input v-model="pageQuery" placeholder="Find text on pages..." aria-label="Find text on pages"/></div>
@@ -1073,12 +1074,11 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
                 <button v-for="match in pageSearch.matches" :key="match.document_id+'-'+match.page" class="page-search-hit" @click="openSearchMatch(match.document_id, match.page)"><strong>{{match.title}} · page {{match.page}}</strong><span>{{highlightedSnippet(match.snippet, pageQuery.trim()).before}}<mark>{{highlightedSnippet(match.snippet, pageQuery.trim()).match}}</mark>{{highlightedSnippet(match.snippet, pageQuery.trim()).after}}</span></button>
               </template>
             </div>
-            <VueDraggable v-if="filteredDocs.length" :model-value="filteredDocs" class="docs-list" item-key="id" handle=".drag-handle" :disabled="busy || !!searching.trim()" :animation="220" easing="cubic-bezier(.2,.7,.2,1)" :force-fallback="true" :fallback-tolerance="5" :fallback-on-body="true" ghost-class="sortable-ghost" chosen-class="sortable-chosen" drag-class="sortable-drag" fallback-class="sortable-fallback" @update:model-value="applyDocumentSort">
-              <div v-for="doc in filteredDocs" :key="doc.id" class="doc-item" :data-document-id="doc.id" :class="{selected:selectedDocId===doc.id}" @click="selectDocument(doc.id)">
+            <VueDraggable v-if="filteredDocs.length" :model-value="filteredDocs" class="docs-list" item-key="id" handle=".drag-handle" direction="vertical" :disabled="busy || !!searching.trim()" :animation="220" easing="cubic-bezier(.2,.7,.2,1)" :force-fallback="true" :fallback-tolerance="5" :fallback-on-body="true" ghost-class="sortable-ghost" chosen-class="sortable-chosen" drag-class="sortable-drag" fallback-class="sortable-fallback" @update:model-value="applyDocumentSort">
+              <div v-for="doc in filteredDocs" :key="doc.id" class="doc-item" :data-document-id="doc.id" :class="{selected:selectedDocId===doc.id}" role="button" tabindex="0" :aria-label="`Open ${doc.title}, ${doc.page_count} ${doc.page_count===1?'page':'pages'}`" @click="selectDocument(doc.id)" @keydown.enter.prevent="selectDocument(doc.id)" @keydown.space.prevent="selectDocument(doc.id)">
                 <span class="grip drag-handle" role="button" :tabindex="busy || !!searching.trim() ? -1 : 0" :aria-label="'Reorder document '+doc.title+'. Press Up or Down arrow keys.'" @click.stop @keydown.up.prevent="moveDocumentFromHandle(doc.id,-1,true)" @keydown.down.prevent="moveDocumentFromHandle(doc.id,1,true)"><GripVertical :size="16"/></span>
-                <div class="doc-icon"><FileText :size="20"/></div>
+                <DocumentThumbnail :document-id="doc.id" :revision="doc.revision"/>
                 <div class="doc-info"><strong :title="doc.title">{{doc.title}}</strong><span><span v-if="doc.label" class="doc-label">{{doc.label}} · </span>Part {{doc.part}} · {{doc.page_count}} {{doc.page_count===1?'page':'pages'}}</span></div>
-                <ChevronRight :size="16" class="doc-arrow"/>
               </div>
             </VueDraggable>
             <div v-else-if="docs.length" class="no-matching">No matching documents</div>
@@ -1223,6 +1223,6 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       </section>
     </div>
     <Transition name="modal"><MatterForm v-if="modalOpen" :profiles="profileList" :working="creating" @close="modalOpen=false" @create="createMatter"/></Transition>
-    <Transition name="toast"><div v-if="toast" :class="['toast',toast.kind]"><CheckCircle2 v-if="toast.kind==='success'" :size="19"/><CircleAlert v-else-if="toast.kind==='error'" :size="19"/><Info v-else :size="19"/><span>{{toast.message}}</span><button class="icon-btn small" @click="toast=null"><X :size="15"/></button></div></Transition>
+    <Transition name="toast"><div v-if="toast" :class="['toast',toast.kind]" :role="toast.kind==='error'?'alert':'status'"><CheckCircle2 v-if="toast.kind==='success'" :size="19"/><CircleAlert v-else-if="toast.kind==='error'" :size="19"/><Info v-else :size="19"/><span>{{toast.message}}</span><button class="icon-btn small" aria-label="Dismiss notification" @click="toast=null"><X :size="15"/></button></div></Transition>
   </div>
 </template>

@@ -147,6 +147,13 @@ export async function pdfBytes(docId: string, revision: number, signal?: AbortSi
   return new Uint8Array(await response.arrayBuffer())
 }
 
+export async function documentThumbnailBlob(docId: string, revision: number,
+                                            signal?: AbortSignal): Promise<Blob> {
+  const response = await request(`/documents/${encodeURIComponent(docId)}/thumbnail?revision=${revision}`,
+    { cache: 'no-store', signal })
+  return response.blob()
+}
+
 export async function pdfDocumentSource(docId: string, revision: number) {
   const connection = await getConnection()
   return {

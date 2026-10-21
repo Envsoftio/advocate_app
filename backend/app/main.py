@@ -976,6 +976,24 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         response.headers['Cache-Control'] = 'no-store'
         return response
 
+    @app.get('/documents/{doc_id}/thumbnail')
+    def document_thumbnail(doc_id: str, revision: int, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        if revision != doc['revision']:
+            raise HTTPException(status_code=409, detail='Working PDF revision changed; reload the document')
+        path = store.working_path(doc)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail='PDF working copy missing')
+        try:
+            with open_pdf(path) as source:
+                page = source[0]
+                scale = min(180 / page.rect.width, 220 / page.rect.height, 1)
+                image = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+                data = image.tobytes('png')
+        except (ValueError, RuntimeError, IndexError) as exc:
+            raise HTTPException(status_code=422, detail=f'Cannot preview working PDF: {exc}') from exc
+        return Response(data, media_type='image/png', headers={'Cache-Control': 'no-store'})
+
     def edit_working_copy(doc_id: str, operation, acknowledged: bool = False,
                           related_document_ids: list[str] | None = None):
         doc = doc_or_404(doc_id)
