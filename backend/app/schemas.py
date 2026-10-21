@@ -218,6 +218,12 @@ class ReorderDocuments(BaseModel):
 class SignatureRiskAcknowledgement(BaseModel):
     acknowledge_signature_risk: bool = False
 
+    @field_validator('acknowledge_signature_risk', mode='before')
+    @classmethod
+    def null_is_not_acknowledged(cls, value):
+        # An optional acknowledgment cannot be granted by a missing UI value.
+        return False if value is None else value
+
 
 class OcrRequest(SignatureRiskAcknowledgement):
     language: Literal['eng', 'hin', 'eng+hin'] = 'eng'
@@ -469,6 +475,15 @@ class ReplaceTextRun(SignatureRiskAcknowledgement):
     expected_revision: int = Field(ge=1)
     expected_text: str = Field(min_length=1, max_length=2000)
     replacement: str = Field(min_length=1, max_length=2000)
+    expected_paragraph: str | None = Field(default=None, max_length=4000)
+
+
+class ParagraphSelection(SignatureRiskAcknowledgement):
+    model_config = ConfigDict(extra='forbid')
+    page_index: int = Field(ge=0)
+    span_index: int = Field(ge=0)
+    expected_revision: int = Field(ge=1)
+    expected_text: str = Field(min_length=1, max_length=2000)
 
 
 class MoveTextRun(SignatureRiskAcknowledgement):

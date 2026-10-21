@@ -45,6 +45,9 @@ async function request(path: string, init?: RequestInit, timeoutMs = REQUEST_TIM
   if (typeof init?.body === 'string') headers.set('Content-Type', 'application/json')
   let res: Response
   const controller = new AbortController()
+  if (init?.signal?.aborted) controller.abort()
+  const abortFromCaller = () => controller.abort()
+  init?.signal?.addEventListener('abort', abortFromCaller, { once: true })
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
     res = await fetch(conn.base_url + path, { ...init, headers, signal: controller.signal })
@@ -53,6 +56,7 @@ async function request(path: string, init?: RequestInit, timeoutMs = REQUEST_TIM
     throw new ApiError(0, 'Local Python service unavailable. Check it is running and retry. ' + String(err))
   } finally {
     clearTimeout(timeout)
+    init?.signal?.removeEventListener('abort', abortFromCaller)
   }
   if (!res.ok) {
     let detail = res.statusText
@@ -138,9 +142,18 @@ export async function downloadPageOutput(documentId: string, operation: 'extract
   return true
 }
 
-export async function pdfBytes(docId: string, revision: number): Promise<Uint8Array> {
-  const response = await request(`/documents/${docId}/pdf?revision=${revision}`, { cache: 'no-store' })
+export async function pdfBytes(docId: string, revision: number, signal?: AbortSignal): Promise<Uint8Array> {
+  const response = await request(`/documents/${docId}/pdf?revision=${revision}`, { cache: 'no-store', signal })
   return new Uint8Array(await response.arrayBuffer())
+}
+
+export async function pdfDocumentSource(docId: string, revision: number) {
+  const connection = await getConnection()
+  return {
+    url: `${connection.base_url}/documents/${encodeURIComponent(docId)}/pdf?revision=${revision}`,
+    httpHeaders: {Authorization: `Bearer ${connection.token}`},
+    rangeChunkSize: 256 * 1024,
+  }
 }
 
 export async function uploadPageAnnotationImage(documentId: string, file: File,
@@ -153,6 +166,18 @@ export async function uploadPageAnnotationImage(documentId: string, file: File,
     method: 'POST', body: form,
   }, 2 * 60_000)
   return response.json() as Promise<import('./types').PageAnnotation[]>
+}
+
+export async function uploadWorkingPageImage(documentId: string, file: File,
+  fields: {page_index:number,expected_revision:number,rect_x:number,rect_y:number,
+    rect_width:number,rect_height:number,acknowledge_signature_risk:boolean}): Promise<import('./types').MatterDocument> {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  for (const [key, value] of Object.entries(fields)) form.append(key, String(value))
+  const response = await request(`/documents/${documentId}/pages/image-overlay`, {
+    method: 'POST', body: form,
+  }, 2 * 60_000)
+  return response.json() as Promise<import('./types').MatterDocument>
 }
 
 export async function pageAnnotationAsset(annotationId: string): Promise<Blob> {

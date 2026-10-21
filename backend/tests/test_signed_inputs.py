@@ -100,6 +100,12 @@ def test_signed_transformations_require_acknowledgement_and_record_build_warning
     assert 'Signature-risk acknowledgment required' in denied.json()['detail']
     assert store.get_document(document['id'])['revision'] == 1
 
+    null_acknowledgment = client.post(f'/documents/{document["id"]}/pages/text-overlay',
+        headers=auth, json={'page_index': 0, 'x': .2, 'y': .2, 'text': 'TEST',
+                            'acknowledge_signature_risk': None})
+    assert null_acknowledgment.status_code == 409
+    assert store.get_document(document['id'])['revision'] == 1
+
     allowed = client.post(f'/documents/{document["id"]}/pages/rotate', headers=auth,
         json={'page_index': 0, 'degrees': 90, 'acknowledge_signature_risk': True})
     assert allowed.status_code == 200, allowed.text

@@ -2,6 +2,7 @@ import io
 import json
 
 import pymupdf
+import pytest
 
 from test_api import upload, wait_for_job
 
@@ -18,6 +19,43 @@ def region(**extra):
         'rect_x': .18, 'rect_y': .22, 'rect_width': .24, 'rect_height': .08,
         **extra,
     }
+
+
+def assert_image_aspect(page):
+    xref = page.get_images(full=True)[0][0]
+    rect = page.get_image_rects(xref)[0]
+    assert rect.width / rect.height == pytest.approx(40 / 24, rel=.02)
+
+
+def test_working_image_insert_revisions_and_undo(client, auth, matter, make_pdf):
+    doc = upload(client, auth, matter, make_pdf, name='working-image.pdf', pages=1)
+    store = client.app.state.store
+    original_hash = store.sha256(store.original_path(doc))
+    endpoint = f'/documents/{doc["id"]}/pages/image-overlay'
+    fields = {key: str(value) for key, value in region().items()}
+    files = {'file': ('stamp.png', image_bytes(), 'image/png')}
+    inserted = client.post(endpoint, headers=auth, data=fields, files=files)
+    assert inserted.status_code == 200, inserted.text
+    assert inserted.json()['revision'] == doc['revision'] + 1
+    with pymupdf.open(store.working_path(inserted.json())) as pdf:
+        assert len(pdf[0].get_images(full=True)) == 1
+        assert_image_aspect(pdf[0])
+    assert store.sha256(store.original_path(doc)) == original_hash
+    job = wait_for_job(client, auth, client.post(
+        f'/matters/{matter["id"]}/build', headers=auth).json()['id'])
+    assert job['status'] == 'completed', job['error']
+    combined = store.exports_root(matter['id']) / job['result']['id'] / 'combined.pdf'
+    with pymupdf.open(combined) as pdf:
+        assert any(page.get_images(full=True) for page in pdf)
+        assert_image_aspect(next(page for page in pdf if page.get_images(full=True)))
+    stale = client.post(endpoint, headers=auth, data=fields, files=files)
+    assert stale.status_code == 409
+    undone = client.post(f'/matters/{matter["id"]}/history/undo', headers=auth)
+    assert undone.status_code == 200
+    current = next(item for item in client.get(
+        f'/matters/{matter["id"]}/documents', headers=auth).json() if item['id'] == doc['id'])
+    with pymupdf.open(store.working_path(current)) as pdf:
+        assert not pdf[0].get_images(full=True)
 
 
 def test_image_highlight_comment_edit_delete_undo_export_and_portable(
@@ -63,6 +101,7 @@ def test_image_highlight_comment_edit_delete_undo_export_and_portable(
     with pymupdf.open(folder / 'combined.pdf') as pdf:
         source_page = pdf[1]
         assert source_page.get_images(full=True)
+        assert_image_aspect(source_page)
         assert list(source_page.annots() or ()) == []
     report = json.loads((folder / 'validation-report.json').read_text())
     assert report['page_annotation_summary'] == {

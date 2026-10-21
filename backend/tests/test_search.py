@@ -23,10 +23,19 @@ def test_search_current_working_copy_and_revisions(client, auth, matter):
     assert [(item['document_id'], item['page'], item['revision']) for item in found['matches']] == [
         (document['id'], 2, document['revision'])]
     assert 'BRAVO' in found['matches'][0]['snippet']
+    document_url = f'/documents/{document["id"]}/search'
+    assert client.get(document_url, params={'q': 'bravo'}).status_code == 401
+    scoped = client.get(document_url, headers=auth,
+                        params={'q': 'bravo', 'revision': document['revision']}).json()
+    assert [(item['page'], item['revision']) for item in scoped['matches']] == [(2, document['revision'])]
     assert client.get(url, headers=auth, params={'q': 'a'}).status_code == 422
     changed = client.post(f'/documents/{document["id"]}/pages/delete', headers=auth,
                           json={'page_index': 1})
     assert changed.status_code == 200, changed.text
+    assert client.get(document_url, headers=auth,
+                      params={'q': 'bravo', 'revision': document['revision']}).status_code == 409
+    assert client.get(document_url, headers=auth,
+                      params={'q': 'bravo', 'revision': changed.json()['revision']}).json()['matches'] == []
     assert client.get(url, headers=auth, params={'q': 'bravo'}).json()['matches'] == []
     found = client.get(url, headers=auth, params={'q': 'alpha'}).json()['matches']
     assert len(found) == 1 and found[0]['revision'] > document['revision']

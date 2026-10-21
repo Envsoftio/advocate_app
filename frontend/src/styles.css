@@ -95,6 +95,8 @@
 .text-overlay-panel .page-tool-actions{align-items:center;justify-content:space-between;margin:7px 0 0}
 .pdf-placement-surface{position:relative;display:inline-block;flex:none;line-height:0}
 .pdf-placement-surface .pdf-paper{display:block}
+.pdf-placement-surface.is-stale > :not(.pdf-paper):not(.pdf-edit-snapshot){visibility:hidden;pointer-events:none}
+.page-counter input{width:3.4rem;padding:2px 3px;border:1px solid var(--border,#ccd8e6);border-radius:5px;background:var(--panel,#fff);color:var(--text,#19283c);font:inherit;text-align:center}
 .pdf-placement-surface.placing-text{cursor:crosshair}
 .pdf-placement-marker{position:absolute;width:12px;height:12px;border:2px solid #d42b2b;background:#fff8;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
 .pdf-text-run{position:absolute;border:1px solid #176bbd;background:#49a1ee44;border-radius:2px;padding:0;cursor:grab;line-height:0;touch-action:none}
@@ -403,7 +405,13 @@
 .pdf-placement-surface{transition:opacity .2s ease,filter .2s ease}
 .pdf-placement-surface.is-busy{opacity:.42;filter:blur(1px);pointer-events:none}
 .pdf-placement-surface.is-switching{opacity:.68}
+.pdf-placement-surface.is-stale{pointer-events:none}
 .pdf-placement-surface.is-rotating{opacity:0;filter:blur(1px);pointer-events:none}
+.pdf-text-layer{position:absolute;top:0;left:0;overflow:hidden;line-height:1;text-align:initial;pointer-events:none;user-select:text;-webkit-text-size-adjust:none;text-size-adjust:none}
+.pdf-text-layer :is(span,br){position:absolute;color:transparent;white-space:pre;transform-origin:0 0;cursor:text}
+.pdf-placement-surface.selecting-text .pdf-text-layer{pointer-events:auto}
+.pdf-text-layer ::selection{background:#499cf077}
+.pdf-image-draft{pointer-events:none;opacity:.82;border:2px dashed #2467ad}
 .view-enter-active,.view-leave-active{transition:opacity .22s ease,transform .22s cubic-bezier(.2,.7,.2,1)}
 .view-enter-from{opacity:0;transform:translateY(10px)}
 .view-leave-to{opacity:0;transform:translateY(-6px)}
@@ -479,6 +487,40 @@
 .workspace-page .editor-tool-group .text-tool{padding:3px 5px}
 
 .document-actionbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:6px 8px;border-top:1px solid var(--border);background:var(--panel);flex-shrink:0}.document-actionbar .text-tool{font-size:11px;min-height:32px;padding:5px}.document-actionbar .page-editbar-divider{margin-left:auto}
+
+/* Keep the PDF visible while a tool is open. Each tool gets its own scrollable inspector. */
+.viewer-edit-workspace{position:relative;display:flex;flex:1;min-width:0;min-height:0}
+.viewer-page-column{order:0;display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
+.viewer-tool-inspector{position:absolute;z-index:15;top:10px;right:12px;width:min(330px,calc(100% - 24px));max-height:calc(100% - 20px);overflow:auto;background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 38px #07182a38}
+.viewer-tool-inspector.marks-inspector{position:relative;order:1;top:auto;right:auto;flex:0 0 clamp(250px,34%,340px);max-height:none;width:auto;border:0;border-left:1px solid var(--border);border-radius:0;box-shadow:none}
+.viewer-tool-inspector-heading{position:sticky;top:0;z-index:6;display:flex;align-items:center;justify-content:space-between;min-height:36px;padding:3px 10px;border-bottom:1px solid var(--border);background:var(--panel);color:var(--text);font-size:11px}
+.viewer-tool-inspector :is(.text-overlay-panel,.page-annotation-panel,.review-link-panel,.output-marks-panel){border-bottom:0}
+.viewer-tool-inspector .annotation-form-grid{grid-template-columns:minmax(0,1fr)}
+.viewer-tool-inspector .annotation-note{grid-column:auto}
+.viewer-tool-inspector .page-tool-actions{align-items:stretch;flex-direction:column;gap:8px}
+.viewer-tool-inspector .page-tool-actions>div{display:flex;flex-wrap:wrap;gap:6px}
+.pdf-image-overlay{object-fit:contain}
+.pdf-tool-hint{display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--border);background:var(--surface-soft);color:var(--muted);font-size:10px;line-height:1.35;flex-shrink:0}
+.pdf-tool-hint strong{color:var(--text);white-space:nowrap}.pdf-tool-hint span{flex:1}.pdf-tool-hint button{margin-left:auto}
+.pdf-edit-method{min-width:150px;max-width:205px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);font-size:10px}
+.pdf-add-text-preview{position:absolute;z-index:5;max-width:70%;white-space:pre-wrap;line-height:1.2;color:#161616;pointer-events:none;text-shadow:0 0 2px #fff;background:#fff8}
+.pdf-inline-add-card{position:absolute;z-index:16;width:min(250px,90%);padding:11px;border:1px solid var(--primary);border-radius:9px;background:var(--panel);color:var(--text);box-shadow:0 12px 30px #07182a45;line-height:1.4}
+.pdf-inline-add-card label{display:block;font-size:11px;font-weight:700;margin-bottom:7px}.pdf-inline-add-card textarea{display:block;width:100%;resize:vertical;min-height:66px;margin-top:4px;border:1px solid var(--border);border-radius:5px;padding:6px;background:var(--panel);color:var(--text);font-size:12px}
+.pdf-inline-add-card input{width:56px;border:1px solid var(--border);border-radius:5px;padding:4px;background:var(--panel);color:var(--text)}
+.pdf-inline-add-actions{display:flex;justify-content:flex-end;gap:6px}
+.pdf-tool-tabs{display:flex;align-items:center;gap:2px;padding:0 9px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0}
+.pdf-tool-tabs button{border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font-size:11px;font-weight:750;padding:8px 12px;min-height:34px}
+.pdf-tool-tabs button.active{color:var(--primary);border-bottom-color:var(--primary);background:var(--surface-soft)}
+.pdf-tool-shortcuts{margin-left:auto;color:var(--muted);font-size:9px;padding:0 5px;white-space:nowrap}
+.pdf-findbar{display:flex;align-items:center;gap:7px;padding:5px 10px;border-bottom:1px solid var(--border);background:var(--panel);font-size:10px;color:var(--muted);flex-shrink:0}
+.pdf-findbar input{flex:1;min-width:100px;max-width:320px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);font-size:11px}
+.pdf-findbar>span{min-width:110px}
+.pdf-find-results{display:flex;gap:5px;overflow-x:auto;padding:5px 9px;border-bottom:1px solid var(--border);background:var(--panel);flex-shrink:0}
+.pdf-find-results button{flex:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);padding:4px 7px;font-size:10px}
+.pdf-find-results button.active{border-color:var(--primary);background:var(--surface-soft)}
+.pdf-text-layer .pdf-find-match{background:#f8d3549c}
+@media(max-width:700px){.viewer-tool-inspector.marks-inspector{flex-basis:min(250px,44%)}}
+@media(max-width:1080px){.pdf-tool-shortcuts{display:none}}
 
 /* Expanded editor uses the app window without remounting the PDF or its drafts. */
 .app-shell[data-editor-expanded="true"]>.sidebar,

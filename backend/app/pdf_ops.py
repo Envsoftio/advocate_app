@@ -360,6 +360,30 @@ def validate_overlay_image(data: bytes, filetype: str) -> tuple[int, int]:
     return pix.width, pix.height
 
 
+def insert_working_image(path: Path, page_index: int, data: bytes, filetype: str,
+                         rect_x: float, rect_y: float, rect_width: float,
+                         rect_height: float) -> None:
+    """Place a raster image on one working-copy page in displayed coordinates."""
+    validate_overlay_image(data, filetype)
+    values = (rect_x, rect_y, rect_width, rect_height)
+    if (not all(math.isfinite(value) for value in values) or
+            rect_x < 0 or rect_y < 0 or rect_width <= 0 or rect_height <= 0 or
+            rect_x + rect_width > 1 or rect_y + rect_height > 1):
+        raise ProcessingError('Image placement must be inside the page')
+    with open_pdf(path) as doc:
+        if not 0 <= page_index < doc.page_count:
+            raise ProcessingError('Invalid page number')
+        page = doc[page_index]
+        displayed = pymupdf.Rect(
+            page.rect.x0 + page.rect.width * rect_x,
+            page.rect.y0 + page.rect.height * rect_y,
+            page.rect.x0 + page.rect.width * (rect_x + rect_width),
+            page.rect.y0 + page.rect.height * (rect_y + rect_height))
+        page.insert_image(displayed * page.derotation_matrix, stream=data,
+                          keep_proportion=True, overlay=True)
+        replace_pdf_atomically(path, doc)
+
+
 def _mark_timestamp(settings: dict, at: datetime | str | None) -> str:
     if isinstance(at, str):
         at = datetime.fromisoformat(at.replace('Z', '+00:00'))
@@ -591,7 +615,8 @@ def replace_text_run(path: Path, page_index: int, span_index: int,
                                  fontname=fontname, fontsize=size, color=rgb, overlay=True)
         replace_pdf_atomically(path, doc)
         return {'font_size': round(size, 2), 'line_count': len(lines),
-                'font_size_reduced': size < source_size - .01}
+                'font_size_reduced': size < source_size - .01,
+                'edit_method': 'remove-and-redraw'}
 
 
 def move_text_run(path: Path, page_index: int, span_index: int,

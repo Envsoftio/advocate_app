@@ -473,7 +473,7 @@ def apply_page_annotations(output: pymupdf.Document, annotations: list[dict],
             page.rect.y0 + page.rect.height * (item['rect_y'] + item['rect_height']))
         page.insert_image(displayed * page.derotation_matrix,
                           stream=read_bytes(Path(item['_asset_path'])),
-                          keep_proportion=False, overlay=True)
+                          keep_proportion=True, overlay=True)
         inserted += 1
     return {'image_overlays_inserted': inserted,
             'unresolved_image_overlays': unresolved_images,

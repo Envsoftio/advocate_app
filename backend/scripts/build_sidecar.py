@@ -39,6 +39,14 @@ def locate_tessdata(language: str):
 
 def main():
     triple = detect_triple()
+    try:
+        import pypdfium2
+        import pypdfium2.raw
+        with pypdfium2.PdfDocument.new() as probe:
+            probe.new_page(72, 72)
+    except (ImportError, OSError) as exc:
+        raise SystemExit('PDFium runtime is missing or unusable in this Python environment. '
+                         'Install backend/requirements-dev.txt for this platform before building.') from exc
     tessdata = [locate_tessdata(language) for language in ('eng', 'hin')]
     addition = os.pathsep
     out = ROOT / '.build-sidecar'
@@ -47,6 +55,7 @@ def main():
     cmd = [sys.executable, '-m', 'PyInstaller', '--onefile', '--noconfirm', '--clean',
            '--name', 'filing-api', '--distpath', str(out / 'dist'), '--workpath', str(out / 'work'),
            '--specpath', str(out), '--paths', str(BACKEND), '--collect-all', 'pymupdf',
+           '--collect-all', 'pypdfium2', '--collect-all', 'pypdfium2_raw',
            '--add-data', f'{BACKEND / "app" / "rules" / "profiles.json"}{addition}app/rules',
            *(item for path in tessdata for item in ('--add-data', f'{path}{addition}tessdata')),
            str(BACKEND / 'launcher.py')]

@@ -13,7 +13,8 @@ def test_text_overlay_is_visible_searchable_undoable_and_exported(client, auth, 
     original_hash = store.sha256(store.original_path(doc))
     url = f'/documents/{doc["id"]}/pages/text-overlay'
     added = client.post(url, headers=auth, json={
-        'page_index': 0, 'x': .15, 'y': .18, 'text': 'REVIEW COPY', 'font_size': 12})
+        'page_index': 0, 'x': .15, 'y': .18, 'text': 'REVIEW COPY', 'font_size': 12,
+        'acknowledge_signature_risk': None})
     assert added.status_code == 200, added.text
     assert added.json()['revision'] == 2
     working = client.get(f'/documents/{doc["id"]}/pdf', headers=auth)

@@ -27,8 +27,8 @@ from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reo
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
                       replace_text_run, move_text_run, permanently_redact_region, compress_pdf,
                       ocr_pdf, ocr_provenance, make_cover_pdf, preview_output_marks,
-                      validate_overlay_image)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, MoveTextRun, PermanentRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate
+                      validate_overlay_image, insert_working_image)
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate
 from .storage import Store, new_id, utcnow
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
 from .schemas import CompressionRequest
@@ -40,6 +40,7 @@ from .vault_store import VaultStore
 from .labels import propose_labels, extract_label_references
 from .signatures import (combined_signature_status, inspect_source_signature,
                          risk_summary, transformation_risk)
+from .paragraph_trial import replace_paragraph_trial, preview_paragraph_trial, trial_status
 
 FILE_LIMIT_BYTES = 80 * 1024 * 1024
 OVERLAY_IMAGE_LIMIT_BYTES = 10 * 1024 * 1024
@@ -414,6 +415,39 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                                 return {'matches': matches, 'truncated': True}
                 except Exception as exc:
                     raise HTTPException(status_code=409, detail=f'Cannot search working copy of {document["title"]}: {exc}') from exc
+        return {'matches': matches, 'truncated': False}
+
+    @app.get('/documents/{doc_id}/search')
+    def search_document(doc_id: str, q: str, revision: int | None = None,
+                        _: None = Depends(auth)):
+        document = doc_or_404(doc_id)
+        query = q.strip()
+        if not 2 <= len(query) <= 120:
+            raise HTTPException(status_code=422, detail='Search for 2 to 120 characters')
+        matches = []
+        with store.matter_lock(document['matter_id']):
+            document = doc_or_404(doc_id)
+            if revision is not None and revision != document['revision']:
+                raise HTTPException(status_code=409, detail='Working PDF revision changed; search again')
+            try:
+                with open_pdf(store.working_path(document)) as pdf:
+                    for page_index, page in enumerate(pdf):
+                        text = ' '.join(page.get_text('text').split())
+                        position = text.casefold().find(query.casefold())
+                        if position < 0:
+                            continue
+                        start = max(0, position - 70)
+                        end = min(len(text), position + len(query) + 100)
+                        matches.append({
+                            'document_id': doc_id, 'title': document['title'],
+                            'revision': document['revision'], 'page': page_index + 1,
+                            'snippet': ('…' if start else '') + text[start:end] + ('…' if end < len(text) else ''),
+                        })
+                        if len(matches) >= 100:
+                            return {'matches': matches, 'truncated': True}
+            except Exception as exc:
+                raise HTTPException(status_code=409,
+                                    detail=f'Cannot search working PDF: {exc}') from exc
         return {'matches': matches, 'truncated': False}
 
     @app.get('/matters/{matter_id}/memo-parties')
@@ -931,8 +965,10 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         return {'status': 'archived', 'files_retained': True}
 
     @app.get('/documents/{doc_id}/pdf')
-    def document_pdf(doc_id: str, _: None = Depends(auth)):
+    def document_pdf(doc_id: str, revision: int | None = None, _: None = Depends(auth)):
         doc = doc_or_404(doc_id)
+        if revision is not None and revision != doc['revision']:
+            raise HTTPException(status_code=409, detail='Working PDF revision changed; reload the document')
         path = store.working_path(doc)
         if not path.is_file():
             raise HTTPException(status_code=404, detail='PDF working copy missing')
@@ -1050,6 +1086,33 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    @app.post('/documents/{doc_id}/pages/image-overlay')
+    async def page_image_overlay(
+            doc_id: str, file: UploadFile = File(...),
+            page_index: int = Form(...), expected_revision: int = Form(...),
+            rect_x: float = Form(...), rect_y: float = Form(...),
+            rect_width: float = Form(...), rect_height: float = Form(...),
+            acknowledge_signature_risk: bool = Form(False),
+            _: None = Depends(auth)):
+        suffix = Path(file.filename or '').suffix.lower()
+        filetype = 'png' if suffix == '.png' else 'jpeg' if suffix in ('.jpg', '.jpeg') else ''
+        data = bytearray()
+        while chunk := await file.read(1024 * 1024):
+            data.extend(chunk)
+            if len(data) > OVERLAY_IMAGE_LIMIT_BYTES:
+                raise HTTPException(status_code=413, detail='Image exceeds 10 MiB')
+        try:
+            validate_overlay_image(bytes(data), filetype)
+            def place(path, doc):
+                if doc['revision'] != expected_revision:
+                    raise HTTPException(status_code=409, detail='Document changed; place the image again')
+                insert_working_image(path, page_index, bytes(data), filetype,
+                                     rect_x, rect_y, rect_width, rect_height)
+                return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
+            return edit_working_copy(doc_id, place, acknowledge_signature_risk)
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.get('/documents/{doc_id}/pages/{page_index}/text-runs')
     def page_text_runs(doc_id: str, page_index: int, _: None = Depends(auth)):
         doc = doc_or_404(doc_id)
@@ -1110,6 +1173,40 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    @app.get('/pdfium-paragraph-trial/status')
+    def pdfium_paragraph_trial_status(_: None = Depends(auth)):
+        return trial_status()
+
+    @app.post('/documents/{doc_id}/pages/paragraph-trial-preview')
+    def page_paragraph_trial_preview(doc_id: str, payload: ParagraphSelection,
+                                     _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        try:
+            with store.matter_lock(doc['matter_id']):
+                current = doc_or_404(doc_id)
+                if current['revision'] != payload.expected_revision:
+                    raise HTTPException(status_code=409, detail='Document changed; reload and select text again')
+                return preview_paragraph_trial(store.working_path(current), payload.page_index,
+                                               payload.span_index, payload.expected_text)
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/paragraph-trial')
+    def page_paragraph_trial(doc_id: str, payload: ReplaceTextRun, _: None = Depends(auth)):
+        try:
+            edit_layout = {}
+            def replace(path, doc):
+                if doc['revision'] != payload.expected_revision:
+                    raise HTTPException(status_code=409, detail='Document changed; reload and select text again')
+                edit_layout.update(replace_paragraph_trial(path, payload.page_index,
+                    payload.span_index, payload.expected_text,
+                    payload.expected_paragraph or '', payload.replacement))
+                return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
+            return dict(edit_working_copy(doc_id, replace, payload.acknowledge_signature_risk),
+                        edit_layout=edit_layout)
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.post('/documents/{doc_id}/pages/move-text-run')
     def page_move_text_run(doc_id: str, payload: MoveTextRun, _: None = Depends(auth)):
         try:
@@ -1119,7 +1216,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 move_text_run(path, payload.page_index, payload.span_index,
                               payload.expected_text, payload.vertical_offset)
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
-            return edit_working_copy(doc_id, move, payload.acknowledge_signature_risk)
+            return dict(edit_working_copy(doc_id, move, payload.acknowledge_signature_risk),
+                        edit_method='remove-and-redraw')
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
