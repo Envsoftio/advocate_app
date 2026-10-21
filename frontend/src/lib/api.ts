@@ -77,8 +77,9 @@ async function request(path: string, init?: RequestInit, timeoutMs = REQUEST_TIM
   return res
 }
 
-export async function api<T>(path: string, method = 'GET', body?: unknown, timeoutMs?: number): Promise<T> {
-  const options: RequestInit = { method }
+export async function api<T>(path: string, method = 'GET', body?: unknown, timeoutMs?: number,
+                             headers?: HeadersInit): Promise<T> {
+  const options: RequestInit = { method, headers }
   if (body !== undefined) options.body = JSON.stringify(body)
   const response = await request(path, options, timeoutMs)
   return response.json() as Promise<T>

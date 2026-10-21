@@ -1103,17 +1103,27 @@ async function placeText() {
       acknowledge_signature_risk: signature.acknowledged,
     }
     const endpoint = `/documents/${documentId}/pages/text-overlay`
+    type ReviewResponse = {review_required: true, detail: string}
+    const submit = (acknowledged: boolean) => api<MatterDocument | ReviewResponse>(
+      endpoint, 'POST', {...payload, acknowledge_signature_risk: acknowledged}, undefined,
+      {'X-CourtBundle-Review-Protocol': 'challenge'})
+    let result: MatterDocument | ReviewResponse
     try {
-      await api(endpoint, 'POST', payload)
+      result = await submit(signature.acknowledged)
     } catch (err) {
       if (!(err instanceof ApiError) || err.status !== 409 ||
           !err.message.startsWith('Signature-risk acknowledgment required') ||
           payload.acknowledge_signature_risk) throw err
-      // The server can know about a signature risk that a stale document list does not.
-      // Never turn a failed edit into an acknowledged one without a fresh user decision.
+      // Older local engines use 409 instead of an explicit review response.
       const proceed = window.confirm(`${err.message}\n\nContinue adding visible text to the working copy?`)
       if (!proceed) return
-      await api(endpoint, 'POST', {...payload, acknowledge_signature_risk: true})
+      result = await submit(true)
+    }
+    if ('review_required' in result) {
+      const proceed = window.confirm(`${result.detail}\n\nContinue adding visible text to the working copy?`)
+      if (!proceed) return
+      result = await submit(true)
+      if ('review_required' in result) throw new Error('Signature review was not accepted. The working copy was not changed.')
     }
     placement.value = null
     overlayText.value = ''

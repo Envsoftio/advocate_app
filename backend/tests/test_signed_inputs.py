@@ -107,6 +107,15 @@ def test_signed_transformations_require_acknowledgement_and_record_build_warning
         assert denied_overlay.status_code == 409
     assert store.get_document(document['id'])['revision'] == 1
 
+    review = client.post(f'/documents/{document["id"]}/pages/text-overlay',
+        headers={**auth, 'X-CourtBundle-Review-Protocol': 'challenge'},
+        json={'page_index': 0, 'x': .2, 'y': .2, 'text': 'TEST',
+              'acknowledge_signature_risk': False})
+    assert review.status_code == 200
+    assert review.json()['review_required'] is True
+    assert 'Signature-risk acknowledgment required' in review.json()['detail']
+    assert store.get_document(document['id'])['revision'] == 1
+
     allowed = client.post(f'/documents/{document["id"]}/pages/rotate', headers=auth,
         json={'page_index': 0, 'degrees': 90, 'acknowledge_signature_risk': True})
     assert allowed.status_code == 200, allowed.text

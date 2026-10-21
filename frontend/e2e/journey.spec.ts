@@ -830,7 +830,9 @@ test('visible text overlay is placed from the preview and becomes searchable', a
     overlayAttempts++
     if (overlayAttempts === 1) {
       expect(route.request().postDataJSON().acknowledge_signature_risk).toBe(false)
-      await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({
+      expect(route.request().headers()['x-courtbundle-review-protocol']).toBe('challenge')
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        review_required: true,
         detail: 'Signature-risk acknowledgment required before transforming this working copy: 03_affidavit. Imported originals will remain unchanged.',
       }) })
     } else await route.continue()
@@ -847,23 +849,22 @@ test('visible text overlay is placed from the preview and becomes searchable', a
     const result = await request.get(`${backend}/matters/${matterId}/search?q=REVIEW%20OVERLAY`, { headers })
     return (await result.json()).matches.length
   }).toBe(1)
-  await page.route(`**/matters/${matterId}/documents`, async route => {
-    const response = await route.fetch()
-    const listed = await response.json() as Array<{id:string,signature_status:string}>
-    await route.fulfill({response, json:listed.map(item => item.id === uploadedDocument.id
-      ? {...item, signature_status:'visible_signature_only'} : item)})
+  const markedRisk = await request.patch(`${backend}/documents/${uploadedDocument.id}`, {
+    headers, data: { visible_signature_status: 'present' },
   })
+  expect(markedRisk.ok()).toBeTruthy()
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
   await page.locator('.pdf-paper').click({ position: { x: 130, y: 200 } })
   await page.getByRole('textbox', { name: /Add text on page/ }).fill('APPROVED FIRST')
   const attemptsBeforeReview = overlayAttempts
-  const approvedRequest = page.waitForRequest(item => item.url().endsWith('/pages/text-overlay') &&
-    item.method() === 'POST' && item.postDataJSON().text === 'APPROVED FIRST')
+  const approvedResponse = page.waitForResponse(item => item.url().endsWith('/pages/text-overlay') &&
+    item.request().method() === 'POST' && item.request().postDataJSON().text === 'APPROVED FIRST')
   await page.getByRole('button', { name: 'Apply text' }).click()
-  expect((await approvedRequest).postDataJSON().acknowledge_signature_risk).toBe(true)
+  const approved = await approvedResponse
+  expect(approved.request().postDataJSON().acknowledge_signature_risk).toBe(true)
+  expect(approved.status()).toBe(200)
   await expect.poll(() => overlayAttempts).toBe(attemptsBeforeReview + 1)
   await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveCount(0)
-  await page.unroute(`**/matters/${matterId}/documents`)
   await page.unroute('**/pages/text-overlay')
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
   await page.locator('.pdf-paper').click({ position: { x: 130, y: 200 } })

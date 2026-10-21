@@ -133,7 +133,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                        allow_headers=['Authorization','Content-Type', 'X-CourtBundle-Filename',
                                       'X-CourtBundle-File-Mtime', 'X-CourtBundle-Pdf-Password',
                                       'X-CourtBundle-Signature-Acknowledge',
-                                      'X-CourtBundle-Backup-Credential', 'X-CourtBundle-Backup-Recovery'])
+                                      'X-CourtBundle-Backup-Credential', 'X-CourtBundle-Backup-Recovery',
+                                      'X-CourtBundle-Review-Protocol'])
 
     def auth(request: Request):
         supplied = request.headers.get('Authorization', '')
@@ -1094,13 +1095,22 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post('/documents/{doc_id}/pages/text-overlay')
-    def page_text_overlay(doc_id: str, payload: TextOverlay, _: None = Depends(auth)):
+    def page_text_overlay(doc_id: str, payload: TextOverlay, request: Request,
+                          _: None = Depends(auth)):
         try:
             def place(path, doc):
                 add_text_overlay(path, payload.page_index, payload.x, payload.y,
                                  payload.text, payload.font_size)
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
             return edit_working_copy(doc_id, place, payload.acknowledge_signature_risk)
+        except HTTPException as exc:
+            if (exc.status_code == 409 and not payload.acknowledge_signature_risk and
+                    request.headers.get('x-courtbundle-review-protocol') == 'challenge' and
+                    isinstance(exc.detail, str) and
+                    exc.detail.startswith('Signature-risk acknowledgment required')):
+                return JSONResponse({'review_required': True, 'detail': exc.detail},
+                                    headers={'Cache-Control': 'no-store'})
+            raise
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

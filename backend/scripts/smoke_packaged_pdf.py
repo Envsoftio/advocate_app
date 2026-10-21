@@ -79,6 +79,24 @@ def main():
                         'acknowledge_signature_risk': {}})
                     overlay.raise_for_status()
                     assert overlay.json()['revision'] == doc['revision'] + 1
+                    marked = client.patch(f'/documents/{doc["id"]}',
+                                          json={'visible_signature_status': 'present'})
+                    marked.raise_for_status()
+                    challenge = client.post(f'/documents/{doc["id"]}/pages/text-overlay',
+                        headers={'X-CourtBundle-Review-Protocol': 'challenge'},
+                        json={'page_index': 0, 'x': .15, 'y': .65, 'text': 'REVIEWED MARK',
+                              'acknowledge_signature_risk': False})
+                    challenge.raise_for_status()
+                    assert challenge.json()['review_required'] is True
+                    assert client.get(base + '/documents').json()[0]['revision'] == overlay.json()['revision']
+                    accepted = client.post(f'/documents/{doc["id"]}/pages/text-overlay',
+                        json={'page_index': 0, 'x': .15, 'y': .65, 'text': 'REVIEWED MARK',
+                              'acknowledge_signature_risk': True})
+                    accepted.raise_for_status()
+                    assert accepted.json()['revision'] == overlay.json()['revision'] + 1
+                    overlay = accepted
+                    client.patch(f'/documents/{doc["id"]}',
+                                 json={'visible_signature_status': 'absent'}).raise_for_status()
 
                     def finish(response):
                         response.raise_for_status()
