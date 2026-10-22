@@ -785,6 +785,21 @@ watch(() => [props.document?.id, props.document?.revision] as const, async ([doc
     if (props.document?.id === docId) appliedRedactions.value = items
   } catch { /* The viewer can still display legacy PDFs without redaction records. */ }
 }, {immediate:true})
+function hasPendingDraft() {
+  return !!(overlayText.value.trim() || placement.value || replacement.value.trim() ||
+    pendingMove.value || redactionRegion.value || annotationRegion.value ||
+    annotationImage.value || (annotationDraft.body.trim() && (annotationRegion.value || editingAnnotationId.value)) ||
+    linkRegion.value || (bookmarkOpen.value && bookmarkTitle.value.trim()))
+}
+function discardPendingDraft() {
+  overlayText.value=''; placement.value=null; replacement.value=''; selectedRun.value=null
+  cancelMove(); redactionRegion.value=null; annotationRegion.value=null
+  annotationImage.value=null; annotationDraft.body=''; editingAnnotationId.value=null
+  linkRegion.value=null; bookmarkTitle.value=''
+  if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value)
+  annotationPreviewUrl.value=''
+}
+defineExpose({hasPendingDraft, discardPendingDraft})
 onBeforeUnmount(() => { rememberPosition(); void flushReadingPositions(); epoch++; if (thumbnailScrollTimer) clearTimeout(thumbnailScrollTimer); thumbnailSequence++; thumbnailTasks.forEach(task => task.cancel()); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value) })
 
 async function addPageBookmark() {

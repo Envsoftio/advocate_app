@@ -28,7 +28,64 @@ import { applyAppearance, readAppearance, type Theme, type UiScale } from './lib
 import { confirmSignatureTransformation, signatureRiskDocuments, signatureStatusLabel } from './lib/signatures'
 import type { Check as PreflightCheck, CourtProfile, DocKind, ExportManifest, Job, ManualBookmark, Matter, MatterDocument, MatterNew, PageSearchResult } from './lib/types'
 
-type View = 'matters' | 'overview' | 'documents' | 'index' | 'build' | 'validation' | 'rules' | 'about'
+type View =
+  | "matters"
+  | "overview"
+  | "documents"
+  | "index"
+  | "build"
+  | "validation"
+  | "rules"
+  | "about";
+type DocumentDraft = {
+  title: string;
+  kind: DocKind;
+  part: number;
+  label: string;
+  group_key: string;
+  document_date: string;
+  date_confirmed: boolean;
+  visible_signature_status: MatterDocument["visible_signature_status"];
+};
+type WorkspaceTab = {
+  id: string;
+  matterId: string;
+  documentId: string | null;
+  view: View;
+  selectedDocumentId: string | null;
+  documentDraft?: DocumentDraft;
+  settingsDraft?: { max_pages_per_volume: number; keep_groups_intact: boolean };
+  hadUnsavedChanges?: boolean;
+  title?: string;
+  detailsOpen?: boolean;
+};
+const workspaceTabs = ref<WorkspaceTab[]>([]);
+const activeTabId = ref<string | null>(null);
+const tabDiscardRequest = ref<{message:string;resolve:(allow:boolean)=>void;focusReturn:HTMLElement|null}|null>(null)
+function askTabDiscard(message:string):Promise<boolean> {
+  return new Promise(resolve => {
+    tabDiscardRequest.value={message,resolve,focusReturn:document.activeElement as HTMLElement|null}
+    void nextTick(() => document.querySelector<HTMLButtonElement>('.tab-discard-dialog button')?.focus())
+  })
+}
+function answerTabDiscard(allow:boolean) {
+  const request=tabDiscardRequest.value
+  tabDiscardRequest.value=null
+  request?.resolve(allow)
+  if (!allow) void nextTick(() => request?.focusReturn?.focus())
+}
+const activeTab = computed(
+  () => workspaceTabs.value.find((tab) => tab.id === activeTabId.value) || null,
+);
+const tabLabel = (tab: WorkspaceTab) =>
+  tab.documentId
+    ? (tab.matterId === currentMatterId.value
+        ? docs.value.find((doc) => doc.id === tab.documentId)?.title
+        : null) ||
+      tab.title ||
+      "Document"
+    : matterList.value.find((matter) => matter.id === tab.matterId)?.name ||
+      "Matter";
 const matterList = ref<Matter[]>([])
 const archivedMatters = ref<Matter[]>([])
 const currentMatterId = ref<string | null>(null)
@@ -54,6 +111,7 @@ const filingGuide = ref<InstanceType<typeof CourtProfileGuide> | null>(null)
 const checks = ref<PreflightCheck[]>([])
 const manualBookmarks = ref<ManualBookmark[]>([])
 const selectedDocId = ref<string | null>(null)
+const pdfViewer = ref<InstanceType<typeof PdfViewer> | null>(null)
 const selectedDoc = computed(() => docs.value.find(d => d.id === selectedDocId.value) || null)
 type OcrRun = { language:string; provider:string; pymupdf_version:string;
   tesseract_cli_version:string|null; model_sha256:Record<string,string>;
@@ -193,15 +251,172 @@ function confirmDiscardDrafts() {
   formattingDirty.value = false
   return true
 }
+function captureActiveTab() {
+  const tab = activeTab.value;
+  if (!tab || tab.matterId !== currentMatterId.value) return;
+  tab.view = activeView.value;
+  tab.selectedDocumentId = selectedDocId.value;
+  tab.detailsOpen = detailsOpen.value;
+  if (selectedDocId.value) tab.documentDraft = { ...docEditor };
+  tab.settingsDraft = { ...matterEditor };
+  tab.hadUnsavedChanges =
+    documentDirty.value || settingsDirty.value || formattingDirty.value;
+}
+function restoreTabDraft(tab: WorkspaceTab) {
+  if (activeTabId.value !== tab.id || currentMatterId.value !== tab.matterId)
+    return;
+  if (tab.documentDraft && tab.selectedDocumentId === selectedDocId.value)
+    Object.assign(docEditor, tab.documentDraft);
+  if (tab.settingsDraft) Object.assign(matterEditor, tab.settingsDraft);
+  detailsOpen.value = !!tab.detailsOpen;
+}
+function tabHasDraft(tab: WorkspaceTab) {
+  if (tab.id === activeTabId.value) captureActiveTab();
+  if (tab.id !== activeTabId.value) return !!tab.hadUnsavedChanges;
+  const matter = matterList.value.find((item) => item.id === tab.matterId);
+  const doc = docs.value.find(
+    (item) =>
+      item.id === tab.selectedDocumentId &&
+      currentMatterId.value === tab.matterId,
+  );
+  const settingsDirtyInTab =
+    !!matter &&
+    !!tab.settingsDraft &&
+    (tab.settingsDraft.max_pages_per_volume !== matter.max_pages_per_volume ||
+      tab.settingsDraft.keep_groups_intact !== matter.keep_groups_intact);
+  const documentDirtyInTab =
+    !!doc &&
+    !!tab.documentDraft &&
+    (tab.documentDraft.title !== doc.title ||
+      tab.documentDraft.kind !== doc.kind ||
+      tab.documentDraft.part !== doc.part ||
+      tab.documentDraft.label !== doc.label ||
+      tab.documentDraft.group_key !== doc.group_key ||
+      tab.documentDraft.document_date !== doc.document_date ||
+      tab.documentDraft.date_confirmed !== (doc.date_status === "confirmed") ||
+      tab.documentDraft.visible_signature_status !==
+        doc.visible_signature_status);
+  return (
+    settingsDirtyInTab ||
+    documentDirtyInTab ||
+    (tab.id === activeTabId.value && formattingDirty.value)
+  );
+}
+async function activateTab(tab: WorkspaceTab) {
+  if (
+    activeTabId.value === tab.id &&
+    activeView.value === tab.view &&
+    currentMatterId.value === tab.matterId
+  )
+    return;
+  const pendingPdfAction = activeTabId.value !== tab.id && !!pdfViewer.value?.hasPendingDraft()
+  if ((pendingPdfAction || formattingDirty.value) &&
+      !(await askTabDiscard('Discard the unfinished PDF tool action or output policy before switching tabs?'))) return
+  if (pendingPdfAction) pdfViewer.value?.discardPendingDraft()
+  if (formattingDirty.value) {
+    outputPresetsPanel.value?.discard()
+    formattingDirty.value = false
+  }
+  if (activeTabId.value !== tab.id) captureActiveTab();
+  activeTabId.value = tab.id;
+  pageToolsOpen.value = false;
+  documentTableOpen.value = false;
+  readerFocus.value = false;
+  const matterChanged = currentMatterId.value !== tab.matterId;
+  currentMatterId.value = tab.matterId;
+  selectedDocId.value =
+    tab.documentId ||
+    tab.selectedDocumentId ||
+    (matterChanged ? null : docs.value[0]?.id || null);
+  activeView.value = tab.view;
+  mobileNavOpen.value = false;
+  if (matterChanged) await loadMatterResources();
+  await nextTick();
+  resetDrafts();
+  restoreTabDraft(tab);
+}
+async function openMatterTab(matterId: string, view: View = "overview") {
+  const id = `matter:${matterId}`;
+  let tab = workspaceTabs.value.find((item) => item.id === id);
+  const created = !tab
+  const previousView = tab?.view
+  if (!tab) {
+    tab = { id, matterId, documentId: null, view, selectedDocumentId: null };
+    workspaceTabs.value.push(tab);
+  } else if (activeTabId.value === id && activeView.value !== view) {
+    const pendingPdfAction=!!pdfViewer.value?.hasPendingDraft()
+    if ((pendingPdfAction || formattingDirty.value) &&
+        !(await askTabDiscard('Discard the unfinished PDF tool action or output policy before changing views?'))) return
+    if (pendingPdfAction) pdfViewer.value?.discardPendingDraft()
+    if (formattingDirty.value) { outputPresetsPanel.value?.discard(); formattingDirty.value=false }
+    tab.view=view
+    activeView.value=view
+    return
+  } else tab.view = view;
+  await activateTab(tab);
+  if (activeTabId.value !== tab.id) {
+    if (created) workspaceTabs.value = workspaceTabs.value.filter(item => item.id !== tab.id)
+    else if (previousView) tab.view = previousView
+  }
+}
+async function openDocumentTab(documentId: string, page?: number) {
+  const matterId = currentMatterId.value;
+  if (!matterId) return;
+  const id = `document:${matterId}:${documentId}`;
+  let tab = workspaceTabs.value.find((item) => item.id === id);
+  const created = !tab
+  if (!tab) {
+    tab = {
+      id,
+      matterId,
+      documentId,
+      view: "documents",
+      selectedDocumentId: documentId,
+      title:
+        docs.value.find((doc) => doc.id === documentId)?.title || "Document",
+    };
+    workspaceTabs.value.push(tab);
+  }
+  tab.view = "documents";
+  await activateTab(tab);
+  if (created && activeTabId.value !== tab.id)
+    workspaceTabs.value = workspaceTabs.value.filter(item => item.id !== tab.id)
+  if (activeTabId.value === tab.id && page !== undefined)
+    pageTarget.value = {
+      documentId,
+      page,
+      sequence: pageTarget.value.sequence + 1,
+    };
+}
+async function closeWorkspaceTab(tab: WorkspaceTab) {
+  const closing = tab.documentId
+    ? [tab]
+    : workspaceTabs.value.filter((item) => item.matterId === tab.matterId);
+  const pendingPdfAction = tab.id === activeTabId.value && !!pdfViewer.value?.hasPendingDraft()
+  if ((pendingPdfAction || closing.some(tabHasDraft)) &&
+      !(await askTabDiscard("Discard unsaved changes in the closing tab(s)?"))) return
+  if (pendingPdfAction) pdfViewer.value?.discardPendingDraft()
+  const closingIds = new Set(closing.map((item) => item.id));
+  const wasActive = !!activeTabId.value && closingIds.has(activeTabId.value);
+  workspaceTabs.value = workspaceTabs.value.filter(
+    (item) => !closingIds.has(item.id),
+  );
+  if (!wasActive) return;
+  formattingDirty.value = false;
+  activeTabId.value = null;
+  const next = workspaceTabs.value[workspaceTabs.value.length - 1];
+  if (next) await activateTab(next);
+  else {
+    activeView.value = "matters";
+    selectedDocId.value = null;
+    readerFocus.value = false;
+  }
+}
 function selectDocument(id: string) {
-  if (selectedDocId.value === id || !confirmDiscardDrafts()) return
-  pageTarget.value = {documentId:'', page:1, sequence:pageTarget.value.sequence + 1}
-  selectedDocId.value = id
+  void openDocumentTab(id);
 }
 function openPreviewDocument(id: string) {
-  if (!confirmDiscardDrafts()) return
-  selectedDocId.value = id
-  activeView.value = 'documents'
+  void openDocumentTab(id);
 }
 function prepareIndexBookmark(id: string) {
   bookmarkPreset.value = {documentId:id,sequence:bookmarkPreset.value.sequence+1}
@@ -229,13 +444,27 @@ watch(pageToolsOpen, async open => {
 })
 function showView(view: View) {
   if (activeView.value === view) {
-    mobileNavOpen.value = false
-    return
+    mobileNavOpen.value = false;
+    return;
   }
-  if (!confirmDiscardDrafts()) return
-  activeView.value = view
-  mobileNavOpen.value = false
-  if (view === 'validation') void validate()
+  if (
+    view !== "rules" &&
+    view !== "about" &&
+    view !== "matters" &&
+    currentMatterId.value
+  ) {
+    void openMatterTab(currentMatterId.value, view);
+    if (view === "validation") void validate();
+    return;
+  }
+  if (pdfViewer.value?.hasPendingDraft() &&
+      !window.confirm('Discard the unfinished PDF tool action before leaving the document?')) return
+  if (formattingDirty.value && !confirmDiscardDrafts()) return;
+  pdfViewer.value?.discardPendingDraft()
+  captureActiveTab();
+  activeView.value = view;
+  mobileNavOpen.value = false;
+  if (view === "validation") void validate();
 }
 function toggleNavigation() {
   if (smallScreen.value) mobileNavOpen.value = !mobileNavOpen.value
@@ -249,11 +478,19 @@ function onResize() {
   fitDocumentsWorkspace()
 }
 function beforeUnload(event: BeforeUnloadEvent) {
-  if (!documentDirty.value && !settingsDirty.value) return
-  event.preventDefault()
-  event.returnValue = ''
+  if (
+    !documentDirty.value &&
+    !settingsDirty.value &&
+    !formattingDirty.value &&
+    !workspaceTabs.value.some((tab) => tab.hadUnsavedChanges) &&
+    !pdfViewer.value?.hasPendingDraft()
+  )
+    return;
+  event.preventDefault();
+  event.returnValue = "";
 }
 function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && tabDiscardRequest.value) { answerTabDiscard(false); return }
   if (event.key === 'Escape' && reviewingPdf.value) { reviewingPdf.value = null; return }
   if (event.key === 'Escape' && mobileNavOpen.value) { mobileNavOpen.value = false; return }
   if (event.defaultPrevented || modalOpen.value || event.altKey) return
@@ -338,9 +575,7 @@ async function searchPages() {
   }
 }
 function openSearchMatch(documentId: string, page: number) {
-  if (!confirmDiscardDrafts()) return
-  selectedDocId.value = documentId
-  pageTarget.value = {documentId, page, sequence:pageTarget.value.sequence + 1}
+  void openDocumentTab(documentId, page);
 }
 function highlightedSnippet(snippet: string, query: string) {
   const index = snippet.toLocaleLowerCase().indexOf(query.toLocaleLowerCase())
@@ -471,11 +706,39 @@ async function checkHealth() {
 }
 async function refreshMatters() {
   const [all, archived] = await Promise.all([
-    api<Matter[]>('/matters'), api<Matter[]>('/matters/archived')])
-  matterList.value = all
-  archivedMatters.value = archived
-  if (currentMatterId.value && !all.some(m => m.id === currentMatterId.value)) currentMatterId.value = null
-  if (!currentMatterId.value && all.length) currentMatterId.value = all[0].id
+    api<Matter[]>("/matters"),
+    api<Matter[]>("/matters/archived"),
+  ]);
+  matterList.value = all;
+  archivedMatters.value = archived;
+  if (currentMatterId.value && !all.some((m) => m.id === currentMatterId.value))
+    currentMatterId.value = null;
+  if (!currentMatterId.value && all.length) currentMatterId.value = all[0].id;
+  const available = new Set(all.map((item) => item.id));
+  workspaceTabs.value = workspaceTabs.value.filter((tab) =>
+    available.has(tab.matterId),
+  );
+  if (
+    activeTabId.value &&
+    !workspaceTabs.value.some((tab) => tab.id === activeTabId.value)
+  )
+    activeTabId.value = null;
+  if (
+    !activeTabId.value &&
+    currentMatterId.value &&
+    activeView.value !== "matters"
+  ) {
+    const id = `matter:${currentMatterId.value}`;
+    if (!workspaceTabs.value.some((tab) => tab.id === id))
+      workspaceTabs.value.push({
+        id,
+        matterId: currentMatterId.value,
+        documentId: null,
+        view: activeView.value,
+        selectedDocumentId: selectedDocId.value,
+      });
+    activeTabId.value = id;
+  }
 }
 async function loadMatterResources() {
   if (!currentMatterId.value) return
@@ -522,37 +785,46 @@ async function traverseHistory(direction:'undo'|'redo') {
   finally { busy.value = false }
 }
 async function createMatter(fields: MatterNew) {
-  if (!confirmDiscardDrafts()) return
-  creating.value=true
+  creating.value = true;
   try {
-    const value=await api<Matter>('/matters','POST',fields)
-    await refreshMatters()
-    currentMatterId.value=value.id
-    activeView.value='documents'; selectedDocId.value=null
-    modalOpen.value=false
-    notify('Matter created. Import your first document to begin.', 'success')
-  } catch(err) { issue(err) }
-  finally { creating.value=false }
+    const value = await api<Matter>("/matters", "POST", fields);
+    await refreshMatters();
+    await openMatterTab(value.id, "documents");
+    modalOpen.value = false;
+    notify("Matter created. Import your first document to begin.", "success");
+  } catch (err) {
+    issue(err);
+  } finally {
+    creating.value = false;
+  }
 }
 async function createSampleMatter() {
-  if (creating.value || !confirmDiscardDrafts()) return
-  creating.value = true
+  if (creating.value) return;
+  creating.value = true;
   try {
-    const value = await api<Matter>('/matters','POST',{
-      name:`Synthetic Sample Matter ${new Date().toLocaleDateString('en-CA')}`,
-      court_profile:'general-demo', case_type:'Synthetic demonstration',
-      petitioner:'Sample Applicant', respondent:'Sample Respondent', advocate:'', case_number:'',
-      max_pages_per_volume:10, keep_groups_intact:true,
-    })
-    await api(`/matters/${value.id}/cover`,'POST')
-    await refreshMatters()
-    currentMatterId.value = value.id
-    selectedDocId.value = null
-    activeView.value = 'documents'
-    await loadMatterResources()
-    notify('Opened a separate synthetic sample matter. Its draft cover is not a court-approved form.', 'success')
-  } catch (err) { issue(err) }
-  finally { creating.value = false }
+    const value = await api<Matter>("/matters", "POST", {
+      name: `Synthetic Sample Matter ${new Date().toLocaleDateString("en-CA")}`,
+      court_profile: "general-demo",
+      case_type: "Synthetic demonstration",
+      petitioner: "Sample Applicant",
+      respondent: "Sample Respondent",
+      advocate: "",
+      case_number: "",
+      max_pages_per_volume: 10,
+      keep_groups_intact: true,
+    });
+    await api(`/matters/${value.id}/cover`, "POST");
+    await refreshMatters();
+    await openMatterTab(value.id, "documents");
+    notify(
+      "Opened a separate synthetic sample matter. Its draft cover is not a court-approved form.",
+      "success",
+    );
+  } catch (err) {
+    issue(err);
+  } finally {
+    creating.value = false;
+  }
 }
 async function backupCurrentMatter() {
   if (!currentMatterId.value || busy.value || !confirmDiscardDrafts()) return
@@ -578,11 +850,9 @@ async function importMatterPackage(files: FileList | null) {
   finally { busy.value = false; if (matterFileInput.value) matterFileInput.value.value = '' }
 }
 async function useRestoredMatter(restored: Matter) {
-  await refreshMatters()
-  currentMatterId.value = restored.id
-  selectedDocId.value = null
-  activeView.value = 'documents'
-  notify('Matter restored with originals and working revisions.', 'success')
+  await refreshMatters();
+  await openMatterTab(restored.id, "documents");
+  notify("Matter restored with originals and working revisions.", "success");
 }
 async function submitProtectedRestore() {
   if (!protectedRestoreFile.value || busy.value) return
@@ -687,10 +957,10 @@ async function documentTableModified() {
   await loadMatterResources()
   notify('Document table changes saved. Bundle order and freshness were refreshed.', 'success')
 }
-function openDocumentFromTable(id:string) {
-  documentTableOpen.value = false
-  selectedDocId.value = id
-  detailsOpen.value = true
+function openDocumentFromTable(id: string) {
+  documentTableOpen.value = false;
+  detailsOpen.value = true;
+  void openDocumentTab(id);
 }
 async function deleteDocument() {
   if (!selectedDoc.value || !confirmDiscardDrafts() || !window.confirm(`Archive ${selectedDoc.value.title}? Its records and original remain available for restore.`)) return
@@ -885,11 +1155,8 @@ async function saveProtectedExport() {
 function reviewGeneratedPdf(exportId:string, filename:string) {
   reviewingPdf.value = {exportId,filename}
 }
-function selectMatter(id:string, view:View='documents'){
-  if (currentMatterId.value === id) { showView(view); return }
-  if (!confirmDiscardDrafts()) return
-  currentMatterId.value=id;selectedDocId.value=null;activeView.value=view;readerFocus.value=false
-  mobileNavOpen.value = false
+function selectMatter(id: string, view: View = "documents") {
+  void openMatterTab(id, view);
 }
 async function removeMatter(){
   if(!currentMatter.value || !confirmDiscardDrafts() || !window.confirm('Archive this matter? Its records, originals and working files remain available for restore.'))return
@@ -997,12 +1264,71 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       </div>
     </aside>
 
-    <div class="app-main" :class="{'workspace-main':currentMatter && activeView!=='rules' && activeView!=='about'}">
+    <div class="app-main" :class="{'workspace-main':currentMatter && activeView!=='rules' && activeView!=='about','has-open-tabs':workspaceTabs.length>0}">
       <header class="topbar">
         <div class="topbar-left"><button class="icon-btn nav-toggle" :aria-label="smallScreen ? (mobileNavOpen ? 'Close navigation' : 'Open navigation') : (sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar')" :aria-expanded="smallScreen ? mobileNavOpen : !sidebarCollapsed" @click="toggleNavigation"><Menu v-if="smallScreen" :size="20"/><PanelLeftOpen v-else-if="sidebarCollapsed" :size="20"/><PanelLeftClose v-else :size="20"/></button><div class="breadcrumb"><span>Workspace</span><ChevronRight :size="14"/><strong>{{activeView==='rules'?'Court rules':activeView==='about'?'About POC':(activeView==='matters'?'Matters':currentMatter?.name||'Matters')}}</strong></div></div>
         <div class="topbar-right"><span class="desktop-tag">DESKTOP POC</span><span class="user-badge">CB</span></div>
       </header>
 
+      <nav
+        v-if="workspaceTabs.length"
+        class="open-workspace-tabs"
+        aria-label="Open matter and document tabs"
+      >
+        <div
+          v-for="tab in workspaceTabs"
+          :key="tab.id"
+          class="open-workspace-tab"
+          :class="{
+            active:
+              activeTabId === tab.id &&
+              activeView !== 'matters' &&
+              activeView !== 'rules' &&
+              activeView !== 'about',
+          }"
+        >
+          <button
+            type="button"
+            class="open-workspace-tab-select"
+            :aria-current="activeTabId === tab.id ? 'page' : undefined"
+            :title="`${tab.documentId ? 'Document' : 'Matter'}: ${tabLabel(tab)}`"
+            @click="activateTab(tab)"
+          >
+            <FileText v-if="tab.documentId" :size="14" /><BriefcaseBusiness
+              v-else
+              :size="14"
+            /><span>{{ tabLabel(tab) }}</span
+            ><span
+              v-if="
+                tab.id === activeTabId
+                  ? documentDirty || settingsDirty || formattingDirty
+                  : tab.hadUnsavedChanges
+              "
+              class="tab-dirty-dot"
+              aria-label="Unsaved changes"
+              title="Unsaved changes"
+              >●</span
+            >
+          </button>
+          <button
+            type="button"
+            class="open-workspace-tab-close"
+            :aria-label="`Close ${tabLabel(tab)} tab`"
+            :title="`Close ${tabLabel(tab)} tab`"
+            @click="closeWorkspaceTab(tab)"
+          >
+            <X :size="13" />
+          </button>
+        </div>
+      </nav>
+
+      <div v-if="tabDiscardRequest" class="vault-restore-overlay" role="presentation">
+        <section class="vault-card tab-discard-dialog" role="alertdialog" aria-modal="true" aria-labelledby="tab-discard-title" aria-describedby="tab-discard-message">
+          <h2 id="tab-discard-title">Unsaved work in this tab</h2>
+          <p id="tab-discard-message">{{tabDiscardRequest.message}}</p>
+          <div class="tab-discard-actions"><button class="btn secondary" @click="answerTabDiscard(false)">Keep editing</button><button class="btn danger" @click="answerTabDiscard(true)">Discard changes</button></div>
+        </section>
+      </div>
       <div v-if="apiStatus==='offline'" class="backend-error"><CircleAlert :size="19"/><div><strong>Python engine unavailable</strong><p v-if="inTauri()">Quit and reopen CourtBundle to start a new local engine session. If it still fails, inspect the packaged sidecar and local port.</p><p v-else>Run <code>cd backend && ./dev.sh</code>, then retry. The browser development token is for local testing only.</p></div><button class="btn secondary" @click="init">Retry connection</button></div>
 
       <Transition name="view" @after-enter="fitDocumentsWorkspace">
@@ -1092,7 +1418,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             <div class="docs-help"><LockKeyhole :size="14"/> Original files are never overwritten.</div>
           </section>
 
-          <section class="panel preview-panel"><PdfViewer :expanded="editorExpanded" @toggle-expanded="toggleEditorExpanded" :focus-mode="readerFocus" @toggle-focus="readerFocus=!readerFocus" :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :can-undo="history.can_undo" :can-redo="history.can_redo" :undo-label="history.undo_label" :redo-label="history.redo_label" :details-open="detailsOpen" :details-dirty="documentDirty" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @undo="traverseHistory('undo')" @redo="traverseHistory('redo')" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @archive-document="deleteDocument" @open-internal-link="openSearchMatch" @open-external-link="openReviewedExternalLink"/></section>
+          <section class="panel preview-panel"><PdfViewer ref="pdfViewer" :key="currentMatterId || 'none'" :expanded="editorExpanded" @toggle-expanded="toggleEditorExpanded" :focus-mode="readerFocus" @toggle-focus="readerFocus=!readerFocus" :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :can-undo="history.can_undo" :can-redo="history.can_redo" :undo-label="history.undo_label" :redo-label="history.redo_label" :details-open="detailsOpen" :details-dirty="documentDirty" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @undo="traverseHistory('undo')" @redo="traverseHistory('redo')" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @archive-document="deleteDocument" @open-internal-link="openSearchMatch" @open-external-link="openReviewedExternalLink"/></section>
 
           <Transition name="inspector">
           <section v-if="detailsOpen && selectedDoc" id="document-details-panel" class="panel inspector-panel" aria-label="Document details">
