@@ -67,6 +67,30 @@ def test_replace_fits_longer_text_and_wraps_in_clear_space(client, auth, matter,
         assert 'ANOTHER LINE' in text
 
 
+def test_explicit_lines_use_their_actual_width_not_a_full_page_column(client, auth, matter):
+    with pymupdf.open() as source:
+        page = source.new_page()
+        page.insert_text((72, 100), 'OLD', fontsize=12)
+        page.insert_text((400, 124), 'UNRELATED RIGHT COLUMN', fontsize=12)
+        original = source.tobytes()
+    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+                           files=[('files', ('two-lines.pdf', original, 'application/pdf'))])
+    doc = uploaded.json()[0]
+    base = f'/documents/{doc["id"]}'
+    selected = client.get(base + '/pages/0/text-runs', headers=auth).json()['runs'][0]
+    result = client.post(base + '/pages/replace-text-run', headers=auth, json={
+        'page_index': 0, 'span_index': selected['index'], 'expected_revision': 1,
+        'expected_text': selected['text'], 'replacement': 'FIRST LINE\nSECOND LINE'})
+    assert result.status_code == 200, result.text
+    assert result.json()['edit_layout']['line_count'] == 2
+    with pymupdf.open(stream=client.get(base + '/pdf', headers=auth).content,
+                      filetype='pdf') as pdf:
+        text = pdf[0].get_text()
+        assert 'FIRST LINE' in text and 'SECOND LINE' in text
+        assert 'UNRELATED RIGHT COLUMN' in text
+        assert 'OLD' not in text
+
+
 def test_replace_rejects_stale_and_unfittable_text_without_revision(client, auth, matter, make_pdf):
     uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
                            files=[('files', ('source.pdf', make_pdf(1, 'SHORT'), 'application/pdf'))])
@@ -128,6 +152,39 @@ def test_move_text_vertically_preserves_original_and_checks_clear_space(client, 
     assert undone.status_code == 200
     restored = client.get(base + '/pages/0/text-runs', headers=auth).json()['runs'][0]
     assert restored['relative_bbox'] == pytest.approx(first['relative_bbox'], abs=.002)
+
+
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+@pytest.mark.parametrize('horizontal,vertical', [(.08, 0), (.06, .04)])
+def test_move_text_in_two_dimensions(client, auth, matter, rotation, horizontal, vertical):
+    with pymupdf.open() as source:
+        page = source.new_page(width=600, height=800)
+        page.insert_text((180, 220), 'MOVE FREELY', fontsize=12)
+        page.insert_text((360, 500), 'UNCHANGED', fontsize=12)
+        page.set_rotation(rotation)
+        original = source.tobytes()
+    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+                           files=[('files', ('move-xy.pdf', original, 'application/pdf'))])
+    doc = uploaded.json()[0]
+    base = f'/documents/{doc["id"]}'
+    before = client.get(base + '/pages/0/text-runs', headers=auth).json()['runs']
+    selected = next(run for run in before if run['text'] == 'MOVE FREELY')
+    moved = client.post(base + '/pages/move-text-run', headers=auth, json={
+        'page_index': 0, 'span_index': selected['index'], 'expected_revision': 1,
+        'expected_text': selected['text'], 'horizontal_offset': horizontal,
+        'vertical_offset': vertical})
+    assert moved.status_code == 200, moved.text
+    after = client.get(base + '/pages/0/text-runs', headers=auth).json()['runs']
+    moved_run = next(run for run in after if run['text'] == 'MOVE FREELY')
+    assert moved_run['relative_bbox'][0] == pytest.approx(
+        selected['relative_bbox'][0] + horizontal, abs=.002)
+    assert moved_run['relative_bbox'][1] == pytest.approx(
+        selected['relative_bbox'][1] + vertical, abs=.002)
+    assert any(run['text'] == 'UNCHANGED' for run in after)
+    with pymupdf.open(stream=client.get(base + '/pdf', headers=auth).content,
+                      filetype='pdf') as pdf:
+        assert 'MOVE FREELY' in pdf[0].get_text()
+        assert 'UNCHANGED' in pdf[0].get_text()
 
 
 @pytest.mark.parametrize('rotation', [90, 180, 270])

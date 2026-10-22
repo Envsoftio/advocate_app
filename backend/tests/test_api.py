@@ -94,34 +94,50 @@ def test_document_thumbnail_is_authenticated_and_revision_bound(client, auth, ma
 
 
 def test_undo_redo_page_metadata_order_and_branch(client, auth, matter, make_pdf):
+    base = f'/matters/{matter["id"]}/history'
+    empty = client.get(base, headers=auth).json()
+    assert empty['undo_label'] is None and empty['redo_label'] is None
     first = upload(client, auth, matter, make_pdf, name='first.pdf', pages=2)
     second = upload(client, auth, matter, make_pdf, name='second.pdf', pages=1)
-    base = f'/matters/{matter["id"]}/history'
     assert client.get(base, headers=auth).json()['undo_count'] == 2
+    assert client.get(base, headers=auth).json()['undo_label'] == 'Add or restore document'
     rotated = client.post(f'/documents/{first["id"]}/pages/rotate', headers=auth,
                           json={'page_index': 0, 'degrees': 90}).json()
     assert rotated['revision'] == 2
+    assert client.get(base, headers=auth).json()['undo_label'] == 'Working PDF edit'
     client.patch(f'/documents/{first["id"]}', headers=auth, json={'title': 'Renamed synthetic file'})
+    assert client.get(base, headers=auth).json()['undo_label'] == 'Document details'
     client.post(f'/matters/{matter["id"]}/documents/reorder', headers=auth,
                 json={'ids': [second['id'], first['id']]})
-    assert client.get(base, headers=auth).json()['undo_count'] == 5
-    assert client.post(base + '/undo', headers=auth).json()['redo_count'] == 1
+    ordered = client.get(base, headers=auth).json()
+    assert ordered['undo_count'] == 5 and ordered['undo_label'] == 'Document order'
+    undone_order = client.post(base + '/undo', headers=auth).json()
+    assert undone_order['redo_count'] == 1
+    assert undone_order['undo_label'] == 'Document details'
+    assert undone_order['redo_label'] == 'Document order'
     assert [d['id'] for d in client.get(f'/matters/{matter["id"]}/documents', headers=auth).json()] == [first['id'], second['id']]
-    client.post(base + '/undo', headers=auth)
+    undone_details = client.post(base + '/undo', headers=auth).json()
+    assert undone_details['undo_label'] == 'Working PDF edit'
+    assert undone_details['redo_label'] == 'Document details'
     assert client.app.state.store.get_document(first['id'])['title'] == first['title']
-    client.post(base + '/undo', headers=auth)
+    undone_pdf = client.post(base + '/undo', headers=auth).json()
+    assert undone_pdf['redo_label'] == 'Working PDF edit'
     restored = client.app.state.store.get_document(first['id'])
     assert restored['revision'] == 3
     with pymupdf.open(stream=client.get(f'/documents/{first["id"]}/pdf', headers=auth).content,
                       filetype='pdf') as pdf:
         assert pdf[0].rotation == 0
-    client.post(base + '/redo', headers=auth)
+    redone_pdf = client.post(base + '/redo', headers=auth).json()
+    assert redone_pdf['undo_label'] == 'Working PDF edit'
+    assert redone_pdf['redo_label'] == 'Document details'
     with pymupdf.open(stream=client.get(f'/documents/{first["id"]}/pdf', headers=auth).content,
                       filetype='pdf') as pdf:
         assert pdf[0].rotation == 90
     assert client.app.state.store.get_document(first['id'])['revision'] == 4
     client.patch(f'/documents/{first["id"]}', headers=auth, json={'label': 'NEW'})
-    assert client.get(base, headers=auth).json()['can_redo'] is False
+    branched = client.get(base, headers=auth).json()
+    assert branched['can_redo'] is False and branched['redo_label'] is None
+    assert branched['undo_label'] == 'Document details'
     assert client.post(base + '/redo', headers=auth).status_code == 409
     assert client.app.state.store.sha256(client.app.state.store.original_path(first)) == first['source_sha256']
 
@@ -415,8 +431,9 @@ def test_source_annotations_and_links_are_reported_and_omitted(client, auth, mat
         report = json.loads(package.read('validation-report.json'))
         assert report['interactive_content_policy'] == {
             'source_annotations': 'omitted', 'source_links': 'omitted',
-                'courtbundle_image_overlays': 'flattened into source-document pages when revision anchors resolve',
-                'courtbundle_highlights_comments': 'private review annotations omitted from filing-preparation PDFs',
+            'courtbundle_image_overlays': 'flattened into source-document pages when revision anchors resolve',
+            'courtbundle_highlights_comments': 'private review annotations omitted from filing-preparation PDFs',
+            'courtbundle_editable_pdf_marks': 'PDF-scope text, shapes and stamps flattened; staged redactions applied to generated PDFs when revision anchors resolve',
             'reviewed_user_links': 'retained when both revision-anchored endpoints resolve',
             'generated_index_links': 'retained'}
         assert {c['code'] for c in report['checks']} >= set(policy_checks)

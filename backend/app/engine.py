@@ -19,6 +19,7 @@ import pymupdf
 
 from .pdf_ops import (ProcessingError, validate_pdf, apply_output_marks,
                       validate_overlay_image)
+from .editable_marks import apply_pdf_marks
 from .file_io import (iter_plain_chunks, open_pdf, protected, read_bytes,
                       save_pdf, size as file_size, write_bytes)
 from .storage import Store, utcnow
@@ -34,6 +35,7 @@ EXPORT_INTERACTIVE_CONTENT_POLICY = {
     'source_links': 'omitted',
     'courtbundle_image_overlays': 'flattened into source-document pages when revision anchors resolve',
     'courtbundle_highlights_comments': 'private review annotations omitted from filing-preparation PDFs',
+    'courtbundle_editable_pdf_marks': 'PDF-scope text, shapes and stamps flattened; staged redactions applied to generated PDFs when revision anchors resolve',
     'reviewed_user_links': 'retained when both revision-anchored endpoints resolve',
     'generated_index_links': 'retained',
 }
@@ -145,7 +147,12 @@ def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
         except Exception as exc:
             issues.append(dict(severity='error', code='BAD_PDF', message=f'Cannot process {doc["title"]}: {exc}', **common))
     annotations = store.list_page_annotations(matter_id)
-    private_count = sum(item['kind'] in ('highlight', 'comment') for item in annotations)
+    for item in annotations:
+        if item.get('output_scope') == 'pdf' and item['kind'] != 'image' and not item['resolved']:
+            issues.append(dict(severity='error', code='UNRESOLVED_EDITABLE_PDF_MARK',
+                message='An editable PDF mark targets an older document revision; resolve or remove it before saving or building.',
+                document_id=item['document_id']))
+    private_count = sum(item.get('output_scope', 'private') == 'private' for item in annotations)
     unresolved_images = sum(item['kind'] == 'image' and not item['resolved'] for item in annotations)
     resolved_images = sum(item['kind'] == 'image' and item['resolved'] for item in annotations)
     for item in annotations:
@@ -167,7 +174,7 @@ def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
                                     'into newly generated source-document pages.'), document_id=None))
     if private_count:
         issues.append(dict(severity='info', code='PRIVATE_REVIEW_ANNOTATIONS_OMITTED',
-                           message=(f'{private_count} CourtBundle highlight/comment review annotation(s) '
+                           message=(f'{private_count} CourtBundle private review mark(s) '
                                     'will be omitted from filing-preparation PDFs. Image overlays use a '
                                     'separate explicit flattened-content policy.'), document_id=None))
     if unresolved_images:
@@ -446,7 +453,7 @@ def validate_reviewed_links(path: Path, expected_uri: dict[int, list[str]]) -> N
 
 def apply_page_annotations(output: pymupdf.Document, annotations: list[dict],
                            document_starts: dict[str, int], cancelled=None) -> dict:
-    """Flatten resolved image overlays; private review annotations stay out."""
+    """Flatten explicitly printable marks; private review annotations stay out."""
     inserted = unresolved_images = private_omitted = 0
     for item in annotations:
         if cancelled and cancelled():
@@ -454,11 +461,10 @@ def apply_page_annotations(output: pymupdf.Document, annotations: list[dict],
         start = document_starts.get(item['document_id'])
         if start is None:
             continue
-        if item['kind'] in ('highlight', 'comment'):
-            private_omitted += 1
-            continue
         if item['kind'] != 'image':
-            raise ProcessingError('Unknown CourtBundle page annotation kind')
+            if item.get('output_scope', 'private') == 'private':
+                private_omitted += 1
+            continue
         if not item.get('resolved'):
             unresolved_images += 1
             continue
@@ -475,9 +481,11 @@ def apply_page_annotations(output: pymupdf.Document, annotations: list[dict],
                           stream=read_bytes(Path(item['_asset_path'])),
                           keep_proportion=True, overlay=True)
         inserted += 1
+    mark_summary = apply_pdf_marks(output, annotations, document_starts)
     return {'image_overlays_inserted': inserted,
             'unresolved_image_overlays': unresolved_images,
-            'private_review_annotations_omitted': private_omitted}
+            'private_review_annotations_omitted': private_omitted,
+            **mark_summary}
 
 
 def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: int,
@@ -678,7 +686,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
     # copying private review text or internal asset paths into filing artifacts.
     annotation_inputs = [{key: item[key] for key in (
         'id', 'document_id', 'page_index', 'target_revision', 'kind',
-        'rect_x', 'rect_y', 'rect_width', 'rect_height', 'color', 'position')}
+        'rect_x', 'rect_y', 'rect_width', 'rect_height', 'color', 'position', 'output_scope')}
         | {'resolved': item['resolved'],
            'body_present': bool(item['body']),
            'asset_sha256': (store.sha256(Path(item['_asset_path']))
@@ -816,7 +824,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         unresolved_images = [item for item in page_annotations
                              if item['kind'] == 'image' and not item['resolved']]
         private_annotations = [item for item in page_annotations
-                               if item['kind'] in ('highlight', 'comment')]
+                               if item.get('output_scope', 'private') == 'private']
         mark_overlap_count = sum(
             volume['content_summary']['marks']['overlaps_content'] for volume in volume_rows)
         if mark_overlap_count:
@@ -852,7 +860,9 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'page_annotation_summary': {
                       'image_overlays_inserted': sum(volume['content_summary']['page_annotations']['image_overlays_inserted'] for volume in volume_rows),
                       'unresolved_image_overlays': len(unresolved_images),
-                      'private_review_annotations_omitted': len(private_annotations)},
+                      'private_review_annotations_omitted': len(private_annotations),
+                      'editable_marks_inserted': sum(volume['content_summary']['page_annotations']['editable_marks_inserted'] for volume in volume_rows),
+                      'redactions_applied': sum(volume['content_summary']['page_annotations']['redactions_applied'] for volume in volume_rows)},
                   'interactive_content_policy': EXPORT_INTERACTIVE_CONTENT_POLICY,
                   'total_input_documents': len(documents), 'volume_count': len(plans),
                   'combined_pages': combined_pages, 'combined_bytes': file_bytes,
@@ -864,7 +874,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'Original evidence and signed files must be reviewed independently.\n'
                   'Working-copy PDF annotation objects and link actions are omitted from volume and combined PDFs.\n'
                   'Flattened marks already in page content remain visible.\n'
-                  'Resolved CourtBundle image overlays are flattened into new source-document pages. Private highlights and comments are omitted by default.\n'
+                  'Resolved PDF-scope marks and image overlays are flattened into new source-document pages; staged redactions remove content in the exported PDFs. Private review notes are omitted.\n'
                   'Generated index links, bookmarks and explicitly reviewed CourtBundle links are retained when their revision-anchored targets resolve.\n'
                   'Cross-volume reviewed links are available only in combined.pdf; configured output marks apply to source document pages, not index pages.\n'
                   'See validation-report.json for omissions, mark settings and detectable overlap warnings.\n'

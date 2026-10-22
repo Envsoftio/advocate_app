@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import io
+import math
 import os
 import struct
 import shutil
@@ -16,12 +17,13 @@ from .file_io import (iter_plain_chunks, protected, read_bytes, size as file_siz
                       write_bytes, write_chunks)
 from .vault import EncryptedReader, encrypted_sink
 from .schemas import (MatterCreate, DocumentPatch, MemoPartiesUpdate, MatterValuesUpdate,
-                      ManualBookmark, ReviewedLink, OutputMarks, OutputPresetCreate)
+                      ManualBookmark, ReviewedLink, OutputMarks, OutputPresetCreate,
+                      valid_draw_body, valid_date_mark)
 from .engine import load_profiles
 from .pdf_ops import ProcessingError, validate_overlay_image
 from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 12
+PACKAGE_VERSION = 14
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -123,6 +125,9 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
         revisions = [dict(row) for row in con.execute('''SELECT r.* FROM document_revisions r
             JOIN documents d ON d.id=r.document_id WHERE d.matter_id=?
             ORDER BY r.document_id,r.revision''', (matter_id,))]
+        redactions = [dict(row) for row in con.execute('''SELECT r.* FROM redaction_records r
+            JOIN documents d ON d.id=r.document_id WHERE d.matter_id=?
+            ORDER BY r.created_at,r.id''', (matter_id,))]
     paths = {doc['source_relpath'] for doc in documents}
     paths.update(rev['working_relpath'] for rev in revisions)
     paths.update(doc['working_relpath'] for doc in documents)
@@ -145,7 +150,8 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
             raise PortableMatterError(f'Original hash mismatch for document {doc["id"]}')
     manifest = {'format': 'courtbundle-matter', 'version': PACKAGE_VERSION,
                 'created_at': utcnow(), 'matter': matter, 'documents': documents,
-                'revisions': revisions, 'memo_parties': store.get_memo_parties(matter_id),
+                'revisions': revisions, 'redactions': redactions,
+                'memo_parties': store.get_memo_parties(matter_id),
                 'matter_values': store.get_matter_values(matter_id),
                 'manual_bookmarks': [{key: item[key] for key in ('id', 'title',
                     'document_id', 'page_index', 'target_revision', 'parent_id', 'position')}
@@ -245,6 +251,9 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
         matter = manifest['matter']
         documents = manifest['documents']
         revisions = manifest['revisions']
+        redactions = manifest.get('redactions', [])
+        if manifest['version'] >= 13 and not isinstance(redactions, list):
+            raise PortableMatterError('Invalid redaction records')
         validated_matter = MatterCreate.model_validate(matter)
         if matter['court_profile'] not in load_profiles():
             raise PortableMatterError('Unknown court profile in package')
@@ -318,6 +327,36 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
             if _safe_relpath(rev['working_relpath']) not in by_path:
                 raise PortableMatterError('Document revision file is missing')
         old_ids = {doc['id'] for doc in documents}
+        revision_keys = {(rev['document_id'], rev['revision']) for rev in revisions}
+        redaction_ids = set()
+        for item in redactions:
+            if not isinstance(item, dict) or item.get('id') in redaction_ids or item.get('document_id') not in old_ids:
+                raise PortableMatterError('Invalid redaction record identity')
+            redaction_ids.add(item['id'])
+            if (type(item.get('page_index')) is not int or item['page_index'] < 0 or
+                    type(item.get('before_revision')) is not int or
+                    type(item.get('after_revision')) is not int or
+                    (item['document_id'], item['before_revision']) not in revision_keys or
+                    (item['document_id'], item['after_revision']) not in revision_keys or
+                    item['after_revision'] <= item['before_revision'] or
+                    type(item.get('active')) is not int or item['active'] not in (0, 1) or
+                    type(item.get('structure_changed')) is not int or
+                    item['structure_changed'] not in (0, 1) or
+                    (item.get('removed_revision') is not None and
+                     (item['document_id'], item['removed_revision']) not in revision_keys)):
+                raise PortableMatterError('Invalid redaction revision record')
+            for key in ('rect_x', 'rect_y', 'rect_width', 'rect_height',
+                        'restore_x', 'restore_y', 'restore_width', 'restore_height'):
+                if not isinstance(item.get(key), (int, float)) or not math.isfinite(item[key]):
+                    raise PortableMatterError('Invalid redaction area')
+            if (item['rect_x'] < 0 or item['rect_y'] < 0 or item['rect_width'] <= 0 or
+                    item['rect_height'] <= 0 or item['rect_x'] + item['rect_width'] > 1 or
+                    item['rect_y'] + item['rect_height'] > 1 or
+                    item['restore_x'] < 0 or item['restore_y'] < 0 or
+                    item['restore_width'] <= 0 or item['restore_height'] <= 0 or
+                    item['restore_x'] + item['restore_width'] > 1.000001 or
+                    item['restore_y'] + item['restore_height'] > 1.000001):
+                raise PortableMatterError('Invalid redaction area')
         if len(old_ids) != len(documents) or any(rev['document_id'] not in old_ids for rev in revisions):
             raise PortableMatterError('Invalid document revision references')
         id_map = {old: new_id() for old in old_ids}
@@ -395,8 +434,11 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
         annotation_id_map = {old: new_id() for old in annotation_ids}
         allowed_colors = {'yellow', 'green', 'blue', 'pink'}
         for index, item in enumerate(annotations):
+            if manifest['version'] < 14:
+                item['output_scope'] = 'pdf' if item.get('kind') == 'image' else 'private'
             required = set(store._annotation_fields())
-            if set(item) != required or item['kind'] not in ('image', 'highlight', 'comment'):
+            if set(item) != required or item['kind'] not in ('image', 'highlight', 'comment', 'draw',
+                    'box', 'ellipse', 'line', 'arrow', 'check', 'cross', 'date', 'text', 'redaction'):
                 raise PortableMatterError('Invalid page annotation fields')
             if (not isinstance(item['id'], str) or len(item['id']) != 32 or
                     item['document_id'] not in old_ids or item['position'] != index or
@@ -404,7 +446,8 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                     type(item['target_revision']) is not int or item['target_revision'] < 1 or
                     item['page_index'] >= revision_pages.get(
                         (item['document_id'], item['target_revision']), 0) or
-                    item['color'] not in allowed_colors or not isinstance(item['body'], str) or
+                    item['color'] not in allowed_colors or item['output_scope'] not in ('private', 'pdf') or
+                    not isinstance(item['body'], str) or
                     len(item['body']) > 4000):
                 raise PortableMatterError('Invalid page annotation target or content')
             for key in ('rect_x', 'rect_y', 'rect_width', 'rect_height'):
@@ -416,6 +459,17 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                 raise PortableMatterError('Invalid page annotation region')
             if item['kind'] == 'comment' and not item['body'].strip():
                 raise PortableMatterError('Invalid empty comment')
+            if item['kind'] == 'date' and not valid_date_mark(item['body']):
+                raise PortableMatterError('Invalid date mark')
+            if item['kind'] == 'draw' and not valid_draw_body(item['body']):
+                raise PortableMatterError('Invalid draw mark')
+            if item['kind'] in ('highlight', 'comment') and item['output_scope'] != 'private':
+                raise PortableMatterError('Private review mark has invalid PDF output scope')
+            if item['kind'] == 'redaction' and (item['output_scope'] != 'pdf' or item['body']):
+                raise PortableMatterError('Invalid redaction mark')
+            if item['kind'] == 'text' and (not item['body'].strip() or any(
+                    ord(char) < 32 and char != '\n' or ord(char) > 126 for char in item['body'])):
+                raise PortableMatterError('Invalid text mark')
             if item['kind'] == 'image':
                 if (item['asset_mime'] not in ('image/png', 'image/jpeg') or
                         not item['asset_relpath'] or
@@ -457,6 +511,18 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                     VALUES (?,?,?,?,?,?,?)''', (id_map[rev['document_id']], rev['revision'],
                     rev['working_relpath'], rev['page_count'], rev['ocr_status'],
                     rev['ocr_provenance_json'], rev['created_at']))
+            for item in redactions:
+                con.execute('''INSERT INTO redaction_records
+                    (id,document_id,page_index,rect_x,rect_y,rect_width,rect_height,
+                    restore_x,restore_y,restore_width,restore_height,
+                    before_revision,after_revision,active,removed_revision,
+                    structure_changed,created_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    (new_id(), id_map[item['document_id']], item['page_index'],
+                     item['rect_x'], item['rect_y'], item['rect_width'], item['rect_height'],
+                     item['restore_x'], item['restore_y'], item['restore_width'], item['restore_height'],
+                     item['before_revision'], item['after_revision'], item['active'],
+                     item['removed_revision'], item['structure_changed'], item['created_at']))
             if manifest['memo_parties']:
                 con.execute('INSERT INTO memo_parties (matter_id,payload_json,updated_at) VALUES (?,?,?)',
                             (matter_id, json.dumps(manifest['memo_parties'], ensure_ascii=False), utcnow()))
@@ -493,13 +559,13 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
             for item in annotations:
                 con.execute('''INSERT INTO page_annotations
                     (id,matter_id,document_id,page_index,target_revision,kind,rect_x,rect_y,
-                     rect_width,rect_height,body,color,asset_relpath,asset_mime,position)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                     rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                     (annotation_id_map[item['id']], matter_id,
                      id_map[item['document_id']], item['page_index'], item['target_revision'],
                      item['kind'], item['rect_x'], item['rect_y'], item['rect_width'],
                      item['rect_height'], item['body'], item['color'], item['asset_relpath'],
-                     item['asset_mime'], item['position']))
+                     item['asset_mime'], item['position'], item['output_scope']))
             store._audit(con, 'matter_restored_from_package', matter_id)
     except (KeyError, TypeError, ValueError, zipfile.BadZipFile, sqlite3.Error, OSError) as exc:
         shutil.rmtree(stage, ignore_errors=True)

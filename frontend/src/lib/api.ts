@@ -85,6 +85,11 @@ export async function api<T>(path: string, method = 'GET', body?: unknown, timeo
   return response.json() as Promise<T>
 }
 
+export async function saveReaderPosition(key:string, state:import('./pdfReader').ReadingState) {
+  // Keep a final metadata-only save alive when the reader/window closes.
+  await request('/reader-position', {method:'PUT',body:JSON.stringify({key,...state}),keepalive:true})
+}
+
 export async function uploadDocument(matterId: string, file: File, password?: string,
                                      acknowledgeSignatureRisk = false): Promise<void> {
   const headers: Record<string,string> = {
@@ -148,6 +153,28 @@ export async function pdfBytes(docId: string, revision: number, signal?: AbortSi
   return new Uint8Array(await response.arrayBuffer())
 }
 
+/** Save a PDF snapshot with resolved editable marks flattened; private notes stay out. */
+export async function downloadWorkingPdf(documentId: string, revision: number, title: string,
+    acknowledgeSignatureRisk = false): Promise<boolean> {
+  if (!Number.isSafeInteger(revision) || revision < 1) throw new ApiError(0, 'Choose a current working PDF revision to save.')
+  const stem = title.replace(/\.pdf$/i, '').replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '').slice(0, 80) || 'document'
+  const filename = `${stem}-working-r${revision}.pdf`
+  if (inTauri()) return invoke<boolean>('save_working_pdf', { documentId, expectedRevision: revision, filename,
+    acknowledgeSignatureRisk })
+  const response = await request(`/documents/${encodeURIComponent(documentId)}/pdf?revision=${revision}&editable=true&acknowledge_signature_risk=${acknowledgeSignatureRisk}`,
+    { cache: 'no-store' }, 5 * 60_000)
+  const url = URL.createObjectURL(await response.blob())
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
+  return true
+}
+
 export async function documentThumbnailBlob(docId: string, revision: number,
                                             signal?: AbortSignal): Promise<Blob> {
   const response = await request(`/documents/${encodeURIComponent(docId)}/thumbnail?revision=${revision}`,
@@ -161,6 +188,8 @@ export async function pdfDocumentSource(docId: string, revision: number) {
     url: `${connection.base_url}/documents/${encodeURIComponent(docId)}/pdf?revision=${revision}`,
     httpHeaders: {Authorization: `Bearer ${connection.token}`},
     rangeChunkSize: 256 * 1024,
+    disableStream: true,
+    disableAutoFetch: true,
   }
 }
 
@@ -193,9 +222,17 @@ export async function pageAnnotationAsset(annotationId: string): Promise<Blob> {
   return response.blob()
 }
 
-export async function exportPdfBytes(matterId: string, exportId: string, filename: string): Promise<Uint8Array> {
-  const response = await request(`/matters/${matterId}/exports/${exportId}/${encodeURIComponent(filename)}`, { cache: 'no-store' }, 5 * 60_000)
-  return new Uint8Array(await response.arrayBuffer())
+export async function exportPdfDocumentSource(matterId: string, exportId: string, filename: string) {
+  const connection = await getConnection()
+  return {
+    url: `${connection.base_url}/matters/${encodeURIComponent(matterId)}/exports/${encodeURIComponent(exportId)}/${encodeURIComponent(filename)}`,
+    httpHeaders: { Authorization: `Bearer ${connection.token}` },
+    rangeChunkSize: 256 * 1024,
+    // PDF.js requests only the byte ranges needed for reading. Disabling
+    // auto-fetch requires disabling its eager complete-response stream too.
+    disableStream: true,
+    disableAutoFetch: true,
+  }
 }
 
 export async function downloadExport(matterId: string, exportId: string, filename: string, saveAs = false): Promise<boolean> {

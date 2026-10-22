@@ -9,6 +9,122 @@ import pytest
 from PIL import Image
 
 
+def test_selected_redaction_can_be_removed_after_later_edits_without_restoring_other_secrets(
+        client, auth, matter):
+    with pymupdf.open() as source:
+        page = source.new_page(width=600, height=800)
+        page.insert_text((80, 100), 'RESTORE_THIS_7312', fontsize=14)
+        page.insert_text((80, 250), 'OTHER_SECRET_8631', fontsize=14)
+        document = upload(client, auth, matter, source.tobytes())
+    first = redact(client, auth, document)
+    assert first.status_code == 200, first.text
+    records = client.get(f'/documents/{document["id"]}/pages/redactions', headers=auth).json()
+    assert len(records) == 1
+    second = redact(client, auth, document, expected_revision=2,
+                    rect_y=.28, rect_height=.06)
+    assert second.status_code == 200, second.text
+    later = client.post(f'/documents/{document["id"]}/pages/text-overlay', headers=auth,
+                        json={'page_index': 0, 'x': .2, 'y': .6,
+                              'text': 'LATER_OUTSIDE_5297', 'font_size': 12})
+    assert later.status_code == 200, later.text
+    inside = client.post(f'/documents/{document["id"]}/pages/text-overlay', headers=auth,
+                         json={'page_index': 0, 'x': .2, 'y': .12,
+                               'text': 'LATER_INSIDE_9823', 'font_size': 12})
+    assert inside.status_code == 200, inside.text
+    stale = client.post(f'/documents/{document["id"]}/pages/redactions/{records[0]["id"]}/remove',
+                        headers=auth, json={'expected_revision': 3})
+    assert stale.status_code == 409
+    restored = client.post(f'/documents/{document["id"]}/pages/redactions/{records[0]["id"]}/remove',
+                           headers=auth, json={'expected_revision': inside.json()['revision']})
+    assert restored.status_code == 200, restored.text
+    assert restored.json()['revision'] == 6
+    active = client.get(f'/documents/{document["id"]}/pages/redactions', headers=auth).json()
+    assert len(active) == 1 and active[0]['id'] != records[0]['id']
+    data = client.get(f'/documents/{document["id"]}/pdf', headers=auth).content
+    with pymupdf.open(stream=data, filetype='pdf') as pdf:
+        text = pdf[0].get_text()
+        assert 'RESTORE_THIS_7312' in text
+        assert 'LATER_OUTSIDE_5297' in text
+        assert 'LATER_INSIDE_9823' not in text
+        assert 'OTHER_SECRET_8631' not in text
+    assert b'OTHER_SECRET_8631' not in data
+    build = client.post(f'/matters/{matter["id"]}/build', headers=auth)
+    assert build.status_code == 202, build.text
+    for _ in range(200):
+        job = client.get(f'/jobs/{build.json()["id"]}', headers=auth).json()
+        if job['status'] not in ('queued', 'running'):
+            break
+        time.sleep(.03)
+    assert job['status'] == 'completed', job
+    exported = client.get(f'/matters/{matter["id"]}/exports/{job["result"]["id"]}/combined.pdf',
+                          headers=auth).content
+    with pymupdf.open(stream=exported, filetype='pdf') as pdf:
+        content = ''.join(page.get_text() for page in pdf)
+        assert 'RESTORE_THIS_7312' in content
+        assert 'LATER_OUTSIDE_5297' in content
+        assert 'OTHER_SECRET_8631' not in content
+    assert b'OTHER_SECRET_8631' not in exported
+
+
+def test_redaction_selection_tracks_undo_and_redo(client, auth, matter, make_pdf):
+    document = upload(client, auth, matter, make_pdf(1, 'PRIVATE_1832'))
+    applied = redact(client, auth, document)
+    assert applied.status_code == 200
+    base = f'/documents/{document["id"]}/pages/redactions'
+    record = client.get(base, headers=auth).json()[0]
+    history = f'/matters/{matter["id"]}/history'
+    assert client.post(history + '/undo', headers=auth).status_code == 200
+    assert client.get(base, headers=auth).json() == []
+    assert client.post(history + '/redo', headers=auth).status_code == 200
+    assert len(client.get(base, headers=auth).json()) == 1
+    current = client.app.state.store.get_document(document['id'])
+    removed = client.post(base + f'/{record["id"]}/remove', headers=auth,
+                          json={'expected_revision': current['revision']})
+    assert removed.status_code == 200, removed.text
+    assert client.get(base, headers=auth).json() == []
+    assert client.post(history + '/undo', headers=auth).status_code == 200
+    assert len(client.get(base, headers=auth).json()) == 1
+    assert client.post(history + '/redo', headers=auth).status_code == 200
+    assert client.get(base, headers=auth).json() == []
+
+
+def test_applied_redaction_remains_selectable_after_portable_restore(
+        client, auth, matter, make_pdf):
+    document = upload(client, auth, matter, make_pdf(1, 'RESTORE_AFTER_BACKUP_6123'))
+    assert redact(client, auth, document).status_code == 200
+    backup = client.get(f'/matters/{matter["id"]}/portable', headers=auth)
+    assert backup.status_code == 200, backup.text
+    restored = client.post('/matters/restore', headers=auth,
+                           files={'file': ('synthetic.cbmatter', backup.content, 'application/zip')})
+    assert restored.status_code == 201, restored.text
+    new_doc = client.get(f'/matters/{restored.json()["id"]}/documents', headers=auth).json()[0]
+    base = f'/documents/{new_doc["id"]}/pages/redactions'
+    records = client.get(base, headers=auth).json()
+    assert len(records) == 1
+    removed = client.post(base + f'/{records[0]["id"]}/remove', headers=auth,
+                          json={'expected_revision': new_doc['revision']})
+    assert removed.status_code == 200, removed.text
+    with pymupdf.open(stream=client.get(f'/documents/{new_doc["id"]}/pdf', headers=auth).content,
+                      filetype='pdf') as pdf:
+        assert 'RESTORE_AFTER_BACKUP_6123' in pdf[0].get_text()
+
+
+def test_selective_restore_refuses_reordered_pages(client, auth, matter, make_pdf):
+    document = upload(client, auth, matter, make_pdf(2, 'PAGE_SECRET_7123'))
+    applied = redact(client, auth, document)
+    assert applied.status_code == 200
+    record = client.get(f'/documents/{document["id"]}/pages/redactions', headers=auth).json()[0]
+    reordered = client.post(f'/documents/{document["id"]}/pages/reorder', headers=auth,
+                            json={'order': [1, 0], 'expected_revision': 2})
+    assert reordered.status_code == 200, reordered.text
+    listed = client.get(f'/documents/{document["id"]}/pages/redactions', headers=auth).json()
+    assert listed[0]['structure_changed'] == 1
+    refused = client.post(f'/documents/{document["id"]}/pages/redactions/{record["id"]}/remove',
+                          headers=auth, json={'expected_revision': reordered.json()['revision']})
+    assert refused.status_code == 422
+    assert client.app.state.store.get_document(document['id'])['revision'] == 3
+
+
 def upload(client, auth, matter, content):
     result = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
                          files=[('files', ('redaction.pdf', content, 'application/pdf'))])
@@ -120,6 +236,18 @@ def test_redaction_removes_pixels_and_text_on_rotated_pages(client, auth, matter
             with Image.open(io.BytesIO(extracted)) as extracted_image:
                 assert extracted_image.convert('RGB').getpixel((extracted_image.width // 2,
                                                                 extracted_image.height // 2)) != (255, 0, 0)
+    record = client.get(f'/documents/{document["id"]}/pages/redactions', headers=auth).json()[0]
+    restored = client.post(f'/documents/{document["id"]}/pages/redactions/{record["id"]}/remove',
+                           headers=auth, json={'expected_revision': changed.json()['revision']})
+    assert restored.status_code == 200, restored.text
+    with pymupdf.open(stream=client.get(f'/documents/{document["id"]}/pdf', headers=auth).content,
+                      filetype='pdf') as pdf:
+        assert 'SECRET_PIXELS_7532' in pdf[0].get_text()
+        assert pdf[0].rotation == rotation
+        for image_info in pdf[0].get_images(full=True):
+            with Image.open(io.BytesIO(pdf.extract_image(image_info[0])['image'])) as extracted:
+                if extracted.size == (200, 100):
+                    assert extracted.convert('RGB').getpixel((100, 50)) != (255, 0, 0)
 
 
 def test_redaction_rejects_stale_outside_and_pending_marks(client, auth, matter, make_pdf):
@@ -140,6 +268,39 @@ def test_redaction_rejects_stale_outside_and_pending_marks(client, auth, matter,
     assert first.status_code == 200, first.text
     stale = redact(client, auth, other)
     assert stale.status_code == 409
+
+
+def test_redaction_signature_review_is_not_a_console_conflict(client, auth, matter, make_pdf):
+    document = upload(client, auth, matter, make_pdf(1, 'SYNTHETIC SECRET'))
+    store = client.app.state.store
+    original_hash = store.sha256(store.original_path(document))
+    marked = client.patch(f'/documents/{document["id"]}', headers=auth,
+                          json={'visible_signature_status': 'present'})
+    assert marked.status_code == 200, marked.text
+    challenge_headers = {**auth, 'X-CourtBundle-Review-Protocol': 'challenge'}
+    challenge = client.post(f'/documents/{document["id"]}/pages/redact',
+                            headers=challenge_headers, json={
+        'page_index': 0, 'expected_revision': 1,
+        'rect_x': .1, 'rect_y': .08, 'rect_width': .65, 'rect_height': .08,
+        'acknowledge_signature_risk': False})
+    assert challenge.status_code == 200, challenge.text
+    assert challenge.json()['review_required'] is True
+    assert store.get_document(document['id'])['revision'] == 1
+    approved = client.post(f'/documents/{document["id"]}/pages/redact',
+                           headers=challenge_headers, json={
+        'page_index': 0, 'expected_revision': 1,
+        'rect_x': .1, 'rect_y': .08, 'rect_width': .65, 'rect_height': .08,
+        'acknowledge_signature_risk': True})
+    assert approved.status_code == 200, approved.text
+    assert approved.json()['revision'] == 2
+    assert store.sha256(store.original_path(document)) == original_hash
+    stale = client.post(f'/documents/{document["id"]}/pages/redact',
+                        headers=challenge_headers, json={
+        'page_index': 0, 'expected_revision': 1,
+        'rect_x': .1, 'rect_y': .08, 'rect_width': .65, 'rect_height': .08,
+        'acknowledge_signature_risk': False})
+    assert stale.status_code == 409
+    assert 'revision changed' in stale.json()['detail']
 
 
 def test_redaction_is_area_scoped_and_omits_stale_link_and_bookmark_text_from_report(

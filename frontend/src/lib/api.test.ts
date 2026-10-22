@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, ApiError } from './api'
+import { api, ApiError, exportPdfDocumentSource, pdfDocumentSource } from './api'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -7,6 +7,20 @@ afterEach(() => {
 })
 
 describe('local API failures', () => {
+  it('opens immutable generated PDFs with authenticated demand-driven ranges', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const source = await exportPdfDocumentSource('synthetic/matter', 'synthetic export', 'volume #1.pdf')
+    expect(source.url).toContain('/matters/synthetic%2Fmatter/exports/synthetic%20export/volume%20%231.pdf')
+    expect(source.httpHeaders.Authorization).toMatch(/^Bearer .+/)
+    expect(source).toMatchObject({ rangeChunkSize: 262144, disableStream: true, disableAutoFetch: true })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(source).not.toHaveProperty('data')
+    const working = await pdfDocumentSource('synthetic/document', 7)
+    expect(working.url).toContain('/documents/synthetic%2Fdocument/pdf?revision=7')
+    expect(working).toMatchObject({ rangeChunkSize: 262144, disableStream: true, disableAutoFetch: true })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it('bounds a stalled health request', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) =>

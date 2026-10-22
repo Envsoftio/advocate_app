@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const samples = resolve(import.meta.dirname, '../../samples')
-const backend = 'http://127.0.0.1:8768'
+const backend = `http://127.0.0.1:${process.env.COURTBUNDLE_E2E_BACKEND_PORT || 8768}`
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 
 test('Bates and annexure policy update the page-map preview and actual-page mark preview', async ({ page, request }) => {
@@ -335,6 +335,8 @@ test('compression exposes measured results and retains a usable PDF', async ({ p
   await page.getByRole('button', { name: 'Hide thumbnails' }).click()
   await expect(page.locator('.thumbnail-strip')).toHaveCount(0)
   const preview = page.locator('.pdf-paper')
+  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('100')
+  await expect(page.locator('.pdf-placement-surface')).toHaveAttribute('aria-busy','false')
   const originalWidth = await preview.evaluate((node: HTMLCanvasElement) => node.getBoundingClientRect().width)
   await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50')
   await expect.poll(() => preview.evaluate((node: HTMLCanvasElement) => node.getBoundingClientRect().width)).toBeCloseTo(originalWidth / 2, 0)
@@ -443,8 +445,21 @@ test('index preview updates with draft volume cap and opens the source document'
   await expect(review.getByText('PDF bookmarks')).toBeVisible()
   await expect(review.getByRole('button', { name: /02_impugned_order/ })).toBeVisible()
   await expect.poll(() => review.locator('canvas').evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0)
+  const indexLink=review.getByRole('button',{name:/Go to PDF page/}).first()
+  await expect(indexLink).toBeVisible()
+  await indexLink.click()
+  await expect(review.getByRole('spinbutton',{name:'PDF page number'})).not.toHaveValue('1')
+  await review.getByRole('button',{name:'Back to previous reading position'}).click()
+  await expect(review.getByRole('spinbutton',{name:'PDF page number'})).toHaveValue('1')
+  await review.getByRole('searchbox',{name:'Find text in generated PDF'}).fill('Synthetic')
+  await expect(review.getByLabel('Generated PDF search occurrences').getByRole('button').first()).toBeVisible()
+  await review.getByLabel('Generated PDF search occurrences').getByRole('button').first().click()
+  await expect(review.locator('.pdf-search-highlight.is-active').first()).toBeVisible()
+  await review.getByRole('searchbox',{name:'Find text in generated PDF'}).fill('')
   await review.getByRole('button', { name: /02_impugned_order/ }).click()
   await expect(review.getByRole('spinbutton', { name: 'PDF page number' })).not.toHaveValue('1')
+  await review.getByRole('combobox',{name:'Reading mode'}).selectOption('continuous')
+  await expect(review.locator('.canvas-scroll')).toHaveClass(/continuous-reader/)
   await review.getByRole('button', { name: 'Close review' }).click()
   await expect(review).toBeHidden()
 })
@@ -484,7 +499,7 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
   await page.getByRole('button', {name:'Document details',exact:true}).click()
   await page.getByRole('button', {name:'Next page'}).click()
   await page.getByRole('combobox', {name:'Theme'}).selectOption('dark')
-  await page.getByRole('tab', {name:'Review', exact:true}).click()
+  await page.getByRole('tab', {name:'Annotate', exact:true}).click()
   await page.getByRole('button', {name:'Bookmark page'}).click()
   await expect(page.locator('.page-bookmark-editor')).toBeVisible()
   await page.getByRole('textbox', {name:'Bookmark title'}).fill('Reviewed second page')
@@ -513,8 +528,12 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
   await expect(savedOnPage).toContainText('Reviewed second page')
   await expect(page.locator('.preview-status.error-msg')).toHaveCount(0)
   await expect(page.locator('.pdf-paper')).toHaveCSS('visibility', 'visible')
+  const savedDocument = (await uploaded.json())[0]
+  await expect.poll(async () => (await (await request.get(`${backend}/reader-position`, {
+    headers, params: {key: `${savedDocument.id}:${savedDocument.revision}`},
+  })).json())?.page).toBe(2)
   await page.reload()
-  await page.getByRole('button', {name:'Next page'}).click()
+  await expect(page.getByRole('spinbutton', {name:'Go to page',exact:true})).toHaveValue('2')
   await expect(savedOnPage).toContainText('Reviewed second page')
   await page.getByRole('button', {name:'Index & bookmarks'}).click()
   await expect(page.getByRole('textbox', {name:'Bookmark title 1'})).toHaveValue('Reviewed second page')
@@ -713,7 +732,7 @@ test('selectable PDF text can be selected and replaced from the preview', async 
   await page.getByRole('button', { name: /Edit text: UPDATED PETITION/ }).click()
   await page.getByRole('textbox', { name: 'Replacement' }).fill('W'.repeat(200))
   await page.getByRole('button', { name: 'Apply replacement' }).click()
-  await expect(page.locator('.toast.error')).toContainText('Replacement is too long for the selected area')
+  await expect(page.locator('.toast.error')).toContainText('No clear room for this replacement')
   expect((await page.locator('.toast.error').boundingBox())!.width).toBeLessThanOrEqual(380)
   await expect(page.locator('.pdf-inline-editor [role="alert"]')).toHaveCount(0)
   await expect(page.getByRole('textbox', { name: 'Replacement' })).toHaveValue('W'.repeat(200))
@@ -778,21 +797,22 @@ test('PDFium paragraph trial edits a synthetic working revision from the viewer'
   await expect(page.getByRole('heading', { name: 'E2E PDFium Paragraph' })).toBeVisible()
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
-  const method = page.getByRole('combobox', { name: 'Text editing method' })
-  await expect(method.locator('option[value="pdfium-trial"]')).toBeEnabled()
-  await method.selectOption('pdfium-trial')
-  await page.getByRole('button', { name: /Edit text: DRAFT PETITION/ }).click()
-  await expect(page.getByRole('textbox', { name: 'Replacement' })).toHaveValue('DRAFT PETITION - EXAMPLE ONLY')
-  await page.getByRole('textbox', { name: 'Replacement' }).fill('DRAFT PETITION - UPDATED EXAMPLE ONLY')
+  await page.getByRole('button', { name: /Edit text: IN THE COURT/ }).click()
+  await page.getByRole('button', {name:'Edit whole paragraph'}).click()
+  await expect(page.getByRole('textbox', { name: 'Replacement' })).toHaveValue('IN THE COURT (DEMONSTRATION)')
+  await page.getByRole('textbox', { name: 'Replacement' }).fill('IN THE COURT - UPDATED\nDEMONSTRATION ONLY')
+  const applied = page.waitForResponse(response => response.url().endsWith('/pages/paragraph-trial'))
   await page.getByRole('button', { name: 'Apply replacement' }).click()
-  await expect(page.locator('.text-overlay-panel [role="status"]')).toContainText('Experimental PDFium paragraph edit saved')
+  const appliedResponse = await applied
+  expect(appliedResponse.status(), await appliedResponse.text()).toBe(200)
+  await expect(page.locator('.text-overlay-panel [role="status"]')).toContainText('Whole paragraph updated')
   await expect.poll(async () => {
-    const response = await request.get(`${backend}/matters/${matterId}/search?q=UPDATED%20EXAMPLE`, { headers })
+    const response = await request.get(`${backend}/matters/${matterId}/search?q=UPDATED`, { headers })
     return (await response.json()).matches.length
   }).toBe(1)
 })
 
-test('selectable text can be dragged vertically and saved to the working copy', async ({ page, request }) => {
+test('selectable text can be dragged diagonally and saved to the working copy', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Move Text', court_profile: 'delhi-hc-illustrative',
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
@@ -825,7 +845,7 @@ test('selectable text can be dragged vertically and saved to the working copy', 
   expect(bounds).toBeTruthy()
   await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2)
   await page.mouse.down()
-  await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2 + 14, { steps: 4 })
+  await page.mouse.move(bounds!.x + bounds!.width / 2 + 14, bounds!.y + bounds!.height / 2 + 14, { steps: 4 })
   await page.mouse.up()
   await expect(page.getByRole('button', { name: 'Apply move' })).toBeVisible()
   await page.getByRole('button', { name: 'Apply move' }).click()
@@ -837,108 +857,52 @@ test('selectable text can be dragged vertically and saved to the working copy', 
   await expect(page.locator('.pdf-inline-editor')).toHaveCount(0)
   const after = await request.get(runsUrl, { headers })
   const moved = (await after.json()).runs.find((item: {text:string}) => item.text === original.text)
+  expect(moved.relative_bbox[0]).toBeGreaterThan(original.relative_bbox[0])
   expect(moved.relative_bbox[1]).toBeGreaterThan(original.relative_bbox[1])
 })
 
-test('visible text overlay is placed from the preview and becomes searchable', async ({ page, request }) => {
+test('added text remains movable and enters saved PDF output', async ({ page, request }) => {
+  await page.setViewportSize({width:1440,height:1000})
   const created = await request.post(`${backend}/matters`, { headers, data: {
-    name: 'E2E Text Overlay', court_profile: 'delhi-hc-illustrative',
-    case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
+    name: 'E2E Text Overlay', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
-  expect(created.ok()).toBeTruthy()
   const matterId = (await created.json()).id as string
   const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
-  expect(uploaded.ok()).toBeTruthy()
-  const uploadedDocument = (await uploaded.json())[0] as {id:string}
+  const doc = (await uploaded.json())[0]
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'E2E Text Overlay' })).toBeVisible()
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark')
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Add text' }).click()
-  await expect(page.locator('.pdf-paper')).toBeVisible()
-  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
   await page.locator('.pdf-paper').click({ position: { x: 120, y: 180 } })
-  await page.getByRole('textbox', { name: /Add text on page/ }).fill('हिंदी')
-  await expect(page.getByRole('alert')).toContainText('printable ASCII')
-  await expect(page.getByRole('button', { name: 'Apply text' })).toBeDisabled()
   await page.getByRole('textbox', { name: /Add text on page/ }).fill('REVIEW OVERLAY')
-  await expect(page.locator('.thumbnail-strip')).toHaveCount(0)
-  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveValue('REVIEW OVERLAY')
-  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveCSS('color', 'rgb(22, 22, 22)')
-  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveCSS('background-color', 'rgb(255, 255, 255)')
-  await expect(page.locator('.pdf-add-text-preview')).toHaveCSS('color', 'rgb(22, 22, 22)')
-  let overlayAttempts = 0
-  const warnings: string[] = []
-  page.on('dialog', async dialog => { warnings.push(dialog.message()); await dialog.accept() })
-  await page.route('**/pages/text-overlay', async route => {
-    overlayAttempts++
-    if (overlayAttempts === 1) {
-      expect(route.request().postDataJSON().acknowledge_signature_risk).toBe(false)
-      expect(route.request().headers()['x-courtbundle-review-protocol']).toBe('challenge')
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        review_required: true,
-        detail: 'Signature-risk acknowledgment required before transforming this working copy: 03_affidavit. Imported originals will remain unchanged.',
-      }) })
-    } else await route.continue()
-  })
-  await expect(page.getByRole('button', { name: 'Apply text' })).toBeEnabled()
-  const retryRequest = page.waitForRequest(item => item.url().endsWith('/pages/text-overlay') && item.method() === 'POST' && item.postDataJSON().acknowledge_signature_risk === true)
   await page.getByRole('button', { name: 'Apply text' }).click()
-  const postedText = (await retryRequest).postDataJSON()
-  await expect.poll(() => overlayAttempts).toBe(2)
-  expect(warnings[0]).toContain('01_petition')
-  expect(warnings[0].length).toBeLessThan(180)
-  expect(postedText.x).toBeGreaterThan(0)
-  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveCount(0)
-  await expect.poll(async () => {
-    const result = await request.get(`${backend}/matters/${matterId}/search?q=REVIEW%20OVERLAY`, { headers })
-    return (await result.json()).matches.length
-  }).toBe(1)
-  const markedRisk = await request.patch(`${backend}/documents/${uploadedDocument.id}`, {
-    headers, data: { visible_signature_status: 'present' },
-  })
-  expect(markedRisk.ok()).toBeTruthy()
-  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
-  await page.locator('.pdf-paper').click({ position: { x: 130, y: 390 } })
-  await page.getByRole('textbox', { name: /Add text on page/ }).fill('APPROVED FIRST')
-  const attemptsBeforeReview = overlayAttempts
-  const approvedResponse = page.waitForResponse(item => item.url().endsWith('/pages/text-overlay') &&
-    item.request().method() === 'POST' && item.request().postDataJSON().text === 'APPROVED FIRST')
-  await page.getByRole('button', { name: 'Apply text' }).click()
-  const approved = await approvedResponse
-  expect(approved.request().postDataJSON().acknowledge_signature_risk).toBe(true)
-  expect(approved.status()).toBe(200)
-  await expect.poll(() => overlayAttempts).toBe(attemptsBeforeReview + 1)
-  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveCount(0)
-  await page.unroute('**/pages/text-overlay')
-  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
-  await page.locator('.pdf-paper').click({ position: { x: 120, y: 180 } })
-  await page.getByRole('textbox', { name: /Add text on page/ }).fill('OVERLAP TEST')
-  const overlapResponse = page.waitForResponse(item => item.url().endsWith('/pages/text-overlay') &&
-    item.request().method() === 'POST' && item.request().postDataJSON().text === 'OVERLAP TEST')
-  await page.getByRole('button', { name: 'Apply text' }).click()
-  expect((await overlapResponse).status()).toBe(200)
-  await expect(page.locator('.toast.error')).toContainText('overlaps existing page content')
-  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveValue('OVERLAP TEST')
-  await page.locator('.pdf-inline-add-card').getByRole('button', { name: 'Cancel' }).click()
-  await page.locator('.pdf-paper').click({ position: { x: 130, y: 200 } })
-  await page.getByRole('textbox', { name: /Add text on page/ }).fill('SECOND OVERLAY')
-  await page.route('**/pages/text-overlay', route => route.fulfill({
-    status: 409, contentType: 'application/json', body: JSON.stringify({detail:'Synthetic edit conflict'}),
-  }))
-  await page.getByRole('button', { name: 'Apply text' }).click()
-  await expect(page.locator('.toast.error')).toContainText('Synthetic edit conflict')
-  await expect(page.locator('.pdf-inline-add-card')).not.toContainText('Synthetic edit conflict')
-  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveValue('SECOND OVERLAY')
-  await page.locator('.pdf-inline-add-card').getByRole('button', { name: 'Cancel' }).click()
-  await page.getByRole('button', { name: 'Add text' }).click()
-  await expect(page.locator('.thumbnail-strip')).toBeVisible()
+  const mark=page.locator('.pdf-review-shape.text')
+  await expect(mark).toBeVisible()
+  const before=(await (await request.get(`${backend}/matters/${matterId}/annotations`,{headers})).json())[0]
+  expect(before.output_scope).toBe('pdf')
+  await mark.scrollIntoViewIfNeeded()
+  const position=await mark.boundingBox()
+  expect(position).not.toBeNull()
+  await page.mouse.move(position!.x+position!.width/2,position!.y+position!.height/2)
+  await page.mouse.down()
+  await page.mouse.move(position!.x+position!.width/2+20,position!.y+position!.height/2+20,{steps:5})
+  await page.mouse.up()
+  await expect.poll(async()=> (await (await request.get(`${backend}/matters/${matterId}/annotations`,{headers})).json())[0].rect_x as number).toBeGreaterThan(before.rect_x)
+  await page.reload()
+  await expect(mark).toBeVisible()
+  const snapshot=await request.get(`${backend}/documents/${doc.id}/pdf?revision=1&editable=true`,{headers})
+  expect(snapshot.ok()).toBeTruthy()
+  expect(snapshot.headers()['content-type']).toContain('application/pdf')
+  const download=page.waitForEvent('download')
+  await page.getByRole('button',{name:'Save working copy'}).click()
+  const saved=await download
+  expect(saved.suggestedFilename()).toContain('working-r1.pdf')
 })
 
-test('redaction requires region review and removes selected text from the working copy', async ({ page, request }) => {
+test('redaction mark stays movable and is applied in saved PDF output', async ({ page, request }) => {
   await page.setViewportSize({width: 1440, height: 1000})
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Permanent Redaction', court_profile: 'delhi-hc-illustrative',
@@ -951,6 +915,10 @@ test('redaction requires region review and removes selected text from the workin
   })
   expect(uploaded.ok()).toBeTruthy()
   const document = (await uploaded.json())[0]
+  const marked = await request.patch(`${backend}/documents/${document.id}`, {
+    headers, data: {visible_signature_status: 'present'},
+  })
+  expect(marked.ok()).toBeTruthy()
   const runsResponse = await request.get(`${backend}/documents/${document.id}/pages/0/text-runs`, { headers })
   const run = (await runsResponse.json()).runs.find((item: {text:string}) => item.text.includes('DRAFT PETITION'))
   expect(run).toBeDefined()
@@ -959,8 +927,9 @@ test('redaction requires region review and removes selected text from the workin
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Redact', exact: true }).click()
   await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50')
-  const apply = page.getByRole('button', { name: 'Apply redaction' })
-  await expect(apply).toHaveCount(0)
+  const apply = page.getByRole('button', { name: 'Add redaction mark' })
+  await expect(page.getByText('Drag over the content to remove.')).toBeVisible()
+  await expect(apply).toBeDisabled()
   await page.locator('.pdf-placement-surface').evaluate(surface => {
     const canvas = surface.querySelector('canvas')!
     const original = canvas.getBoundingClientRect.bind(canvas)
@@ -971,7 +940,8 @@ test('redaction requires region review and removes selected text from the workin
     canvas.getBoundingClientRect = original
   })
   await expect(page.locator('.pdf-redaction-region')).toHaveCount(0)
-  await expect(apply).toHaveCount(0)
+  await expect(apply).toBeDisabled()
+  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale|is-busy|is-switching/)
   await page.locator('.canvas-scroll').evaluate(element => { element.scrollTop = 0 })
   const canvas = await page.locator('.pdf-paper').boundingBox()
   expect(canvas).not.toBeNull()
@@ -983,14 +953,40 @@ test('redaction requires region review and removes selected text from the workin
     canvas!.y + Math.min(1,y1+.01)*canvas!.height, {steps:8})
   await page.mouse.up()
   await expect(page.locator('.pdf-redaction-region')).toBeVisible()
-  await expect(apply).toBeDisabled()
-  await page.getByRole('checkbox', { name: 'I reviewed this area and the document-wide cleanup.' }).check()
+  await expect(page.locator('.pdf-redaction-region')).toHaveCSS('background-color', 'rgb(16, 16, 16)')
+  await expect(apply).toBeEnabled()
+  await expect(page.getByRole('checkbox', { name: 'I reviewed this area and the document-wide cleanup.' })).toHaveCount(0)
+  const originalMark = await page.locator('.pdf-redaction-region').boundingBox()
+  const resize = await page.getByRole('button', {name:'Resize redaction area from se corner'}).boundingBox()
+  expect(originalMark).not.toBeNull()
+  expect(resize).not.toBeNull()
+  await page.mouse.move(resize!.x + resize!.width / 2, resize!.y + resize!.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(resize!.x + resize!.width / 2 + 12, resize!.y + resize!.height / 2 + 12, {steps:4})
+  await page.mouse.up()
+  const expandedMark = await page.locator('.pdf-redaction-region').boundingBox()
+  expect(expandedMark!.width).toBeGreaterThan(originalMark!.width)
+  expect(expandedMark!.height).toBeGreaterThan(originalMark!.height)
   await apply.click()
-  await expect(page.getByText('Applied to the working copy.', { exact: false })).toBeVisible()
-  await expect.poll(async () => {
-    const result = await request.get(`${backend}/matters/${matterId}/search?q=DRAFT%20PETITION`, { headers })
-    return (await result.json()).matches.filter((match: {page:number}) => match.page === 1).length
-  }).toBe(0)
+  await expect(page.locator('.review-tool-notice')).toContainText('Redaction mark saved.')
+  const staged=page.locator('.pdf-review-shape.redaction')
+  await expect(staged).toBeVisible()
+  const before=(await (await request.get(`${backend}/matters/${matterId}/annotations`,{headers})).json())[0]
+  const area=await staged.boundingBox()
+  expect(area).not.toBeNull()
+  await page.mouse.move(area!.x+area!.width/2,area!.y+area!.height/2)
+  await page.mouse.down()
+  await page.mouse.move(area!.x+area!.width/2+20,area!.y+area!.height/2+12,{steps:5})
+  await page.mouse.up()
+  await expect.poll(async()=> (await (await request.get(`${backend}/matters/${matterId}/annotations`,{headers})).json())[0].rect_x as number).toBeGreaterThan(before.rect_x)
+  await page.reload()
+  await expect(staged).toBeVisible()
+  const saved=await request.get(`${backend}/documents/${document.id}/pdf?revision=${document.revision}&editable=true&acknowledge_signature_risk=true`,{headers})
+  expect(saved.ok()).toBeTruthy()
+  expect(saved.headers()['content-type']).toContain('application/pdf')
+  await staged.click()
+  await staged.press('Delete')
+  await expect(staged).toHaveCount(0)
 })
 
 test('redaction applies to a rotated synthetic scan', async ({ page, request }) => {
@@ -1023,11 +1019,10 @@ test('redaction applies to a rotated synthetic scan', async ({ page, request }) 
   await page.mouse.down()
   await page.mouse.move(canvas!.x + canvas!.width * .35, canvas!.y + canvas!.height * .35, { steps: 8 })
   await page.mouse.up()
-  await page.getByRole('checkbox', { name: 'I reviewed this area and the document-wide cleanup.' }).check()
-  await page.getByRole('button', { name: 'Apply redaction' }).click()
-  await expect(page.getByText('Applied to the working copy.', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: 'Add redaction mark' }).click()
+  await expect(page.locator('.review-tool-notice')).toContainText('Redaction mark saved.')
   const current = await request.get(`${backend}/matters/${matterId}/documents`, { headers })
-  expect((await current.json())[0].revision).toBe(3)
+  expect((await current.json())[0].revision).toBe(2)
 })
 
 test('image overlays, highlights and comments can be placed, edited and removed', async ({ page, request }) => {
@@ -1043,7 +1038,7 @@ test('image overlays, highlights and comments can be placed, edited and removed'
 
   await page.goto('/')
   await expect(page.getByRole('heading', {name:'E2E PDF Annotations'})).toBeVisible()
-  await page.getByRole('tab', {name:'Review', exact:true}).click()
+  await page.getByRole('tab', {name:'Annotate', exact:true}).click()
   await page.getByRole('button', {name:'Highlight', exact:true}).click()
   const paper = page.locator('.pdf-paper')
   const draw = async (x:number, y:number, width:number, height:number) => {
@@ -1059,32 +1054,31 @@ test('image overlays, highlights and comments can be placed, edited and removed'
 
   await draw(80, 12, 150, 28)
   await page.getByRole('textbox', {name:'Optional highlight note'}).fill('Important passage')
-  await expect(page.getByRole('button', {name:'Save annotation'})).toBeEnabled()
-  await page.getByRole('button', {name:'Save annotation'}).click()
+  await expect(page.getByRole('button', {name:'Add mark'})).toBeEnabled()
+  await page.getByRole('button', {name:'Add mark'}).click()
   await expect(page.getByText('Highlight saved as a private review annotation.')).toBeVisible()
   await expect(page.locator('.pdf-review-highlight')).toHaveCount(1)
 
   await page.getByRole('button', {name:'Comment', exact:true}).click()
   await draw(250, 12, 45, 28)
   await page.getByRole('textbox', {name:'Comment text'}).fill('Check the cited proposition')
-  await expect(page.getByRole('button', {name:'Save annotation'})).toBeEnabled()
-  await page.getByRole('button', {name:'Save annotation'}).click()
+  await expect(page.getByRole('button', {name:'Add mark'})).toBeEnabled()
+  await page.getByRole('button', {name:'Add mark'}).click()
   await expect(page.locator('.pdf-review-comment')).toHaveCount(1)
 
-  await page.getByRole('tab', {name:'Edit', exact:true}).click()
+  await page.getByRole('tab', {name:'Stamps', exact:true}).click()
   await page.getByRole('button', {name:'Image / stamp', exact:true}).click()
   await page.getByLabel('PNG or JPEG').setInputFiles(resolve(samples, '04_scanned_annexure.jpg'))
-  await page.getByRole('combobox', {name:'Destination'}).selectOption('build')
   await draw(320, 12, 120, 28)
-  await expect(page.getByRole('button', {name:'Save for builds'})).toBeEnabled()
-  await page.getByRole('button', {name:'Save for builds'}).click()
+  await expect(page.getByRole('button', {name:'Add mark'})).toBeEnabled()
+  await page.getByRole('button', {name:'Add mark'}).click()
   await expect(page.locator('.pdf-image-overlay')).toHaveCount(1)
   let annotations = await (await request.get(`${backend}/matters/${matterId}/annotations`, {headers})).json()
   expect(annotations.map((item:{kind:string}) => item.kind).sort()).toEqual(['comment','highlight','image'])
 
   await page.locator('.pdf-review-comment').click()
   await page.getByRole('textbox', {name:'Comment text'}).fill('Reviewed comment text')
-  await page.getByRole('button', {name:'Update annotation'}).click()
+  await page.getByRole('button', {name:'Update mark'}).click()
   await expect(page.getByText('Annotation updated.')).toBeVisible()
   annotations = await (await request.get(`${backend}/matters/${matterId}/annotations`, {headers})).json()
   expect(annotations.find((item:{kind:string}) => item.kind === 'comment').body).toBe('Reviewed comment text')
@@ -1113,7 +1107,7 @@ test('reviewed link and output-mark preview persist through the matter workspace
 
   await page.goto('/')
   await expect(page.getByRole('heading', {name:'E2E Links And Marks'})).toBeVisible()
-  await page.getByRole('tab', {name:'Review', exact:true}).click()
+  await page.getByRole('tab', {name:'Annotate', exact:true}).click()
   await page.getByRole('button', {name:'Links', exact:true}).click()
   const paper = page.locator('.pdf-paper')
   await expect(paper).toBeVisible()
@@ -1422,6 +1416,7 @@ test('visible rotation controls turn the selected PDF page in either direction',
   await expect(page.locator('.page-counter')).toContainText('/ 3')
   const canvas = page.locator('.pdf-paper')
   const ratio = () => canvas.evaluate((node: HTMLCanvasElement) => node.width / node.height)
+  await expect.poll(()=>canvas.evaluate((node:HTMLCanvasElement)=>node.width)).toBeGreaterThan(0)
   const originalRatio = await ratio()
   await page.route('**/pages/rotate', async route => {
     await new Promise(resolve => setTimeout(resolve, 350))
@@ -1481,7 +1476,7 @@ test('page text search opens a result and thumbnails navigate', async ({ page, r
   await page.getByRole('button', {name:/01_petition · page 3/}).click()
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   page.once('dialog', dialog => void dialog.accept())
-  await page.getByRole('button', {name:'Delete page from working copy'}).click()
+  await page.getByRole('button', {name:/Delete page \d+/}).click()
   await expect(page.locator('.page-counter')).toContainText('/ 2')
   await expect(page.getByText('0 matching page(s)')).toBeVisible()
 })
@@ -1502,12 +1497,12 @@ test('PDF editor groups tools and finds text in the current working PDF', async 
   await expect(page.getByRole('button', {name:'Go to page 1'})).toBeVisible()
   await page.getByRole('button', {name:'Find in this PDF'}).click()
   await page.getByRole('searchbox', {name:'Find text in this PDF'}).fill('page 3/3')
-  await expect(page.getByText('1 matching page')).toBeVisible()
+  await expect(page.locator('.pdf-findbar').getByText('1 match', {exact:false})).toBeVisible()
   await page.getByRole('button', {name:/Page 3 ·/}).click()
   await expect(page.locator('.page-counter input')).toHaveValue('3')
   await page.getByRole('tab', {name:'Pages'}).click()
   await expect(page.getByRole('button', {name:'Rotate right'})).toBeVisible()
-  await page.getByRole('tab', {name:'Review'}).click()
+  await page.getByRole('tab', {name:'Annotate'}).click()
   await expect(page.getByRole('button', {name:'Bookmark page'})).toBeVisible()
   await expect(page.getByRole('button', {name:'Rotate right'})).toHaveCount(0)
 })

@@ -82,7 +82,7 @@ export interface PageAnnotation {
   document_id: string
   page_index: number
   target_revision: number
-  kind: 'image' | 'highlight' | 'comment'
+  kind: 'image' | 'highlight' | 'comment' | 'draw' | 'box' | 'ellipse' | 'line' | 'arrow' | 'check' | 'cross' | 'date' | 'text' | 'redaction'
   rect_x: number
   rect_y: number
   rect_width: number
@@ -91,6 +91,7 @@ export interface PageAnnotation {
   color: 'yellow' | 'green' | 'blue' | 'pink'
   asset_relpath: string | null
   asset_mime: string | null
+  output_scope: 'private' | 'pdf'
   position: number
   resolved: boolean
 }

@@ -1,6 +1,8 @@
 from typing import Literal
 from datetime import date
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+import json
+import math
 import re
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -231,31 +233,79 @@ class OcrRequest(SignatureRiskAcknowledgement):
 
 class ReorderPages(SignatureRiskAcknowledgement):
     order: list[int]
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
+
+
+class BatchPageOperation(SignatureRiskAcknowledgement):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: int = Field(ge=1, strict=True)
+    operation: Literal['rotate', 'delete']
+    pages: list[int] = Field(min_length=1, max_length=100000)
+    degrees: int | None = Field(default=None, strict=True)
+
+    @field_validator('pages', mode='before')
+    @classmethod
+    def explicit_page_indices(cls, value):
+        if not isinstance(value, list) or any(type(index) is not int for index in value):
+            raise ValueError('Page indexes must be integers')
+        if len(value) != len(set(value)):
+            raise ValueError('Select each page only once')
+        return value
+
+    @model_validator(mode='after')
+    def validate_operation(self):
+        if self.operation == 'rotate' and self.degrees not in (90, 180, 270):
+            raise ValueError('Rotation must be 90, 180 or 270 degrees clockwise')
+        if self.operation == 'delete' and self.degrees is not None:
+            raise ValueError('Deletion does not accept a rotation')
+        return self
 
 
 class RotatePage(SignatureRiskAcknowledgement):
     page_index: int = Field(ge=0)
     degrees: int
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
 
 
 class DeletePage(SignatureRiskAcknowledgement):
     page_index: int = Field(ge=0)
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
 
 
 class InsertPages(SignatureRiskAcknowledgement):
     source_document_id: str
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
+    expected_source_revision: int | None = Field(default=None, ge=1, strict=True)
     source_pages: list[int] = Field(min_length=1, max_length=2000)
     before_index: int = Field(ge=0)
 
 
 class ReplacePages(SignatureRiskAcknowledgement):
     source_document_id: str
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
+    expected_source_revision: int | None = Field(default=None, ge=1, strict=True)
     target_pages: list[int] = Field(min_length=1, max_length=2000)
     source_pages: list[int] = Field(min_length=1, max_length=2000)
 
 
 class ReplaceDocument(SignatureRiskAcknowledgement):
     source_document_id: str
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
+    expected_source_revision: int | None = Field(default=None, ge=1, strict=True)
+
+
+READER_KEY_PATTERN = r'^(?:[0-9a-f]{32}:[1-9][0-9]*|export:[0-9a-f]{32}:[0-9a-f]{32}:[A-Za-z0-9_-]+\.pdf)$'
+
+
+class ReaderPosition(BaseModel):
+    """Local navigation metadata; never PDF text, names or bytes."""
+    model_config = ConfigDict(extra='forbid')
+    key: str = Field(max_length=200, pattern=READER_KEY_PATTERN)
+    page: int = Field(ge=1, le=100000, strict=True)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    zoom: Literal['fit-width', 'fit-page', '25', '50', '75', '100', '125', '150', '200', '300', '400']
+    mode: Literal['single', 'continuous']
 
 
 class CompressionRequest(SignatureRiskAcknowledgement):
@@ -411,6 +461,7 @@ class OutputPresetCreate(BaseModel):
 
 class CropPages(SignatureRiskAcknowledgement):
     pages: list[int] = Field(min_length=1, max_length=2000)
+    expected_revision: int | None = Field(default=None, ge=1, strict=True)
     left: float = Field(ge=0, le=1)
     top: float = Field(ge=0, le=1)
     right: float = Field(ge=0, le=1)
@@ -427,12 +478,38 @@ class TextOverlay(SignatureRiskAcknowledgement):
 
 
 AnnotationColor = Literal['yellow', 'green', 'blue', 'pink']
+ReviewMarkKind = Literal['highlight', 'comment', 'draw', 'box', 'ellipse', 'line', 'arrow',
+                         'check', 'cross', 'date', 'text', 'redaction']
+
+
+def valid_date_mark(body: str) -> bool:
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', body):
+        return False
+    try:
+        date.fromisoformat(body)
+        return True
+    except ValueError:
+        return False
+
+
+def valid_draw_body(body: str) -> bool:
+    try:
+        data = json.loads(body)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(data, dict) or set(data) != {'v', 'points'} or type(data['v']) is not int or data['v'] != 1:
+        return False
+    points = data['points']
+    return (isinstance(points, list) and 2 <= len(points) <= 160 and
+            all(isinstance(point, list) and len(point) == 2 and
+                all(type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
+                    for value in point) for point in points))
 
 
 class PageAnnotationCreate(BaseModel):
-    """A private review annotation anchored to one exact working revision."""
+    """An editable page mark anchored to one exact working revision."""
     model_config = ConfigDict(extra='forbid')
-    kind: Literal['highlight', 'comment']
+    kind: ReviewMarkKind
     page_index: int = Field(ge=0)
     expected_revision: int = Field(ge=1)
     rect_x: float = Field(ge=0, lt=1)
@@ -441,6 +518,7 @@ class PageAnnotationCreate(BaseModel):
     rect_height: float = Field(gt=0, le=1)
     body: str = Field(default='', max_length=4000)
     color: AnnotationColor = 'yellow'
+    output_scope: Literal['private', 'pdf'] = 'private'
 
     @model_validator(mode='after')
     def validate_annotation(self):
@@ -448,6 +526,17 @@ class PageAnnotationCreate(BaseModel):
             raise ValueError('Annotation region must stay within the displayed page')
         if self.kind == 'comment' and not self.body.strip():
             raise ValueError('Comments require visible note text')
+        if self.kind == 'date' and not valid_date_mark(self.body):
+            raise ValueError('Date marks require a YYYY-MM-DD label')
+        if self.kind == 'draw' and not valid_draw_body(self.body):
+            raise ValueError('Draw marks require a bounded point path')
+        if self.kind == 'text' and (not self.body.strip() or any(
+                ord(char) < 32 and char != '\n' or ord(char) > 126 for char in self.body)):
+            raise ValueError('Text marks require printable ASCII text')
+        if self.kind == 'redaction' and (self.output_scope != 'pdf' or self.body):
+            raise ValueError('Redaction marks require PDF output scope and no text')
+        if self.kind in ('highlight', 'comment') and self.output_scope != 'private':
+            raise ValueError('Review highlights and comments must remain private')
         return self
 
 
@@ -460,6 +549,7 @@ class PageAnnotationUpdate(BaseModel):
     rect_height: float = Field(gt=0, le=1)
     body: str = Field(default='', max_length=4000)
     color: AnnotationColor = 'yellow'
+    output_scope: Literal['private', 'pdf'] | None = None
 
     @model_validator(mode='after')
     def validate_region(self):
@@ -492,6 +582,7 @@ class MoveTextRun(SignatureRiskAcknowledgement):
     span_index: int = Field(ge=0)
     expected_revision: int = Field(ge=1)
     expected_text: str = Field(min_length=1, max_length=2000)
+    horizontal_offset: float = Field(default=0, ge=-1, le=1)
     vertical_offset: float = Field(ge=-1, le=1)
 
 
@@ -509,6 +600,11 @@ class PermanentRedaction(SignatureRiskAcknowledgement):
         if self.rect_x + self.rect_width > 1 or self.rect_y + self.rect_height > 1:
             raise ValueError('Redaction region must stay within the displayed page')
         return self
+
+
+class RestoreRedaction(SignatureRiskAcknowledgement):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: int = Field(ge=1)
 
 
 class JobView(BaseModel):

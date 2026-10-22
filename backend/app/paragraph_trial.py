@@ -91,6 +91,13 @@ def _collect(pdfium, raw, page):
     return runs
 
 
+def _has_untracked_text(raw, page, runs: list[dict]) -> bool:
+    tracked = {run['index'] for run in runs}
+    return any(raw.FPDFPageObj_GetType(raw.FPDFPage_GetObject(page.raw, index)) ==
+               raw.FPDF_PAGEOBJ_TEXT and index not in tracked
+               for index in range(raw.FPDFPage_CountObjects(page.raw)))
+
+
 def _paragraph(runs: list[dict], selected_bbox: list[float], expected_text: str,
                page_height: float) -> list[dict]:
     # PyMuPDF selection boxes are top-left; PDFium page objects are bottom-left.
@@ -264,6 +271,34 @@ def _check_visual_obstacles(source: bytes, page_index: int, pdfium_bounds: tuple
             raise ProcessingError('Paragraph overlaps an image, graphic, link or annotation')
 
 
+def _plan_following_text_shift(runs: list[dict], paragraph: list[dict],
+                               old_bounds: tuple, new_bounds: tuple,
+                               page_box: tuple) -> tuple[list[dict], float]:
+    """Make room for extra lines by moving the subsequent text flow together."""
+    others = [run for run in runs if run not in paragraph]
+    if not any(_overlap(run['bounds'], new_bounds) > 0 for run in others):
+        return [], 0.0
+    # A same-row column or a heading above the paragraph is not part of its flow.
+    following = [run for run in others if run['bounds'][3] <= old_bounds[1] + 0.5]
+    fixed = [run for run in others if run not in following]
+    if any(_overlap(run['bounds'], new_bounds) > 0 for run in fixed):
+        raise ProcessingError('Replacement would cover text outside this paragraph flow')
+    if not following:
+        raise ProcessingError('No following text can be moved to make room')
+    shift = max(0.0, old_bounds[1] - new_bounds[1])
+    if shift <= 0:
+        raise ProcessingError('Replacement would cover text outside this paragraph flow')
+    if any(run['bounds'][1] - shift < page_box[1] + 2 for run in following):
+        raise ProcessingError('Following text cannot fit on this page after reflow')
+    for run in following:
+        moved = (run['bounds'][0], run['bounds'][1] - shift,
+                 run['bounds'][2], run['bounds'][3] - shift)
+        if _overlap(moved, new_bounds) > 0 or any(
+                _overlap(moved, fixed_run['bounds']) > 0 for fixed_run in fixed):
+            raise ProcessingError('Following text cannot be moved without covering other text')
+    return following, shift
+
+
 def _links(page: pymupdf.Page) -> list[dict]:
     return [{key: str(value) for key, value in link.items() if key not in ('xref', 'id')}
             for link in page.get_links()]
@@ -412,9 +447,14 @@ def replace_paragraph_trial(path: Path, page_index: int, span_index: int,
             if (new_bounds[0] < page_box[0] + 2 or new_bounds[1] < page_box[1] + 2 or
                     new_bounds[2] > page_box[2] - 2 or new_bounds[3] > page_box[3] - 2):
                 raise ProcessingError('Replacement paragraph would leave the page')
-            if any(_overlap(run['bounds'], new_bounds) > 0 for run in runs if run not in paragraph):
-                raise ProcessingError('Replacement paragraph would overlap another text object')
-            combined = _rect_union([bounds, new_bounds])
+            following, shift = _plan_following_text_shift(
+                runs, paragraph, bounds, new_bounds, page_box)
+            if following and _has_untracked_text(raw, page, runs):
+                raise ProcessingError('Page has unsupported text objects; following text cannot be reflowed safely')
+            combined = _rect_union([bounds, new_bounds] + [
+                (run['bounds'][0], run['bounds'][1] - shift,
+                 run['bounds'][2], run['bounds'][3]) for run in following] +
+                [run['bounds'] for run in following])
             _check_visual_obstacles(source, page_index, combined, page_height)
             if (combined[2] - combined[0]) * (combined[3] - combined[1]) > page_width * page_height * .5:
                 raise ProcessingError('Paragraph trial region is too large')
@@ -424,6 +464,12 @@ def replace_paragraph_trial(path: Path, page_index: int, span_index: int,
                 if not obj or not raw.FPDFPage_RemoveObject(page.raw, obj):
                     raise ProcessingError('PDFium could not remove the old paragraph object')
                 raw.FPDFPageObj_Destroy(obj)
+            for run in following:
+                matrix = run['matrix']
+                if not raw.FPDFPageObj_SetMatrix(run['handle'], raw.FS_MATRIX(
+                        matrix.a, matrix.b, matrix.c, matrix.d,
+                        matrix.e, matrix.f - shift)):
+                    raise ProcessingError('PDFium could not move following text')
             insert_at = min(old_indexes)
             for item in tuple(created):
                 handle = item[0]
@@ -449,4 +495,6 @@ def replace_paragraph_trial(path: Path, page_index: int, span_index: int,
     validate_pdf(path, page_count)
     return {'edit_method': 'native-content-edit', 'engine': 'pdfium-object-edit',
             'font_substituted': font_substituted, 'font_name': font_name,
-            'line_count': len(lines), 'edit_region': list(region)}
+            'line_count': len(lines), 'edit_region': list(region),
+            'following_text_shift': round(shift, 2),
+            'following_text_objects_moved': len(following)}

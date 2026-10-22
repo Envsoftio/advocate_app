@@ -322,10 +322,16 @@ def assert_acceptance(report: dict) -> None:
         assert result['size_ratio'] <= budgets['max_size_ratio'], result
         expected_rewrites = 0 if preset == 'lossless' else len(PAGE_NAMES)
         assert result['images_rewritten'] == expected_rewrites, result
-        assert result['changed'] is (preset != 'lossless'), result
-        if preset == 'lossless':
+        # MuPDF can save a few bytes in lossless PDF metadata serialization.
+        # Assert the actual size/result contract, not an incidental byte count.
+        assert result['changed'] is (result['after_bytes'] < result['before_bytes']), result
+        if preset != 'lossless':
+            assert result['changed'], result
+        if not result['changed']:
             assert result['after_bytes'] == result['before_bytes'], result
             assert result['message'] == 'No smaller result; working copy retained.'
+        else:
+            assert result['message'] == 'Compressed working copy; review visual quality.'
         for name, metrics in result['pages'].items():
             budget = budgets[name]
             for key, minimum in budget.items():

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { FilePlus2, Files, Replace, Crop, Download, Scissors, Minimize2, ArrowRight } from 'lucide-vue-next'
-import { api, downloadPageOutput } from '../lib/api'
+import { api, ApiError, downloadPageOutput } from '../lib/api'
 import { friendlyError } from '../lib/format'
 import { confirmSignatureTransformation } from '../lib/signatures'
 import type { Job, MatterDocument } from '../lib/types'
+import PageCropPreview from './PageCropPreview.vue'
+import PageTransferPreview from './PageTransferPreview.vue'
 
 const props = defineProps<{ document: MatterDocument, documents: MatterDocument[], disabled: boolean, expanded?: boolean, job?: Job | null }>()
 const emit = defineEmits<{ modified: [], jobStarted: [job: Job], cancel: [] }>()
@@ -13,7 +15,7 @@ const tasks = [
   {id:'append', title:'Combine PDFs', description:'Add another PDF at the end.', detail:'Copy every page from another document onto the end of this working PDF. The source document stays in the matter.', icon:Files},
   {id:'replace', title:'Replace pages', description:'Swap selected pages for corrected ones.', detail:'Choose the same number of source and target pages. They are replaced in the order you enter them.', icon:Replace},
   {id:'replaceDocument', title:'Replace whole PDF', description:'Use another document as this working copy.', detail:'Every working page in this document will be replaced. Its matter details and imported original stay unchanged.', icon:Replace},
-  {id:'crop', title:'Crop margins', description:'Keep a smaller area of the page.', detail:'Set the edges of the area to keep, measured from the top-left corner. This changes the visible page area; it does not securely remove hidden content.', icon:Crop},
+  {id:'crop', title:'Crop margins', description:'Keep a smaller area of the page.', detail:'Preview the area to keep on the actual PDF. Edge percentages start at the unrotated page’s top-left corner. Cropping changes the visible page area; it does not securely remove hidden content.', icon:Crop},
   {id:'extract', title:'Save selected pages', description:'Create a separate PDF from a selection.', detail:'Choose the pages to copy into a new PDF. This document and the matter remain unchanged.', icon:Download},
   {id:'split', title:'Split into PDFs', description:'Divide a PDF into separate files.', detail:'Enter the pages after which to start a new file. The resulting PDFs are saved together in a ZIP; this document stays unchanged.', icon:Scissors},
   {id:'compress', title:'Reduce file size', description:'Clean up or compress this working PDF.', detail:'Choose how much image quality to retain. A smaller result becomes the working copy; a larger result is discarded.', icon:Minimize2},
@@ -54,9 +56,39 @@ const cropRange = ref('1')
 const extractRange = ref('1')
 const splitAfter = ref('1')
 const crop = ref({ left: 0, top: 0, right: 100, bottom: 100 })
+const cropPreviewReady = ref(false)
+const cropPages = computed(() => {
+  try { return [...new Set(parsePages(cropRange.value, props.document.page_count))].map(index => index + 1) }
+  catch { return [] }
+})
 const working = ref(false)
 const error = ref('')
 const source = computed(() => props.documents.find(item => item.id === sourceId.value))
+const transferPreviewReady = ref(false)
+const transferPreview = computed(() => {
+  if (!source.value || !needsSource.value) return null
+  try {
+    const operation = task.value as 'insert' | 'append' | 'replace' | 'replaceDocument'
+    const sourcePages = operation === 'append' || operation === 'replaceDocument'
+      ? Array.from({length:source.value.page_count}, (_,index)=>index)
+      : parsePages(sourceRange.value, source.value.page_count)
+    const targetPages = operation === 'replace' ? parsePages(targetRange.value, props.document.page_count) : []
+    if (operation === 'replace' && (sourcePages.length !== targetPages.length || new Set(targetPages).size !== targetPages.length)) return null
+    if (operation === 'replaceDocument' && source.value.id === props.document.id) return null
+    if (operation === 'insert') {
+      const position = insertionSide.value === 'before' ? beforePage.value : afterPage.value
+      const maximum = insertionSide.value === 'before' ? props.document.page_count + 1 : props.document.page_count
+      if (!Number.isInteger(position) || position < 1 || position > maximum) return null
+    }
+    const beforeIndex = operation === 'append' ? props.document.page_count
+      : insertionSide.value === 'before' ? beforePage.value - 1 : afterPage.value
+    if ((operation === 'insert' || operation === 'append') && (!Number.isInteger(beforeIndex) || beforeIndex < 0 || beforeIndex > props.document.page_count)) return null
+    return {operation, sourcePages, targetPages, beforeIndex}
+  } catch { return null }
+})
+watch(() => [props.document.id, props.document.revision, source.value?.id, source.value?.revision,
+  task.value, sourceRange.value, targetRange.value, insertionSide.value, beforePage.value, afterPage.value],
+  () => {transferPreviewReady.value=false})
 watch(() => props.document.id, () => {
   task.value = 'insert'
   insertionSide.value = 'before'
@@ -103,6 +135,7 @@ async function run(action: 'insert' | 'insertAfter' | 'replace' | 'replaceDocume
       payload = { pages: parsePages(cropRange.value, props.document.page_count),
         left: crop.value.left / 100, top: crop.value.top / 100,
         right: crop.value.right / 100, bottom: crop.value.bottom / 100,
+        expected_revision: props.document.revision,
         acknowledge_signature_risk: signature.acknowledged }
     } else {
       if (!source.value) throw new Error('Choose a source document in this matter.')
@@ -113,10 +146,12 @@ async function run(action: 'insert' | 'insertAfter' | 'replace' | 'replaceDocume
         : action === 'replaceDocument' ? [] : parsePages(sourceRange.value, source.value.page_count)
       if (action === 'replaceDocument') {
         payload = { source_document_id: source.value.id,
+          expected_revision: props.document.revision, expected_source_revision: source.value.revision,
           acknowledge_signature_risk: signature.acknowledged }
       } else if (action === 'replace') {
         payload = { source_document_id: source.value.id, source_pages: sourcePages,
           target_pages: parsePages(targetRange.value, props.document.page_count),
+          expected_revision: props.document.revision, expected_source_revision: source.value.revision,
           acknowledge_signature_risk: signature.acknowledged }
       } else {
         operation = 'insert'
@@ -127,6 +162,7 @@ async function run(action: 'insert' | 'insertAfter' | 'replace' | 'replaceDocume
         if (!Number.isInteger(before) || before < 1 || before > props.document.page_count + 1)
           throw new Error(`Insert before page 1 to ${props.document.page_count + 1}.`)
         payload = { source_document_id: source.value.id, source_pages: sourcePages,
+          expected_revision: props.document.revision, expected_source_revision: source.value.revision,
           before_index: before - 1, acknowledge_signature_risk: signature.acknowledged }
       }
     }
@@ -134,8 +170,14 @@ async function run(action: 'insert' | 'insertAfter' | 'replace' | 'replaceDocume
       : `/documents/${props.document.id}/pages/${operation}`, 'POST', payload)
     notice.value = 'Working copy updated. Review the PDF; use matter Undo if needed.'
     emit('modified')
-  } catch (err) { error.value = friendlyError(err) }
-  finally { working.value = false }
+  } catch (err) {
+    error.value = friendlyError(err)
+    if (err instanceof ApiError && err.status === 409 && /revision changed/i.test(err.message)) {
+      transferPreviewReady.value = false
+      error.value += ' Refreshing the preview; review it before trying again.'
+      emit('modified')
+    }
+  } finally { working.value = false }
 }
 async function savePages(operation: 'extract' | 'split') {
   if (props.disabled || working.value) return
@@ -154,7 +196,7 @@ async function savePages(operation: 'extract' | 'split') {
   } catch (err) { error.value = friendlyError(err) }
   finally { working.value = false }
 }
-const selection = computed(() => {
+const inputSelection = computed(() => {
   try {
     const count = props.document.page_count
     if (needsSource.value && !source.value) return {valid:false, message:'Choose the document to copy pages from.'}
@@ -171,7 +213,10 @@ const selection = computed(() => {
       if (!Number.isInteger(position) || position < 1 || position > maximum) throw new Error(`Choose a position from 1 to ${maximum}.`)
       return {valid:true, message:`Copy ${pages.length} page(s) from “${source.value!.title}” ${insertionSide.value} page ${position}. This PDF will have ${count + pages.length} pages.`}
     }
-    if (task.value === 'append') return {valid:true, message:`Add all ${source.value!.page_count} pages of “${source.value!.title}” at the end. This PDF will have ${count + source.value!.page_count} pages.`}
+    if (task.value === 'append') {
+      if (source.value!.page_count > 2000) throw new Error('Combine supports up to 2,000 source pages per action. Use Add pages for separate ranges.')
+      return {valid:true, message:`Add all ${source.value!.page_count} pages of “${source.value!.title}” at the end. This PDF will have ${count + source.value!.page_count} pages.`}
+    }
     if (task.value === 'replaceDocument') {
       if (sourceId.value === props.document.id) throw new Error('Choose a different document as the replacement.')
       return {valid:true, message:`Replace all ${count} working pages with the ${source.value!.page_count} pages of “${source.value!.title}”.`}
@@ -180,6 +225,7 @@ const selection = computed(() => {
       const pages = parsePages(cropRange.value, count)
       const {left,top,right,bottom} = crop.value
       if (![left,top,right,bottom].every(value => Number.isFinite(value) && value >= 0 && value <= 100) || left >= right || top >= bottom) throw new Error('The right edge must be after the left edge, and the bottom edge below the top edge (0–100%).')
+      if (!cropPreviewReady.value) return {valid:false, message:'Wait for the selected source page to render before applying its crop.'}
       return {valid:true, message:`Crop ${pages.length} page(s), keeping ${right-left}% of the width and ${bottom-top}% of the height.`}
     }
     if (task.value === 'extract') {
@@ -194,6 +240,10 @@ const selection = computed(() => {
     }
     return {valid:true, message:compressionPreset.value === 'lossless' ? 'Clean up this PDF while retaining image quality. The file may not become smaller.' : 'Compress images in this working PDF. Review small text and seals afterward.'}
   } catch (err) { return {valid:false, message:friendlyError(err)} }
+})
+const selection = computed(() => {
+  if (!inputSelection.value.valid || !needsSource.value || transferPreviewReady.value) return inputSelection.value
+  return {valid:false, message:'Wait for the actual source and destination pages to render before applying this change.'}
 })
 const actionLabel = computed(() => ({insert:'Add selected pages',append:'Combine documents',replace:'Replace selected pages',replaceDocument:'Replace entire working document',crop:'Crop selected pages',extract:'Save extracted PDF',split:'Save split ZIP',compress:'Compress working PDF'})[task.value])
 function applyTask() {
@@ -231,9 +281,10 @@ function applyTask() {
           <label v-else class="field">Insert after page<input v-model.number="afterPage" type="number" min="1" :max="document.page_count" :disabled="disabled || working"/></label>
         </template>
         <label v-if="task==='replace'" class="field">Target pages to replace<input v-model="targetRange" placeholder="1,3-5" :disabled="disabled || working"/><small>Pages in {{document.title}} · Choose as many pages as the source selection.</small></label>
+        <PageTransferPreview v-if="needsSource && source && transferPreview" :document="document" :source="source" v-bind="transferPreview" :disabled="disabled || working" @ready="transferPreviewReady=$event"/>
         <template v-if="task==='crop'">
           <label class="field">Pages to crop<input v-model="cropRange" placeholder="1,3-5" :disabled="disabled || working"/></label>
-          <div class="crop-explainer"><svg viewBox="0 0 100 120" role="img" aria-label="Diagram of the area to keep, not a document preview"><rect x="1" y="1" width="98" height="118" fill="var(--surface-soft)" stroke="var(--border)"/><rect v-if="selection.valid" :x="crop.left" :y="crop.top*1.2" :width="crop.right-crop.left" :height="(crop.bottom-crop.top)*1.2" fill="#3985da33" stroke="#3985da" stroke-dasharray="3 2"/></svg><p><strong>Blue area = keep</strong><br/>Left/top are where the kept area starts. Right/bottom are where it ends.<br/>Example: left 10%, right 90% trims 10% from each side. Diagram only; review the PDF after applying.</p></div>
+          <PageCropPreview v-model="crop" :document="document" :pages="cropPages" :disabled="disabled || working" @ready="cropPreviewReady=$event"/>
           <div class="crop-grid"><label v-for="edge in (['left','top','right','bottom'] as const)" :key="edge">{{edge}} %<input v-model.number="crop[edge]" type="number" min="0" max="100" :disabled="disabled || working"/></label></div>
         </template>
         <label v-if="task==='extract'" class="field">Pages to extract<input v-model="extractRange" placeholder="1,3-5" :disabled="disabled || working"/></label>

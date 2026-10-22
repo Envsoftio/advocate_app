@@ -8,9 +8,10 @@ in the build environment and stops with an installation instruction if it
 cannot. On another Mac or Windows machine, install the backend requirements
 for that platform and build its matching sidecar there; the development
 machine's installed runtime is not needed on a machine running the bundled
-app. The Vue editor offers **PDFium paragraph trial** as an
-explicit alternative to the current PyMuPDF fit-and-redraw method. A missing
-runtime or `COURTBUNDLE_ENABLE_PDFIUM_TRIAL=0` hides that choice. No external
+app. The Vue editor offers **Edit whole paragraph** after selecting a text run,
+when the trial is available. This explicitly previews and replaces the detected
+paragraph; normal Edit text changes only the selected run. A missing runtime or
+`COURTBUNDLE_ENABLE_PDFIUM_TRIAL=0` hides the paragraph action. No external
 worker, Node process, cloud service or separate document writer is required.
 
 This is an independent Python adaptation of the PDFium object-edit approach
@@ -43,10 +44,20 @@ pixels and invisible OCR layers are not edited. The trial also rejects a
 paragraph whose old or proposed area intersects an image, drawing, link,
 widget or annotation.
 
+When replacement lines need more room, the trial now moves all following
+upright text objects down by the added paragraph height, preserving their
+relative spacing. It checks that the moved text stays on the page and does
+not cover fixed text, images, drawings, links, widgets or annotations. A
+multi-column page, non-text content in the affected region or insufficient
+space at the bottom still fails without publishing a revision. This is
+bounded same-page text reflow, not general document layout or page insertion.
+The standard single-run editor handles explicit line breaks in clear space
+without PDFium.
+
 The candidate is reopened before publication. The backend checks page count,
 geometry, bookmarks, metadata, links, annotation counts, form values,
 attachments, other-page text, requested extraction, extracted words and
-rendered pixels outside the declared paragraph region. These are conservative
+rendered pixels outside the declared paragraph and shifted-text region. These are conservative
 checks for a bounded trial, not proof of font fidelity, arbitrary PDF safety,
 signature validity or secure redaction. Imported originals remain unchanged;
 Undo restores the prior working revision. Python remains authoritative for

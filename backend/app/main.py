@@ -12,7 +12,7 @@ import tempfile
 from datetime import datetime
 from urllib.parse import unquote
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
@@ -20,18 +20,19 @@ from starlette.datastructures import UploadFile as ParsedUploadFile
 import pymupdf
 
 from .engine import (load_profiles, preflight, build_bundle, bundle_preview,
-                     volume_plan, volume_rows, bates_page_labels, annexure_mode)
+                     volume_plan, volume_rows, bates_page_labels, annexure_mode,
+                     apply_page_annotations)
 from .jobs import JobManager
 from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reorder_pages,
-                      rotate_page, delete_page, insert_pages, replace_pages, replace_document, crop_pages,
+                      rotate_page, delete_page, batch_page_operation, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
-                      replace_text_run, move_text_run, permanently_redact_region, compress_pdf,
+                      replace_text_run, move_text_run, permanently_redact_region, redaction_restore_footprint, restore_redacted_region, compress_pdf,
                       ocr_pdf, ocr_provenance, make_cover_pdf, preview_output_marks,
                       validate_overlay_image, insert_working_image)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
 from .storage import Store, new_id, utcnow
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
-from .schemas import CompressionRequest
+from .schemas import BatchPageOperation, CompressionRequest, ReaderPosition, READER_KEY_PATTERN
 from .portable import (create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES,
                        PROTECTED_PACKAGE_MAGIC, protected_package_header,
                        parse_protected_package_stream)
@@ -41,6 +42,7 @@ from .labels import propose_labels, extract_label_references
 from .signatures import (combined_signature_status, inspect_source_signature,
                          risk_summary, transformation_risk)
 from .paragraph_trial import replace_paragraph_trial, preview_paragraph_trial, trial_status
+from .pdf_stream import pdf_stream_response
 
 FILE_LIMIT_BYTES = 80 * 1024 * 1024
 OVERLAY_IMAGE_LIMIT_BYTES = 10 * 1024 * 1024
@@ -129,8 +131,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         allowed_origins.append(f'http://127.0.0.1:{port}')
     app.add_middleware(CORSMiddleware,
                        allow_origins=allowed_origins,
-                       allow_methods=['GET','POST','PUT','PATCH','DELETE'],
-                       allow_headers=['Authorization','Content-Type', 'X-CourtBundle-Filename',
+                       allow_methods=['GET','HEAD','POST','PUT','PATCH','DELETE'],
+                       expose_headers=['Accept-Ranges', 'Content-Range', 'Content-Length'],
+                       allow_headers=['Authorization','Content-Type', 'Range', 'If-Range', 'X-CourtBundle-Filename',
                                       'X-CourtBundle-File-Mtime', 'X-CourtBundle-Pdf-Password',
                                       'X-CourtBundle-Signature-Acknowledge',
                                       'X-CourtBundle-Backup-Credential', 'X-CourtBundle-Backup-Recovery',
@@ -887,7 +890,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                          target_revision=expected_revision, kind='image', rect_x=rect_x,
                          rect_y=rect_y, rect_width=rect_width, rect_height=rect_height,
                          body='', color='yellow', asset_relpath=rel,
-                         asset_mime='image/png' if filetype == 'png' else 'image/jpeg')
+                         asset_mime='image/png' if filetype == 'png' else 'image/jpeg',
+                         output_scope='pdf')
             try:
                 with store.matter_lock(doc['matter_id']):
                     return store.create_page_annotation(doc['matter_id'], entry)
@@ -910,7 +914,21 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         doc = doc_or_404(annotation['document_id'])
         if payload.expected_revision != annotation['target_revision'] or doc['revision'] != payload.expected_revision:
             raise HTTPException(status_code=409, detail='Document changed; this annotation needs review')
-        changes = payload.model_dump(exclude={'expected_revision'})
+        changes = payload.model_dump(exclude={'expected_revision'}, exclude_none=True)
+        scope = changes.get('output_scope', annotation['output_scope'])
+        if annotation['kind'] in ('highlight', 'comment') and scope != 'private':
+            raise HTTPException(status_code=422, detail='Review highlights and comments must remain private')
+        if annotation['kind'] == 'redaction' and scope != 'pdf':
+            raise HTTPException(status_code=422, detail='Redaction marks must be included in PDF output')
+        if annotation['kind'] == 'draw' and not valid_draw_body(payload.body):
+            raise HTTPException(status_code=422, detail='Draw marks require a bounded point path')
+        if annotation['kind'] == 'date' and not valid_date_mark(payload.body):
+            raise HTTPException(status_code=422, detail='Date marks require a valid YYYY-MM-DD date')
+        if annotation['kind'] == 'text' and (not payload.body.strip() or any(
+                ord(char) < 32 and char != '\n' or ord(char) > 126 for char in payload.body)):
+            raise HTTPException(status_code=422, detail='Text marks require printable ASCII text')
+        if annotation['kind'] == 'redaction' and payload.body:
+            raise HTTPException(status_code=422, detail='Redaction marks cannot contain text')
         try:
             with store.matter_lock(annotation['matter_id']):
                 return store.update_page_annotation(annotation_id, changes)
@@ -975,17 +993,45 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         # Intentionally preserve originals and working copies for safe recovery.
         return {'status': 'archived', 'files_retained': True}
 
-    @app.get('/documents/{doc_id}/pdf')
-    def document_pdf(doc_id: str, revision: int | None = None, _: None = Depends(auth)):
+    @app.api_route('/documents/{doc_id}/pdf', methods=['GET', 'HEAD'])
+    def document_pdf(doc_id: str, request: Request, revision: int | None = None,
+                     editable: bool = False, acknowledge_signature_risk: bool = False,
+                     _: None = Depends(auth)):
         doc = doc_or_404(doc_id)
         if revision is not None and revision != doc['revision']:
             raise HTTPException(status_code=409, detail='Working PDF revision changed; reload the document')
         path = store.working_path(doc)
         if not path.is_file():
             raise HTTPException(status_code=404, detail='PDF working copy missing')
-        response = file_response(path, 'application/pdf', doc['id'] + '.pdf')
-        response.headers['Cache-Control'] = 'no-store'
-        return response
+        if editable:
+            annotations = [item for item in store.list_page_annotations(doc['matter_id'])
+                           if item['document_id'] == doc_id and item['output_scope'] == 'pdf']
+            if any(not item['resolved'] and item['kind'] != 'image' for item in annotations):
+                raise HTTPException(status_code=409, detail='Editable PDF marks need review after the working PDF changed; resolve or remove them before saving')
+            annotations = [item for item in annotations if item['resolved']]
+            if annotations:
+                require_signature_acknowledgement([doc], acknowledge_signature_risk,
+                                                  'saving an edited PDF copy')
+                for item in annotations:
+                    if item['kind'] == 'image':
+                        item['_asset_path'] = str(store.matter_dir(doc['matter_id']) / item['asset_relpath'])
+                try:
+                    with open_pdf(path) as source:
+                        with pymupdf.open(stream=source.tobytes(), filetype='pdf') as output:
+                            summary = apply_page_annotations(output, annotations, {doc_id: 0})
+                            if summary['redactions_applied']:
+                                with pymupdf.open() as clean:
+                                    clean.insert_pdf(output, annots=False, links=False, widgets=False)
+                                    content = clean.tobytes(garbage=4, deflate=True)
+                            else:
+                                content = output.tobytes(garbage=4, deflate=True)
+                    return Response(content=content, media_type='application/pdf', headers={
+                        'Cache-Control': 'no-store',
+                        'Content-Disposition': f'attachment; filename="{doc_id}.pdf"',
+                    })
+                except (ProcessingError, RuntimeError, ValueError) as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return pdf_stream_response(path, request, doc['id'] + '.pdf', store._data_key)
 
     @app.get('/documents/{doc_id}/thumbnail')
     def document_thumbnail(doc_id: str, revision: int, _: None = Depends(auth)):
@@ -1005,23 +1051,60 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=422, detail=f'Cannot preview working PDF: {exc}') from exc
         return Response(data, media_type='image/png', headers={'Cache-Control': 'no-store'})
 
+    def reader_position_owner(key: str):
+        parts = key.split(':')
+        if parts[0] == 'export':
+            matter_or_404(parts[1])
+            return parts[1], None
+        document = doc_or_404(parts[0])
+        if document['revision'] != int(parts[1]):
+            raise HTTPException(status_code=409, detail='Reading position belongs to an earlier working revision')
+        return document['matter_id'], document['page_count']
+
+    @app.get('/reader-position')
+    def read_position(key: str = Query(max_length=200, pattern=READER_KEY_PATTERN), _: None = Depends(auth)):
+        reader_position_owner(key)
+        return store.reader_position(key)
+
+    @app.put('/reader-position')
+    def save_position(payload: ReaderPosition, _: None = Depends(auth)):
+        matter_id, page_count = reader_position_owner(payload.key)
+        if page_count is not None and payload.page > page_count:
+            raise HTTPException(status_code=422, detail='Reading page is outside this working PDF')
+        state = payload.model_dump(exclude={'key'})
+        store.save_reader_position(payload.key, matter_id, state)
+        return state
+
     def edit_working_copy(doc_id: str, operation, acknowledged: bool = False,
                           related_document_ids: list[str] | None = None,
-                          preserve_page_annotations: bool = False):
+                          preserve_page_annotations: bool = False,
+                          expected_revision: int | None = None,
+                          expected_source_revision: int | None = None,
+                          on_committed=None, changes_page_structure: bool = False):
         doc = doc_or_404(doc_id)
         with store.matter_lock(doc['matter_id']):
             doc = doc_or_404(doc_id)
+            if expected_revision is not None and doc['revision'] != expected_revision:
+                raise HTTPException(status_code=409, detail='Working PDF revision changed; reload the document')
             related = [doc_or_404(item) for item in (related_document_ids or [])]
             if any(item['matter_id'] != doc['matter_id'] for item in related):
                 raise HTTPException(status_code=422, detail='Source must be in the same matter')
+            if expected_source_revision is not None and any(item['revision'] != expected_source_revision for item in related):
+                raise HTTPException(status_code=409, detail='Source PDF revision changed; reopen the page preview')
             require_signature_acknowledgement([doc, *related], acknowledged,
                                               'transforming this working copy')
             rel, candidate = store.next_working_path(doc)
             try:
                 copy_file(store.working_path(doc), candidate)
                 changes = operation(candidate, doc) or {}
-                return store.update_document(doc_id, dict(changes, working_relpath=rel),
-                                             preserve_page_annotations=preserve_page_annotations)
+                result = store.update_document(doc_id, dict(changes, working_relpath=rel),
+                                               preserve_page_annotations=preserve_page_annotations,
+                                               preserve_pdf_marks=not changes_page_structure)
+                if on_committed is not None:
+                    on_committed(result)
+                if changes_page_structure:
+                    store.invalidate_redaction_geometry(doc_id)
+                return result
             except BaseException:
                 store.discard_uncommitted_working(doc_id, rel, candidate)
                 raise
@@ -1031,7 +1114,18 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         try:
             return edit_working_copy(doc_id, lambda path, doc: {
                 'page_count': reorder_pages(path, payload.order), 'ocr_status': 'modified'},
-                payload.acknowledge_signature_risk)
+                payload.acknowledge_signature_risk, expected_revision=payload.expected_revision,
+                changes_page_structure=True)
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/batch')
+    def page_batch(doc_id: str, payload: BatchPageOperation, _: None = Depends(auth)):
+        try:
+            return edit_working_copy(doc_id, lambda path, doc: {
+                'page_count': batch_page_operation(path, payload.pages, payload.operation, payload.degrees),
+                'ocr_status': 'modified'}, payload.acknowledge_signature_risk,
+                expected_revision=payload.expected_revision, changes_page_structure=True)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1041,7 +1135,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             def rotate(path, doc):
                 rotate_page(path, payload.page_index, payload.degrees)
                 return {'page_count': doc['page_count']}
-            return edit_working_copy(doc_id, rotate, payload.acknowledge_signature_risk)
+            return edit_working_copy(doc_id, rotate, payload.acknowledge_signature_risk,
+                                     expected_revision=payload.expected_revision,
+                                     changes_page_structure=True)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1050,7 +1146,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         try:
             return edit_working_copy(doc_id, lambda path, doc: {
                 'page_count': delete_page(path, payload.page_index)},
-                payload.acknowledge_signature_risk)
+                payload.acknowledge_signature_risk, expected_revision=payload.expected_revision,
+                changes_page_structure=True)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1067,7 +1164,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 'page_count': insert_pages(path, source_for_edit(doc, payload.source_document_id),
                                            payload.source_pages, payload.before_index),
                 'ocr_status': 'modified'}, payload.acknowledge_signature_risk,
-                [payload.source_document_id])
+                [payload.source_document_id], expected_revision=payload.expected_revision,
+                expected_source_revision=payload.expected_source_revision,
+                changes_page_structure=True)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1078,7 +1177,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 'page_count': replace_pages(path, source_for_edit(doc, payload.source_document_id),
                                             payload.target_pages, payload.source_pages),
                 'ocr_status': 'modified'}, payload.acknowledge_signature_risk,
-                [payload.source_document_id])
+                [payload.source_document_id], expected_revision=payload.expected_revision,
+                expected_source_revision=payload.expected_source_revision,
+                changes_page_structure=True)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1092,7 +1193,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                     path, source_for_edit(doc, payload.source_document_id)),
                     'ocr_status': 'modified'}
             return edit_working_copy(doc_id, replace, payload.acknowledge_signature_risk,
-                                     [payload.source_document_id])
+                                     [payload.source_document_id], expected_revision=payload.expected_revision,
+                                     expected_source_revision=payload.expected_source_revision,
+                                     changes_page_structure=True)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1102,7 +1205,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             return edit_working_copy(doc_id, lambda path, doc: {
                 'page_count': crop_pages(path, payload.pages, payload.left, payload.top,
                                          payload.right, payload.bottom),
-                'ocr_status': 'modified'}, payload.acknowledge_signature_risk)
+                'ocr_status': 'modified'}, payload.acknowledge_signature_risk,
+                expected_revision=payload.expected_revision, changes_page_structure=True)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1273,7 +1377,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 if doc['revision'] != payload.expected_revision:
                     raise HTTPException(status_code=409, detail='Document changed; reload and select text again')
                 move_text_run(path, payload.page_index, payload.span_index,
-                              payload.expected_text, payload.vertical_offset)
+                              payload.expected_text, payload.vertical_offset,
+                              payload.horizontal_offset)
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
             return dict(edit_working_copy(doc_id, move, payload.acknowledge_signature_risk),
                         edit_method='remove-and-redraw')
@@ -1286,17 +1391,81 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post('/documents/{doc_id}/pages/redact')
-    def page_redact(doc_id: str, payload: PermanentRedaction, _: None = Depends(auth)):
+    def page_redact(doc_id: str, payload: PermanentRedaction, request: Request,
+                    _: None = Depends(auth)):
         try:
+            restore_area = None
             def redact(path, doc):
-                if doc['revision'] != payload.expected_revision:
-                    raise HTTPException(status_code=409, detail='Document changed; mark the region again')
+                nonlocal restore_area
+                restore_area = redaction_restore_footprint(path, payload.page_index,
+                    payload.rect_x, payload.rect_y, payload.rect_width, payload.rect_height)
                 result = permanently_redact_region(path, payload.page_index,
                                                    payload.rect_x, payload.rect_y,
                                                    payload.rect_width, payload.rect_height)
                 return {'page_count': result['page_count'], 'ocr_status': 'modified'}
-            return edit_working_copy(doc_id, redact, payload.acknowledge_signature_risk)
+            return edit_working_copy(doc_id, redact, payload.acknowledge_signature_risk,
+                                     expected_revision=payload.expected_revision,
+                                     on_committed=lambda result: store.record_redaction(
+                                         result, payload.page_index,
+                                         (payload.rect_x, payload.rect_y, payload.rect_width, payload.rect_height),
+                                         restore_area,
+                                         payload.expected_revision))
+        except HTTPException as exc:
+            review = text_edit_review_response(exc, request, payload.acknowledge_signature_risk)
+            if review is not None:
+                return review
+            raise
         except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get('/documents/{doc_id}/pages/redactions')
+    def list_document_redactions(doc_id: str, _: None = Depends(auth)):
+        doc_or_404(doc_id)
+        return store.list_redactions(doc_id)
+
+    @app.post('/documents/{doc_id}/pages/redactions/{redaction_id}/remove')
+    def remove_document_redaction(doc_id: str, redaction_id: str, payload: RestoreRedaction,
+                                  request: Request, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        record = store.get_redaction(doc_id, redaction_id)
+        if record is None or not record['active']:
+            raise HTTPException(status_code=404, detail='Applied redaction not found')
+        if record['structure_changed']:
+            raise HTTPException(status_code=422, detail='Page structure changed after this redaction; selective restoration cannot preserve later page edits safely')
+        if doc['revision'] != payload.expected_revision:
+            raise HTTPException(status_code=409, detail='Working PDF revision changed; reload the document')
+        try:
+            before = store.redaction_source_path(doc, record['before_revision'])
+            if not before.is_file():
+                raise ProcessingError('The private working revision needed to restore this area is missing')
+            for item in store.list_redactions(doc_id, active_only=False):
+                if (item['id'] == redaction_id or item['active'] or
+                        item['page_index'] != record['page_index'] or
+                        item['after_revision'] >= record['after_revision']):
+                    continue
+                if (item['rect_x'] < record['restore_x'] + record['restore_width'] and
+                        item['rect_x'] + item['rect_width'] > record['restore_x'] and
+                        item['rect_y'] < record['restore_y'] + record['restore_height'] and
+                        item['rect_y'] + item['rect_height'] > record['restore_y']):
+                    raise ProcessingError('An earlier overlapping redaction was already removed; this area cannot be restored selectively without changing that content')
+            later = [item for item in store.list_redactions(doc_id)
+                     if item['page_index'] == record['page_index'] and
+                     item['after_revision'] > record['after_revision'] and item['id'] != redaction_id]
+            def restore(path, _doc):
+                restore_redacted_region(path, before, record['page_index'],
+                                        record['restore_x'], record['restore_y'],
+                                        record['restore_width'], record['restore_height'], later)
+                return {'ocr_status': 'modified'}
+            return edit_working_copy(doc_id, restore, payload.acknowledge_signature_risk,
+                                     expected_revision=payload.expected_revision,
+                                     on_committed=lambda result: store.mark_redaction_removed(
+                                         doc_id, redaction_id, result['revision']))
+        except HTTPException as exc:
+            review = text_edit_review_response(exc, request, payload.acknowledge_signature_risk)
+            if review is not None:
+                return review
+            raise
+        except (ProcessingError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     def page_selection(value: str) -> list[int]:
@@ -1494,12 +1663,14 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         matter_or_404(matter_id)
         return store.list_exports(matter_id)
 
-    @app.get('/matters/{matter_id}/exports/{export_id}/{filename}')
-    def export_file(matter_id: str, export_id: str, filename: str, _: None = Depends(auth)):
+    @app.api_route('/matters/{matter_id}/exports/{export_id}/{filename}', methods=['GET', 'HEAD'])
+    def export_file(matter_id: str, export_id: str, filename: str, request: Request, _: None = Depends(auth)):
         matter_or_404(matter_id)
         path = store.get_export_file(matter_id, export_id, filename)
         if not path:
             raise HTTPException(status_code=404, detail='Export file not found')
+        if filename.endswith('.pdf'):
+            return pdf_stream_response(path, request, filename, store._data_key)
         media = 'application/pdf' if filename.endswith('.pdf') else ('application/zip' if filename.endswith('.zip') else 'application/octet-stream')
         return file_response(path, media, filename)
 

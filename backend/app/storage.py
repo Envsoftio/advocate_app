@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 15:
+            if version > 18:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -291,6 +291,90 @@ class Store:
                 con.execute('PRAGMA user_version=14')
             if version < 15:
                 con.execute('PRAGMA user_version=15')
+            con.execute('''CREATE TABLE IF NOT EXISTS reader_positions (
+                resource_key TEXT PRIMARY KEY,
+                matter_id TEXT NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
+                payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
+            )''')
+            if version < 16:
+                con.execute('PRAGMA user_version=16')
+            con.execute('''CREATE TABLE IF NOT EXISTS redaction_records (
+                id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id),
+                page_index INTEGER NOT NULL, rect_x REAL NOT NULL, rect_y REAL NOT NULL,
+                rect_width REAL NOT NULL, rect_height REAL NOT NULL,
+                restore_x REAL NOT NULL, restore_y REAL NOT NULL,
+                restore_width REAL NOT NULL, restore_height REAL NOT NULL,
+                before_revision INTEGER NOT NULL, after_revision INTEGER NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1, removed_revision INTEGER,
+                structure_changed INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )''')
+            con.execute('CREATE INDEX IF NOT EXISTS idx_redactions_document ON redaction_records(document_id,page_index)')
+            if version < 17:
+                con.execute('PRAGMA user_version=17')
+            if version < 18:
+                columns = {row['name'] for row in con.execute('PRAGMA table_info(page_annotations)')}
+                if 'output_scope' not in columns:
+                    con.execute("ALTER TABLE page_annotations ADD COLUMN output_scope TEXT NOT NULL DEFAULT 'private'")
+                con.execute("UPDATE page_annotations SET output_scope='pdf' WHERE kind='image'")
+                con.execute('PRAGMA user_version=18')
+
+    def list_redactions(self, doc_id: str, active_only: bool = True) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute('''SELECT * FROM redaction_records WHERE document_id=?
+                AND (?=0 OR active=1) ORDER BY created_at,id''', (doc_id, int(active_only))).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_redaction(self, doc_id: str, redaction_id: str) -> dict | None:
+        with self.connect() as con:
+            row = con.execute('SELECT * FROM redaction_records WHERE id=? AND document_id=?',
+                              (redaction_id, doc_id)).fetchone()
+        return dict(row) if row else None
+
+    def redaction_source_path(self, doc: dict, revision: int) -> Path:
+        with self.connect() as con:
+            row = con.execute('''SELECT working_relpath FROM document_revisions
+                WHERE document_id=? AND revision=?''', (doc['id'], revision)).fetchone()
+        if row is None:
+            raise ValueError('The working revision needed to restore this redaction is missing')
+        return self.matter_dir(doc['matter_id']) / row['working_relpath']
+
+    def record_redaction(self, doc: dict, page_index: int, region: tuple[float,float,float,float],
+                         restore_region: tuple[float,float,float,float], before_revision: int) -> dict:
+        item = dict(id=new_id(), document_id=doc['id'], page_index=page_index,
+                    rect_x=region[0], rect_y=region[1], rect_width=region[2], rect_height=region[3],
+                    restore_x=restore_region[0], restore_y=restore_region[1],
+                    restore_width=restore_region[2], restore_height=restore_region[3],
+                    before_revision=before_revision, after_revision=doc['revision'],
+                    active=1, removed_revision=None, structure_changed=0, created_at=utcnow())
+        with self.connect() as con:
+            con.execute('INSERT INTO redaction_records (' + ','.join(item) + ') VALUES (' +
+                        ','.join('?' for _ in item) + ')', tuple(item.values()))
+        return item
+
+    def mark_redaction_removed(self, doc_id: str, redaction_id: str, revision: int) -> None:
+        with self.connect() as con:
+            con.execute('''UPDATE redaction_records SET active=0,removed_revision=?
+                WHERE id=? AND document_id=? AND active=1''', (revision, redaction_id, doc_id))
+
+    def invalidate_redaction_geometry(self, doc_id: str) -> None:
+        with self.connect() as con:
+            con.execute('''UPDATE redaction_records SET structure_changed=1
+                WHERE document_id=? AND active=1''', (doc_id,))
+
+    def reader_position(self, key: str) -> dict | None:
+        with self.connect() as con:
+            row = con.execute('SELECT payload_json FROM reader_positions WHERE resource_key=?', (key,)).fetchone()
+        return json.loads(row['payload_json']) if row else None
+
+    def save_reader_position(self, key: str, matter_id: str, state: dict):
+        # Reading does not modify matter/build freshness or create Undo history.
+        with self.connect() as con:
+            con.execute('''INSERT INTO reader_positions VALUES (?,?,?,?)
+                ON CONFLICT(resource_key) DO UPDATE SET payload_json=excluded.payload_json,
+                updated_at=excluded.updated_at''', (key, matter_id, json.dumps(state), utcnow()))
+            con.execute('''DELETE FROM reader_positions WHERE resource_key NOT IN
+                (SELECT resource_key FROM reader_positions ORDER BY updated_at DESC LIMIT 100)''')
 
     def matter_dir(self, matter_id: str) -> Path:
         # Never accept caller-controlled paths. All ids must have been found in DB.
@@ -749,13 +833,13 @@ class Store:
     def _annotation_fields() -> tuple[str, ...]:
         return ('id', 'document_id', 'page_index', 'target_revision', 'kind',
                 'rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color',
-                'asset_relpath', 'asset_mime', 'position')
+                'asset_relpath', 'asset_mime', 'position', 'output_scope')
 
     @classmethod
     def _raw_page_annotations(cls, con, matter_id: str) -> list[dict]:
         fields = cls._annotation_fields()
         rows = con.execute('''SELECT id,document_id,page_index,target_revision,kind,
-            rect_x,rect_y,rect_width,rect_height,body,color,asset_relpath,asset_mime,position
+            rect_x,rect_y,rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope
             FROM page_annotations WHERE matter_id=? ORDER BY position''', (matter_id,)).fetchall()
         return [{key: row[key] for key in fields} for row in rows]
 
@@ -788,8 +872,8 @@ class Store:
         for entry in entries:
             con.execute('''INSERT INTO page_annotations
                 (id,matter_id,document_id,page_index,target_revision,kind,rect_x,rect_y,
-                 rect_width,rect_height,body,color,asset_relpath,asset_mime,position)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                 rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (entry['id'], matter_id, *(entry[key] for key in fields[1:])))
 
     @staticmethod
@@ -832,7 +916,7 @@ class Store:
             self._validate_annotation_document(con, matter_id, merged)
             if merged['kind'] == 'comment' and not merged['body'].strip():
                 raise ValueError('Comments require visible note text')
-            tracked = ('rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color')
+            tracked = ('rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color', 'output_scope')
             if all(current[key] == merged[key] for key in tracked):
                 return self.list_page_annotations(matter_id)
             con.execute('UPDATE page_annotations SET ' + ','.join(f'{key}=?' for key in tracked) +
@@ -972,7 +1056,8 @@ class Store:
         return self.get_document(data['id'])
 
     def update_document(self, doc_id: str, changes: dict, record_history: bool = True,
-                        preserve_page_annotations: bool = False):
+                        preserve_page_annotations: bool = False,
+                        preserve_pdf_marks: bool = False):
         if not changes:
             return self.get_document(doc_id)
         changes = dict(changes)
@@ -991,10 +1076,11 @@ class Store:
             if 'working_relpath' in changes:
                 changes['revision'] = current['revision'] + 1
             annotation_ids = []
-            if preserve_page_annotations and 'working_relpath' in changes:
+            if (preserve_page_annotations or preserve_pdf_marks) and 'working_relpath' in changes:
                 annotation_ids = [row['id'] for row in con.execute('''
-                    SELECT id FROM page_annotations WHERE document_id=? AND target_revision=?''',
-                    (doc_id, current['revision']))]
+                    SELECT id FROM page_annotations WHERE document_id=? AND target_revision=?
+                    AND (?=1 OR output_scope='pdf')''',
+                    (doc_id, current['revision'], int(preserve_page_annotations)))]
             con.execute('UPDATE documents SET ' + ','.join(f'{k}=?' for k in changes) + ' WHERE id=?', (*changes.values(), doc_id))
             if annotation_ids:
                 con.executemany('UPDATE page_annotations SET target_revision=? WHERE id=?',
@@ -1277,12 +1363,41 @@ class Store:
         return self.get_documents(matter_id)
 
     def history_state(self, matter_id: str) -> dict:
+        def label(row):
+            if row is None:
+                return None
+            if row['kind'] == 'document':
+                fields = json.loads(row['after_json']).get('fields', {})
+                return 'Working PDF edit' if 'working_relpath' in fields else 'Document details'
+            if row['kind'] == 'document_presence':
+                after = json.loads(row['after_json'])
+                return 'Archive document' if after['archived_at'] else 'Add or restore document'
+            return {
+                'document_batch': 'Batch document details',
+                'matter': 'Matter settings',
+                'order': 'Document order',
+                'bookmarks': 'Bookmarks',
+                'reviewed_links': 'Reviewed links',
+                'output_marks': 'Output marks',
+                'output_preset': 'Output preset',
+                'page_annotations': 'Private review notes or overlays',
+                'memo_parties': 'Memo of Parties',
+                'matter_values': 'Matter values',
+            }.get(row['kind'], 'Matter edit')
+
         with self.connect() as con:
             undo = con.execute('SELECT COUNT(*) FROM edit_history WHERE matter_id=? AND applied=1',
                                (matter_id,)).fetchone()[0]
             redo = con.execute('SELECT COUNT(*) FROM edit_history WHERE matter_id=? AND applied=0',
                                (matter_id,)).fetchone()[0]
-        return {'can_undo': bool(undo), 'can_redo': bool(redo), 'undo_count': undo, 'redo_count': redo}
+            # Match traverse_history exactly: newest applied edit for Undo,
+            # oldest unapplied edit for Redo. Labels do not create another history.
+            undo_row = con.execute('''SELECT kind,after_json FROM edit_history
+                WHERE matter_id=? AND applied=1 ORDER BY id DESC LIMIT 1''', (matter_id,)).fetchone()
+            redo_row = con.execute('''SELECT kind,after_json FROM edit_history
+                WHERE matter_id=? AND applied=0 ORDER BY id ASC LIMIT 1''', (matter_id,)).fetchone()
+        return {'can_undo': bool(undo), 'can_redo': bool(redo), 'undo_count': undo, 'redo_count': redo,
+                'undo_label': label(undo_row), 'redo_label': label(redo_row)}
 
     def traverse_history(self, matter_id: str, redo: bool = False) -> dict:
         with self.connect() as con:
@@ -1319,6 +1434,9 @@ class Store:
                 if 'working_relpath' in fields:
                     if not (self.matter_dir(matter_id) / fields['working_relpath']).is_file():
                         raise ValueError('Working copy is missing; this edit cannot be restored')
+                    source_revision = con.execute('''SELECT MIN(revision) FROM document_revisions
+                        WHERE document_id=? AND working_relpath=?''',
+                        (state['id'], fields['working_relpath'])).fetchone()[0]
                     revision = doc['revision'] + 1
                     con.execute('''INSERT INTO document_revisions
                         (document_id,revision,working_relpath,page_count,ocr_status,ocr_provenance_json,created_at)
@@ -1328,6 +1446,15 @@ class Store:
                          fields.get('ocr_status', doc['ocr_status']),
                          fields.get('ocr_provenance_json', doc['ocr_provenance_json']), now))
                     fields = dict(fields, revision=revision)
+                    if source_revision is not None:
+                        con.execute('''UPDATE redaction_records SET active=CASE
+                            WHEN before_revision=? THEN 0
+                            WHEN after_revision=? THEN 1
+                            WHEN removed_revision-1=? THEN 1
+                            WHEN removed_revision=? THEN 0
+                            ELSE active END WHERE document_id=?''',
+                            (source_revision, source_revision, source_revision,
+                             source_revision, state['id']))
                 changes = dict(fields, updated_at=now)
                 con.execute('UPDATE documents SET ' + ','.join(f'{key}=?' for key in changes) +
                             ' WHERE id=?', (*changes.values(), state['id']))

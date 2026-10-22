@@ -41,7 +41,14 @@ const exportsList = ref<ExportManifest[]>([])
 const recentJobs = ref<Job[]>([])
 const previewRefreshKey = ref(0)
 const bookmarkPreset = ref<{documentId:string,sequence:number}>({documentId:'',sequence:0})
-const history = ref({can_undo:false,can_redo:false,undo_count:0,redo_count:0})
+const history = ref({can_undo:false,can_redo:false,undo_count:0,redo_count:0,
+  undo_label:null as string|null,redo_label:null as string|null})
+const undoDescription = computed(() => history.value.undo_label
+  ? `Undo: ${history.value.undo_label}. Applies to the last change anywhere in this matter.`
+  : 'Undo last matter change. No change available.')
+const redoDescription = computed(() => history.value.redo_label
+  ? `Redo: ${history.value.redo_label}. Restores the next undone change anywhere in this matter.`
+  : 'Redo matter change. No change available.')
 const guideReloadKey = ref(0)
 const filingGuide = ref<InstanceType<typeof CourtProfileGuide> | null>(null)
 const checks = ref<PreflightCheck[]>([])
@@ -875,11 +882,7 @@ async function saveProtectedExport() {
   } catch (err) { protectedExportError.value = friendlyError(err) }
   finally { savingExport.value = false }
 }
-function reviewGeneratedPdf(exportId:string, filename:string, bytes:number) {
-  if (bytes > 25 * 1024 * 1024) {
-    notify('This PDF exceeds the 25 MB in-app review limit. Save it and inspect it in a PDF viewer.', 'info')
-    return
-  }
+function reviewGeneratedPdf(exportId:string, filename:string) {
   reviewingPdf.value = {exportId,filename}
 }
 function selectMatter(id:string, view:View='documents'){
@@ -1036,8 +1039,8 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
         <div class="matter-heading">
           <div class="matter-heading-copy"><h1>{{currentMatter.name}}</h1><p class="matter-description"><span>{{currentMatter.case_number||'Draft'}}</span><span class="dot-sep">·</span>{{currentMatter.case_type}} <span class="dot-sep">·</span> {{selectedProfile?.name}}</p></div>
           <div class="matter-heading-actions">
-            <button class="btn secondary small matter-icon-action" aria-label="Undo" title="Undo" :disabled="busy || !history.can_undo" @click="traverseHistory('undo')"><Undo2 :size="16"/></button>
-            <button class="btn secondary small matter-icon-action" aria-label="Redo" title="Redo" :disabled="busy || !history.can_redo" @click="traverseHistory('redo')"><Redo2 :size="16"/></button>
+            <button class="btn secondary small matter-icon-action" aria-label="Undo" :title="undoDescription" :aria-description="undoDescription" :disabled="busy || !history.can_undo" @click="traverseHistory('undo')"><Undo2 :size="16"/></button>
+            <button class="btn secondary small matter-icon-action" aria-label="Redo" :title="redoDescription" :aria-description="redoDescription" :disabled="busy || !history.can_redo" @click="traverseHistory('redo')"><Redo2 :size="16"/></button>
             <details class="matter-more"><summary class="btn secondary small matter-icon-action" aria-label="More actions" title="More actions"><Ellipsis :size="17"/></summary><div class="matter-more-menu">
               <button :disabled="busy" @click="backupCurrentMatter">Back up matter</button>
               <button @click="confirmDiscardDrafts() && void loadMatterResources()"><RefreshCw :size="15"/> Refresh</button>
@@ -1089,7 +1092,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             <div class="docs-help"><LockKeyhole :size="14"/> Original files are never overwritten.</div>
           </section>
 
-          <section class="panel preview-panel"><PdfViewer :expanded="editorExpanded" @toggle-expanded="toggleEditorExpanded" :focus-mode="readerFocus" @toggle-focus="readerFocus=!readerFocus" :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :can-undo="history.can_undo" :can-redo="history.can_redo" :details-open="detailsOpen" :details-dirty="documentDirty" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @undo="traverseHistory('undo')" @redo="traverseHistory('redo')" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @archive-document="deleteDocument" @open-internal-link="openSearchMatch" @open-external-link="openReviewedExternalLink"/></section>
+          <section class="panel preview-panel"><PdfViewer :expanded="editorExpanded" @toggle-expanded="toggleEditorExpanded" :focus-mode="readerFocus" @toggle-focus="readerFocus=!readerFocus" :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :can-undo="history.can_undo" :can-redo="history.can_redo" :undo-label="history.undo_label" :redo-label="history.redo_label" :details-open="detailsOpen" :details-dirty="documentDirty" :bookmark-refresh-key="previewRefreshKey" :page-target="pageTarget" @modified="refreshDocument" @undo="traverseHistory('undo')" @redo="traverseHistory('redo')" @error="issue" @page-tools="pageToolsOpen=true" @toggle-details="detailsOpen=!detailsOpen" @ocr="startOcr" @archive-document="deleteDocument" @open-internal-link="openSearchMatch" @open-external-link="openReviewedExternalLink"/></section>
 
           <Transition name="inspector">
           <section v-if="detailsOpen && selectedDoc" id="document-details-panel" class="panel inspector-panel" aria-label="Document details">
@@ -1159,7 +1162,7 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
             <BundlePreview :matter-id="currentMatterId!" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" @open-document="openPreviewDocument"/>
             <div class="panel exports-panel"><div class="panel-header"><div><h2>Generated exports</h2><span>Stored locally for repeat downloads</span></div><Archive :size="18" class="muted-icon"/></div>
               <div v-if="activeExport" class="export-body"><div v-if="activeExport.stale" class="notice amber"><ShieldAlert :size="18"/> Matter inputs changed since this export. Rebuild before using it.</div><div v-if="activeJob?.kind==='build' && activeJob.status==='failed'" class="notice amber"><ShieldAlert :size="18"/> The latest build failed. These files are from an earlier completed export; review them before use.</div><div class="export-summary"><div class="export-icon"><FileCheck2 :size="25"/></div><div><strong>{{activeJob?.kind==='build' && activeJob.status==='failed' ? 'Previous filing package' : 'Latest filing package'}}</strong><span>{{prettyDate(activeExport.created_at)}} · {{activeExport.volumes}} volume(s) · {{activeExport.pages}} pages</span></div></div><div v-if="activeExport.checks.some(check => check.code==='SOURCE_ANNOTATIONS_OMITTED' || check.code==='SOURCE_LINKS_OMITTED')" class="notice amber"><ShieldAlert :size="18"/> This export omitted source annotations or links. See validation-report.json for affected documents; generated index links remain.</div>
-                <div v-for="file in activeExport.files" :key="file.name" class="export-file"><FileText :size="18"/><div><strong>{{file.name}}</strong><small>{{bytesLabel(file.bytes)}}</small></div><button v-if="file.name.endsWith('.pdf')" class="text-tool" :aria-label="'Review '+file.name" @click="reviewGeneratedPdf(activeExport.id,file.name,file.bytes)">Review PDF</button><button class="icon-btn" :disabled="savingExport" :title="inTauri() ? 'Save '+file.name : 'Download '+file.name" :aria-label="inTauri() ? 'Save '+file.name : 'Download '+file.name" @click="download(activeExport.id,file.name)"><ArrowDownToLine :size="18"/></button><button v-if="inTauri()" class="text-tool" :disabled="savingExport" :title="'Save '+file.name+' as'" @click="download(activeExport.id,file.name,true)">Save As</button><button v-if="file.name.endsWith('.pdf') && !selectedProfile?.disallow_pdf_encryption" class="text-tool" :disabled="savingExport" :aria-label="'Save password-protected '+file.name" @click="beginProtectedExport(activeExport.id,file.name)">Protect PDF…</button></div>
+                <div v-for="file in activeExport.files" :key="file.name" class="export-file"><FileText :size="18"/><div><strong>{{file.name}}</strong><small>{{bytesLabel(file.bytes)}}</small></div><button v-if="file.name.endsWith('.pdf')" class="text-tool" :aria-label="'Review '+file.name" @click="reviewGeneratedPdf(activeExport.id,file.name)">Review PDF</button><button class="icon-btn" :disabled="savingExport" :title="inTauri() ? 'Save '+file.name : 'Download '+file.name" :aria-label="inTauri() ? 'Save '+file.name : 'Download '+file.name" @click="download(activeExport.id,file.name)"><ArrowDownToLine :size="18"/></button><button v-if="inTauri()" class="text-tool" :disabled="savingExport" :title="'Save '+file.name+' as'" @click="download(activeExport.id,file.name,true)">Save As</button><button v-if="file.name.endsWith('.pdf') && !selectedProfile?.disallow_pdf_encryption" class="text-tool" :disabled="savingExport" :aria-label="'Save password-protected '+file.name" @click="beginProtectedExport(activeExport.id,file.name)">Protect PDF…</button></div>
                 <p v-if="selectedProfile?.disallow_pdf_encryption" class="export-footnote">Encrypted PDF output is disabled by this illustrative profile as an unapproved technical setting. This is not a reviewed court rule.</p>
                 <p class="export-footnote">The ZIP contains PDFs, an index CSV, and a technical validation report. It is not submitted to a court.</p>
               </div><div v-else class="empty-export"><Archive :size="28"/><strong>No exports yet</strong><span>Build a bundle to see generated files.</span></div>
@@ -1177,12 +1180,12 @@ watch(sidebarCollapsed, collapsed => { try { localStorage.setItem('courtbundle.s
       </main>
       </Transition>
     </div>
-    <dialog v-if="selectedDoc" ref="pageToolsDialog" class="page-tools-dialog" aria-labelledby="page-tools-title" @close="pageToolsOpen=false" @click.self="pageToolsOpen=false">
+    <dialog v-if="selectedDoc && pageToolsOpen" ref="pageToolsDialog" class="page-tools-dialog" aria-labelledby="page-tools-title" @keydown.stop @close="pageToolsOpen=false" @click.self="pageToolsOpen=false">
       <div class="page-tools-dialog-head"><div><h2 id="page-tools-title">Page tools</h2><p>{{selectedDoc.title}} · {{selectedDoc.page_count}} pages · Choose what you want to do below</p></div><button class="icon-btn" aria-label="Close page tools" @click="pageToolsOpen=false"><X :size="18"/></button></div>
       <p v-if="documentDirty" class="notice amber">Save document details before editing pages.</p>
       <PageTools :document="selectedDoc" :documents="docs" :disabled="busy || isJobActive || documentDirty" :job="activeJob" expanded @modified="refreshDocument" @job-started="watchJob" @cancel="cancelJob"/>
     </dialog>
-    <ExportPdfReview v-if="reviewingPdf && currentMatterId" :matter-id="currentMatterId" :export-id="reviewingPdf.exportId" :filename="reviewingPdf.filename" @close="reviewingPdf=null"/>
+    <ExportPdfReview v-if="reviewingPdf && currentMatterId" :matter-id="currentMatterId" :export-id="reviewingPdf.exportId" :filename="reviewingPdf.filename" :stale="exportsList.find(item=>item.id===reviewingPdf!.exportId)?.stale" @open-external-link="openReviewedExternalLink" @close="reviewingPdf=null"/>
     <div v-if="pdfImportRequest" class="vault-restore-overlay" role="presentation">
       <section class="vault-card" role="dialog" aria-modal="true" aria-labelledby="pdf-import-password-title">
         <h2 id="pdf-import-password-title">Open protected PDF</h2>

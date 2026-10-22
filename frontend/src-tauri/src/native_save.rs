@@ -43,6 +43,46 @@ fn valid_filename(value: &str) -> bool {
         )
 }
 
+fn working_pdf_path(document_id: &str, expected_revision: u64,
+                    acknowledge_signature_risk: bool) -> Result<String, String> {
+    if !valid_id(document_id) || expected_revision == 0 {
+        return Err("Invalid working PDF selection".into());
+    }
+    Ok(format!(
+        "/documents/{document_id}/pdf?revision={expected_revision}&editable=true&acknowledge_signature_risk={acknowledge_signature_risk}"
+    ))
+}
+
+fn check_working_destination(destination: &Path, app_data: &Path) -> Result<(), String> {
+    if destination.is_dir() || destination.file_name().is_none() {
+        return Err("Choose a PDF file, not a folder".into());
+    }
+    // A debug shell can connect to an external backend before creating its own
+    // app-data directory. Initialize that directory before resolving aliases.
+    // This guard covers the app-owned production directory, not an unknown
+    // external debug backend's data root.
+    fs::create_dir_all(app_data)
+        .map_err(|error| format!("Cannot initialize the internal data folder: {error}"))?;
+    let internal = app_data
+        .canonicalize()
+        .map_err(|error| format!("Cannot verify the internal data folder: {error}"))?;
+    let parent = destination
+        .parent()
+        .ok_or("Save location has no parent directory")?
+        .canonicalize()
+        .map_err(|error| format!("Cannot access the save folder: {error}"))?;
+    // Resolve directory aliases before writing, so a symlink cannot lead a Save
+    // into the application's preserved originals or revision catalog.
+    if parent.starts_with(&internal)
+        || destination
+            .canonicalize()
+            .is_ok_and(|path| path.starts_with(&internal))
+    {
+        return Err("Choose a file outside CourtBundle's internal data folder".into());
+    }
+    Ok(())
+}
+
 fn temp_file(destination: &Path) -> Result<(PendingFile, std::fs::File), String> {
     let directory = destination
         .parent()
@@ -126,6 +166,15 @@ async fn transfer(
         .await
         .map_err(|e| format!("Cannot reach the local filing engine: {e}"))?;
     if !response.status().is_success() {
+        if response.status() == reqwest::StatusCode::CONFLICT
+            && path.starts_with("/documents/")
+            && path.contains("/pdf?revision=")
+        {
+            return Err(
+                "Working PDF revision changed. Refresh the document, review it, and save again."
+                    .into(),
+            );
+        }
         return Err(format!(
             "Export unavailable (HTTP {}). Rebuild or retry.",
             response.status()
@@ -159,6 +208,55 @@ async fn transfer(
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn save_working_pdf(
+    app: AppHandle,
+    backend: State<'_, BackendState>,
+    saves: State<'_, SaveState>,
+    document_id: String,
+    expected_revision: u64,
+    filename: String,
+    acknowledge_signature_risk: bool,
+) -> Result<bool, String> {
+    let path = working_pdf_path(&document_id, expected_revision, acknowledge_signature_risk)?;
+    if !valid_filename(&filename) || !filename.ends_with(".pdf") || filename.len() > 160 {
+        return Err("Invalid working PDF filename".into());
+    }
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Save working PDF copy")
+        .set_file_name(&filename)
+        .add_filter("PDF", &["pdf"]);
+    if let Some(directory) = saves
+        .last_directory
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+    {
+        dialog = dialog.set_directory(directory);
+    }
+    let Some(chosen) = dialog.blocking_save_file() else {
+        return Ok(false);
+    };
+    let destination = chosen
+        .into_path()
+        .map_err(|error| format!("Unsupported save location: {error}"))?;
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    check_working_destination(&destination, &app_data)?;
+    // The revision-checked endpoint includes editable PDF marks in the saved
+    // copy while leaving the stored working revision and private notes intact.
+    transfer(&backend.connection, &path, &destination, None).await?;
+    *saves
+        .last_directory
+        .lock()
+        .map_err(|error| error.to_string())? = destination.parent().map(Path::to_path_buf);
+    Ok(true)
 }
 
 #[tauri::command]
@@ -415,6 +513,106 @@ mod tests {
         assert!(!valid_filename(".hidden.pdf"));
         assert!(!valid_filename("file.pdf/other"));
         assert!(valid_filename("volume-1.pdf"));
+    }
+
+    #[test]
+    fn working_save_uses_exact_revision_and_rejects_invalid_identity() {
+        let id = "0123456789abcdef0123456789abcdef";
+        assert_eq!(
+            working_pdf_path(id, 7, false).unwrap(),
+            format!("/documents/{id}/pdf?revision=7&editable=true&acknowledge_signature_risk=false")
+        );
+        assert!(working_pdf_path(id, 0, false).is_err());
+        assert!(working_pdf_path("../originals", 1, false).is_err());
+        assert!(working_pdf_path("0123456789ABCDEF0123456789ABCDEF", 1, false).is_err());
+    }
+
+    #[test]
+    fn working_save_rejects_internal_destination_and_directory_alias() {
+        let directory =
+            std::env::temp_dir().join(format!("courtbundle-save-paths-{}", rand::random::<u64>()));
+        let internal = directory.join("app-data");
+        let outside = directory.join("chosen");
+        fs::create_dir_all(internal.join("originals")).unwrap();
+        fs::create_dir(&outside).unwrap();
+        assert!(check_working_destination(&outside.join("copy.pdf"), &internal).is_ok());
+        assert!(
+            check_working_destination(&internal.join("originals/source.pdf"), &internal).is_err()
+        );
+        assert!(check_working_destination(&outside, &internal).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(internal.join("originals"), outside.join("alias")).unwrap();
+            assert!(
+                check_working_destination(&outside.join("alias/source.pdf"), &internal).is_err()
+            );
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn working_save_accepts_external_destination_before_app_data_exists() {
+        let directory = std::env::temp_dir().join(format!(
+            "courtbundle-save-new-data-{}",
+            rand::random::<u64>()
+        ));
+        let internal = directory.join("missing/app-data");
+        fs::create_dir_all(directory.join("chosen")).unwrap();
+        assert!(!internal.exists());
+        assert!(check_working_destination(&directory.join("chosen/copy.pdf"), &internal).is_ok());
+        assert!(internal.is_dir());
+        assert!(check_working_destination(&internal.join("copy.pdf"), &internal).is_err());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn working_save_preserves_response_bytes_and_stale_failure_keeps_existing_file() {
+        let id = "0123456789abcdef0123456789abcdef";
+        let path = working_pdf_path(id, 7, false).unwrap();
+        let directory = std::env::temp_dir().join(format!(
+            "courtbundle-working-save-{}",
+            rand::random::<u64>()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let destination = directory.join("working-r7.pdf");
+        const ORIGINAL_BYTES: &[u8] = b"%PDF-1.7\n\x00\xffsynthetic exact revision\n%%EOF";
+        for (status, body) in [("200 OK", ORIGINAL_BYTES), ("409 Conflict", b"".as_slice())] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let expected_path = path.clone();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 4096];
+                let count = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..count]);
+                assert!(request.starts_with(&format!("GET {expected_path} HTTP/1.1")));
+                assert!(request
+                    .to_lowercase()
+                    .contains("authorization: bearer test-token"));
+                write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .unwrap();
+                stream.write_all(body).unwrap();
+            });
+            let connection = crate::BackendConnection {
+                base_url: format!("http://{address}"),
+                token: "test-token".into(),
+            };
+            let result =
+                tauri::async_runtime::block_on(transfer(&connection, &path, &destination, None));
+            server.join().unwrap();
+            if status.starts_with("200") {
+                result.unwrap();
+            } else {
+                assert!(result.unwrap_err().contains("revision changed"));
+            }
+            assert_eq!(fs::read(&destination).unwrap(), ORIGINAL_BYTES);
+            assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        }
+        fs::remove_dir_all(directory).unwrap();
     }
 
     fn test_response(body: &'static [u8], declared_length: usize) -> crate::BackendConnection {

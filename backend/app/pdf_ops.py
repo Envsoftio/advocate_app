@@ -216,6 +216,31 @@ def delete_page(path: Path, page_index: int):
         return count
 
 
+def batch_page_operation(path: Path, indices: list[int], operation: str,
+                         degrees: int | None = None) -> int:
+    """Validate the entire selection, then save one working-copy candidate."""
+    with open_pdf(path) as doc:
+        if (not indices or len(indices) != len(set(indices)) or
+                any(type(index) is not int or not 0 <= index < doc.page_count for index in indices)):
+            raise ProcessingError('Select unique existing pages using zero-based page indexes')
+        if operation == 'rotate':
+            if degrees not in (90, 180, 270):
+                raise ProcessingError('Rotation must be 90, 180 or 270 degrees clockwise')
+            for index in indices:
+                page = doc[index]
+                page.set_rotation((page.rotation + degrees) % 360)
+        elif operation == 'delete':
+            if len(indices) == doc.page_count:
+                raise ProcessingError('Keep at least one page in the working PDF')
+            for index in sorted(indices, reverse=True):
+                doc.delete_page(index)
+        else:
+            raise ProcessingError('Unsupported batch page operation')
+        count = doc.page_count
+        replace_pdf_atomically(path, doc)
+        return count
+
+
 def _checked_pages(indices: list[int], count: int) -> list[int]:
     if not indices or len(indices) > 2000 or any(not 0 <= index < count for index in indices):
         raise ProcessingError('Select existing pages using zero-based page indexes')
@@ -315,6 +340,87 @@ def permanently_redact_region(path: Path, page_index: int, x: float, y: float,
                 raise ProcessingError('Redaction sanitisation retained embedded content')
             replace_pdf_atomically(path, clean)
         return {'page_count': source.page_count, 'removed_navigation_and_metadata': True}
+
+
+def redaction_restore_footprint(path: Path, page_index: int, x: float, y: float,
+                                width: float, height: float) -> tuple[float,float,float,float]:
+    """Include complete text spans touched by a redaction, since glyph removal crosses its edge."""
+    with open_pdf(path) as pdf:
+        page = pdf[page_index]
+        display = page.rect
+        selected = pymupdf.Rect(display.x0 + display.width*x, display.y0 + display.height*y,
+                                display.x0 + display.width*(x+width),
+                                display.y0 + display.height*(y+height))
+        box = selected * page.derotation_matrix
+        for block in page.get_text('dict')['blocks']:
+            for line in block.get('lines', []):
+                for span in line.get('spans', []):
+                    rect = pymupdf.Rect(span['bbox'])
+                    if rect.intersects(box):
+                        box |= rect
+        expanded = box * page.rotation_matrix
+        expanded &= display
+        return ((expanded.x0-display.x0)/display.width,
+                (expanded.y0-display.y0)/display.height,
+                expanded.width/display.width, expanded.height/display.height)
+
+
+def restore_redacted_region(path: Path, before_path: Path, page_index: int,
+                            x: float, y: float, width: float, height: float,
+                            later_redactions: list[dict]) -> None:
+    """Restore one area from its private pre-redaction revision into a new working PDF.
+
+    Content currently in that area is replaced. Content outside it remains on the
+    current page. Only pixels from the selected rectangle and its printable
+    text spans are copied; unrelated source-page resources never enter the PDF.
+    """
+    with open_pdf(path) as current, open_pdf(before_path) as before:
+        if current.page_count != before.page_count or not 0 <= page_index < current.page_count:
+            raise ProcessingError('Page structure changed; this redaction cannot be restored by area')
+        page, source_page = current[page_index], before[page_index]
+        if (page.rotation != source_page.rotation or
+                abs(page.rect.width - source_page.rect.width) > .01 or
+                abs(page.rect.height - source_page.rect.height) > .01):
+            raise ProcessingError('Page size or rotation changed; this redaction cannot be restored by area')
+        display = page.rect
+        selected = pymupdf.Rect(display.x0 + display.width*x, display.y0 + display.height*y,
+                                display.x0 + display.width*(x+width),
+                                display.y0 + display.height*(y+height))
+        box = selected * page.derotation_matrix
+        source_page.set_rotation(0)
+        pixels = source_page.get_pixmap(clip=box, matrix=pymupdf.Matrix(2, 2),
+                                        alpha=False, annots=False).tobytes('png')
+        text_spans = [span for block in source_page.get_text('dict')['blocks']
+                      for line in block.get('lines', []) for span in line.get('spans', [])
+                      if pymupdf.Rect(span['bbox']).intersects(box)]
+        page.add_redact_annot(box, fill=False, cross_out=False)
+        page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
+                              graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+                              text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+        page.insert_image(box, stream=pixels, overlay=True)
+        for span in text_spans:
+            value = span['text']
+            if not value or any(ord(char) < 32 or ord(char) > 126 for char in value):
+                continue
+            # The pixels carry the appearance; this text enables search without
+            # embedding unrelated source-page resources or intact images.
+            page.insert_text(pymupdf.Point(*span['origin']), value,
+                             fontsize=span['size'], render_mode=3, overlay=True)
+        for item in later_redactions:
+            other = pymupdf.Rect(display.x0 + display.width*item['rect_x'],
+                                 display.y0 + display.height*item['rect_y'],
+                                 display.x0 + display.width*(item['rect_x']+item['rect_width']),
+                                 display.y0 + display.height*(item['rect_y']+item['rect_height']))
+            if not other.intersects(selected):
+                continue
+            page.add_redact_annot(other * page.derotation_matrix, fill=(0, 0, 0), cross_out=False)
+        if later_redactions:
+            page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS,
+                                  graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+                                  text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+        with pymupdf.open() as clean:
+            clean.insert_pdf(current, annots=False, links=False, widgets=False)
+            replace_pdf_atomically(path, clean)
 
 
 def add_text_overlay(path: Path, page_index: int, x: float, y: float,
@@ -611,10 +717,6 @@ def replace_text_run(path: Path, page_index: int, span_index: int,
                 right = min(right, other.x0 - 2)
         if right <= selected['origin'][0]:
             raise ProcessingError('No clear space to the right of the selected text')
-        bottom = unrotated_rect.y1 - 12
-        for other in obstacles:
-            if other.y0 >= box.y1 - 1 and other.x0 < right and other.x1 > box.x0:
-                bottom = min(bottom, other.y0 - 2)
         available_width = right - selected['origin'][0]
         source_size = selected['size']
         minimum_size = min(source_size, max(6, source_size * .75))
@@ -624,8 +726,15 @@ def replace_text_run(path: Path, page_index: int, span_index: int,
             lines = _wrap_replacement(replacement, available_width, fontname, size)
             if lines is None:
                 continue
-            last_baseline = selected['origin'][1] + (len(lines) - 1) * size * 1.2
-            if last_baseline + size * .3 <= bottom:
+            positions = [(line, pymupdf.Rect(
+                selected['origin'][0], selected['origin'][1] + index * size * 1.2 - size * .9,
+                selected['origin'][0] + pymupdf.get_text_length(line, fontname=fontname,
+                                                                 fontsize=size),
+                selected['origin'][1] + index * size * 1.2 + size * .3))
+                for index, line in enumerate(lines) if line]
+            if all(unrotated_rect.contains(rect) and
+                   not any(rect.intersects(other) for other in obstacles)
+                   for _, rect in positions):
                 layout = (size, lines)
                 break
         if layout is None:
@@ -649,10 +758,12 @@ def replace_text_run(path: Path, page_index: int, span_index: int,
 
 
 def move_text_run(path: Path, page_index: int, span_index: int,
-                  expected_text: str, vertical_offset: float) -> None:
-    """Move one native horizontal span vertically in displayed page coordinates."""
-    if not math.isfinite(vertical_offset) or abs(vertical_offset) < .0001:
-        raise ProcessingError('Drag the text up or down before applying the move')
+                  expected_text: str, vertical_offset: float,
+                  horizontal_offset: float = 0) -> None:
+    """Move one native horizontal span in displayed page coordinates."""
+    if (not math.isfinite(vertical_offset) or not math.isfinite(horizontal_offset) or
+            max(abs(vertical_offset), abs(horizontal_offset)) < .0001):
+        raise ProcessingError('Drag the text to a new position before applying the move')
     runs = editable_text_runs(path, page_index)
     if not 0 <= span_index < len(runs) or runs[span_index]['text'] != expected_text:
         raise ProcessingError('Selected text changed; reload the page and select it again')
@@ -670,14 +781,15 @@ def move_text_run(path: Path, page_index: int, span_index: int,
         source_matches = [span for span in spans if source.intersects(pymupdf.Rect(span['bbox']))]
         if len(source_matches) != 1:
             raise ProcessingError('Selected text overlaps other text; cannot move it safely')
-        display_delta = page.rect.height * vertical_offset
+        display_delta_x = page.rect.width * horizontal_offset
+        display_delta_y = page.rect.height * vertical_offset
         zero = pymupdf.Point(0, 0) * page.derotation_matrix
-        shifted = pymupdf.Point(0, display_delta) * page.derotation_matrix
+        shifted = pymupdf.Point(display_delta_x, display_delta_y) * page.derotation_matrix
         dx, dy = shifted.x - zero.x, shifted.y - zero.y
         target = source + (dx, dy, dx, dy)
         page_bounds = page.rect * page.derotation_matrix
         if not page_bounds.contains(target):
-            raise ProcessingError('The text would leave the page; drag it closer to the centre')
+            raise ProcessingError('The text would leave the page; drag it inside the page')
         links = [pymupdf.Rect(link['from']) for link in page.get_links()]
         if any(source.intersects(link) or target.intersects(link) for link in links):
             raise ProcessingError('Text inside or over a link cannot be moved with this tool')

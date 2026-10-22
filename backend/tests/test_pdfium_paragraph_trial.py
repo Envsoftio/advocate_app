@@ -29,7 +29,7 @@ def test_pdfium_paragraph_trial_revision_original_and_undo(client, auth, matter)
     paragraph = preview.json()['text']
     assert paragraph == 'First paragraph line Second paragraph line'
     payload = {**selection, 'expected_paragraph': paragraph,
-               'replacement': 'A changed paragraph that should reflow into several readable lines'}
+               'replacement': 'A changed paragraph\nthat should reflow into several readable lines'}
     changed = client.post(base + '/pages/paragraph-trial', headers=auth, json=payload)
     assert changed.status_code == 200, changed.text
     assert changed.json()['revision'] == 2
@@ -152,3 +152,58 @@ def test_pdfium_trial_preserves_same_words_elsewhere_on_page(client, auth, matte
                       filetype='pdf') as edited:
         assert 'Changed wording' in edited[0].get_text()
         assert 'Repeated wording' in edited[0].get_text()
+
+
+def test_pdfium_trial_moves_following_text_to_fit_added_lines(client, auth, matter):
+    with pymupdf.open() as source:
+        page = source.new_page()
+        page.insert_text((72, 100), 'Short first paragraph', fontsize=12)
+        page.insert_text((72, 127), 'NEXT PARAGRAPH', fontsize=12)
+        page.insert_text((72, 145), 'STAYS IN ORDER', fontsize=12)
+        original = source.tobytes()
+    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+                           files=[('files', ('flow.pdf', original, 'application/pdf'))])
+    assert uploaded.status_code == 201, uploaded.text
+    doc = uploaded.json()[0]
+    base = f'/documents/{doc["id"]}'
+    run = client.get(base + '/pages/0/text-runs', headers=auth).json()['runs'][0]
+    selection = {'page_index': 0, 'span_index': run['index'],
+                 'expected_revision': 1, 'expected_text': run['text']}
+    paragraph = client.post(base + '/pages/paragraph-trial-preview', headers=auth,
+                            json=selection).json()['text']
+    response = client.post(base + '/pages/paragraph-trial', headers=auth, json={
+        **selection, 'expected_paragraph': paragraph,
+        'replacement': 'A longer first paragraph\nwith a second line\nand a third line'})
+    assert response.status_code == 200, response.text
+    assert response.json()['edit_layout']['following_text_objects_moved'] == 2
+    assert response.json()['edit_layout']['following_text_shift'] > 0
+    with pymupdf.open(stream=client.get(base + '/pdf', headers=auth).content,
+                      filetype='pdf') as edited:
+        words = edited[0].get_text('words')
+        first_next = next(word for word in words if word[4] == 'NEXT')
+        third = next(word for word in words if word[4] == 'third')
+        assert first_next[1] > third[3]
+        assert 'STAYS IN ORDER' in edited[0].get_text()
+
+
+def test_pdfium_trial_keeps_revision_when_following_text_cannot_fit(client, auth, matter):
+    with pymupdf.open() as source:
+        page = source.new_page()
+        page.insert_text((72, 795), 'BOTTOM PARAGRAPH', fontsize=12)
+        page.insert_text((72, 825), 'BOTTOM FOLLOWER', fontsize=12)
+        original = source.tobytes()
+    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+                           files=[('files', ('bottom.pdf', original, 'application/pdf'))])
+    doc = uploaded.json()[0]
+    base = f'/documents/{doc["id"]}'
+    run = client.get(base + '/pages/0/text-runs', headers=auth).json()['runs'][0]
+    selection = {'page_index': 0, 'span_index': run['index'],
+                 'expected_revision': 1, 'expected_text': run['text']}
+    paragraph = client.post(base + '/pages/paragraph-trial-preview', headers=auth,
+                            json=selection).json()['text']
+    response = client.post(base + '/pages/paragraph-trial', headers=auth, json={
+        **selection, 'expected_paragraph': paragraph,
+        'replacement': 'A longer bottom paragraph\nsecond line\nthird line'})
+    assert response.status_code == 422
+    assert 'cannot fit on this page' in response.json()['detail']
+    assert client.app.state.store.get_document(doc['id'])['revision'] == 1
