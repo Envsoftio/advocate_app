@@ -116,6 +116,20 @@ def test_signed_transformations_require_acknowledgement_and_record_build_warning
     assert 'Signature-risk acknowledgment required' in review.json()['detail']
     assert store.get_document(document['id'])['revision'] == 1
 
+    replacement = {'page_index': 0, 'span_index': 0, 'expected_revision': 1,
+                   'expected_text': 'Synthetic signature inspection fixture',
+                   'replacement': 'Reviewed text', 'acknowledge_signature_risk': False}
+    move = {'page_index': 0, 'span_index': 0, 'expected_revision': 1,
+            'expected_text': replacement['expected_text'], 'vertical_offset': .02,
+            'acknowledge_signature_risk': False}
+    for endpoint, payload in (('replace-text-run', replacement),
+                              ('paragraph-trial', replacement), ('move-text-run', move)):
+        review = client.post(f'/documents/{document["id"]}/pages/{endpoint}',
+            headers={**auth, 'X-CourtBundle-Review-Protocol': 'challenge'}, json=payload)
+        assert review.status_code == 200, review.text
+        assert review.json()['review_required'] is True
+        assert store.get_document(document['id'])['revision'] == 1
+
     allowed = client.post(f'/documents/{document["id"]}/pages/rotate', headers=auth,
         json={'page_index': 0, 'degrees': 90, 'acknowledge_signature_risk': True})
     assert allowed.status_code == 200, allowed.text

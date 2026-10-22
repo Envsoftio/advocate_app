@@ -971,7 +971,8 @@ class Store:
         self.touch(data['matter_id'])
         return self.get_document(data['id'])
 
-    def update_document(self, doc_id: str, changes: dict, record_history: bool = True):
+    def update_document(self, doc_id: str, changes: dict, record_history: bool = True,
+                        preserve_page_annotations: bool = False):
         if not changes:
             return self.get_document(doc_id)
         changes = dict(changes)
@@ -989,7 +990,15 @@ class Store:
                 return dict(current)
             if 'working_relpath' in changes:
                 changes['revision'] = current['revision'] + 1
+            annotation_ids = []
+            if preserve_page_annotations and 'working_relpath' in changes:
+                annotation_ids = [row['id'] for row in con.execute('''
+                    SELECT id FROM page_annotations WHERE document_id=? AND target_revision=?''',
+                    (doc_id, current['revision']))]
             con.execute('UPDATE documents SET ' + ','.join(f'{k}=?' for k in changes) + ' WHERE id=?', (*changes.values(), doc_id))
+            if annotation_ids:
+                con.executemany('UPDATE page_annotations SET target_revision=? WHERE id=?',
+                                [(changes['revision'], item_id) for item_id in annotation_ids])
             if 'working_relpath' in changes:
                 con.execute('''INSERT INTO document_revisions
                     (document_id,revision,working_relpath,page_count,ocr_status,ocr_provenance_json,created_at)
@@ -1002,8 +1011,10 @@ class Store:
                 tracked = {key: value for key, value in changes.items()
                            if key not in ('updated_at', 'revision')}
                 self._record_edit(con, matter_id, 'document',
-                                  {'id': doc_id, 'fields': {key: current[key] for key in tracked}},
-                                  {'id': doc_id, 'fields': tracked})
+                                  {'id': doc_id, 'fields': {key: current[key] for key in tracked},
+                                   'preserved_annotation_ids': annotation_ids},
+                                  {'id': doc_id, 'fields': tracked,
+                                   'preserved_annotation_ids': annotation_ids})
             self._audit(con, 'document_updated', matter_id, doc_id)
             con.execute('UPDATE matters SET updated_at=? WHERE id=?', (changes['updated_at'], matter_id))
             result = dict(con.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone())
@@ -1320,6 +1331,9 @@ class Store:
                 changes = dict(fields, updated_at=now)
                 con.execute('UPDATE documents SET ' + ','.join(f'{key}=?' for key in changes) +
                             ' WHERE id=?', (*changes.values(), state['id']))
+                for annotation_id in state.get('preserved_annotation_ids', []):
+                    con.execute('UPDATE page_annotations SET target_revision=? WHERE id=? AND document_id=?',
+                                (revision, annotation_id, state['id']))
             elif row['kind'] == 'document_batch':
                 for item in state['items']:
                     doc = con.execute('''SELECT id FROM documents WHERE id=? AND matter_id=?

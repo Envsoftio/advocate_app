@@ -503,7 +503,7 @@
 .pdf-tool-hint{display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--border);background:var(--surface-soft);color:var(--muted);font-size:10px;line-height:1.35;flex-shrink:0}
 .pdf-tool-hint strong{color:var(--text);white-space:nowrap}.pdf-tool-hint span{flex:1}.pdf-tool-hint button{margin-left:auto}
 .pdf-edit-method{min-width:150px;max-width:205px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text);font-size:10px}
-.pdf-add-text-preview{position:absolute;z-index:5;max-width:70%;white-space:pre-wrap;line-height:1.2;color:#161616;pointer-events:none;text-shadow:0 0 2px #fff;background:#fff8}
+.pdf-add-text-preview{position:absolute;z-index:5;white-space:pre;line-height:1.2;color:#161616;pointer-events:none;text-shadow:0 0 2px #fff}
 .pdf-inline-add-card{position:absolute;z-index:16;width:min(250px,90%);padding:11px;border:1px solid var(--primary);border-radius:9px;background:var(--panel);color:var(--text);box-shadow:0 12px 30px #07182a45;line-height:1.4}
 .pdf-inline-add-card label{display:block;font-size:11px;font-weight:700;margin-bottom:7px}.pdf-inline-add-card textarea{display:block;width:100%;resize:vertical;min-height:66px;margin-top:4px;border:1px solid var(--border);border-radius:5px;padding:6px;background:#fff;color:#161616;-webkit-text-fill-color:#161616;font-size:12px}
 :root[data-effective-theme="dark"] .pdf-inline-add-card textarea{background:#fff;color:#161616;-webkit-text-fill-color:#161616;color-scheme:light}
@@ -703,3 +703,4 @@
 :root[data-effective-theme="dark"] .rules-page .conflict-box strong{color:#ffdfa1}
 :root[data-effective-theme="dark"] .rules-page .conflict-box p{color:#e3ecf7}
 :root[data-effective-theme="dark"] .rules-page .conflict-box p+p{border-color:#53667f}
+.toast.error{max-width:min(380px,calc(100vw - 32px))}

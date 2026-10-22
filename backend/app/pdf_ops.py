@@ -318,7 +318,8 @@ def permanently_redact_region(path: Path, page_index: int, x: float, y: float,
 
 
 def add_text_overlay(path: Path, page_index: int, x: float, y: float,
-                     text: str, font_size: float) -> None:
+                     text: str, font_size: float,
+                     reserved_rects: list[tuple[float, float, float, float]] | None = None) -> None:
     """Place visible text on a working-copy page; source content is not replaced."""
     if not text.strip() or any(ord(char) < 32 and char != '\n' or ord(char) > 126 for char in text):
         raise ProcessingError('Text overlay supports printable ASCII and line breaks only')
@@ -331,14 +332,42 @@ def add_text_overlay(path: Path, page_index: int, x: float, y: float,
         rect = page.rect
         left = rect.x0 + rect.width * x
         top = rect.y0 + rect.height * y
-        box = pymupdf.Rect(left, top, rect.x1 - 12, rect.y1 - 12)
-        if box.width < font_size * 2 or box.height < font_size * 1.5:
-            raise ProcessingError('Choose a point farther from the right or bottom edge')
-        box = box * page.derotation_matrix
+        # Match the explicit lines shown in the editor. A box extending to the
+        # page edge makes PyMuPDF wrap text through unrelated page content.
+        lines = text.split('\n')
+        width = max(pymupdf.get_text_length(line, fontname='helv', fontsize=font_size)
+                    for line in lines) + 3
+        # PyMuPDF needs more than one glyph height even for a single line.
+        height = font_size * (2.8 + 1.2 * (len(lines) - 1)) + 2
+        display_box = pymupdf.Rect(left, top, left + width, top + height)
+        if not rect.contains(display_box):
+            raise ProcessingError('Text does not fit on the page; move it or reduce the font size')
+        existing_items = page.get_bboxlog()
+        box = display_box * page.derotation_matrix
         remaining = page.insert_textbox(box, text, fontsize=font_size, fontname='helv', rotate=page.rotation,
                                         color=(0, 0, 0), overlay=True)
         if remaining < 0:
             raise ProcessingError('Text does not fit from this point; move it or reduce the font size')
+        added_items = page.get_bboxlog()[len(existing_items):]
+        added_boxes = [pymupdf.Rect(bounds) * page.rotation_matrix for kind, bounds in added_items
+                       if kind in ('fill-text', 'stroke-text')]
+        if not added_boxes:
+            raise ProcessingError('Text could not be placed on this page')
+        for kind, bounds in existing_items:
+            if kind not in ('fill-text', 'stroke-text', 'fill-image'):
+                continue
+            existing = pymupdf.Rect(bounds) * page.rotation_matrix
+            # A page-sized scan is the backdrop, not a movable component.
+            if kind == 'fill-image' and existing.get_area() > rect.get_area() * .8:
+                continue
+            if any(added.intersects(existing) for added in added_boxes):
+                raise ProcessingError('Text overlaps existing page content. Choose a clear area.')
+        for rx, ry, rw, rh in reserved_rects or []:
+            existing = pymupdf.Rect(rect.x0 + rx * rect.width, rect.y0 + ry * rect.height,
+                                    rect.x0 + (rx + rw) * rect.width,
+                                    rect.y0 + (ry + rh) * rect.height)
+            if any(added.intersects(existing) for added in added_boxes):
+                raise ProcessingError('Text overlaps an existing page component. Choose a clear area.')
         replace_pdf_atomically(path, doc)
 
 

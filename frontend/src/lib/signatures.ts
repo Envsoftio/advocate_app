@@ -25,8 +25,7 @@ export function confirmSignatureTransformation(documents: MatterDocument[], acti
   const names = affected.slice(0, 5).map(document => `“${document.title}”`).join(', ')
   const remainder = affected.length > 5 ? ` and ${affected.length - 5} more` : ''
   const proceed = window.confirm(
-    `${action} will transform ${names}${remainder}. Certificate indicators are not proof of validity, ` +
-    'and the operation may invalidate or omit signature protections. Visible/scanned signatures are not ' +
-    'cryptographically verified. Imported originals remain unchanged. Continue?')
+    `${action} will change ${names}${remainder}. Certificate validity and visible signatures are unverified; ` +
+    'edits may invalidate or omit signature protections. Imported originals remain unchanged. Continue?')
   return { proceed, acknowledged: proceed }
 }

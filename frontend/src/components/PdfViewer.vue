@@ -1086,6 +1086,53 @@ function choosePlacement(event: MouseEvent) {
     placement.value = { x, y, page: current.value }
   }
 }
+type TextEditReviewResponse = {review_required: true, detail: string}
+type TextPlacementRejected = {placement_rejected: true, detail: string}
+function confirmUnexpectedTextRisk(title: string): boolean {
+  return window.confirm(`Editing “${title}” may invalidate signature protections. Certificate validity is unverified. The imported original remains unchanged. Continue?`)
+}
+async function submitReviewedTextEdit<T extends object>(endpoint: string,
+    payload: Record<string, unknown>, acknowledged: boolean, title: string): Promise<T | null> {
+  const submit = (approved: boolean) => api<T | TextEditReviewResponse | TextPlacementRejected>(endpoint, 'POST',
+    {...payload, acknowledge_signature_risk: approved}, undefined,
+    {'X-CourtBundle-Review-Protocol': 'challenge'})
+  let result: T | TextEditReviewResponse | TextPlacementRejected
+  try {
+    result = await submit(acknowledged)
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 409 ||
+        !err.message.startsWith('Signature-risk acknowledgment required') || acknowledged) throw err
+    // A previously installed local engine may still use the 409 review contract.
+    if (!confirmUnexpectedTextRisk(title)) return null
+    result = await submit(true)
+  }
+  if ('review_required' in result) {
+    if (!confirmUnexpectedTextRisk(title)) return null
+    result = await submit(true)
+    if ('review_required' in result) throw new Error('Signature review was not accepted. The working copy was not changed.')
+  }
+  if ('placement_rejected' in result) throw new Error(result.detail)
+  return result
+}
+async function currentTextEditSignature(documentId: string, matterId: string,
+    expectedRevision: number, action: string) {
+  const documents = await api<MatterDocument[]>(`/matters/${matterId}/documents`)
+  const currentDocument = documents.find(item => item.id === documentId)
+  if (!currentDocument) throw new Error('Document changed. Reopen it before editing text.')
+  if (currentDocument.revision !== expectedRevision)
+    throw new Error('Document changed. Reload the page and select text again.')
+  return confirmSignatureTransformation([currentDocument], action)
+}
+function conciseTextEditError(err: unknown): string {
+  const message = friendlyError(err)
+  if (message.startsWith('Signature-risk acknowledgment required'))
+    return 'Signature review is required. Select the text and try again.'
+  if (message.includes('cannot fit in clear space'))
+    return 'Replacement is too long for the selected area. Shorten it and try again.'
+  if (message.startsWith('Document changed'))
+    return 'Document changed. Reload the page and select text again.'
+  return message.length > 140 ? `${message.slice(0, 137)}…` : message
+}
 async function placeText() {
   if (!props.document || !placement.value || editing.value || props.disabled) return
   if (overlayValidation.value) { emit('error', overlayValidation.value); return }
@@ -1103,32 +1150,13 @@ async function placeText() {
       acknowledge_signature_risk: signature.acknowledged,
     }
     const endpoint = `/documents/${documentId}/pages/text-overlay`
-    type ReviewResponse = {review_required: true, detail: string}
-    const submit = (acknowledged: boolean) => api<MatterDocument | ReviewResponse>(
-      endpoint, 'POST', {...payload, acknowledge_signature_risk: acknowledged}, undefined,
-      {'X-CourtBundle-Review-Protocol': 'challenge'})
-    let result: MatterDocument | ReviewResponse
-    try {
-      result = await submit(signature.acknowledged)
-    } catch (err) {
-      if (!(err instanceof ApiError) || err.status !== 409 ||
-          !err.message.startsWith('Signature-risk acknowledgment required') ||
-          payload.acknowledge_signature_risk) throw err
-      // Older local engines use 409 instead of an explicit review response.
-      const proceed = window.confirm(`${err.message}\n\nContinue adding visible text to the working copy?`)
-      if (!proceed) return
-      result = await submit(true)
-    }
-    if ('review_required' in result) {
-      const proceed = window.confirm(`${result.detail}\n\nContinue adding visible text to the working copy?`)
-      if (!proceed) return
-      result = await submit(true)
-      if ('review_required' in result) throw new Error('Signature review was not accepted. The working copy was not changed.')
-    }
+    const result = await submitReviewedTextEdit<MatterDocument>(endpoint, payload,
+      signature.acknowledged, currentDocument.title)
+    if (!result) return
     placement.value = null
     overlayText.value = ''
     emit('modified')
-  } catch (err) { emit('error', friendlyError(err)) }
+  } catch (err) { emit('error', conciseTextEditError(err)) }
   finally { editing.value = false }
 }
 async function selectRun(run: TextRun) {
@@ -1213,20 +1241,25 @@ function clickRun(run: TextRun) {
 }
 async function applyMove(run: TextRun, offset: number) {
   if (!props.document || editing.value || props.disabled) return
-  const signature = confirmSignatureTransformation([props.document], 'Moving visible text')
-  if (!signature.proceed) return
+  const documentId = props.document.id
+  const matterId = props.document.matter_id
+  const title = props.document.title
+  const expectedRevision = runsRevision.value
   try { editSnapshot.value = canvas.value?.toDataURL('image/png') || '' } catch { editSnapshot.value = '' }
   editSnapshotFading.value = false
   replacingText.value = true
   editing.value = true
   runsError.value = ''
   try {
-    const updated = await api<MatterDocument>(`/documents/${props.document.id}/pages/move-text-run`, 'POST', {
+    const signature = await currentTextEditSignature(documentId, matterId,
+      expectedRevision, 'Moving visible text')
+    if (!signature.proceed) return
+    const updated = await submitReviewedTextEdit<MatterDocument>(`/documents/${documentId}/pages/move-text-run`, {
       page_index: current.value - 1, span_index: run.index,
-      expected_revision: runsRevision.value, expected_text: run.text,
+      expected_revision: expectedRevision, expected_text: run.text,
       vertical_offset: offset,
-      acknowledge_signature_risk: signature.acknowledged,
-    })
+    }, signature.acknowledged, title)
+    if (!updated) return
     await loadPdf(updated)
     if (!viewerError.value && editSnapshot.value) {
       editSnapshotFading.value = true
@@ -1235,29 +1268,35 @@ async function applyMove(run: TextRun, offset: number) {
     }
     editNotice.value = 'Text moved by removing and redrawing the selected glyphs in the working copy. Review font and position; Undo can restore the prior revision.'
     emit('modified')
-  } catch (err) { runsError.value = friendlyError(err) }
+  } catch (err) { emit('error', conciseTextEditError(err)) }
   finally { editing.value = false; replacingText.value = false; editSnapshot.value = ''; cancelMove() }
 }
 async function applyReplacement() {
   if (!props.document || !selectedRun.value || !replacement.value.trim() || props.disabled || editing.value) return
   if (replacementEngine.value === 'pdfium-trial' && !selectedParagraph.value) {
-    runsError.value = 'Select a supported paragraph before applying the PDFium trial.'
+    emit('error', 'Select a supported paragraph before applying the PDFium trial.')
     return
   }
-  const signature = confirmSignatureTransformation([props.document], 'Replacing visible text')
-  if (!signature.proceed) return
+  const documentId = props.document.id
+  const matterId = props.document.matter_id
+  const title = props.document.title
+  const expectedRevision = runsRevision.value
+  const run = selectedRun.value
   editing.value = true
   replacingText.value = true
   runsError.value = ''
   try {
+    const signature = await currentTextEditSignature(documentId, matterId,
+      expectedRevision, 'Replacing visible text')
+    if (!signature.proceed) return
     const trial = replacementEngine.value === 'pdfium-trial'
-    const result = await api<MatterDocument & {edit_layout:{font_size?:number,line_count?:number,font_size_reduced?:boolean,edit_method:string,font_substituted?:boolean,font_name?:string}}>(`/documents/${props.document.id}/pages/${trial ? 'paragraph-trial' : 'replace-text-run'}`, 'POST', {
-      page_index: current.value - 1, span_index: selectedRun.value.index,
-      expected_revision: runsRevision.value, expected_text: selectedRun.value.text,
+    const result = await submitReviewedTextEdit<MatterDocument & {edit_layout:{font_size?:number,line_count?:number,font_size_reduced?:boolean,edit_method:string,font_substituted?:boolean,font_name?:string}}>(`/documents/${documentId}/pages/${trial ? 'paragraph-trial' : 'replace-text-run'}`, {
+      page_index: current.value - 1, span_index: run.index,
+      expected_revision: expectedRevision, expected_text: run.text,
       ...(trial ? {expected_paragraph:selectedParagraph.value} : {}),
       replacement: replacement.value,
-      acknowledge_signature_risk: signature.acknowledged,
-    })
+    }, signature.acknowledged, title)
+    if (!result) return
     editNotice.value = trial
       ? `Experimental PDFium paragraph edit saved in ${result.edit_layout.line_count} line(s)${result.edit_layout.font_substituted ? ` with substituted ${result.edit_layout.font_name}` : ''}. Inspect the page, extraction, and export.`
       : `Removed and redrew selected text in ${result.edit_layout.line_count} line(s) at ${result.edit_layout.font_size} pt${result.edit_layout.font_size_reduced ? ' (reduced to fit)' : ''}. Review font, layout and extraction.`
@@ -1272,7 +1311,7 @@ async function applyReplacement() {
     }
     editSnapshot.value = ''
     emit('modified')
-  } catch (err) { runsError.value = friendlyError(err) }
+  } catch (err) { emit('error', conciseTextEditError(err)) }
   finally { editing.value = false; replacingText.value = false; editSnapshot.value = '' }
 }
 </script>

@@ -280,6 +280,8 @@ def test_overlay_on_rotated_pages_uses_display_coordinates(tmp_path, rotation):
         assert abs(box.x0 / page.rect.width - .2) < .01
         assert abs(box.y0 / page.rect.height - .3) < .01
         assert page.rotation == rotation
+    with pytest.raises(pdf_ops.ProcessingError, match='overlaps existing page content'):
+        pdf_ops.add_text_overlay(path, 0, .2, .3, 'SECOND COPY', 12)
 
 
 @pytest.mark.parametrize('corrupt', [False, True])

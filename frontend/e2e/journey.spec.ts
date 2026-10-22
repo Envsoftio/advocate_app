@@ -713,7 +713,54 @@ test('selectable PDF text can be selected and replaced from the preview', async 
   await page.getByRole('button', { name: /Edit text: UPDATED PETITION/ }).click()
   await page.getByRole('textbox', { name: 'Replacement' }).fill('W'.repeat(200))
   await page.getByRole('button', { name: 'Apply replacement' }).click()
-  await expect(page.locator('.pdf-inline-editor [role="alert"]')).toContainText('cannot fit in clear space')
+  await expect(page.locator('.toast.error')).toContainText('Replacement is too long for the selected area')
+  expect((await page.locator('.toast.error').boundingBox())!.width).toBeLessThanOrEqual(380)
+  await expect(page.locator('.pdf-inline-editor [role="alert"]')).toHaveCount(0)
+  await expect(page.getByRole('textbox', { name: 'Replacement' })).toHaveValue('W'.repeat(200))
+})
+
+test('Edit text reviews signature risk without a failed request or inline error', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Signed Text Edit', court_profile: 'general-demo', max_pages_per_volume: 10,
+  } })
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
+      buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
+  })
+  const docId = (await uploaded.json())[0].id as string
+  const marked = await request.patch(`${backend}/documents/${docId}`, {
+    headers, data: {visible_signature_status: 'present'},
+  })
+  expect(marked.ok()).toBeTruthy()
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name: 'E2E Signed Text Edit'})).toBeVisible()
+  await page.getByRole('tab', {name: 'Edit', exact: true}).click()
+  await page.getByRole('button', {name: 'Edit text', exact: true}).click()
+  await page.getByRole('button', {name: /Edit text: DRAFT PETITION/}).click()
+  await page.getByRole('textbox', {name: 'Replacement'}).fill('REVIEWED PETITION')
+  await page.route(`**/matters/${matterId}/documents`, async route => {
+    const response = await route.fetch()
+    const listed = await response.json() as Array<{id:string,signature_status:string}>
+    await route.fulfill({response, json: listed.map(item => item.id === docId
+      ? {...item, signature_status: 'unsigned'} : item)})
+  })
+  const prompts: string[] = []
+  page.on('dialog', async dialog => { prompts.push(dialog.message()); await dialog.accept() })
+  const responses: number[] = []
+  const acknowledgments: boolean[] = []
+  page.on('response', response => {
+    if (!response.url().endsWith('/pages/replace-text-run')) return
+    responses.push(response.status())
+    acknowledgments.push(response.request().postDataJSON().acknowledge_signature_risk)
+  })
+  await page.getByRole('button', {name: 'Apply replacement'}).click()
+  await expect(page.locator('.text-overlay-panel [role="status"]')).toContainText('Removed and redrew selected text')
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('01_petition')
+  expect(acknowledgments).toEqual([false, true])
+  expect(responses).toEqual([200, 200])
+  await expect(page.locator('.pdf-inline-editor [role="alert"]')).toHaveCount(0)
 })
 
 test('PDFium paragraph trial edits a synthetic working revision from the viewer', async ({ page, request }) => {
@@ -842,7 +889,8 @@ test('visible text overlay is placed from the preview and becomes searchable', a
   await page.getByRole('button', { name: 'Apply text' }).click()
   const postedText = (await retryRequest).postDataJSON()
   await expect.poll(() => overlayAttempts).toBe(2)
-  expect(warnings[0]).toContain('03_affidavit')
+  expect(warnings[0]).toContain('01_petition')
+  expect(warnings[0].length).toBeLessThan(180)
   expect(postedText.x).toBeGreaterThan(0)
   await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveCount(0)
   await expect.poll(async () => {
@@ -854,7 +902,7 @@ test('visible text overlay is placed from the preview and becomes searchable', a
   })
   expect(markedRisk.ok()).toBeTruthy()
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
-  await page.locator('.pdf-paper').click({ position: { x: 130, y: 200 } })
+  await page.locator('.pdf-paper').click({ position: { x: 130, y: 390 } })
   await page.getByRole('textbox', { name: /Add text on page/ }).fill('APPROVED FIRST')
   const attemptsBeforeReview = overlayAttempts
   const approvedResponse = page.waitForResponse(item => item.url().endsWith('/pages/text-overlay') &&
@@ -867,6 +915,15 @@ test('visible text overlay is placed from the preview and becomes searchable', a
   await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveCount(0)
   await page.unroute('**/pages/text-overlay')
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
+  await page.locator('.pdf-paper').click({ position: { x: 120, y: 180 } })
+  await page.getByRole('textbox', { name: /Add text on page/ }).fill('OVERLAP TEST')
+  const overlapResponse = page.waitForResponse(item => item.url().endsWith('/pages/text-overlay') &&
+    item.request().method() === 'POST' && item.request().postDataJSON().text === 'OVERLAP TEST')
+  await page.getByRole('button', { name: 'Apply text' }).click()
+  expect((await overlapResponse).status()).toBe(200)
+  await expect(page.locator('.toast.error')).toContainText('overlaps existing page content')
+  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveValue('OVERLAP TEST')
+  await page.locator('.pdf-inline-add-card').getByRole('button', { name: 'Cancel' }).click()
   await page.locator('.pdf-paper').click({ position: { x: 130, y: 200 } })
   await page.getByRole('textbox', { name: /Add text on page/ }).fill('SECOND OVERLAY')
   await page.route('**/pages/text-overlay', route => route.fulfill({

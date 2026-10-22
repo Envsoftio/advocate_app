@@ -169,6 +169,16 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             'copy or generated bundle may invalidate or omit signature protections. '
             'Imported originals will remain unchanged.'))
 
+    def text_edit_review_response(exc: HTTPException, request: Request,
+                                  acknowledged: bool) -> JSONResponse | None:
+        if (exc.status_code == 409 and not acknowledged and
+                request.headers.get('x-courtbundle-review-protocol') == 'challenge' and
+                isinstance(exc.detail, str) and
+                exc.detail.startswith('Signature-risk acknowledgment required')):
+            return JSONResponse({'review_required': True, 'detail': exc.detail},
+                                headers={'Cache-Control': 'no-store'})
+        return None
+
     @app.get('/health')
     def health(_: None = Depends(auth)):
         return {'status': 'locked' if store is None else 'ok', 'version': '0.1.0', 'ocr_engine': 'PyMuPDF+Tesseract',
@@ -996,7 +1006,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         return Response(data, media_type='image/png', headers={'Cache-Control': 'no-store'})
 
     def edit_working_copy(doc_id: str, operation, acknowledged: bool = False,
-                          related_document_ids: list[str] | None = None):
+                          related_document_ids: list[str] | None = None,
+                          preserve_page_annotations: bool = False):
         doc = doc_or_404(doc_id)
         with store.matter_lock(doc['matter_id']):
             doc = doc_or_404(doc_id)
@@ -1009,7 +1020,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             try:
                 copy_file(store.working_path(doc), candidate)
                 changes = operation(candidate, doc) or {}
-                return store.update_document(doc_id, dict(changes, working_relpath=rel))
+                return store.update_document(doc_id, dict(changes, working_relpath=rel),
+                                             preserve_page_annotations=preserve_page_annotations)
             except BaseException:
                 store.discard_uncommitted_working(doc_id, rel, candidate)
                 raise
@@ -1099,19 +1111,25 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                           _: None = Depends(auth)):
         try:
             def place(path, doc):
+                annotations = store.list_page_annotations(doc['matter_id'])
+                reserved = [(item['rect_x'], item['rect_y'], item['rect_width'], item['rect_height'])
+                            for item in annotations if item['document_id'] == doc_id and
+                            item['page_index'] == payload.page_index and item['resolved'] and
+                            item['kind'] == 'image']
                 add_text_overlay(path, payload.page_index, payload.x, payload.y,
-                                 payload.text, payload.font_size)
+                                 payload.text, payload.font_size, reserved)
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
-            return edit_working_copy(doc_id, place, payload.acknowledge_signature_risk)
+            return edit_working_copy(doc_id, place, payload.acknowledge_signature_risk,
+                                     preserve_page_annotations=True)
         except HTTPException as exc:
-            if (exc.status_code == 409 and not payload.acknowledge_signature_risk and
-                    request.headers.get('x-courtbundle-review-protocol') == 'challenge' and
-                    isinstance(exc.detail, str) and
-                    exc.detail.startswith('Signature-risk acknowledgment required')):
-                return JSONResponse({'review_required': True, 'detail': exc.detail},
-                                    headers={'Cache-Control': 'no-store'})
+            review = text_edit_review_response(exc, request, payload.acknowledge_signature_risk)
+            if review is not None:
+                return review
             raise
         except ProcessingError as exc:
+            if (request.headers.get('x-courtbundle-review-protocol') == 'challenge' and
+                    str(exc).startswith('Text overlaps')):
+                return {'placement_rejected': True, 'detail': str(exc)}
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post('/documents/{doc_id}/pages/image-overlay')
@@ -1187,7 +1205,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post('/documents/{doc_id}/pages/replace-text-run')
-    def page_replace_text_run(doc_id: str, payload: ReplaceTextRun, _: None = Depends(auth)):
+    def page_replace_text_run(doc_id: str, payload: ReplaceTextRun, request: Request,
+                              _: None = Depends(auth)):
         try:
             edit_layout = {}
             def replace(path, doc):
@@ -1198,6 +1217,11 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
             return dict(edit_working_copy(doc_id, replace, payload.acknowledge_signature_risk),
                         edit_layout=edit_layout)
+        except HTTPException as exc:
+            review = text_edit_review_response(exc, request, payload.acknowledge_signature_risk)
+            if review is not None:
+                return review
+            raise
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1220,7 +1244,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post('/documents/{doc_id}/pages/paragraph-trial')
-    def page_paragraph_trial(doc_id: str, payload: ReplaceTextRun, _: None = Depends(auth)):
+    def page_paragraph_trial(doc_id: str, payload: ReplaceTextRun, request: Request,
+                             _: None = Depends(auth)):
         try:
             edit_layout = {}
             def replace(path, doc):
@@ -1232,11 +1257,17 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
             return dict(edit_working_copy(doc_id, replace, payload.acknowledge_signature_risk),
                         edit_layout=edit_layout)
+        except HTTPException as exc:
+            review = text_edit_review_response(exc, request, payload.acknowledge_signature_risk)
+            if review is not None:
+                return review
+            raise
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post('/documents/{doc_id}/pages/move-text-run')
-    def page_move_text_run(doc_id: str, payload: MoveTextRun, _: None = Depends(auth)):
+    def page_move_text_run(doc_id: str, payload: MoveTextRun, request: Request,
+                           _: None = Depends(auth)):
         try:
             def move(path, doc):
                 if doc['revision'] != payload.expected_revision:
@@ -1246,6 +1277,11 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 return {'page_count': doc['page_count'], 'ocr_status': 'modified'}
             return dict(edit_working_copy(doc_id, move, payload.acknowledge_signature_risk),
                         edit_method='remove-and-redraw')
+        except HTTPException as exc:
+            review = text_edit_review_response(exc, request, payload.acknowledge_signature_risk)
+            if review is not None:
+                return review
+            raise
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

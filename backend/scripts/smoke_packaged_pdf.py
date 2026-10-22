@@ -89,6 +89,15 @@ def main():
                     challenge.raise_for_status()
                     assert challenge.json()['review_required'] is True
                     assert client.get(base + '/documents').json()[0]['revision'] == overlay.json()['revision']
+                    edit_review = client.post(f'/documents/{doc["id"]}/pages/replace-text-run',
+                        headers={'X-CourtBundle-Review-Protocol': 'challenge'},
+                        json={'page_index': 0, 'span_index': 0,
+                              'expected_revision': overlay.json()['revision'],
+                              'expected_text': 'Native header', 'replacement': 'Reviewed header',
+                              'acknowledge_signature_risk': False})
+                    edit_review.raise_for_status()
+                    assert edit_review.json()['review_required'] is True
+                    assert client.get(base + '/documents').json()[0]['revision'] == overlay.json()['revision']
                     accepted = client.post(f'/documents/{doc["id"]}/pages/text-overlay',
                         json={'page_index': 0, 'x': .15, 'y': .65, 'text': 'REVIEWED MARK',
                               'acknowledge_signature_risk': True})
