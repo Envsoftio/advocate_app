@@ -708,7 +708,8 @@ class Store:
 
     @staticmethod
     def default_output_marks() -> dict:
-        return {'watermark_enabled': False, 'watermark_text': 'DRAFT',
+        return {'index_style': 'compact', 'part_extracts_enabled': False,
+                'watermark_enabled': False, 'watermark_text': 'DRAFT',
                 'watermark_position': 'center', 'watermark_font_size': 32.0,
                 'watermark_opacity': .16, 'timestamp_enabled': False,
                 'timestamp_format': 'datetime', 'timestamp_timezone': 'UTC',
@@ -1018,6 +1019,28 @@ class Store:
             con.execute('UPDATE matters SET updated_at=? WHERE id=?', (utcnow(), matter_id))
             self._audit(con, 'matter_values_updated', matter_id)
         return values
+
+    def get_filing_review(self, matter_id: str) -> dict:
+        from .schemas import FilingReview
+        values = self.get_matter_values(matter_id)
+        if 'filing_review_meta' not in values and 'filing_review_items' not in values:
+            return FilingReview().model_dump()
+        try:
+            meta = json.loads(values.get('filing_review_meta', '{}'))
+            items = json.loads(values.get('filing_review_items', '[]'))
+            return FilingReview.model_validate({**meta, 'items': items}).model_dump()
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ValueError('Stored filing review is invalid; restore or correct it before building') from exc
+
+    def set_filing_review(self, matter_id: str, review: dict) -> dict:
+        from .schemas import MatterValuesUpdate
+        values = self.get_matter_values(matter_id)
+        values['filing_review_meta'] = json.dumps({key: review[key] for key in
+            ('court', 'case_type', 'stage', 'source_note')}, ensure_ascii=False)
+        values['filing_review_items'] = json.dumps(review['items'], ensure_ascii=False)
+        MatterValuesUpdate.model_validate({'values': values})
+        self.set_matter_values(matter_id, values)
+        return self.get_filing_review(matter_id)
 
     def get_document(self, doc_id: str) -> dict | None:
         with self.connect() as con:
@@ -1607,6 +1630,7 @@ class Store:
                        'target_document_id', 'target_page_index', 'target_revision',
                        'uri', 'position')} for entry in self.list_reviewed_links(matter_id)],
                    'output_marks': self.get_output_marks(matter_id),
+                   'filing_review': self.get_filing_review(matter_id),
                    'output_preset': self.get_applied_output_preset(matter_id)}
         annotations = []
         for entry in self.list_page_annotations(matter_id):

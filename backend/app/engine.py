@@ -5,6 +5,7 @@ Index positions, bookmark destinations and the emitted CSV share one page map.
 """
 from __future__ import annotations
 import csv
+from html import escape as html_escape
 import io
 import json
 import math
@@ -46,6 +47,16 @@ def load_profiles() -> dict:
     return {p['id']: p for p in json.loads(path.read_text(encoding='utf-8'))}
 
 
+def supported_index_script(value: str) -> bool:
+    """Fail closed outside the Latin/Devanagari visual pilot and common punctuation."""
+    return all(32 <= ord(char) <= 0x024f or
+               0x0900 <= ord(char) <= 0x097f or
+               0x2000 <= ord(char) <= 0x206f or
+               0x20a0 <= ord(char) <= 0x20cf or
+               0xa8e0 <= ord(char) <= 0xa8ff
+               for char in value)
+
+
 def original_integrity_issues(store: Store, docs: list[dict]) -> list[dict]:
     """Compare imported originals with their recorded hashes without changing either."""
     issues = []
@@ -70,18 +81,38 @@ def original_integrity_issues(store: Store, docs: list[dict]) -> list[dict]:
 
 def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
     docs = store.get_documents(matter_id)
+    matter = store.get_matter(matter_id)
     output_settings = store.get_output_marks(matter_id)
+    filing_review = store.get_filing_review(matter_id)
     issues = []
     if not docs:
         issues.append(dict(severity='error', code='NO_DOCUMENTS', message='Import at least one document before building.', document_id=None))
         return issues
     if profile['status'] != 'APPROVED':
         issues.append(dict(severity='info', code='PROFILE_NOT_APPROVED', message='This is a demo/illustrative profile, not a verified court-compliance determination.', document_id=None))
+    if matter and not supported_index_script(matter['name']):
+        issues.append(dict(severity='error', code='UNSUPPORTED_INDEX_SCRIPT',
+                           message='The matter name contains a script outside the current Latin/Devanagari visual pilot. Generated index output is blocked until this script is verified.',
+                           document_id=None))
+    pending_review = sum(item['status'] == 'unreviewed' for item in filing_review['items'])
+    if pending_review:
+        issues.append(dict(severity='info', code='USER_CHECKLIST_PENDING',
+                           message=f'{pending_review} user-authored checklist item(s) remain unreviewed. This checklist is not a court-rule determination.',
+                           document_id=None))
+    if (matter and filing_review['case_type'] and
+            filing_review['case_type'].strip().casefold() != matter['case_type'].strip().casefold()):
+        issues.append(dict(severity='warning', code='USER_CHECKLIST_SCOPE_MISMATCH',
+                           message='The user-authored checklist case type differs from the matter case type. Review whether these items still apply.',
+                           document_id=None))
     issues.extend(original_integrity_issues(store, docs))
     seen_hashes = set()
     seen_labels = set()
     for doc in docs:
         common = dict(document_id=doc['id'])
+        if not supported_index_script(doc['title'] + doc['label']):
+            issues.append(dict(severity='error', code='UNSUPPORTED_INDEX_SCRIPT',
+                               message=f'{doc["title"]} contains a script outside the current Latin/Devanagari visual pilot. Generated index output is blocked until this script is verified.',
+                               **common))
         mode = annexure_mode(doc, output_settings)
         if mode != 'none':
             if doc['label_status'] != 'confirmed' or not doc['label'].strip():
@@ -187,8 +218,12 @@ def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
     return issues
 
 
-def index_pages_for(doc_count: int) -> int:
-    return max(1, math.ceil(doc_count / INDEX_ROWS_PER_PAGE))
+def index_layout(settings: dict | None = None) -> tuple[int, int]:
+    return (16, 35) if (settings or {}).get('index_style') == 'readable' else (INDEX_ROWS_PER_PAGE, 25)
+
+
+def index_pages_for(doc_count: int, settings: dict | None = None) -> int:
+    return max(1, math.ceil(doc_count / index_layout(settings)[0]))
 
 
 def annexure_mode(document: dict, settings: dict) -> str:
@@ -202,7 +237,7 @@ def volume_rows(documents: list[dict], volume_no: int,
                 settings: dict | None = None) -> tuple[list[dict], int]:
     """The single page map used by preview, PDF rendering, links and CSV."""
     settings = settings or {}
-    index_count = index_pages_for(len(documents))
+    index_count = index_pages_for(len(documents), settings)
     position = index_count
     rows = []
     for doc in documents:
@@ -282,11 +317,100 @@ def bundle_preview(store: Store, matter_id: str, max_pages: int,
                            volume_page=destination[1] + item['page_index'] if resolved else None,
                            combined_page=destination[2] + destination[1] + item['page_index'] if resolved else None))
     return dict(volumes=volumes, combined_pages=combined_offset, manual_bookmarks=manual,
+                part_extracts=[{'part': part, 'documents': sum(row['part'] == part for volume in volumes for row in volume['rows']),
+                                'pages': sum(row['total_pages'] for volume in volumes for row in volume['rows'] if row['part'] == part)}
+                               for part in range(1, 5)
+                               if settings.get('part_extracts_enabled') and any(
+                                   row['part'] == part for volume in volumes for row in volume['rows'])],
                 bates_policy={'enabled': settings.get('bates_enabled', False),
                     'include_index': settings.get('bates_include_index', False),
                     'include_separator': settings.get('bates_include_separator', False),
                     'restart_per_volume': settings.get('bates_restart_per_volume', False)},
                 numbering='Physical page numbers restart at 1 in each volume; the combined PDF retains those printed numbers.')
+
+
+def page_map_entries(preview: dict) -> list[dict]:
+    """Small, immutable comparison snapshot from the same map used for output."""
+    return [{key: row[key] for key in ('id', 'part', 'label', 'title', 'volume',
+            'start_page', 'end_page', 'combined_start_page', 'combined_end_page')}
+            for volume in preview['volumes'] for row in volume['rows']]
+
+
+def compare_bundle_plan(store: Store, matter_id: str, prior: dict,
+                        max_pages: int, keep_groups: bool) -> dict:
+    """Explain only changes supported by a recorded page-map snapshot."""
+    if not isinstance(prior.get('page_map_snapshot'), list) or not isinstance(prior.get('input_revisions'), list):
+        return {'available': False, 'reason': 'This older build did not record enough page-map detail for a reliable comparison.'}
+    current = bundle_preview(store, matter_id, max_pages, keep_groups)
+    old_rows = prior['page_map_snapshot']
+    new_rows = page_map_entries(current)
+    if any(not isinstance(row, dict) or not all(key in row for key in
+           ('id', 'part', 'label', 'title', 'volume', 'start_page', 'end_page',
+            'combined_start_page', 'combined_end_page')) for row in old_rows):
+        return {'available': False, 'reason': 'The stored page-map snapshot is incomplete.'}
+    old_by_id = {row['id']: row for row in old_rows}
+    new_by_id = {row['id']: row for row in new_rows}
+    shared_ids = set(old_by_id) & set(new_by_id)
+    old_shared_order = [row['id'] for row in old_rows if row['id'] in shared_ids]
+    new_shared_order = [row['id'] for row in new_rows if row['id'] in shared_ids]
+    old_positions = {doc_id: index for index, doc_id in enumerate(old_shared_order)}
+    new_positions = {doc_id: index for index, doc_id in enumerate(new_shared_order)}
+    old_revisions = {item['document_id']: item for item in prior['input_revisions']}
+    current_docs = {item['id']: item for item in store.get_documents(matter_id)}
+    changes = []
+    for doc_id in list(dict.fromkeys([*old_by_id, *new_by_id])):
+        old, new = old_by_id.get(doc_id), new_by_id.get(doc_id)
+        before = old_revisions.get(doc_id, {})
+        after = current_docs.get(doc_id, {})
+        reasons = []
+        if old is None:
+            reasons.append('added')
+        elif new is None:
+            reasons.append('removed from current bundle')
+        else:
+            if before.get('revision') != after.get('revision') or (before.get('working_sha256') and
+                    before['working_sha256'] != store.sha256(store.working_path(after))):
+                reasons.append('working PDF changed')
+            if old_positions[doc_id] != new_positions[doc_id]:
+                reasons.append('order changed')
+            if old['title'] != new['title']:
+                reasons.append('title changed')
+            if old['part'] != new['part']:
+                reasons.append('Part changed')
+            if old['label'] != new['label']:
+                reasons.append('label changed')
+            if any(old[key] != new[key] for key in ('volume', 'start_page', 'end_page',
+                    'combined_start_page', 'combined_end_page')):
+                reasons.append('page range shifted')
+        if reasons:
+            changes.append({'document_id': doc_id, 'title': (new or old)['title'],
+                            'reasons': reasons, 'before': old, 'after': new})
+    settings = prior.get('build_settings') or {}
+    setting_changes = []
+    if settings.get('max_pages_per_volume') != max_pages:
+        setting_changes.append('Volume page cap')
+    if bool(settings.get('keep_groups_intact')) != keep_groups:
+        setting_changes.append('Keep groups together')
+    if prior.get('output_marks') != store.get_output_marks(matter_id):
+        setting_changes.append('Output formatting and marks')
+    if prior.get('filing_review') != store.get_filing_review(matter_id):
+        setting_changes.append('User-authored review checklist')
+    old_bookmarks = {item['id']: item for item in prior.get('manual_bookmark_inputs', [])}
+    new_bookmarks = {item['id']: item for item in store.list_manual_bookmarks(matter_id)}
+    bookmark_changes = sorted(item['title'] for key, item in new_bookmarks.items()
+                              if key not in old_bookmarks or any(item.get(field) != old_bookmarks[key].get(field)
+                              for field in ('title', 'document_id', 'page_index', 'target_revision', 'parent_id', 'position')))
+    bookmark_changes.extend(item['title'] or 'Untitled bookmark' for key, item in old_bookmarks.items()
+                            if key not in new_bookmarks)
+    return {'available': True, 'prior_build_id': prior['id'], 'prior_created_at': prior['created_at'],
+            'prior_pages': prior['pages'], 'current_pages': current['combined_pages'],
+            'changes': changes, 'setting_changes': setting_changes,
+            'bookmark_changes': bookmark_changes,
+            'unresolved_bookmarks': [item['title'] for item in current['manual_bookmarks'] if not item['resolved']],
+            'other_inputs_changed': (prior.get('build_input_digest') != store.build_input_digest(matter_id)
+                                     and not changes and not setting_changes and not bookmark_changes),
+            'current_matches_prior': (prior.get('build_input_digest') == store.build_input_digest(matter_id)
+                                      and not setting_changes)}
 
 
 def make_units(docs: list[dict], keep_groups: bool) -> list[list[dict]]:
@@ -327,7 +451,7 @@ def volume_plan(docs: list[dict], max_pages: int, keep_groups: bool,
     for unit in make_units(docs, keep_groups):
         unit_pages = sum(d['page_count'] + int(annexure_mode(d, settings) == 'separator')
                          for d in unit)
-        next_index_pages = index_pages_for(len(current) + len(unit))
+        next_index_pages = index_pages_for(len(current) + len(unit), settings)
         if page_count + unit_pages + next_index_pages <= max_pages:
             current.extend(unit)
             page_count += unit_pages
@@ -336,7 +460,7 @@ def volume_plan(docs: list[dict], max_pages: int, keep_groups: bool,
             volumes.append(current)
             current = []
             page_count = 0
-        if unit_pages + index_pages_for(len(unit)) > max_pages:
+        if unit_pages + index_pages_for(len(unit), settings) > max_pages:
             joined = ', '.join(d['title'] for d in unit)
             raise ProcessingError(f'Document/group ({joined}) exceeds {max_pages}-page volume cap including index. No document was split. Increase the cap or revise the grouping policy.')
         current.extend(unit)
@@ -451,6 +575,43 @@ def validate_reviewed_links(path: Path, expected_uri: dict[int, list[str]]) -> N
                 raise ProcessingError('Written PDF external links differ from reviewed link inputs')
 
 
+def render_part_extracts(combined_file: Path, rows: list[dict],
+                         document_starts: dict[str, int], staging: Path,
+                         cancelled) -> list[dict]:
+    """Optional source-page extracts; destinations originate in the combined map."""
+    artifacts = []
+    with open_pdf(combined_file) as combined:
+        for part_number in range(1, 5):
+            selected = [row for row in rows if row['part'] == part_number]
+            if not selected:
+                continue
+            filename = f'part-{part_number:02}.pdf'
+            with pymupdf.open() as output:
+                toc = []
+                for row in selected:
+                    if cancelled():
+                        raise ProcessingError('Operation cancelled')
+                    start = document_starts[row['id']]
+                    end = start + row['total_pages'] - 1
+                    if end >= combined.page_count:
+                        raise ProcessingError('Part extract differs from the deterministic page map')
+                    toc.append([1, (row['label'] + ' - ' if row['label'] else '') + row['title'],
+                                output.page_count + 1])
+                    output.insert_pdf(combined, from_page=start, to_page=end,
+                                      annots=False, links=False)
+                output.set_toc(toc)
+                output.set_metadata({'title': f'Technical Part {part_number} extract',
+                                     'subject': 'DRAFT CourtBundle POC - not court certified',
+                                     'creator': 'CourtBundle POC'})
+                save_pdf(output, staging / filename, garbage=4, deflate=True)
+            validate_navigation(staging / filename,
+                                sum(row['total_pages'] for row in selected), toc, {})
+            artifacts.append({'part': part_number, 'filename': filename,
+                              'documents': len(selected),
+                              'pages': sum(row['total_pages'] for row in selected)})
+    return artifacts
+
+
 def apply_page_annotations(output: pymupdf.Document, annotations: list[dict],
                            document_starts: dict[str, int], cancelled=None) -> dict:
     """Flatten explicitly printable marks; private review annotations stay out."""
@@ -498,6 +659,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
     """Create an indexed, paginated, bookmarked volume and return page-map records."""
     output_marks = output_marks or {}
     rows, index_count = volume_rows(documents, volume_no, output_marks)
+    rows_per_page, row_step = index_layout(output_marks)
     bates_labels = bates_labels or [None] * (rows[-1]['end_page'] if rows else index_count)
 
     with pymupdf.open() as output:
@@ -506,22 +668,34 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
             page.draw_rect(pymupdf.Rect(0, 0, A4_W, 10), color=(0.10, .25, .46), fill=(0.10, .25, .46))
             page.insert_text((50, 50), 'COURTBUNDLE / INDEX', fontsize=10, fontname='hebo', color=(.12,.32,.58))
             page.insert_text((50, 82), f'Volume {volume_no} - Document Index', fontsize=19, fontname='hebo', color=(.08,.16,.29))
-            page.insert_textbox(pymupdf.Rect(50, 94, 555, 135), clean_title(matter['name'], 95), fontsize=9)
+            if any(ord(char) > 126 for char in matter['name']):
+                page.insert_htmlbox(pymupdf.Rect(50, 94, 555, 135),
+                    html_escape(matter['name']), css='* {font-family:sans-serif;font-size:9px;}')
+            else:
+                page.insert_textbox(pymupdf.Rect(50, 94, 555, 135), clean_title(matter['name'], 95), fontsize=9)
             page.insert_text((50, 156), 'PART', fontsize=9, fontname='hebo')
             page.insert_text((100, 156), 'DOCUMENT / PARTICULARS', fontsize=9, fontname='hebo')
             page.insert_text((490, 156), 'PAGES', fontsize=9, fontname='hebo')
             page.draw_line((50, 164), (545, 164), color=(.7,.75,.8), width=.8)
-            subset = rows[i * INDEX_ROWS_PER_PAGE:(i + 1) * INDEX_ROWS_PER_PAGE]
+            subset = rows[i * rows_per_page:(i + 1) * rows_per_page]
             for offset, row in enumerate(subset):
-                ypos = 187 + offset * 25
+                ypos = 187 + offset * row_step
                 page.insert_text((50, ypos), str(row['part']), fontsize=9)
                 display_title = (row['label'] + '  ' if row['label'] else '') + row['title']
-                page.insert_text((100, ypos), clean_title(display_title, 66), fontsize=9)
+                if output_marks.get('index_style') == 'readable' or any(ord(char) > 126 for char in display_title):
+                    title_rect = (pymupdf.Rect(100, ypos - 18, 475, ypos + 14)
+                                  if output_marks.get('index_style') == 'readable'
+                                  else pymupdf.Rect(100, ypos - 13, 475, ypos + 7))
+                    page.insert_htmlbox(title_rect, html_escape(display_title),
+                        css='* {font-family:sans-serif;font-size:10px;line-height:1.1;}')
+                else:
+                    page.insert_text((100, ypos), clean_title(display_title, 66), fontsize=9)
                 start_end = str(row['start_page']) if row['start_page'] == row['end_page'] else f'{row["start_page"]}-{row["end_page"]}'
                 page.insert_text((488, ypos), start_end, fontsize=9)
                 # The target pages do not exist yet; insert links after adding all documents.
                 if offset % 2 == 0:
-                    page.draw_line((50, ypos+8), (545, ypos+8), color=(.92,.93,.95), width=.5)
+                    line_y = ypos + (16 if row_step == 35 else 8)
+                    page.draw_line((50, line_y), (545, line_y), color=(.92,.93,.95), width=.5)
             page.insert_text((50, 774), 'Index entries open their source pages. Verify legal completeness separately.', fontsize=8, color=(.45,.48,.52))
             page.insert_text((50, 796), 'DRAFT / POC - NOT COURT CERTIFIED', fontsize=8, color=(.55,.32,.24))
 
@@ -606,11 +780,12 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
         # Link each index row to its true 0-based destination.
         for i in range(index_count):
             page = output[i]
-            subset = rows[i * INDEX_ROWS_PER_PAGE:(i + 1) * INDEX_ROWS_PER_PAGE]
+            subset = rows[i * rows_per_page:(i + 1) * rows_per_page]
             for offset, row in enumerate(subset):
-                ypos = 187 + offset * 25
+                ypos = 187 + offset * row_step
                 page.insert_link({'kind': pymupdf.LINK_GOTO,
-                                  'from': pymupdf.Rect(90, ypos - 14, 545, ypos + 8),
+                                  'from': pymupdf.Rect(90, ypos - (20 if row_step == 35 else 14), 545,
+                                                       ypos + (15 if row_step == 35 else 8)),
                                   'page': row['start_page'] - 1, 'to': pymupdf.Point(0, 0)})
         reviewed_summary = insert_reviewed_links(
             output, reviewed_links or [], document_starts)
@@ -623,7 +798,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
 
     expected_links = {}
     for index, row in enumerate(rows):
-        expected_links.setdefault(index // INDEX_ROWS_PER_PAGE, []).append(row['start_page'] - 1)
+        expected_links.setdefault(index // rows_per_page, []).append(row['start_page'] - 1)
     for page_index, destinations in reviewed_summary['expected_goto'].items():
         expected_links.setdefault(page_index, []).extend(destinations)
     validate_navigation(path, rows[-1]['end_page'] if rows else index_count, toc, expected_links)
@@ -661,6 +836,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             item['_asset_path'] = str(store.matter_dir(matter_id) / item['asset_relpath'])
     output_marks = store.get_output_marks(matter_id)
     output_preset = store.get_applied_output_preset(matter_id)
+    filing_review = store.get_filing_review(matter_id)
     mark_at = datetime.now(timezone.utc)
     mark_at_iso = mark_at.isoformat(timespec='seconds')
     progress(5, 'Checking source documents')
@@ -764,11 +940,13 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                         global_toc.append([3, f'{row["label"]} separator',
                                            offset + row['separator_page']])
                     global_toc.append([3, (row['label'] + ' - ' if row['label'] else '') + row['title'], destination + 1])
-                    idx_page = offset + rno // INDEX_ROWS_PER_PAGE
+                    rows_per_page, row_step = index_layout(output_marks)
+                    idx_page = offset + rno // rows_per_page
                     global_links.setdefault(idx_page, []).append(destination)
-                    ypos = 187 + (rno % INDEX_ROWS_PER_PAGE) * 25
+                    ypos = 187 + (rno % rows_per_page) * row_step
                     combined[idx_page].insert_link({'kind': pymupdf.LINK_GOTO,
-                        'from': pymupdf.Rect(90, ypos-14, 545, ypos+8),
+                        'from': pymupdf.Rect(90, ypos-(20 if row_step == 35 else 14), 545,
+                                             ypos+(15 if row_step == 35 else 8)),
                         'page': destination, 'to': pymupdf.Point(0, 0)})
                 offset += count
             combined_link_summary = insert_reviewed_links(
@@ -784,6 +962,9 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
 
         validate_navigation(combined_file, offset, global_toc, global_links)
         validate_reviewed_links(combined_file, combined_link_summary['expected_uri'])
+        part_extracts = (render_part_extracts(combined_file, all_rows,
+                         combined_document_starts, staging, cancelled)
+                         if output_marks.get('part_extracts_enabled') else [])
 
         progress(83, 'Checking bookmarks and generating index CSV')
         with open_pdf(combined_file) as final:
@@ -803,7 +984,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         file_bytes = file_size(combined_file)
         if any(any(ord(c)>126 for c in row['title']+row['label']) for row in all_rows):
             problems.append(dict(severity='warning', code='NON_LATIN_INDEX', document_id=None,
-                                 message='Printed index uses built-in Latin PDF fonts; non-Latin title glyphs may be replaced by ?. PDF outlines retain Unicode titles.'))
+                                 message='Printed index uses shaped fallback fonts for non-Latin titles. Visually inspect every generated row and saved PDF; text extraction and script coverage are not verified. PDF outlines retain Unicode titles.'))
         unresolved = [bookmark for bookmark in bookmarks if not bookmark['resolved']]
         if unresolved:
             problems.append(dict(severity='warning', code='UNRESOLVED_MANUAL_BOOKMARKS',
@@ -846,6 +1027,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'output_marks': output_marks, 'output_preset': output_preset,
                   'output_mark_timestamp': mark_at_iso,
                   'page_map': all_rows,
+                  'part_extracts': part_extracts,
                   'bates_policy': {'enabled': output_marks['bates_enabled'],
                       'include_index': output_marks['bates_include_index'],
                       'include_separator': output_marks['bates_include_separator'],
@@ -883,9 +1065,11 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         write_bytes(staging / 'READ_ME_FIRST.txt', readme.encode('utf-8'))
         progress(90, 'Packaging export ZIP')
         zip_file = staging / 'filing-package.zip'
+        part_filenames = [item['filename'] for item in part_extracts]
         def fill_zip(output):
             with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
                 for filename in ['combined.pdf', *[v['filename'] for v in volume_rows],
+                                 *part_filenames,
                                  'index.csv', 'validation-report.json', 'READ_ME_FIRST.txt']:
                     if cancelled():
                         raise ProcessingError('Operation cancelled')
@@ -906,10 +1090,13 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             with zipfile.ZipFile(zip_file) as archive:
                 if archive.testzip() is not None:
                     raise ProcessingError('Export ZIP integrity verification failed')
-        filenames = ['filing-package.zip', 'combined.pdf', *[v['filename'] for v in volume_rows], 'index.csv', 'validation-report.json']
+        filenames = ['filing-package.zip', 'combined.pdf', *[v['filename'] for v in volume_rows],
+                     *part_filenames, 'index.csv', 'validation-report.json']
         # The ZIP may exceed the cap even when each PDF fits. Check everything offered
         # for download before the staging directory can be published as an export.
         check_export_sizes(staging, filenames, profile.get('max_file_mb'))
+        page_snapshot = page_map_entries(bundle_preview(
+            store, matter_id, matter['max_pages_per_volume'], matter['keep_groups_intact']))
         export_manifest = dict(id=export_id, created_at=report['created_at'], matter_id=matter_id,
                                pages=combined_pages, volumes=len(plans),
                                matter_updated_at=matter['updated_at'], input_revisions=input_revisions,
@@ -917,10 +1104,13 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                                signature_inputs=signature_inputs,
                                signature_risk_acknowledged=bool(signature_risks and signature_acknowledged),
                                build_input_digest=build_input_digest,
+                               page_map_snapshot=page_snapshot,
+                               part_extracts=part_extracts,
                                build_settings=build_settings, manual_bookmark_inputs=bookmark_inputs,
                                reviewed_link_inputs=reviewed_link_inputs,
                                page_annotation_inputs=annotation_inputs,
                                output_marks=output_marks, output_preset=output_preset,
+                               filing_review=filing_review,
                                output_mark_timestamp=mark_at_iso,
                                interactive_content_policy=EXPORT_INTERACTIVE_CONTENT_POLICY,
                                files=[{'name':name,'bytes':file_size(staging/name),

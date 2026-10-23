@@ -33,6 +33,8 @@ The client described the following desired product:
 5. **Collation and structuring engine (the distinctive complexity):** Four-part workflows (Part 1–4), drag-and-drop document order, OCR, pagination, indexes, smart grouping e.g. 1a/1b/1c, splitting at an approximately 300-page constraint, preserving whole-document boundaries, per-volume indexes, final combined and bookmarked outputs.
 6. **Automations:** Index page-number updates, bookmarks generated from index entries, category-driven rule/defect checking.
 7. **Architecture:** Offline first, clean UI/backend boundary, secure IPC, progress/cancellation, modularity and maintainability.
+
+**24 October 2026 desktop-foundation scope clarification:** The product owner selected modern DOCX/XLSX/PPTX exports for this increment, rather than legacy `.doc/.xls/.ppt` or every pairwise Office conversion. Share-link generation is deferred; no online destination or revocation service is authorized. The original broader PDF/Office conversion discussion below remains historical context and requires a separate scope decision before implementation. Editable Office review drafts must identify their PDF/CSV source build and describe extraction/layout losses; they are not filing PDFs.
 8. **Testing/distribution:** pytest for Python, Vitest for TypeScript, Playwright E2E requested initially, native builds for Windows/macOS (Linux mentioned in build scope).
 
 The client asked proposal respondents for prior PDF/Electron experience, actual desktop-app examples, an MVP timeline, monthly retainer and fixed-price estimate.

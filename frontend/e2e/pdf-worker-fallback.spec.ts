@@ -80,7 +80,10 @@ test('production PDF reader renders with the bundled main-thread fallback when W
   const surface = page.locator('.pdf-page-surface[data-page="1"]')
   await expect(surface).toHaveAttribute('aria-busy', 'false')
   await expect(surface.locator('.pdf-text-layer')).not.toHaveText('')
-  expect(await surface.locator('canvas').evaluate(canvas => (canvas as HTMLCanvasElement).width)).toBeGreaterThan(100)
+  // Fit page scales to the available reader height, which changes with the
+  // desktop toolbar and viewport. A nontrivial raster plus text proves the
+  // main-thread fallback rendered without pinning a layout-specific width.
+  expect(await surface.locator('canvas').evaluate(canvas => (canvas as HTMLCanvasElement).width)).toBeGreaterThan(50)
   expect(await page.evaluate(() => (window as any).__blockedWorkerAttempts)).toBeGreaterThan(0)
   expect(served.has(`/assets/${workerName}`)).toBe(true)
 

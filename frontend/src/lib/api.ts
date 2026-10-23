@@ -253,6 +253,39 @@ export async function downloadExport(matterId: string, exportId: string, filenam
   return true
 }
 
+export async function downloadOfficeReview(matterId: string, exportId: string,
+    filename: string, kind: 'docx' | 'xlsx' | 'pptx'): Promise<boolean> {
+  if (inTauri()) return invoke<boolean>('save_office_export', { matterId, exportId, filename, kind })
+  const response = await request(`/matters/${encodeURIComponent(matterId)}/exports/${encodeURIComponent(exportId)}/${encodeURIComponent(filename)}/office/${kind}`,
+    { cache: 'no-store' }, 5 * 60_000)
+  const outputName = filename.replace(/\.[^.]+$/, '') + `-review.${kind}`
+  const url = URL.createObjectURL(await response.blob())
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = outputName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
+  return true
+}
+
+export async function printableExport(matterId: string, exportId: string, filename: string,
+    options: { pages: string, orientation: 'source' | 'portrait' | 'landscape', scale: 'fit' | 'actual' }): Promise<Blob> {
+  const response = await request(`/matters/${encodeURIComponent(matterId)}/exports/${encodeURIComponent(exportId)}/${encodeURIComponent(filename)}/print`,
+    { method: 'POST', body: JSON.stringify(options), cache: 'no-store' }, 5 * 60_000)
+  return response.blob()
+}
+
+export async function printableWorkingPdf(documentId: string, revision: number,
+    options: { pages: string, orientation: 'source' | 'portrait' | 'landscape', scale: 'fit' | 'actual' },
+    acknowledgeSignatureRisk = false): Promise<Blob> {
+  const response = await request(`/documents/${encodeURIComponent(documentId)}/print`,
+    { method: 'POST', body: JSON.stringify({ ...options, expected_revision: revision,
+      acknowledge_signature_risk: acknowledgeSignatureRisk }), cache: 'no-store' }, 5 * 60_000)
+  return response.blob()
+}
+
 export async function downloadProtectedPdf(matterId: string, exportId: string,
                                            filename: string, password: string): Promise<boolean> {
   if (inTauri()) {

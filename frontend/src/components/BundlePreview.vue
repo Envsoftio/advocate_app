@@ -30,6 +30,7 @@ interface Volume {
 interface Preview {
   volumes: Volume[]
   combined_pages: number
+  part_extracts: Array<{part:number;documents:number;pages:number}>
   manual_bookmarks: Array<{id:string,title:string,document_title:string,document_page:number,resolved:boolean,volume:number|null,volume_page:number|null,combined_page:number|null}>
   numbering: string
   bates_policy: {enabled:boolean;include_index:boolean;include_separator:boolean;restart_per_volume:boolean}
@@ -80,6 +81,7 @@ watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey]
       <div v-if="preview && !loading">
         <p v-if="!preview.volumes.length" class="hint">Import documents to see index rows and page numbers.</p>
         <p v-else class="bundle-preview-summary">{{preview.volumes.length}} volume(s) · {{preview.volumes.reduce((sum, volume) => sum + volume.index_pages, 0)}} index page(s) · {{preview.combined_pages}} combined pages</p>
+        <p v-if="preview.part_extracts.length" class="hint">Technical Part PDFs: {{preview.part_extracts.map(item => `Part ${item.part} (${item.documents} documents, ${item.pages} source pages)`).join(' · ')}}. They omit volume index and separator pages.</p>
         <p v-if="preview.bates_policy.enabled" class="hint">Bates: {{preview.bates_policy.restart_per_volume ? 'restarts per volume' : 'continuous across volumes'}} · index pages {{preview.bates_policy.include_index ? 'included' : 'excluded'}} · separator pages {{preview.bates_policy.include_separator ? 'included' : 'excluded'}}. Physical volume page numbers remain separate.</p>
         <div v-for="volume in preview.volumes" :key="volume.number" class="bundle-preview-volume">
           <h3>Volume {{volume.number}} <small>{{volume.page_count}} pages · {{volume.index_pages}} index page(s)</small></h3>
@@ -90,7 +92,7 @@ watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey]
         <div v-if="preview.manual_bookmarks.length" class="bundle-preview-manual"><h3>Manual bookmark destinations</h3>
           <ul><li v-for="bookmark in preview.manual_bookmarks" :key="bookmark.id"><strong>{{bookmark.title}}</strong> · {{bookmark.document_title}}, source page {{bookmark.document_page}} — <span v-if="bookmark.resolved">Volume {{bookmark.volume}}, printed page {{bookmark.volume_page}} · combined page {{bookmark.combined_page}}</span><strong v-else>Needs review; omitted from export</strong></li></ul>
         </div>
-        <p class="hint">{{preview.numbering}} These are physical PDF pages, including index pages. Review the generated PDFs before use; the illustrative profile is not legally approved.</p>
+        <p class="hint">{{preview.numbering}} These are physical PDF pages, including index pages. Review the generated PDFs before use; the selected profile does not establish court approval.</p>
       </div>
     </div>
   </section>

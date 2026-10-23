@@ -1,0 +1,97 @@
+Summary
+I want to build a local-first, cross-platform desktop application (Windows and MacOS) using:
+
+* **Tauri (Vue + TypeScript frontend)**
+* **Python FastAPI sidecar (backend)**
+* **PyMuPDF (PDF engine) + Tesseract OCR**
+
+This is not a basic PDF editor. The goal is to build a high-performance document processing and workflow automation system, with a strong focus on PDF manipulation, structured document workflows, and legal-tech style automation. The tool will be specifically designed for legal use case.
+
+The product will run fully offline-first, with a clean architecture separating UI and processing via a secure IPC bridge.
+
+
+Project Scope (High-Level)
+
+1. Core System (Desktop App Foundation)**
+
+* File management: Open, Save, Save As, Autosave
+* User storage panel
+* Export (PDF, Word, Excel, PPT)
+* Print + Share (link generation)
+* Zoom, search, undo/redo
+* Theme + UI scaling controls
+
+---
+
+2. Core PDF Engine (Primary Requirement)**
+
+Using PyMuPDF + OCR (open to an alternate for this), build a robust PDF system:
+
+* Merge / split / extract / reorder/ replace (pdf, word and image format files)
+*Rotate, crop, delete, replace pages
+* Insert pages before/after
+* Convert to/from PDF (images, Word, etc.)
+* Compress PDFs
+* Page navigation
+
+**Editing Layer:**
+
+* OCR-based editable text 
+* Add text, highlights, images
+* Comments and annotations
+* Link insertion
+
+---
+
+3. Advanced PDF Features
+
+* Password protection
+* Redaction
+* E-signatures
+* Watermarks, timestamps
+* Pagination system
+* Scan + OCR workflows
+
+**Bookmarking System:**
+
+* Manual + auto bookmark creation
+* Drag/drop bookmarks
+* Index-based auto-bookmarking
+
+---
+
+4. Document Generation System (For legal use case)
+
+* Matter-based workflow (multi-tab system)
+* Category + subcategory driven inputs
+* Dynamic forms (dropdown-based)
+* Template-driven document creation
+* Output: structured ZIP with generated files
+
+---
+5. Collation & Structuring Engine (Core Complexity)
+
+* Multi-part document system (Part 1–4 + combine)
+* Drag/drop file collation
+* OCR + pagination + indexing
+
+**Advanced Logic:**
+
+* Smart bookmarks (grouped documents like 1a, 1b, 1c)
+* Volume splitting (~300 pages constraint)
+* Prevent document breaks across volumes
+* Auto index generation per volume
+* Final structured output (combined + indexed + bookmarked)
+
+---
+
+6. Automation Systems
+
+* **Index automation:** auto-fill page numbers
+* **Auto-bookmark system:** generate bookmarks from index
+* **Error-check system:** rule-based validation across document categories
+
+---
+
+
+

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { Maximize2, Minimize2, Archive, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, FilePlus2, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare, Eraser, Undo2, Redo2, X, Search, Square, Circle, Minus, ArrowUpRight, Check, CalendarDays } from 'lucide-vue-next'
+import { Maximize2, Minimize2, Archive, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, FilePlus2, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare, Eraser, Undo2, Redo2, X, Search, Square, Circle, Minus, ArrowUpRight, Check, CalendarDays, Printer } from 'lucide-vue-next'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import type { MatterDocument, OutputMarkPreview, OutputMarks, PageAnnotation, ReviewedLink } from '../lib/types'
 import { ApiError, api, downloadWorkingPdf, inTauri, pageAnnotationAsset, pdfDocumentSource, uploadPageAnnotationImage } from '../lib/api'
@@ -18,12 +18,14 @@ const pdfOwner = usePdfDocument()
 const readerPdf = pdfOwner.pdf
 const readerViewport = ref<InstanceType<typeof PdfReaderViewport> | null>(null)
 const readerMode = ref<ReaderMode>('single')
-const zoomChoice = ref('fit-width')
+const zoomChoice = ref('fit-page')
 const readingHistory = ref<ReaderPosition[]>([])
 const outlineOpen = ref(false)
 const sourceOutline = ref<Array<{title:string,page:number|null,url:string|null,level:number}>>([])
 const outlineError = ref('')
 const commentsOpen = ref(false)
+const commentQuery = ref('')
+const pageBookmarksOpen = ref(false)
 const organizerOpen = ref(false)
 const workingSaveBusy = ref(false)
 const workingSaveNotice = ref('')
@@ -48,6 +50,19 @@ async function saveWorkingCopy() {
       : 'Save cancelled. No file was written.'
   } catch (cause) { workingSaveError.value = friendlyError(cause) }
   finally { workingSaveBusy.value = false }
+}
+function printWorkingCopy() {
+  const document = props.document
+  if (!document || props.disabled || editing.value || loading.value) return
+  const hasPdfMarks = pageAnnotations.value.some(item => item.document_id===document.id &&
+    item.output_scope==='pdf' && item.resolved)
+  const signature = hasPdfMarks
+    ? confirmSignatureTransformation([document], 'Printing a PDF with editable marks')
+    : {proceed:true,acknowledged:false}
+  if (signature.proceed) emit('printWorking', {
+    documentId:document.id, revision:document.revision, title:document.title,
+    acknowledged:signature.acknowledged,
+  })
 }
 function rememberPosition(position?:ReaderPosition) {
   const key = activeDocumentId && displayedRevision.value ? `${activeDocumentId}:${displayedRevision.value}` : ''
@@ -98,7 +113,7 @@ function tabKey(event:KeyboardEvent, category:EditorCategory) {
 }
 
 const props = defineProps<{ expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], disabled?: boolean, canUndo?: boolean, canRedo?: boolean, undoLabel?: string | null, redoLabel?: string | null, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
-const emit = defineEmits<{ toggleExpanded: [], toggleFocus: [], modified: [], undo: [], redo: [], error: [message: string], pageTools: [], toggleDetails: [], ocr: [language: 'eng' | 'hin' | 'eng+hin'], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string] }>()
+const emit = defineEmits<{ toggleExpanded: [], toggleFocus: [], modified: [], undo: [], redo: [], error: [message: string], pageTools: [], toggleDetails: [], openBookmarks: [], ocr: [language: 'eng' | 'hin' | 'eng+hin'], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string], printWorking: [request:{documentId:string,revision:number,title:string,acknowledged:boolean}] }>()
 const undoDescription = computed(() => props.undoLabel
   ? `Undo: ${props.undoLabel}. Applies to the last change anywhere in this matter.`
   : 'Undo last matter change. No change available.')
@@ -115,6 +130,10 @@ const switchingPage = ref(false)
 const rotatingPage = ref(false)
 const viewerError = ref('')
 function zoomBy(step:number) { zoomChoice.value=nextZoom(zoomChoice.value,pageZoom.value,step) }
+function toggleExpandedView() {
+  if (!props.expanded) zoomChoice.value = 'fit-page'
+  emit('toggleExpanded')
+}
 const pageZoom = ref(1)
 const showThumbnails = ref(true)
 type EditorCategory = 'edit' | 'review' | 'stamps' | 'pages' | 'output'
@@ -138,6 +157,7 @@ const bookmarkTitle = ref('')
 const bookmarkSaving = ref(false)
 const bookmarkError = ref('')
 const bookmarkNotice = ref('')
+let bookmarkNoticeTimer: ReturnType<typeof setTimeout> | null = null
 let bookmarkLoadSequence = 0
 const pageBookmarks = computed(() => manualBookmarks.value.filter(item =>
   item.document_id === props.document?.id && item.page_index === current.value - 1))
@@ -397,6 +417,12 @@ const editingAnnotationId = ref<string | null>(null)
 const currentPageAnnotations = computed(() => pageAnnotations.value.filter(item =>
   item.document_id === props.document?.id && item.page_index === current.value - 1))
 const documentComments = computed(()=>pageAnnotations.value.filter(item=>item.document_id===props.document?.id && item.kind==='comment'))
+const filteredComments = computed(() => {
+  const query = commentQuery.value.trim().toLocaleLowerCase()
+  return documentComments.value.filter(item => !query ||
+    item.body.toLocaleLowerCase().includes(query) || String(item.page_index + 1).includes(query))
+    .sort((a,b) => a.page_index - b.page_index)
+})
 const marksPanelOpen = computed(() => activeTool.value === 'marks')
 const inspectorVisible = computed(() => marksPanelOpen.value ||
   (editTextMode.value && (pendingMove.value || !!runsError.value || !!editNotice.value)) ||
@@ -421,6 +447,7 @@ const marksError = ref('')
 const marksNotice = ref('')
 const markPreview = ref<OutputMarkPreview[]>([])
 const defaultMarks: OutputMarks = {
+  index_style:'compact',part_extracts_enabled:false,
   watermark_enabled:false,watermark_text:'DRAFT',watermark_position:'center',
   watermark_font_size:32,watermark_opacity:.16,timestamp_enabled:false,
   timestamp_format:'datetime',timestamp_timezone:'UTC',timestamp_position:'bottom_right',
@@ -521,6 +548,7 @@ function showFind() {
   if (findOpen.value) void nextTick(() => findInput.value?.focus())
 }
 async function openReviewComment(item:PageAnnotation) {
+  commentsOpen.value=false
   navigateToPage(item.page_index+1)
   activeCategory.value='review'
   await nextTick()
@@ -532,6 +560,10 @@ async function openReviewComment(item:PageAnnotation) {
 function toggleTool(tool: EditorTool) {
   clearOverlaySelection()
   activeTool.value = activeTool.value === tool ? 'select' : tool
+  // Editing handles need enough room even when opening the inspector shrinks
+  // the page after the tool switch. Numeric zoom choices remain intact.
+  if (activeTool.value !== 'select' && zoomChoice.value === 'fit-page')
+    zoomChoice.value = 'fit-width'
   replacementEngine.value = 'pymupdf'
   placement.value = null
   selectedRun.value = null
@@ -668,6 +700,7 @@ async function loadPdf(doc: MatterDocument | null) {
   if(call!==epoch)return
   current.value=saved?.page || retainedPage
   if(saved){zoomChoice.value=saved.zoom;readerMode.value=saved.mode}
+  else if(!sameDocument){zoomChoice.value='fit-page';readerMode.value='single'}
   try {
     const loaded = await pdfOwner.open(() => pdfDocumentSource(doc.id, doc.revision))
     if(call!==epoch || !loaded){if(call===epoch)viewerError.value=pdfOwner.error.value;return}
@@ -739,8 +772,14 @@ watch([showThumbnails, activeTool, () => props.expanded], ([shown, tool, expande
 watch(current, () => void nextTick(()=>{if(!props.expanded)scheduleThumbnailRender()}))
 watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}`, () => {
   bookmarkOpen.value = false
+  pageBookmarksOpen.value = false
   bookmarkTitle.value = ''
   bookmarkNotice.value = ''
+})
+watch(() => props.document?.id, () => {
+  outlineOpen.value = false
+  commentsOpen.value = false
+  commentQuery.value = ''
 })
 watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}|${props.bookmarkRefreshKey || 0}`, async () => {
   const sequence = ++bookmarkLoadSequence
@@ -771,7 +810,7 @@ watch(() => [props.document?.matter_id || '', props.bookmarkRefreshKey || 0] as 
 }, {immediate:true})
 watch(() => [marksPanelOpen.value, props.document?.id, props.document?.revision, current.value,
   JSON.stringify(markSettings)] as const, () => scheduleMarkPreview())
-watch(current, () => { bookmarkOpen.value = false; bookmarkError.value = ''; bookmarkNotice.value = '' })
+watch(current, () => { bookmarkOpen.value = false; pageBookmarksOpen.value = false; bookmarkError.value = ''; bookmarkNotice.value = '' })
 watch(current, () => { linkRegion.value = null; linkDrawing.value = false; linkError.value = ''; linkNotice.value = ''; resetAnnotationDraft(false) })
 watch([current, () => props.document?.id, () => props.document?.revision], () => {
   redactionRegion.value = null; redactionError.value = ''
@@ -800,7 +839,7 @@ function discardPendingDraft() {
   annotationPreviewUrl.value=''
 }
 defineExpose({hasPendingDraft, discardPendingDraft})
-onBeforeUnmount(() => { rememberPosition(); void flushReadingPositions(); epoch++; if (thumbnailScrollTimer) clearTimeout(thumbnailScrollTimer); thumbnailSequence++; thumbnailTasks.forEach(task => task.cancel()); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value) })
+onBeforeUnmount(() => { rememberPosition(); void flushReadingPositions(); epoch++; if (thumbnailScrollTimer) clearTimeout(thumbnailScrollTimer); if (bookmarkNoticeTimer) clearTimeout(bookmarkNoticeTimer); thumbnailSequence++; thumbnailTasks.forEach(task => task.cancel()); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value) })
 
 async function addPageBookmark() {
   const doc = props.document
@@ -819,6 +858,8 @@ async function addPageBookmark() {
     bookmarkOpen.value = false
     bookmarkTitle.value = ''
     bookmarkNotice.value = `Bookmarked page ${pageIndex + 1}. Review its destination under Index & bookmarks.`
+    if (bookmarkNoticeTimer) clearTimeout(bookmarkNoticeTimer)
+    bookmarkNoticeTimer = setTimeout(() => { bookmarkNotice.value = ''; bookmarkNoticeTimer = null }, 5000)
     emit('modified')
   } catch (err) { bookmarkError.value = friendlyError(err) }
   finally { bookmarkSaving.value = false }
@@ -1600,8 +1641,9 @@ async function applyReplacement() {
       <div class="viewer-toolbar">
         <div class="toolbar-group reader-document"><FileSearch :size="16"/><div><strong :title="document.title">{{document.title}}</strong><span title="This is the editable PDF created when you imported the file. The imported original is kept separately.">Editable copy · Original preserved</span></div></div>
         <button class="btn secondary small" aria-label="Save working copy" title="Save this working revision with editable PDF marks flattened. Private notes stay out." :disabled="workingSaveBusy || disabled || editing || loading" @click="saveWorkingCopy">{{workingSaveBusy ? 'Saving…' : 'Save copy'}}</button>
+        <button class="btn secondary small" aria-label="Print working copy" title="Print this working revision with resolved PDF marks; private notes stay out" :disabled="disabled || editing || loading" @click="printWorkingCopy"><Printer :size="16"/> Print</button>
         <div class="toolbar-group"><button class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :aria-description="undoDescription" :disabled="!canUndo || disabled || editing" @click="emit('undo')"><Undo2 :size="17"/></button><button class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :aria-description="redoDescription" :disabled="!canRedo || disabled || editing" @click="emit('redo')"><Redo2 :size="17"/></button></div>
-        <div class="toolbar-group"><button class="icon-btn small" aria-label="Find in this PDF" title="Find in this PDF (Ctrl/⌘+F)" :aria-pressed="findOpen" @click="showFind"><Search :size="16"/></button><button class="btn secondary small editor-expand-button" :aria-pressed="!!expanded" :title="expanded ? 'Exit full screen (Esc)' : 'Expand PDF editor to fill the window'" @click="emit('toggleExpanded')"><Minimize2 v-if="expanded" :size="16"/><Maximize2 v-else :size="16"/><span>{{expanded ? 'Exit full screen' : 'Full screen'}}</span></button><button class="icon-btn small" :aria-label="focusMode ? 'Show document list' : 'Focus on PDF'" :title="focusMode ? 'Show document list' : 'Focus on PDF'" :aria-pressed="!!focusMode" @click="emit('toggleFocus')"><PanelRightClose :size="16"/></button><button class="icon-btn small" :aria-label="showThumbnails?'Hide thumbnails':'Show thumbnails'" :aria-pressed="showThumbnails" title="Toggle page thumbnails" @click="showThumbnails=!showThumbnails"><LayoutGrid :size="16"/></button></div>
+        <div class="toolbar-group"><button class="icon-btn small" aria-label="Find in this PDF" title="Find in this PDF (Ctrl/⌘+F)" :aria-pressed="findOpen" @click="showFind"><Search :size="16"/></button><button class="btn secondary small editor-expand-button" :aria-pressed="!!expanded" :title="expanded ? 'Exit full screen (Esc)' : 'Expand editor and fit the page to the window'" @click="toggleExpandedView"><Minimize2 v-if="expanded" :size="16"/><Maximize2 v-else :size="16"/><span>{{expanded ? 'Exit full screen' : 'Full screen'}}</span></button><button class="icon-btn small" :aria-label="focusMode ? 'Show document list' : 'Focus on PDF'" :title="focusMode ? 'Show document list' : 'Focus on PDF'" :aria-pressed="!!focusMode" @click="emit('toggleFocus')"><PanelRightClose :size="16"/></button><button class="icon-btn small" :aria-label="showThumbnails?'Hide thumbnails':'Show thumbnails'" :aria-pressed="showThumbnails" title="Toggle page thumbnails" @click="showThumbnails=!showThumbnails"><LayoutGrid :size="16"/></button></div>
       </div>
       <div v-if="workingSaveNotice || workingSaveError" class="preview-status" :class="{'error-msg':!!workingSaveError}" :role="workingSaveError ? 'alert' : 'status'">{{workingSaveError || workingSaveNotice}}<button class="icon-btn small" aria-label="Dismiss save notice" @click="workingSaveNotice='';workingSaveError=''"><X :size="14"/></button></div>
       <div v-if="findOpen" class="pdf-findbar" role="search" aria-label="Find in working PDF">
@@ -1615,9 +1657,7 @@ async function applyReplacement() {
       <div v-if="findOpen && findMatches.length" class="pdf-find-results" aria-label="PDF search occurrences">
         <button v-for="(match,index) in findMatches" :key="match.index" :class="{active:index===findIndex}" :title="match.snippet" @click="chooseFind(index)">Page {{match.page}} · {{match.snippet}}</button>
       </div>
-      <div class="reader-secondary-actions"><button class="text-tool" :aria-expanded="outlineOpen" @click="outlineOpen=!outlineOpen">PDF outline</button><button class="text-tool" :aria-expanded="commentsOpen" @click="commentsOpen=!commentsOpen">Comments ({{documentComments.length}})</button><span v-if="activeTool!=='select' && readerMode==='continuous'">Editing page {{current}} · Select returns to continuous reading</span></div>
-      <div v-if="outlineOpen" class="reader-outline" aria-label="Source PDF outline"><p v-if="outlineError" role="status">{{outlineError}}</p><p v-if="!sourceOutline.length">No outline in this source PDF.</p><button v-for="(item,index) in sourceOutline" :key="index" class="text-tool" :disabled="!item.page && !item.url" :style="{paddingLeft:`${10+item.level*12}px`}" @click="item.page?navigateToPage(item.page):item.url&&emit('openExternalLink',item.url)">{{item.title}}<small v-if="item.page"> · p{{item.page}}</small></button></div>
-      <div v-if="commentsOpen" class="reader-outline" aria-label="Private review comments"><p v-if="!documentComments.length">No private comments in this document.</p><button v-for="item in documentComments" :key="item.id" class="text-tool" @click="openReviewComment(item)">Page {{item.page_index+1}} · {{item.body}}{{item.resolved?'':' · needs review'}}</button></div>
+      <div class="reader-secondary-actions" aria-label="PDF navigation and review"><button class="text-tool" :aria-expanded="outlineOpen" title="Navigate using entries already in this source PDF" @click="outlineOpen=!outlineOpen;commentsOpen=false;pageBookmarksOpen=false">PDF outline</button><button class="text-tool" :aria-expanded="commentsOpen" title="Private review comments; omitted from Save copy and bundles" @click="commentsOpen=!commentsOpen;outlineOpen=false;pageBookmarksOpen=false">Comments ({{documentComments.length}})</button><button v-if="pageBookmarks.length" class="text-tool reader-bookmark-trigger" :aria-expanded="pageBookmarksOpen" :aria-label="`Page ${current} bookmarks${pageBookmarks.some(item=>!item.resolved)?' need review':''}`" title="Manual bundle bookmarks pointing to this page" @click="pageBookmarksOpen=!pageBookmarksOpen;outlineOpen=false;commentsOpen=false"><BookMarked :size="14"/> {{pageBookmarks.length}} page bookmark{{pageBookmarks.length===1?'':'s'}}<span v-if="pageBookmarks.some(item=>!item.resolved)" class="reader-review-dot">Needs review</span></button><span v-if="activeTool!=='select' && readerMode==='continuous'">Editing page {{current}} · Select returns to continuous reading</span></div>
       <div class="pdf-tool-tabs" role="tablist" aria-label="PDF tools">
         <button v-for="category in (['edit','review','stamps','pages','output'] as const)" :key="category" role="tab" :aria-selected="activeCategory===category" :class="{active:activeCategory===category}" :data-category="category" :id="`pdf-tab-${category}`" :tabindex="activeCategory===category?0:-1" aria-controls="pdf-tool-panel" @keydown="tabKey($event,category)" @click="selectCategory(category)">{{category==='edit'?'Edit':category==='review'?'Annotate':category==='stamps'?'Stamps':category==='pages'?'Pages':'Output'}}</button>
         <span class="pdf-tool-shortcuts">V Select · E Edit text · T Add text · H Highlight</span>
@@ -1661,11 +1701,6 @@ async function applyReplacement() {
       </div>
       <div v-if="selectedOverlay" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="clearOverlaySelection"><X :size="14"/></button></div>
       <p v-if="activeCategory==='pages'" class="page-action-guidance">Changes here affect the editable copy; the imported original stays unchanged. Drag page thumbnails to reorder, or use Organize pages for arrow controls.</p>
-      <div v-if="pageBookmarks.length" class="page-bookmarks-present" role="region" :aria-label="`Bookmarks on page ${current}`">
-        <BookMarked :size="15" aria-hidden="true"/>
-        <strong>Page {{current}} bookmarks</strong>
-        <span v-for="item in pageBookmarks" :key="item.id" class="page-bookmark-chip">{{item.title}}<span v-if="!item.resolved" class="page-bookmark-review"> · needs review</span></span>
-      </div>
       <div v-if="bookmarkOpen" class="page-bookmark-editor" aria-label="Bookmark current page">
         <strong>Bookmark {{document.title}}, page {{current}}</strong>
         <label>Bookmark title<input v-model="bookmarkTitle" maxlength="200" :disabled="bookmarkSaving || disabled" @keydown.enter.prevent="addPageBookmark"/></label>
@@ -1678,6 +1713,20 @@ async function applyReplacement() {
       <PdfThumbnailRail v-if="expanded && total > 0 && showThumbnails" :pdf="readerPdf" :count="total" :page="current" :title="document.title"
         :disabled="disabled || editing || loading" :dragging-page="draggingPage" :drop-target-page="dropTargetPage" @select="navigateToPage($event)" @reorder="reorderThumbnailPage"
         @dragstart="startPageDrag" @dragover="overPage" @drop="dropPage" @dragend="draggingPage=null;dropTargetPage=null"/>
+      <aside v-if="outlineOpen || commentsOpen || (pageBookmarksOpen && pageBookmarks.length)" class="reader-side-panel" role="region" :aria-label="outlineOpen ? 'Source PDF outline' : commentsOpen ? 'Private review comments' : `Bookmarks on page ${current}`">
+        <div class="reader-side-panel-heading"><strong>{{outlineOpen ? 'PDF outline' : commentsOpen ? `Comments (${documentComments.length})` : `Page ${current} bookmarks`}}</strong><button class="icon-btn small" :aria-label="outlineOpen ? 'Close PDF outline' : commentsOpen ? 'Close comments' : 'Close page bookmarks'" @click="outlineOpen=false;commentsOpen=false;pageBookmarksOpen=false"><X :size="16"/></button></div>
+        <p v-if="outlineOpen" class="reader-side-panel-intro">Navigation embedded in the source PDF. It does not change the bundle index.</p>
+        <p v-if="commentsOpen" class="reader-side-panel-intro">Private review notes, omitted from Save copy and bundles.</p>
+        <p v-if="pageBookmarksOpen" class="reader-side-panel-intro">Manual bookmarks for this source page. Check their bundle destinations under Index & bookmarks.</p>
+        <label v-if="commentsOpen && documentComments.length" class="reader-comment-search"><Search :size="15" aria-hidden="true"/><input v-model="commentQuery" type="search" aria-label="Search private comments" placeholder="Search comments or page"/></label>
+        <div v-if="commentsOpen && commentQuery.trim()" class="reader-filter-count">{{filteredComments.length}} of {{documentComments.length}} comments</div>
+        <div class="reader-side-panel-list">
+          <template v-if="outlineOpen"><p v-if="outlineError" role="status">{{outlineError}}</p><p v-if="!sourceOutline.length">No outline in this source PDF.</p><button v-for="(item,index) in sourceOutline" :key="index" class="text-tool" :disabled="!item.page && !item.url" :style="{paddingLeft:`${10+item.level*12}px`}" @click="item.page?navigateToPage(item.page):item.url&&emit('openExternalLink',item.url)">{{item.title}}<small v-if="item.page"> · p{{item.page}}</small></button></template>
+          <template v-if="commentsOpen"><p v-if="!documentComments.length">No private comments in this document.</p><p v-else-if="!filteredComments.length">No matching comments.</p><button v-for="item in filteredComments" :key="item.id" class="text-tool reader-comment-entry" :title="item.body" @click="openReviewComment(item)">Page {{item.page_index+1}} · {{item.body}}{{item.resolved?'':' · needs review'}}</button></template>
+          <template v-if="pageBookmarksOpen"><div v-for="item in pageBookmarks" :key="item.id" class="reader-bookmark-row"><strong>{{item.title}}</strong><span v-if="!item.resolved">Needs review after a source revision or page change</span><span v-else>Destination currently linked</span></div></template>
+        </div>
+        <button v-if="pageBookmarksOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
+      </aside>
       <aside v-if="inspectorVisible" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen}" aria-label="PDF editing controls">
         <div class="viewer-tool-inspector-heading"><strong>{{toolTitle}}</strong><button class="icon-btn small" aria-label="Close PDF tool" title="Close tool" @click="toggleTool(activeTool)"><X :size="16"/></button></div>
       <Transition name="soft"><div v-if="editTextMode" class="text-overlay-panel" aria-label="Edit existing text">

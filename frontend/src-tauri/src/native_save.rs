@@ -433,6 +433,46 @@ pub(crate) async fn save_matter(
 }
 
 #[tauri::command]
+pub(crate) async fn save_office_export(
+    app: AppHandle,
+    backend: State<'_, BackendState>,
+    saves: State<'_, SaveState>,
+    matter_id: String,
+    export_id: String,
+    filename: String,
+    kind: String,
+) -> Result<bool, String> {
+    if !valid_id(&matter_id) || !valid_id(&export_id) || !valid_filename(&filename) {
+        return Err("Invalid completed export selection".into());
+    }
+    if !matches!(kind.as_str(), "docx" | "xlsx" | "pptx")
+        || (kind == "xlsx" && filename != "index.csv")
+        || (kind != "xlsx" && !filename.ends_with(".pdf"))
+    {
+        return Err("Invalid Office review format".into());
+    }
+    let stem = filename.rsplit_once('.').map(|(value, _)| value).unwrap_or(&filename);
+    let output_name = format!("{stem}-review.{kind}");
+    let mut dialog = app.dialog().file()
+        .set_title("Save editable review draft")
+        .set_file_name(&output_name)
+        .add_filter("Office review draft", &[kind.as_str()]);
+    if let Some(directory) = saves.last_directory.lock().map_err(|e| e.to_string())?.clone() {
+        dialog = dialog.set_directory(directory);
+    }
+    let Some(path) = dialog.blocking_save_file() else { return Ok(false); };
+    let destination = path.into_path().map_err(|e| format!("Unsupported save location: {e}"))?;
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    check_working_destination(&destination, &app_data)?;
+    transfer(&backend.connection,
+        &format!("/matters/{matter_id}/exports/{export_id}/{filename}/office/{kind}"),
+        &destination, None).await?;
+    *saves.last_directory.lock().map_err(|e| e.to_string())? =
+        destination.parent().map(Path::to_path_buf);
+    Ok(true)
+}
+
+#[tauri::command]
 pub(crate) async fn save_page_output(
     app: AppHandle,
     backend: State<'_, BackendState>,

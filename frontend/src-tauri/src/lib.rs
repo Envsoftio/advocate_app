@@ -134,6 +134,7 @@ pub fn run() {
             native_save::save_export,
             native_save::save_protected_export,
             native_save::save_matter,
+            native_save::save_office_export,
             native_save::save_working_pdf,
             native_save::save_page_output
         ])

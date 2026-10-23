@@ -213,6 +213,38 @@ class MatterValuesUpdate(BaseModel):
         return values
 
 
+class FilingReviewItem(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: str = Field(min_length=1, max_length=80)
+    part: int | None = Field(default=None, ge=1, le=4)
+    status: Literal['unreviewed', 'present', 'not_applicable'] = 'unreviewed'
+
+    @field_validator('title')
+    @classmethod
+    def nonblank_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError('Checklist item title is required')
+        return value
+
+
+class FilingReview(BaseModel):
+    """User-authored review aid, with no built-in court requirements."""
+    model_config = ConfigDict(extra='forbid')
+    court: str = Field(default='', max_length=120)
+    case_type: str = Field(default='', max_length=120)
+    stage: str = Field(default='', max_length=120)
+    source_note: str = Field(default='', max_length=500)
+    items: list[FilingReviewItem] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode='after')
+    def fits_existing_matter_values(self):
+        import json
+        if len(json.dumps([item.model_dump() for item in self.items], ensure_ascii=False)) > 2000:
+            raise ValueError('Checklist is too long; shorten item titles')
+        return self
+
+
 class ReorderDocuments(BaseModel):
     ids: list[str]
 
@@ -379,6 +411,8 @@ MarkPosition = Literal['top_left', 'top_center', 'top_right', 'center',
 class OutputMarks(BaseModel):
     """Matter-level technical output marks. This is not a court-rule preset."""
     model_config = ConfigDict(extra='forbid')
+    index_style: Literal['compact', 'readable'] = 'compact'
+    part_extracts_enabled: bool = False
     watermark_enabled: bool = False
     watermark_text: str = Field(default='DRAFT', max_length=120)
     watermark_position: MarkPosition = 'center'

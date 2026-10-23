@@ -110,9 +110,57 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
   await expect(page.getByRole('textbox',{name:'Comment text',exact:true})).toHaveValue('Long document review note')
   await page.getByRole('tab',{name:'Pages',exact:true}).click()
   await page.getByRole('button',{name:'Rotate left',exact:true}).click()
+  await page.getByRole('button',{name:'Comments (1)',exact:true}).click()
   await expect(page.getByRole('button',{name:'Page 2 · Long document review note · needs review',exact:true})).toBeVisible()
   await page.getByRole('button',{name:'Page 2 · Long document review note · needs review',exact:true}).click()
   await expect(page.locator('.pdf-tool-hint')).toContainText('This annotation needs review because the document revision changed.')
   await expect(page.getByRole('button',{name:'Update annotation',exact:true})).toHaveCount(0)
   expect(errors).toEqual([])
+})
+
+test('expanded editor fits saved zoom and keeps many comments out of the canvas',async({page,request})=>{
+  const created=await request.post(`${base}/matters`,{headers,data:{name:'E2E Compact Editor',court_profile:'general-demo',max_pages_per_volume:100}})
+  const matter=await created.json()
+  const uploaded=await request.post(`${base}/matters/${matter.id}/documents`,{headers,multipart:{files:{name:'compact.pdf',mimeType:'application/pdf',buffer:fixture(2)}}})
+  expect(uploaded.ok()).toBeTruthy()
+  const document=(await uploaded.json())[0]
+  const position=await request.put(`${base}/reader-position`,{headers,data:{key:`${document.id}:${document.revision}`,page:1,x:0,y:0,zoom:'fit-width',mode:'single'}})
+  expect(position.ok()).toBeTruthy()
+  for(let index=0;index<120;index++){
+    const annotated=await request.post(`${base}/documents/${document.id}/annotations`,{headers,data:{kind:'comment',page_index:0,expected_revision:document.revision,rect_x:.1,rect_y:.2,rect_width:.1,rect_height:.05,body:`Review item ${index}`}})
+    expect(annotated.ok()).toBeTruthy()
+  }
+  await page.setViewportSize({width:1440,height:900})
+  await page.goto('/')
+  await page.locator('.doc-item').filter({hasText:'compact'}).click()
+  await expect(page.getByRole('combobox',{name:'Zoom',exact:true})).toHaveValue('fit-width')
+  await page.getByRole('button',{name:'Full screen',exact:true}).click()
+  await expect(page.getByRole('combobox',{name:'Zoom',exact:true})).toHaveValue('fit-page')
+  await expect.poll(async()=>{
+    const paper=(await page.locator('.pdf-paper').boundingBox())!
+    const viewport=(await page.locator('.canvas-scroll').boundingBox())!
+    return paper.width<=viewport.width && paper.height<=viewport.height
+  }).toBeTruthy()
+  expect((await page.locator('.viewer-toolbar').boundingBox())!.height).toBeLessThanOrEqual(46)
+  await page.screenshot({path:test.info().outputPath('compact-expanded-editor.png')})
+  const canvasHeight=(await page.locator('.canvas-scroll').boundingBox())!.height
+  await page.getByRole('button',{name:'Comments (120)',exact:true}).click()
+  await expect(page.getByLabel('Private review comments')).toBeVisible()
+  await page.screenshot({path:test.info().outputPath('compact-comments-panel.png')})
+  await expect.poll(async()=>Math.round((await page.locator('.canvas-scroll').boundingBox())!.height)).toBe(Math.round(canvasHeight))
+  const list=page.locator('.reader-side-panel-list')
+  expect(await list.evaluate(node=>node.scrollHeight>node.clientHeight)).toBeTruthy()
+  await page.getByRole('searchbox',{name:'Search private comments'}).fill('Review item 119')
+  await expect(page.getByLabel('Private review comments')).toContainText('1 of 120 comments')
+  await expect(page.getByRole('button',{name:'Page 1 · Review item 119',exact:true})).toBeVisible()
+  await page.getByRole('button',{name:'Close comments'}).click()
+  await page.getByRole('tab',{name:'Annotate',exact:true}).click()
+  await page.getByRole('button',{name:'Bookmark page'}).click()
+  await page.getByRole('textbox',{name:'Bookmark title'}).fill('Review destination')
+  await page.getByRole('button',{name:'Add bookmark'}).click()
+  await expect.poll(async()=>Math.round((await page.locator('.canvas-scroll').boundingBox())!.height)).toBe(Math.round(canvasHeight))
+  await page.getByRole('button',{name:/Page 1 bookmarks/}).click()
+  await expect(page.getByLabel('Bookmarks on page 1')).toContainText('Review destination')
+  await page.getByRole('button',{name:'Open Index & bookmarks'}).click()
+  await expect(page.getByRole('navigation',{name:'Matter preparation'}).getByRole('button',{name:'Index & bookmarks'})).toHaveClass(/active/)
 })

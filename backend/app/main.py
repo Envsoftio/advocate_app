@@ -20,6 +20,7 @@ from starlette.datastructures import UploadFile as ParsedUploadFile
 import pymupdf
 
 from .engine import (load_profiles, preflight, build_bundle, bundle_preview,
+                     compare_bundle_plan,
                      volume_plan, volume_rows, bates_page_labels, annexure_mode,
                      apply_page_annotations)
 from .jobs import JobManager
@@ -29,7 +30,7 @@ from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reo
                       replace_text_run, move_text_run, permanently_redact_region, redaction_restore_footprint, restore_redacted_region, compress_pdf,
                       ocr_pdf, ocr_provenance, make_cover_pdf, preview_output_marks,
                       validate_overlay_image, insert_working_image)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, FilingReview, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
 from .storage import Store, new_id, utcnow
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
 from .schemas import BatchPageOperation, CompressionRequest, ReaderPosition, READER_KEY_PATTERN
@@ -43,6 +44,8 @@ from .signatures import (combined_signature_status, inspect_source_signature,
                          risk_summary, transformation_risk)
 from .paragraph_trial import replace_paragraph_trial, preview_paragraph_trial, trial_status
 from .pdf_stream import pdf_stream_response
+from .office_export import word_draft, excel_index, powerpoint_draft
+from .print_export import print_copy
 
 FILE_LIMIT_BYTES = 80 * 1024 * 1024
 OVERLAY_IMAGE_LIMIT_BYTES = 10 * 1024 * 1024
@@ -132,7 +135,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     app.add_middleware(CORSMiddleware,
                        allow_origins=allowed_origins,
                        allow_methods=['GET','HEAD','POST','PUT','PATCH','DELETE'],
-                       expose_headers=['Accept-Ranges', 'Content-Range', 'Content-Length'],
+                       expose_headers=['Accept-Ranges', 'Content-Range', 'Content-Length',
+                                       'Content-Disposition', 'X-CourtBundle-Conversion-Note'],
                        allow_headers=['Authorization','Content-Type', 'Range', 'If-Range', 'X-CourtBundle-Filename',
                                       'X-CourtBundle-File-Mtime', 'X-CourtBundle-Pdf-Password',
                                       'X-CourtBundle-Signature-Acknowledge',
@@ -486,6 +490,23 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         matter_or_404(matter_id)
         with store.matter_lock(matter_id):
             return {'values': store.set_matter_values(matter_id, payload.values)}
+
+    @app.get('/matters/{matter_id}/filing-review')
+    def get_filing_review(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            return store.get_filing_review(matter_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.put('/matters/{matter_id}/filing-review')
+    def put_filing_review(matter_id: str, payload: FilingReview, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                return store.set_filing_review(matter_id, payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     async def import_document(matter_id: str, filename: str,
                               file: UploadFile | None = None, request: Request | None = None,
@@ -993,6 +1014,27 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         # Intentionally preserve originals and working copies for safe recovery.
         return {'status': 'archived', 'files_retained': True}
 
+    def editable_pdf_content(doc: dict, annotations: list[dict], acknowledged: bool) -> bytes:
+        require_signature_acknowledgement([doc], acknowledged, 'saving or printing an edited PDF copy')
+        for item in annotations:
+            if item['kind'] == 'image':
+                item['_asset_path'] = str(store.matter_dir(doc['matter_id']) / item['asset_relpath'])
+        with open_pdf(store.working_path(doc)) as source:
+            with pymupdf.open(stream=source.tobytes(), filetype='pdf') as output:
+                summary = apply_page_annotations(output, annotations, {doc['id']: 0})
+                if summary['redactions_applied']:
+                    with pymupdf.open() as clean:
+                        clean.insert_pdf(output, annots=False, links=False, widgets=False)
+                        return clean.tobytes(garbage=4, deflate=True)
+                return output.tobytes(garbage=4, deflate=True)
+
+    def printable_annotations(doc: dict) -> list[dict]:
+        annotations = [item for item in store.list_page_annotations(doc['matter_id'])
+                       if item['document_id'] == doc['id'] and item['output_scope'] == 'pdf']
+        if any(not item['resolved'] and item['kind'] != 'image' for item in annotations):
+            raise HTTPException(status_code=409, detail='Editable PDF marks need review after the working PDF changed; resolve or remove them before saving')
+        return [item for item in annotations if item['resolved']]
+
     @app.api_route('/documents/{doc_id}/pdf', methods=['GET', 'HEAD'])
     def document_pdf(doc_id: str, request: Request, revision: int | None = None,
                      editable: bool = False, acknowledge_signature_risk: bool = False,
@@ -1004,27 +1046,10 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         if not path.is_file():
             raise HTTPException(status_code=404, detail='PDF working copy missing')
         if editable:
-            annotations = [item for item in store.list_page_annotations(doc['matter_id'])
-                           if item['document_id'] == doc_id and item['output_scope'] == 'pdf']
-            if any(not item['resolved'] and item['kind'] != 'image' for item in annotations):
-                raise HTTPException(status_code=409, detail='Editable PDF marks need review after the working PDF changed; resolve or remove them before saving')
-            annotations = [item for item in annotations if item['resolved']]
+            annotations = printable_annotations(doc)
             if annotations:
-                require_signature_acknowledgement([doc], acknowledge_signature_risk,
-                                                  'saving an edited PDF copy')
-                for item in annotations:
-                    if item['kind'] == 'image':
-                        item['_asset_path'] = str(store.matter_dir(doc['matter_id']) / item['asset_relpath'])
                 try:
-                    with open_pdf(path) as source:
-                        with pymupdf.open(stream=source.tobytes(), filetype='pdf') as output:
-                            summary = apply_page_annotations(output, annotations, {doc_id: 0})
-                            if summary['redactions_applied']:
-                                with pymupdf.open() as clean:
-                                    clean.insert_pdf(output, annots=False, links=False, widgets=False)
-                                    content = clean.tobytes(garbage=4, deflate=True)
-                            else:
-                                content = output.tobytes(garbage=4, deflate=True)
+                    content = editable_pdf_content(doc, annotations, acknowledge_signature_risk)
                     return Response(content=content, media_type='application/pdf', headers={
                         'Cache-Control': 'no-store',
                         'Content-Disposition': f'attachment; filename="{doc_id}.pdf"',
@@ -1032,6 +1057,27 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 except (ProcessingError, RuntimeError, ValueError) as exc:
                     raise HTTPException(status_code=422, detail=str(exc)) from exc
         return pdf_stream_response(path, request, doc['id'] + '.pdf', store._data_key)
+
+    @app.post('/documents/{doc_id}/print')
+    def printable_working_pdf(doc_id: str, payload: dict, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        if payload.get('expected_revision') != doc['revision']:
+            raise HTTPException(status_code=409, detail='Working PDF revision changed; reload the document')
+        path = store.working_path(doc)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail='PDF working copy missing')
+        annotations = printable_annotations(doc)
+        try:
+            source = editable_pdf_content(doc, annotations, bool(payload.get('acknowledge_signature_risk'))) if annotations else path
+            printable = print_copy(source, payload.get('pages', 'all'),
+                                   payload.get('orientation', 'source'),
+                                   payload.get('scale', 'fit'))
+        except (ProcessingError, RuntimeError, ValueError, TypeError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return Response(content=printable, media_type='application/pdf', headers={
+            'Cache-Control': 'no-store',
+            'Content-Disposition': f'inline; filename="{doc_id}-working-print.pdf"',
+        })
 
     @app.get('/documents/{doc_id}/thumbnail')
     def document_thumbnail(doc_id: str, revision: int, _: None = Depends(auth)):
@@ -1663,6 +1709,22 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         matter_or_404(matter_id)
         return store.list_exports(matter_id)
 
+    @app.post('/matters/{matter_id}/exports/{export_id}/compare')
+    def compare_export(matter_id: str, export_id: str, payload: BundlePreviewRequest,
+                       _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            prior = next((item for item in store.list_exports(matter_id)
+                          if item['id'] == export_id), None)
+            if prior is None:
+                raise HTTPException(status_code=404, detail='Build not found')
+            try:
+                return compare_bundle_plan(store, matter_id, prior,
+                                           payload.max_pages_per_volume,
+                                           payload.keep_groups_intact)
+            except ProcessingError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.api_route('/matters/{matter_id}/exports/{export_id}/{filename}', methods=['GET', 'HEAD'])
     def export_file(matter_id: str, export_id: str, filename: str, request: Request, _: None = Depends(auth)):
         matter_or_404(matter_id)
@@ -1673,6 +1735,58 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             return pdf_stream_response(path, request, filename, store._data_key)
         media = 'application/pdf' if filename.endswith('.pdf') else ('application/zip' if filename.endswith('.zip') else 'application/octet-stream')
         return file_response(path, media, filename)
+
+    @app.get('/matters/{matter_id}/exports/{export_id}/{filename}/office/{kind}')
+    def office_review_export(matter_id: str, export_id: str, filename: str,
+                             kind: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        if kind not in {'docx', 'xlsx', 'pptx'}:
+            raise HTTPException(status_code=422, detail='Choose Word, Excel or PowerPoint')
+        if kind == 'xlsx' and filename != 'index.csv':
+            raise HTTPException(status_code=422, detail='Excel export is derived from the completed index CSV')
+        if kind != 'xlsx' and not filename.endswith('.pdf'):
+            raise HTTPException(status_code=422, detail='Word and PowerPoint drafts require a completed PDF')
+        path = store.get_export_file(matter_id, export_id, filename)
+        if not path:
+            raise HTTPException(status_code=404, detail='Completed export file not found')
+        try:
+            if kind == 'xlsx':
+                content = excel_index(read_bytes(path))
+                note = 'Editable index workbook derived from the identified build CSV; verify page ranges against PDF'
+            elif kind == 'docx':
+                content = word_draft(path)
+                note = 'Editable text draft; PDF layout, images and signatures are not reproduced'
+            else:
+                content = powerpoint_draft(path)
+                note = 'Editable text slides; PDF layout, images and signatures are not reproduced'
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        output_name = filename.rsplit('.', 1)[0] + '-review.' + kind
+        media = {'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                 'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                 'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'}[kind]
+        return Response(content=content, media_type=media,
+                        headers={'Content-Disposition': f'attachment; filename="{output_name}"',
+                                 'Cache-Control': 'no-store', 'X-CourtBundle-Conversion-Note': note})
+
+    @app.post('/matters/{matter_id}/exports/{export_id}/{filename}/print')
+    def printable_export(matter_id: str, export_id: str, filename: str,
+                         payload: dict, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        if not filename.endswith('.pdf'):
+            raise HTTPException(status_code=422, detail='Only completed PDFs can be printed')
+        path = store.get_export_file(matter_id, export_id, filename)
+        if not path:
+            raise HTTPException(status_code=404, detail='Completed PDF not found')
+        try:
+            printable = print_copy(path, payload.get('pages', 'all'),
+                                   payload.get('orientation', 'source'),
+                                   payload.get('scale', 'fit'))
+        except (ValueError, TypeError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return Response(content=printable, media_type='application/pdf',
+                        headers={'Cache-Control': 'no-store',
+                                 'Content-Disposition': f'inline; filename="{filename.rsplit(".", 1)[0]}-print.pdf"'})
 
     @app.post('/matters/{matter_id}/exports/{export_id}/{filename}/protected')
     def protected_pdf_export(matter_id: str, export_id: str, filename: str,

@@ -120,7 +120,11 @@ defineExpose({discard})
       <p v-if="marks" class="preset-live-summary" role="status">Output policy: {{policySummary}}<span v-if="marksDirty"> · Unsaved</span></p>
       <div v-if="marks" class="preset-formatting">
         <details class="preset-section"><summary>Cover &amp; sections <span>Current technical layout</span></summary>
-          <p class="setting-description">The current technical layout creates a linked index for each volume. Add any cover as a normal source document; it keeps its place in the register and page map. Reviewed court-specific cover and index layouts are pending.</p>
+          <p class="setting-description">Choose a technical index density. The readable option gives titles more space and changes index-page counts and every later page destination. Add a cover as a normal source document. Neither layout is court-approved.</p>
+          <label>Index layout<select v-model="marks.index_style"><option value="compact">Compact · up to 23 rows per page</option><option value="readable">Readable · up to 16 rows per page</option></select></label>
+          <p class="setting-description">Devanagari titles use a visual font fallback and need review in the saved PDF; Hindi text extraction is unverified. Other scripts block generated output until qualified.</p>
+          <label class="checkbox-line"><input v-model="marks.part_extracts_enabled" type="checkbox"/> Also create separate technical Part PDFs</label>
+          <p class="setting-description">Part PDFs contain the marked source pages assigned to each non-empty Part, in register order. They omit volume indexes and separators. Combined PDF and indexed volumes remain the primary outputs.</p>
         </details>
         <details class="preset-section"><summary>Numbering <span>{{marks.bates_enabled ? 'Bates enabled' : 'Physical pages only'}}</span></summary>
         <p class="setting-description">Physical volume page numbers remain separate from Bates identifiers. Bates runs across selected pages in document order.</p>

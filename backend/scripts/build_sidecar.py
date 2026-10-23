@@ -57,6 +57,7 @@ def main():
            '--specpath', str(out), '--paths', str(BACKEND), '--collect-all', 'pymupdf',
            '--collect-all', 'pypdfium2', '--collect-all', 'pypdfium2_raw',
            '--add-data', f'{BACKEND / "app" / "rules" / "profiles.json"}{addition}app/rules',
+           '--add-data', f'{BACKEND / "app" / "assets" / "editable-draft-template.pptx"}{addition}app/assets',
            *(item for path in tessdata for item in ('--add-data', f'{path}{addition}tessdata')),
            str(BACKEND / 'launcher.py')]
     print('Building native sidecar for', triple)

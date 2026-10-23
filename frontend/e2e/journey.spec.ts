@@ -7,6 +7,95 @@ const samples = resolve(import.meta.dirname, '../../samples')
 const backend = `http://127.0.0.1:${process.env.COURTBUNDLE_E2E_BACKEND_PORT || 8768}`
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 
+test('court-neutral checklist and reviewed CSV index import persist', async ({page, request}) => {
+  const created = await request.post(`${backend}/matters`, {headers, data:{
+    name:'E2E Court Neutral Review', court_profile:'general-demo', max_pages_per_volume:300,
+  }})
+  const matterId = (await created.json()).id as string
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, {headers,
+    multipart:{files:{name:'01_petition.pdf', mimeType:'application/pdf',
+      buffer:await readFile(resolve(samples,'01_petition.pdf'))}},
+  })
+  const doc = (await uploaded.json())[0]
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name:'E2E Court Neutral Review'})).toBeVisible()
+  await page.getByRole('button', {name:'Index & bookmarks'}).click()
+  const importer = page.getByRole('region', {name:'Import reviewed index rows'})
+  await importer.getByLabel('Choose index file').setInputFiles({name:'index.csv',
+    mimeType:'text/csv', buffer:Buffer.from('title,document,page\n"Petition, reviewed",unknown.pdf,2\n')})
+  await importer.getByLabel('Source document').selectOption(doc.id)
+  await importer.getByLabel('Checked target').check()
+  await importer.getByRole('button', {name:'Add 1 reviewed bookmark(s)'}).click()
+  await expect(importer.getByText('1 reviewed row(s) added as manual bookmarks.')).toBeVisible()
+  const bookmarks = await (await request.get(`${backend}/matters/${matterId}/bookmarks`, {headers})).json()
+  expect(bookmarks[0]).toMatchObject({title:'Petition, reviewed', document_id:doc.id,
+    page_index:1, target_revision:doc.revision})
+  await importer.getByLabel('Choose index file').setInputFiles({name:'index.csv',
+    mimeType:'text/csv', buffer:Buffer.from('title,document,page\n"Petition, reviewed",unknown.pdf,2\n')})
+  await importer.getByLabel('Source document').selectOption(doc.id)
+  await importer.getByLabel('Checked target').check()
+  await importer.getByRole('button', {name:'Add 1 reviewed bookmark(s)'}).click()
+  await expect(importer.getByRole('alert')).toContainText('already exists as a bookmark')
+  expect((await (await request.get(`${backend}/matters/${matterId}/bookmarks`, {headers})).json())).toHaveLength(1)
+  await page.getByRole('button', {name:/Preflight checks/}).click()
+  const checklist = page.getByRole('region', {name:'User-authored filing review checklist'})
+  await checklist.getByLabel('Court or forum').fill('Synthetic forum')
+  await checklist.getByLabel('Case type').fill('Synthetic case')
+  await checklist.getByLabel('Filing stage').fill('Initial')
+  await checklist.getByRole('button', {name:'Add item'}).click()
+  await checklist.getByRole('textbox', {name:'Item 1'}).fill('Review petition')
+  await checklist.getByLabel('Part').selectOption('1')
+  await checklist.getByRole('combobox', {name:'Review', exact:true}).selectOption('present')
+  await checklist.getByRole('button', {name:'Save checklist'}).click()
+  await expect(checklist.getByText('Review checklist saved.', {exact:false})).toBeVisible()
+  const review = await (await request.get(`${backend}/matters/${matterId}/filing-review`, {headers})).json()
+  expect(review).toMatchObject({court:'Synthetic forum', case_type:'Synthetic case', stage:'Initial',
+    items:[{title:'Review petition', part:1, status:'present'}]})
+  await page.getByRole('button', {name:'Build bundle', exact:true}).click()
+  const presets = page.getByRole('region', {name:'Reusable output presets'})
+  await presets.locator('details.preset-section').filter({hasText:'Cover & sections'}).locator('summary').click()
+  await presets.getByRole('combobox', {name:'Index layout'}).selectOption('readable')
+  await presets.getByRole('checkbox', {name:'Also create separate technical Part PDFs'}).check()
+  await presets.getByRole('button', {name:'Save numbering & annexure policy'}).click()
+  await expect(page.getByText('Technical Part PDFs:', {exact:false})).toBeVisible()
+  await page.locator('.build-panel').getByRole('button', {name:'Build filing bundle'}).click()
+  await expect(page.locator('.exports-panel')).toContainText('part-01.pdf', {timeout:90_000})
+  const exports = await (await request.get(`${backend}/matters/${matterId}/exports`, {headers})).json()
+  expect(exports[0].part_extracts).toMatchObject([{part:1, pages:doc.page_count}])
+})
+
+test('build workspace explains a late addition against a named prior build', async ({ page, request }) => {
+  const created = await request.post(`${backend}/matters`, { headers, data: {
+    name: 'E2E Rebuild Comparison', court_profile: 'general-demo', max_pages_per_volume: 300,
+  } })
+  const matterId = (await created.json()).id as string
+  const upload = async (name:string) => request.post(`${backend}/matters/${matterId}/documents`, {headers,
+    multipart: {files: {name, mimeType:'application/pdf', buffer:await readFile(resolve(samples, name))}},
+  })
+  expect((await upload('01_petition.pdf')).ok()).toBeTruthy()
+  const started = await request.post(`${backend}/matters/${matterId}/build`, {headers})
+  expect(started.status()).toBe(202)
+  const jobId = (await started.json()).id as string
+  await expect.poll(async () => (await (await request.get(`${backend}/jobs/${jobId}`, {headers})).json()).status,
+    {timeout:90_000}).toBe('completed')
+  const priorId = (await (await request.get(`${backend}/matters/${matterId}/exports`, {headers})).json())[0].id as string
+  expect((await upload('03_affidavit.pdf')).ok()).toBeTruthy()
+  const rebuilt = await request.post(`${backend}/matters/${matterId}/build`, {headers})
+  const rebuiltJobId = (await rebuilt.json()).id as string
+  await expect.poll(async () => (await (await request.get(`${backend}/jobs/${rebuiltJobId}`, {headers})).json()).status,
+    {timeout:90_000}).toBe('completed')
+  await page.goto('/')
+  await expect(page.getByRole('heading', {name:'E2E Rebuild Comparison'})).toBeVisible()
+  await page.getByRole('button', {name:'Build bundle', exact:true}).click()
+  await page.getByRole('combobox', {name:'Compare current plan with build'}).selectOption(priorId)
+  const comparison = page.getByRole('region', {name:'What changed since the selected build'})
+  await expect(comparison.getByText('03_affidavit', {exact:false})).toBeVisible()
+  await expect(comparison.getByText('added', {exact:true})).toBeVisible()
+  await expect(comparison.getByText('Page shifts can affect references outside this package.', {exact:false})).toBeVisible()
+  await expect(page.getByText('Selected prior package')).toBeVisible()
+  await expect(page.locator('.exports-panel .export-summary')).toContainText(priorId.slice(0, 8))
+})
+
 test('Bates and annexure policy update the page-map preview and actual-page mark preview', async ({ page, request }) => {
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Bates and separators', court_profile: 'general-demo',
@@ -525,11 +614,13 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
     return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)
   })
   expect(noticeContrast).toBeGreaterThanOrEqual(4.5)
-  const savedOnPage = page.getByRole('region', {name:'Bookmarks on page 2'})
+  await page.getByRole('button', {name:/Page 2 bookmarks/}).click()
+  const savedOnPage = page.getByLabel('Bookmarks on page 2')
   await expect(savedOnPage).toContainText('Reviewed second page')
   await page.getByRole('button', {name:'Next page'}).click()
   await expect(savedOnPage).toBeHidden()
   await page.getByRole('button', {name:'Previous page'}).click()
+  await page.getByRole('button', {name:/Page 2 bookmarks/}).click()
   await expect(savedOnPage).toContainText('Reviewed second page')
   await expect(page.locator('.preview-status.error-msg')).toHaveCount(0)
   await expect(page.locator('.pdf-paper')).toHaveCSS('visibility', 'visible')
@@ -539,8 +630,9 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
   })).json())?.page).toBe(2)
   await page.reload()
   await expect(page.getByRole('spinbutton', {name:'Go to page',exact:true})).toHaveValue('2')
+  await page.getByRole('button', {name:/Page 2 bookmarks/}).click()
   await expect(savedOnPage).toContainText('Reviewed second page')
-  await page.getByRole('button', {name:'Index & bookmarks'}).click()
+  await page.getByRole('button', {name:'Open Index & bookmarks',exact:true}).click()
   await expect(page.getByRole('textbox', {name:'Bookmark title 1'})).toHaveValue('Reviewed second page')
   await expect(page.getByRole('region', {name:'Index and page number preview'})).toContainText('combined page 3')
 })
@@ -1170,8 +1262,10 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await expect(page.locator('.upload-zone')).toHaveCSS('background-color', 'rgb(43, 60, 82)')
   await expect(page.locator('.canvas-scroll')).toHaveCSS('background-color', 'rgb(17, 25, 39)')
   await expect(page.locator('.page-editbar')).toHaveCSS('background-color', 'rgb(38, 54, 74)')
-  await expect(page.locator('.topbar')).toBeVisible()
-  const headerHeight = await page.locator('.topbar').evaluate(element => getComputedStyle(element).height)
+  await expect(page.locator('.topbar')).toHaveCount(0)
+  await expect(page.locator('.open-workspace-tabs')).toBeVisible()
+  const tabBarHeight = await page.locator('.open-workspace-tabs').evaluate(element => getComputedStyle(element).height)
+  await expect(page.locator('.sidebar-profile')).toContainText('Local workspace')
   const pageTool = page.getByRole('button', { name: 'Add text' })
   await expect(pageTool).toBeEnabled()
   await pageTool.hover()
@@ -1211,7 +1305,7 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await page.getByRole('button', { name: 'Close document details' }).click()
   await expect(page.locator('.inspector-panel')).toHaveCount(0)
   await page.getByRole('button', { name: 'Court rules' }).click()
-  await expect(page.locator('.topbar')).toHaveCSS('height', headerHeight)
+  await expect(page.locator('.open-workspace-tabs')).toHaveCSS('height', tabBarHeight)
   await expect(page.locator('.guide-card').first()).toHaveCSS('background-color', 'rgb(29, 41, 58)')
   await expect(page.locator('.template-row').first()).toHaveCSS('background-color', 'rgb(38, 56, 79)')
   await expect(page.locator('.party-form').first()).toHaveCSS('background-color', 'rgb(38, 56, 79)')
@@ -1233,12 +1327,12 @@ test('appearance persists and keyboard search respects text editing', async ({ p
     .toHaveCSS('height', '44px')
   await page.getByRole('dialog', { name: 'Create matter' }).getByRole('button', { name: 'Close' }).click()
   await page.getByRole('button', { name: 'About POC' }).click()
-  await expect(page.locator('.topbar')).toHaveCSS('height', headerHeight)
+  await expect(page.locator('.open-workspace-tabs')).toHaveCSS('height', tabBarHeight)
   await expect(page.locator('.feature-strip > div').first()).toHaveCSS('background-color', 'rgb(29, 41, 58)')
   await page.getByRole('button', { name: 'Matters', exact: true }).click()
   await page.locator('.matter-home-card').filter({hasText:'E2E Appearance Matter'}).click()
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
-  await expect(page.locator('.topbar')).toHaveCSS('height', headerHeight)
+  await expect(page.locator('.open-workspace-tabs')).toHaveCSS('height', tabBarHeight)
   await expect(page.locator('.checkbox-line').first()).toHaveCSS('background-color', 'rgb(43, 60, 82)')
   await page.getByRole('button', { name: /Preflight checks/ }).click()
   await expect(page.locator('.validation-intro')).toHaveCSS('background-color', 'rgb(43, 60, 82)')

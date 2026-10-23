@@ -98,6 +98,8 @@ export interface PageAnnotation {
 export type MarkPosition = 'top_left' | 'top_center' | 'top_right' | 'center' |
   'bottom_left' | 'bottom_center' | 'bottom_right'
 export interface OutputMarks {
+  index_style: 'compact' | 'readable'
+  part_extracts_enabled: boolean
   watermark_enabled: boolean
   watermark_text: string
   watermark_position: MarkPosition
