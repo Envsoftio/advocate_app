@@ -15,6 +15,7 @@ import type {
   Job,
   MatterDocument,
   CourtProfile,
+  OutputMarks,
 } from "../lib/types";
 import OutputChecksDialog from "./OutputChecksDialog.vue";
 import { useOutputValidation } from "../lib/outputValidation";
@@ -99,6 +100,8 @@ type Plan = {
 };
 const plan = ref<Plan | null>(null),
   planError = ref("");
+const savedOptions = ref<OutputMarks|null>(null);
+const qualityLabel = computed(() => savedOptions.value ? ({original:"Original page quality",lossless:"Lossless optimization",balanced:"Balanced images · 240 dpi",small:"Smaller images · 150 dpi"})[savedOptions.value.processing_quality || "original"] : "Saved output options");
 let sequence = 0;
 async function refresh() {
   const call = ++sequence;
@@ -106,15 +109,15 @@ async function refresh() {
   planError.value = "";
   if (props.busy || props.blocked || props.dirty) return;
   try {
-    const p = await api<Plan>(
+    const [p, options] = await Promise.all([api<Plan>(
       `/matters/${props.matterId}/bundle-preview`,
       "POST",
       {
         max_pages_per_volume: props.maxPages,
         keep_groups_intact: props.keepGroups,
       },
-    );
-    if (call === sequence) plan.value = p;
+    ), api<OutputMarks>(`/matters/${props.matterId}/output-marks`)]);
+    if (call === sequence) { plan.value = p; savedOptions.value=options; }
   } catch (e) {
     if (call === sequence) planError.value = friendlyError(e);
   }
@@ -163,6 +166,7 @@ watch(
   },
   { immediate: true },
 );
+const optionsOpen = ref(false);
 const tool = ref(""),
   toolDialog = ref<HTMLDialogElement | null>(null);
 let returnFocus: HTMLElement | null = null;
@@ -173,9 +177,11 @@ async function openTool(name: string) {
   }
   returnFocus = document.activeElement as HTMLElement;
   tool.value = name;
+  if(name === "Output options") { optionsOpen.value = true; return; }
   await nextTick();
   toolDialog.value?.showModal();
 }
+function closeOptions() { optionsOpen.value=false; void nextTick(() => returnFocus?.isConnected && returnFocus.focus()); }
 function closeTool() {
   toolDialog.value?.close();
   void nextTick(() => returnFocus?.isConnected && returnFocus.focus());
@@ -320,8 +326,8 @@ onBeforeUnmount(() => {
           </section>
           <section class="build-setting-row">
             <div>
-              <h3>Original page quality · screen output</h3>
-              <p>Technical marks, Part extracts and Office review drafts</p>
+              <h3>{{qualityLabel}} · screen output</h3>
+              <p>Cleanup, print layout and Office review drafts</p>
             </div>
             <button
               class="membership-button secondary"
@@ -396,6 +402,7 @@ onBeforeUnmount(() => {
       <div class="build-secondary">
         <button class="text-tool" @click="emit('membership')">
           Bundle membership</button
+        ><button class="text-tool" @click="openTool('Technical output tools')">Technical marks &amp; Part extracts</button
         ><button v-if="artifact" class="text-tool" @click="showResult">
           Previous generated output</button
         ><span v-if="dirty">Unsaved settings — saved before build</span
@@ -677,7 +684,7 @@ onBeforeUnmount(() => {
               <thead>
                 <tr>
                   <th>File</th>
-                  <th>Size</th>
+                  <th>Measured size</th>
                   <th>State</th>
                 </tr>
               </thead>
@@ -693,7 +700,7 @@ onBeforeUnmount(() => {
                       <FileText :size="16" />{{ file.name }}</button
                     ><span v-else>{{ file.name }}</span>
                   </td>
-                  <td>{{ bytesLabel(file.bytes) }}</td>
+                  <td :title="`${file.bytes.toLocaleString()} actual bytes`">{{ bytesLabel(file.bytes) }}</td>
                   <td>Generated</td>
                 </tr>
               </tbody>
@@ -788,6 +795,7 @@ onBeforeUnmount(() => {
         emit('review', artifact.id, 'combined.pdf');
       "
     />
+    <slot v-if="optionsOpen" name="processing" :close="closeOptions" />
     <dialog
       ref="toolDialog"
       class="build-tool-dialog"
@@ -806,7 +814,7 @@ onBeforeUnmount(() => {
       </header>
       <div v-show="tool === 'Preview'"><slot name="preview" /></div>
       <div v-show="tool === 'Plan volumes'"><slot name="volumes" /></div>
-      <div v-show="tool !== 'Preview' && tool !== 'Plan volumes'">
+      <div v-if="tool === 'Technical output tools'">
         <slot name="settings" />
       </div>
     </dialog>

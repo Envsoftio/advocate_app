@@ -22,6 +22,8 @@ import pymupdf
 from .pdf_ops import (ProcessingError, validate_pdf, apply_output_marks,
                       validate_overlay_image)
 from .editable_marks import apply_pdf_marks
+from .output_processing import process_generated_pdf
+from .office_export import word_draft, excel_index, powerpoint_draft
 from .file_io import (iter_plain_chunks, open_pdf, protected, read_bytes,
                       save_pdf, size as file_size, write_bytes)
 from .storage import Store, utcnow
@@ -1288,6 +1290,24 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         writer.writeheader()
         writer.writerows({key:r[key] for key in writer.fieldnames} for r in all_rows)
         write_bytes(csvpath, csv_stream.getvalue().encode('utf-8-sig'))
+        progress(85, 'Processing selected generated outputs')
+        processing = [process_generated_pdf(staging / filename, output_marks, cancelled)
+                      for filename in ['combined.pdf', *[v['filename'] for v in volume_rows],
+                                       *[p['filename'] for p in part_extracts]]]
+        office_files = []
+        for kind, source, writer in [('docx', combined_file, word_draft),
+                                     ('xlsx', csvpath, lambda p: excel_index(read_bytes(p))),
+                                     ('pptx', combined_file, powerpoint_draft)]:
+            if not output_marks.get('office_' + kind):
+                continue
+            if cancelled():
+                raise ProcessingError('Operation cancelled')
+            filename = ('index' if kind == 'xlsx' else 'combined') + '-review.' + kind
+            try:
+                write_bytes(staging / filename, writer(source))
+            except (ValueError, OSError) as exc:
+                raise ProcessingError(f'{kind.upper()} review draft failed: {exc}') from exc
+            office_files.append(filename)
         file_bytes = file_size(combined_file)
         if any(any(ord(c)>126 for c in row['title']+row['label']) for row in all_rows):
             problems.append(dict(severity='warning', code='NON_LATIN_INDEX', document_id=None,
@@ -1332,6 +1352,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'reviewed_link_inputs': reviewed_link_inputs,
                   'page_annotation_inputs': annotation_inputs,
                   'output_marks': output_marks, 'output_preset': output_preset,
+                  'processing': processing, 'office_review_files': office_files,
                   'output_mark_timestamp': mark_at_iso,
                   'page_map': all_rows,
                   'part_extracts': part_extracts,
@@ -1376,7 +1397,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         def fill_zip(output):
             with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
                 for filename in ['combined.pdf', *[v['filename'] for v in volume_rows],
-                                 *part_filenames,
+                                 *part_filenames, *office_files,
                                  'index.csv', 'validation-report.json', 'READ_ME_FIRST.txt']:
                     if cancelled():
                         raise ProcessingError('Operation cancelled')
@@ -1398,7 +1419,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                 if archive.testzip() is not None:
                     raise ProcessingError('Export ZIP integrity verification failed')
         filenames = ['filing-package.zip', 'combined.pdf', *[v['filename'] for v in volume_rows],
-                     *part_filenames, 'index.csv', 'validation-report.json']
+                     *part_filenames, *office_files, 'index.csv', 'validation-report.json']
         # The ZIP may exceed the cap even when each PDF fits. Check everything offered
         # for download before the staging directory can be published as an export.
         check_export_sizes(staging, filenames, profile.get('max_file_mb'))
@@ -1426,6 +1447,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                                reviewed_link_inputs=reviewed_link_inputs,
                                page_annotation_inputs=annotation_inputs,
                                output_marks=output_marks, output_preset=output_preset,
+                               processing=processing, office_review_files=office_files,
                                filing_review=filing_review,
                                output_mark_timestamp=mark_at_iso,
                                interactive_content_policy=EXPORT_INTERACTIVE_CONTENT_POLICY,

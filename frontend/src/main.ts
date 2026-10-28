@@ -13,3 +13,5 @@ import './structure-design.css'
 createApp(App).use(createPinia()).mount('#app')
 
 import "./metadata-design.css"
+
+import './output-options.css'

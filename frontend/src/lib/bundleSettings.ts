@@ -9,7 +9,7 @@ export function differences(settings:LayoutSettings,applied:BundlePreset|null){
  const result:Array<{field:string;label:string;baseline:unknown;current:unknown}>=[]
  const names:Record<string,string>={max_pages_per_volume:'Maximum pages per volume',keep_groups_intact:'Keep groups together',front_matter:'Volume front matter',index_date:'Index date column',index_style:'Index layout'}
  for(const key of ['max_pages_per_volume','keep_groups_intact'] as const)if(settings[key]!==applied.settings[key])result.push({field:key,label:names[key],baseline:applied.settings[key],current:settings[key]})
- const baseline=Object.assign({front_matter:'index_only',index_date:false,numbering_style:'arabic',numbering_restart:'volume',numbering_start:1,numbering_prefix:'',numbering_position:'bottom_center',numbering_front_matter:'physical',numbering_pdf_labels:true,numbering_linked_index:true,numbering_back_link:false},applied.settings.output_marks) as unknown as Record<string,unknown>
+ const baseline=Object.assign({processing_quality:'original',cleanup_metadata:false,print_layout:'screen',office_docx:false,office_xlsx:false,office_pptx:false,front_matter:'index_only',index_date:false,numbering_style:'arabic',numbering_restart:'volume',numbering_start:1,numbering_prefix:'',numbering_position:'bottom_center',numbering_front_matter:'physical',numbering_pdf_labels:true,numbering_linked_index:true,numbering_back_link:false},applied.settings.output_marks) as unknown as Record<string,unknown>
  for(const [key,value] of Object.entries(settings.output_marks))if(!matterOnly.includes(key)&&JSON.stringify(value)!==JSON.stringify(baseline[key]))result.push({field:key,label:names[key]||key.replace(/_/g,' '),baseline:baseline[key],current:value})
  return result
 }

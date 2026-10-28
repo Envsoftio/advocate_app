@@ -11,6 +11,7 @@ import io
 import json
 import os
 import zipfile
+from xml.etree import ElementTree as ET
 from pathlib import Path
 import pymupdf
 from .file_io import read_bytes, write_bytes, open_pdf, size, protected
@@ -113,7 +114,6 @@ def validate_output(store, matter_id, build_id, selected_files=None):
                     # Independently decode PDF text-string labels with PDFium. MuPDF's
                     # get_label returns raw escaped prefixes for non-ASCII text.
                     import pypdfium2 as pdfium
-                    from .file_io import read_bytes
                     with pdfium.PdfDocument(read_bytes(path) if protected(path) else str(path)) as label_pdf:
                         decoded_labels = [label_pdf.get_page_label(i) for i in range(len(label_pdf))]
                     labels, printed, links = [], [], {}
@@ -129,7 +129,8 @@ def validate_output(store, matter_id, build_id, selected_files=None):
                         if destinations:
                             links[str(index)] = destinations
                     pdfs[name] = {'pages': pdf.page_count, 'toc': pdf.get_toc(), 'links': links,
-                                  'labels': labels, 'printed': printed}
+                                  'labels': labels, 'printed': printed,
+                                  'metadata_cleared': not any(v for k,v in pdf.metadata.items() if k not in ('format','encryption')) and not pdf.get_xml_metadata()}
                     measured[name]['pages'] = pdf.page_count
             elif name.endswith('.zip'):
                 with ExitStack() as stack:
@@ -145,6 +146,17 @@ def validate_output(store, matter_id, build_id, selected_files=None):
                     if not set(by_name).difference({name}).issubset(archive.namelist()):
                         raise ValueError('ZIP is missing a saved artifact')
                     measured[name]['members'] = archive.namelist()
+            elif name.endswith(('.docx', '.xlsx', '.pptx')):
+                with zipfile.ZipFile(io.BytesIO(read_bytes(path))) as archive:
+                    if archive.testzip() is not None:
+                        raise ValueError('Office package integrity failure')
+                    required = {'docx':'word/document.xml', 'xlsx':'xl/workbook.xml', 'pptx':'ppt/presentation.xml'}[name.rsplit('.',1)[1]]
+                    for member in ['[Content_Types].xml', '_rels/.rels', required]:
+                        ET.fromstring(archive.read(member))
+                    for member in archive.namelist():
+                        if member.endswith(('.xml', '.rels')):
+                            ET.fromstring(archive.read(member))
+                    measured[name]['review_draft'] = True
             elif name.endswith('.csv'):
                 measured[name]['rows'] = len(list(csv.DictReader(io.StringIO(read_bytes(path).decode('utf-8-sig')))))
                 if measured[name]['rows'] != len(manifest.get('page_map_snapshot', [])):
@@ -205,7 +217,13 @@ def validate_output(store, matter_id, build_id, selected_files=None):
     add('sizes', 'failed' if too_large else 'passed' if limit else 'not-applicable',
         {'summary': f'{limit} MB limit; {len(too_large)} exceed it' if limit else 'No byte limit configured in saved profile',
          'limit_mb': limit, 'bytes': {n: measured[n].get('bytes') for n in selected}}, bool(too_large))
-    add('cleanup', 'not-run', {'summary': 'Optional general export cleanup is not implemented; not selected for this build'})
+    if manifest.get('output_marks', {}).get('cleanup_metadata'):
+        failed_cleanup = [n for n in pdf_names if not pdfs.get(n, {}).get('metadata_cleared')]
+        add('cleanup', 'failed' if failed_cleanup else 'passed' if pdf_names else 'not-applicable',
+            {'summary': 'PDF Info and XMP cleared in selected PDFs; visible text and other artifacts are outside this cleanup scope',
+             'files': pdf_names, 'failures': failed_cleanup}, bool(failed_cleanup))
+    else:
+        add('cleanup', 'not-run', {'summary': 'Optional PDF Info / XMP cleanup was not selected for this build'})
     redactions = manifest.get('redaction_inputs', []) + [a for a in manifest.get('page_annotation_inputs', []) if a.get('kind') == 'redaction']
     add('redaction', 'not-run' if redactions else 'not-applicable',
         {'summary': 'Content removal needs independent verification; a visible black mark is not proof' if redactions else

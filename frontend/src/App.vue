@@ -73,6 +73,7 @@ import { engineState, engineBlocked, engineReviewReason, autosaveHeld, disconnec
 import FindingReviewPanel from './components/FindingReviewPanel.vue';
 import PreflightWorkspace from './components/PreflightWorkspace.vue';
 import OutputChecksDialog from './components/OutputChecksDialog.vue';
+import OutputOptions from "./components/OutputOptions.vue";
 import BuildWorkspace from "./components/BuildWorkspace.vue";
 import BundleExportDialog from "./components/BundleExportDialog.vue";
 import ExportPdfReview from "./components/ExportPdfReview.vue";
@@ -662,7 +663,7 @@ const settingsAutosaveState = ref<"idle" | "saving" | "failed">("idle");
 let documentAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
 let settingsAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
 const formattingDirty = ref(false);
-const outputPresetsPanel = ref<InstanceType<typeof OutputPresets> | InstanceType<typeof BundleStructure> | null>(null);
+const outputPresetsPanel = ref<InstanceType<typeof OutputPresets> | InstanceType<typeof BundleStructure> | InstanceType<typeof OutputOptions> | null>(null);
 const structureMode = ref("map");
 async function openStructure(name:string) { structureMode.value=name; await showView("index"); }
 async function openStructurePolicy(name:string) { if (!(await guardArtifactTransition(name))) return; await showView("build"); await nextTick(); buildWorkspace.value?.openTool(name); }
@@ -4089,6 +4090,7 @@ watch(sidebarCollapsed, (collapsed) => {
               @build="startBuild" @cancel="cancelJob" @retry="retryInterrupted" @review="reviewGeneratedPdf"
               @finding="openFinding" @export="exportDialogArtifact=$event" @documents="showPreparation" @checks="showView('validation')"
               @configure="openStructure" @membership="openMembership" @storage="showView('storage')" @backup="backupCurrentMatter">
+              <template #processing="{close}"><OutputOptions ref="outputPresetsPanel" :matter-id="currentMatterId!" :disabled="engineBlocked || busy || isJobActive" :inputs-dirty="settingsDirty" @dirty-changed="formattingDirty=$event" @modified="loadMatterResources" @close="close" /></template>
               <template #settings>                <OutputPresets
                   :key="currentMatterId!"
                   ref="outputPresetsPanel"

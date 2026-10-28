@@ -759,7 +759,9 @@ class Store:
 
     @staticmethod
     def default_output_marks() -> dict:
-        return {'index_style': 'compact', 'numbering_style': 'arabic',
+        return {'processing_quality': 'original', 'cleanup_metadata': False, 'print_layout': 'screen',
+                'office_docx': False, 'office_xlsx': False, 'office_pptx': False,
+                'index_style': 'compact', 'numbering_style': 'arabic',
                 'numbering_restart': 'volume', 'numbering_start': 1, 'numbering_prefix': '',
                 'numbering_position': 'bottom_center', 'numbering_front_matter': 'physical',
                 'numbering_pdf_labels': True, 'numbering_linked_index': True, 'numbering_back_link': False, 'part_extracts_enabled': False,
@@ -1736,6 +1738,12 @@ class Store:
                    'output_marks': self.get_output_marks(matter_id),
                    'filing_review': self.get_filing_review(matter_id),
                    'output_preset': self.get_applied_output_preset(matter_id)}
+        # New opt-in processing defaults do not stale historical B01/B02 outputs.
+        # Nondefault choices remain part of the same deterministic settings digest.
+        for key in ('processing_quality', 'cleanup_metadata', 'print_layout',
+                    'office_docx', 'office_xlsx', 'office_pptx'):
+            if payload['output_marks'].get(key) == self.default_output_marks()[key]:
+                payload['output_marks'].pop(key, None)
         annotations = []
         for entry in self.list_page_annotations(matter_id):
             item = {key: entry[key] for key in self._annotation_fields()}

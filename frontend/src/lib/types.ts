@@ -99,6 +99,12 @@ export interface PageAnnotation {
 export type MarkPosition = 'top_left' | 'top_center' | 'top_right' | 'center' |
   'bottom_left' | 'bottom_center' | 'bottom_right'
 export interface OutputMarks {
+  processing_quality?: 'original' | 'lossless' | 'balanced' | 'small'
+  cleanup_metadata?: boolean
+  print_layout?: 'screen'
+  office_docx?: boolean
+  office_xlsx?: boolean
+  office_pptx?: boolean
   numbering_style?: 'arabic' | 'roman_lower' | 'roman_upper'
   numbering_restart?: 'volume' | 'continuous' | 'section'
   numbering_start?: number

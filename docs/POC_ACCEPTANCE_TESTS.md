@@ -814,3 +814,16 @@ Evidence: [browser PDF selection](ui-evidence/clipboard/pdf-text-selected.png), 
 - `git diff --check` passed. Existing work preserved; no reset/commit. Only isolated synthetic QA app/engine were stopped; user's engine 8765 untouched.
 
 No remaining failed scoped acceptance check. Windows, Intel Mac, clean/minimum-version install, packaged-vault startup, native print/Office Save and native transport-failure injection remain unverified. This phase tested native CSV Save and generated PDF review, not a new native PDF Save. Local date parsing intentionally leaves unsupported/ambiguous formats for manual review. No legal/OCR/signature approval, cloud dependency, schema migration or new volume/index rule. **B03A is next; not started.**
+
+
+## BV. B03A — New output options and measured generated files — 29 October 2026
+
+[Certain] B03A implementation and required available-target acceptance checks are complete. See [requirement, design, command and native evidence](DESIGN_PHASEB03A_IMPLEMENTATION.md).
+
+- Backend **306 passed**; frontend **44 unit tests passed** and production/type build passed. Ten new processing cases exercise actual image effects, Office packages, two volumes/Part PDF, map/navigation/CSV/labels, sizes/hashes, cancellation/failure/stale settings and retry.
+- Final full browser suite **110 passed, 1 skipped** (opt-in vault), **6.8m**. Three B03A cases exercise persistent choices, processing/download bytes, originals/prior hashes, stale artifacts, failed saves/conflicts/reload, dirty cancel/focus, Cmd/Ctrl-S and compact keyboard access. Archive/restore's false-dirty regression was corrected by aligning reader defaults; existing assertions remain intact.
+- Sixteen screenshots: 1440×900 and 1024×768, light/dark, 90/100/110/125%. Reference-size dialog 960×692 at x240/y104; panels y218, widths 440/456, gap16. Both matrix contact sheets and full-size reference comparison were visually inspected.
+- Matching packaged sidecar and final Apple Silicon release `.app` **69.80 MiB** built. Separate QA app **36.73 MiB**, connected to packaged sidecar and synthetic isolated storage, generated the processed build and verified settings/artifact persistence after restart.
+- Native combined PDF **40,648 bytes**, volume **40,642**, DOCX **1,388**, XLSX **1,976**, PPTX **30,999**, ZIP **101,192**. Native PDF review, bookmark to physical/printed page2 and Save cancel/retry/success passed. Saved PDF SHA-256 matches manifest; eight original/prior files unchanged. Page map/CSV 2–4, four physical pages and cleared metadata reconciled.
+
+Windows/Intel Mac/clean-device/minimum-macOS/production vault startup and native Office rendering/print remain unverified. Duplex document starts are unavailable; image reduction has no target-size guarantee. No legal/signature/OCR approval, cloud dependency, schema migration or new volume/index rule. **B03B is next; not started.**

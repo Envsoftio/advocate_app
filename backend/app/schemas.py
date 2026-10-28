@@ -413,6 +413,12 @@ MarkPosition = Literal['top_left', 'top_center', 'top_right', 'center',
 class OutputMarks(BaseModel):
     """Matter-level technical output marks. This is not a court-rule preset."""
     model_config = ConfigDict(extra='forbid')
+    processing_quality: Literal['original', 'lossless', 'balanced', 'small'] = 'original'
+    cleanup_metadata: bool = False
+    print_layout: Literal['screen'] = 'screen'
+    office_docx: bool = False
+    office_xlsx: bool = False
+    office_pptx: bool = False
     numbering_style: Literal['arabic', 'roman_lower', 'roman_upper'] = 'arabic'
     numbering_restart: Literal['volume', 'continuous', 'section'] = 'volume'
     numbering_start: int = Field(default=1, ge=1, le=3999)
