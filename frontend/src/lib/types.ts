@@ -18,6 +18,7 @@ export type DocKind = 'petition' | 'affidavit' | 'order' | 'annexure' | 'applica
 export type SignatureStatus = 'certificate_signature_detected' | 'no_certificate_signature_detected' |
   'inspection_inconclusive' | 'visible_signature_only' | 'unsigned'
 export interface MatterDocument {
+  bundle_included: number
   id: string
   matter_id: string
   title: string
@@ -98,7 +99,21 @@ export interface PageAnnotation {
 export type MarkPosition = 'top_left' | 'top_center' | 'top_right' | 'center' |
   'bottom_left' | 'bottom_center' | 'bottom_right'
 export interface OutputMarks {
-  index_style: 'compact' | 'readable'
+  numbering_style?: 'arabic' | 'roman_lower' | 'roman_upper'
+  numbering_restart?: 'volume' | 'continuous' | 'section'
+  numbering_start?: number
+  numbering_prefix?: string
+  numbering_position?: 'bottom_left' | 'bottom_center' | 'bottom_right' | 'top_left' | 'top_right'
+  numbering_front_matter?: 'physical' | 'roman' | 'none'
+  numbering_pdf_labels?: boolean
+  numbering_linked_index?: boolean
+  numbering_back_link?: boolean
+  front_matter: 'index_only' | 'cover_index'
+  index_date: boolean
+  cover_heading: string
+  cover_reference: string
+  cover_title: string
+  index_style: 'compact' | 'readable' | 'review'
   part_extracts_enabled: boolean
   watermark_enabled: boolean
   watermark_text: string
@@ -147,6 +162,13 @@ export interface PageSearchResult {
   truncated: boolean
 }
 export interface Check {
+  validation_run_id?: string
+  effective_input_digest?: string | null
+  finding_id?: string
+  input_snapshot?: string | null
+  target_revision?: number
+  page_index?: number
+  artifact?: 'working' | 'original'
   severity: 'error' | 'warning' | 'info'
   code: string
   message: string
@@ -192,7 +214,9 @@ export interface ExportManifest {
   pages: number
   volumes: number
   stale?: boolean
-  files: Array<{ name: string, bytes: number }>
+  files: Array<{ name: string, bytes: number, sha256?: string }>
+  input_revisions?: Array<{document_id:string;revision:number}>
+  page_map_snapshot?: Array<{printed_labels?:string[];id:string;title:string;volume:number;start_page:number;end_page:number;combined_start_page:number;combined_end_page:number}>
   checks: Check[]
 }
 export interface Job {
@@ -207,4 +231,16 @@ export interface Job {
   message: string
   error: string | null
   result: ExportManifest | Record<string, unknown> | null
+}
+
+export interface BundleMembershipState {
+  bundle_id: string
+  title: string
+  revision: number
+  input_snapshot: string
+  documents: Array<Pick<MatterDocument, 'id'|'title'|'part'|'group_key'|'page_count'|'position'|'revision'> & {bundle_included:number}>
+  included_documents: number
+  included_source_pages: number
+  reference_documents: number
+  reference_source_pages: number
 }

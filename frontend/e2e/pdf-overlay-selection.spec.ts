@@ -1,3 +1,4 @@
+import { closeWorkspaceNavigation, openDocumentActions } from './navigation'
 import {expect,test} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -10,7 +11,7 @@ test('select, drag, and Delete affect only authored overlays',async({page,reques
   const matter=await (await request.post(`${base}/matters`,{headers,data:{
     name:'E2E Overlay Selection',court_profile:'general-demo',max_pages_per_volume:10,
   }})).json()
-  const uploaded=await request.post(`${base}/matters/${matter.id}/documents`,{headers,multipart:{
+  const uploaded=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{
     files:{name:'01_petition.pdf',mimeType:'application/pdf',buffer:await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))},
   }})
   expect(uploaded.ok()).toBeTruthy()
@@ -28,7 +29,7 @@ test('select, drag, and Delete affect only authored overlays',async({page,reques
   }]}})
   expect(link.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading',{name:'E2E Overlay Selection'})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Overlay Selection'})).toBeVisible()
   const highlight=page.locator('.pdf-review-highlight')
   const reviewedLink=page.locator('.pdf-reviewed-link')
   await expect(highlight).toBeVisible()
@@ -86,12 +87,13 @@ test('Annotate and Stamps retain independent editable marks',async({page,request
   const matter=await (await request.post(`${base}/matters`,{headers,data:{
     name:'E2E Independent Marks',court_profile:'general-demo',max_pages_per_volume:10,
   }})).json()
-  const uploaded=await request.post(`${base}/matters/${matter.id}/documents`,{headers,multipart:{
+  const uploaded=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{
     files:{name:'01_petition.pdf',mimeType:'application/pdf',buffer:await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))},
   }})
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading',{name:'E2E Independent Marks'})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Independent Marks'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab',{name:'Annotate'}).click()
   for (const name of ['Highlight','Comment','Draw','Box','Ellipse','Line','Arrow'])
     await expect(page.getByRole('button',{name,exact:true})).toBeVisible()
@@ -129,6 +131,8 @@ test('Annotate and Stamps retain independent editable marks',async({page,request
   await page.getByRole('button',{name:'Add mark'}).click()
   const drawing=page.locator('.pdf-review-shape.draw:not(.draft)')
   await expect(drawing).toBeVisible()
+  await openDocumentActions(page)
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab',{name:'Stamps'}).click()
   await expect(page.getByText('no verified signature or form filling')).toBeVisible()
   await expect(page.getByRole('button',{name:'Check',exact:true})).toBeVisible()

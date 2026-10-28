@@ -22,7 +22,8 @@ def test_legacy_document_schema_migrates_without_changing_records(tmp_path):
     with store.connect() as con:
         row = con.execute('SELECT * FROM documents WHERE id=?', ('d',)).fetchone()
         revision = con.execute('SELECT * FROM document_revisions WHERE document_id=?', ('d',)).fetchone()
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 18
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 19
+    assert row['bundle_included'] == 1
     assert row['revision'] == 1
     assert row['working_relpath'] == 'working/d.pdf'
     assert row['document_date'] == ''
@@ -54,7 +55,7 @@ def test_v5_store_gains_reusable_values_without_changing_matter(tmp_path):
     assert reopened.get_matter(matter['id'])['name'] == 'Synthetic matter'
     assert reopened.get_matter_values(matter['id']) == {}
     with reopened.connect() as con:
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 18
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 19
     reopened.close()
 
 

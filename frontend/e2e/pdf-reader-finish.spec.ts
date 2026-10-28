@@ -1,3 +1,4 @@
+import { openReaderView, closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -15,10 +16,12 @@ sys.stdout.buffer.write(pdf.tobytes())`])}
 test('reader persists revision-scoped positions after reload and keyboard dialogs restore focus',async({page,request})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message))
   const matter=await (await request.post(`${base}/matters`,{headers,data:{name:'E2E Reader Persistence',court_profile:'general-demo'}})).json()
-  const document=(await (await request.post(`${base}/matters/${matter.id}/documents`,{headers,multipart:{files:{name:'reader-restart.pdf',mimeType:'application/pdf',buffer:fixture()}}})).json())[0]
+  const document=(await (await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'reader-restart.pdf',mimeType:'application/pdf',buffer:fixture()}}})).json())[0]
   await page.goto('/')
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'reader-restart'}).click()
   await expect(page.getByRole('spinbutton',{name:'Go to page',exact:true})).toBeEnabled()
+  await openReaderView(page)
   await page.getByRole('combobox',{name:'Reading mode'}).selectOption('continuous')
   await page.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('125')
   await page.getByRole('spinbutton',{name:'Go to page',exact:true}).fill('7')
@@ -32,34 +35,43 @@ test('reader persists revision-scoped positions after reload and keyboard dialog
   }).toBeTruthy()
   const stored=await (await request.get(`${base}/reader-position`,{headers,params:{key}})).json()
   await page.reload()
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'reader-restart'}).click()
   await expect(page.getByRole('spinbutton',{name:'Go to page',exact:true})).toHaveValue('7')
   await expect(page.getByRole('combobox',{name:'Zoom',exact:true})).toHaveValue('125')
+  await openReaderView(page)
   await expect(page.getByRole('combobox',{name:'Reading mode'})).toHaveValue('continuous')
+  await page.getByRole('button',{name:'View options'}).click()
   await expect.poll(()=>page.locator('.canvas-scroll').evaluate(element=>{
     const wrap=element.getBoundingClientRect(), frame=element.querySelector('[data-reader-page="7"]')!.getBoundingClientRect()
     return (wrap.top+20-frame.top)/frame.height
   })).toBeCloseTo(stored.y,1)
+  await openReaderView(page)
   const help=page.getByRole('button',{name:'PDF keyboard shortcuts',exact:true})
   await help.focus();await page.keyboard.press('Enter')
   const dialog=page.getByRole('dialog',{name:'PDF keyboard shortcuts'})
   await expect(dialog).toBeVisible()
   await expect(dialog.getByRole('button',{name:'Close shortcuts'})).toBeFocused()
   await page.keyboard.press('Escape');await expect(dialog).not.toBeVisible();await expect(help).toBeFocused()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab',{name:'Edit',exact:true}).focus();await page.keyboard.press('ArrowRight')
   await expect(page.getByRole('tab',{name:'Annotate',exact:true})).toBeFocused()
   await expect(page.getByRole('tab',{name:'Annotate',exact:true})).toHaveAttribute('aria-selected','true')
-  await page.keyboard.press('Home');await expect(page.getByRole('tab',{name:'Edit',exact:true})).toBeFocused()
+  await page.keyboard.press('Home');await expect(page.getByRole('tab',{name:'Read',exact:true})).toBeFocused()
+  await expect(page.getByRole('tab',{name:'Read',exact:true})).toHaveAttribute('aria-selected','true')
   expect(errors).toEqual([])
 })
 
 test('continuous reading covers the viewport for tiny pages with bounded raster memory',async({page,request})=>{
   const matter=await (await request.post(`${base}/matters`,{headers,data:{name:'E2E Tiny Pages',court_profile:'general-demo'}})).json()
-  await request.post(`${base}/matters/${matter.id}/documents`,{headers,multipart:{files:{name:'tiny-pages.pdf',mimeType:'application/pdf',buffer:fixture(true)}}})
+  await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'tiny-pages.pdf',mimeType:'application/pdf',buffer:fixture(true)}}})
   await page.setViewportSize({width:1440,height:1100});await page.goto('/')
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'tiny-pages'}).click()
   await expect(page.getByRole('spinbutton',{name:'Go to page',exact:true})).toBeEnabled()
+  await openDocumentActions(page)
   await page.getByRole('button',{name:'Full screen',exact:true}).click()
+  await openReaderView(page)
   await page.getByRole('combobox',{name:'Reading mode'}).selectOption('continuous')
   await page.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('25')
   await page.getByRole('spinbutton',{name:'Go to page',exact:true}).fill('50')
@@ -76,15 +88,18 @@ test('continuous reading covers the viewport for tiny pages with bounded raster 
 
 test('single-page navigation and zoom persist without scrolling or unmounting',async({page,request})=>{
   const matter=await (await request.post(`${base}/matters`,{headers,data:{name:'E2E Reader No Scroll',court_profile:'general-demo'}})).json()
-  const document=(await (await request.post(`${base}/matters/${matter.id}/documents`,{headers,multipart:{files:{name:'reader-no-scroll.pdf',mimeType:'application/pdf',buffer:fixture()}}})).json())[0]
+  const document=(await (await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'reader-no-scroll.pdf',mimeType:'application/pdf',buffer:fixture()}}})).json())[0]
   await page.goto('/')
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'reader-no-scroll'}).click()
   const number=page.getByRole('spinbutton',{name:'Go to page',exact:true})
   await expect(number).toBeEnabled()
   await page.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('125')
   await number.fill('9');await number.press('Enter')
   await expect(page.locator('.pdf-page-surface[data-page="9"]')).toHaveAttribute('aria-busy','false')
+  await openReaderView(page)
   await expect(page.getByRole('combobox',{name:'Reading mode'})).toHaveValue('single')
+  await page.getByRole('button',{name:'View options'}).click()
   expect(await page.locator('.canvas-scroll').evaluate(element=>element.scrollTop)).toBe(0)
   const key=`${document.id}:1`
   await expect.poll(async()=>{
@@ -93,10 +108,13 @@ test('single-page navigation and zoom persist without scrolling or unmounting',a
   }).toBeTruthy()
   // The save above happened while the reader was still mounted, without scroll.
   await page.reload()
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'reader-no-scroll'}).click()
   await expect(number).toHaveValue('9')
   await expect(page.getByRole('combobox',{name:'Zoom',exact:true})).toHaveValue('125')
+  await openReaderView(page)
   await expect(page.getByRole('combobox',{name:'Reading mode'})).toHaveValue('single')
+  await page.getByRole('button',{name:'View options'}).click()
   await expect(page.locator('.pdf-page-surface[data-page="9"]')).toHaveAttribute('aria-busy','false')
   expect(await page.locator('.canvas-scroll').evaluate(element=>element.scrollTop)).toBeLessThan(1)
 })

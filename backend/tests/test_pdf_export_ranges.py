@@ -26,7 +26,7 @@ def _artifact(client, auth, content):
     write_bytes(folder / 'export_manifest.json', json.dumps({'files': [{
         'name': 'combined.pdf', 'bytes': len(content), 'sha256': hashlib.sha256(content).hexdigest(),
     }]}).encode())
-    return f'/matters/{matter["id"]}/exports/{export_id}/combined.pdf', path
+    return f'/matters/{matter["id"]}/exports/{export_id}/inspection/combined.pdf', path
 
 
 @pytest.mark.parametrize('encrypted', [False, True])
@@ -73,7 +73,7 @@ def test_export_ranges_are_authenticated_exact_and_bounded(tmp_path, monkeypatch
 
         matter = client.post('/matters', headers=auth, json={
             'name': 'Synthetic working ranges', 'court_profile': 'general-demo'}).json()
-        uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+        uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                                files=[('files', ('synthetic.pdf', make_pdf(1), 'application/pdf'))])
         assert uploaded.status_code == 201
         document = uploaded.json()[0]

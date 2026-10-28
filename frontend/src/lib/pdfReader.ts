@@ -2,6 +2,7 @@ import { nextTick, onBeforeUnmount, ref, shallowRef } from 'vue'
 import * as pdfjs from 'pdfjs-dist'
 import workerSrc from './pdfWorker?worker&url'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
+import type { DocumentInitParameters } from 'pdfjs-dist/types/src/display/api'
 import { api, ApiError, saveReaderPosition } from './api'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
@@ -14,7 +15,7 @@ const pending = new Map<string, ReadingState>()
 let saveTimer:ReturnType<typeof setTimeout>|undefined
 let saving:Promise<void>|undefined
 export const readingPositionError = ref('')
-const persistedKey=/^(?:[0-9a-f]{32}:[1-9][0-9]*|export:[0-9a-f]{32}:[0-9a-f]{32}:[A-Za-z0-9_-]+\.pdf)$/
+const persistedKey=/^(?:original:[0-9a-f]{32}|[0-9a-f]{32}:[1-9][0-9]*|export:[0-9a-f]{32}:[0-9a-f]{32}:[A-Za-z0-9_-]+\.pdf)$/
 function validState(state:ReadingState):boolean {
   return Number.isInteger(state?.page) && state.page>0 && state.page<=100000 &&
     Number.isFinite(state.x) && Number.isFinite(state.y) && state.x>=0 && state.x<=1 && state.y>=0 && state.y<=1 &&
@@ -51,7 +52,7 @@ export async function loadReadingPosition(key:string):Promise<ReadingState|undef
     }
   }catch(error){
     if(!(error instanceof ApiError && [404,409].includes(error.status)))
-      readingPositionError.value='Reading position could not be restored. The PDF is still available.'
+      readingPositionError.value='Reading position could not be restored. This session will retain subsequent navigation.'
   }
   return undefined
 }
@@ -99,20 +100,33 @@ export function usePdfDocument() {
   let generation = 0
   let task: ReturnType<typeof pdfjs.getDocument> | null = null
   let teardown:Promise<void> = Promise.resolve()
+  let ownedWorker: InstanceType<typeof pdfjs.PDFWorker> | null = null
   function close() {
     generation++
     const oldTask = task; task = null
+    const oldWorker = ownedWorker; ownedWorker = null
     const old = pdf.value; pdf.value = null
     loading.value = false
     // Let page/text/search consumers cancel before terminating their worker.
     teardown=teardown.then(async()=>{
       await nextTick()
-      if (oldTask) await oldTask.destroy().catch(() => {})
-      else if (old) await old.destroy().catch(() => {})
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        // A failed range/text stream can leave PDF.js transport destruction
+        // pending. Each document owns its worker; retire it after a bounded
+        // cleanup window so an explicit retry cannot hang behind old data.
+        const closing = oldTask ? oldTask.destroy() : old?.destroy()
+        if (closing) await Promise.race([closing.catch(() => {}), new Promise<void>(resolve => {
+          timer = setTimeout(resolve, 2000)
+        })])
+      } finally {
+        if (timer) clearTimeout(timer)
+        oldWorker?.destroy()
+      }
     })
     return teardown
   }
-  async function open(source:() => Promise<Parameters<typeof pdfjs.getDocument>[0]>) {
+  async function open(source:() => Promise<DocumentInitParameters>) {
     const closing=close()
     const call = generation
     loading.value = true; error.value = ''
@@ -121,7 +135,8 @@ export function usePdfDocument() {
       if(call!==generation)return null
       const input = await source()
       if (call !== generation) return null
-      const pending = pdfjs.getDocument(input); task = pending
+      ownedWorker = new pdfjs.PDFWorker()
+      const pending = pdfjs.getDocument({...input, worker:ownedWorker}); task = pending
       const loaded = await pending.promise
       if (call !== generation) { void loaded.destroy().catch(() => {}); return null }
       pdf.value = loaded

@@ -12,3 +12,5 @@
 - First priority: real Mac/Windows compile, browser UI runtime verification, native export/save testing. Do not infer those tests passed.
 - Work with synthetic files in `samples/`, not actual confidential matters. Source hashes and signed documents require extra caution.
 - For new implementation tickets, carry authorized work through implementation, verification and handoff in one pass; do not stop after scaffolding. Mark a ticket complete only when its stated acceptance checks pass.
+
+- UI work must use the supplied scoped design as the layout source. Preserve capabilities and data, not the legacy layout. Verify rendered screenshots against the reference viewport before marking a UI task complete; do not defer visual fidelity to later feature tasks. See `docs/DESIGN_PHASE02D_UI_CORRECTION.md`.

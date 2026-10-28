@@ -37,7 +37,7 @@ def test_protected_pdf_import_export_and_profile_restriction(tmp_path, make_pdf)
                     json={'password': 'synthetic local vault password'}).raise_for_status()
         matter = client.post('/matters', headers=auth, json={
             'name': 'PDF-09 synthetic', 'court_profile': 'general-demo'}).json()
-        path = f'/matters/{matter["id"]}/documents/raw'
+        path = f'/matters/{matter["id"]}/documents/raw?included=true'
         headers = {**auth, 'Content-Type': 'application/octet-stream',
                    'X-CourtBundle-Filename': 'locked.pdf'}
         missing = client.post(path, headers=headers, content=encrypted_source)
@@ -85,7 +85,7 @@ def test_protected_pdf_import_export_and_profile_restriction(tmp_path, make_pdf)
 
         restricted = client.post('/matters', headers=auth, json={
             'name': 'Illustrative profile', 'court_profile': 'delhi-hc-illustrative'}).json()
-        uploaded = client.post(f'/matters/{restricted["id"]}/documents/raw',
+        uploaded = client.post(f'/matters/{restricted["id"]}/documents/raw?included=true',
             headers={**auth, 'Content-Type': 'application/octet-stream',
                      'X-CourtBundle-Filename': 'plain.pdf'}, content=plain)
         assert uploaded.status_code == 201, uploaded.text
@@ -104,7 +104,7 @@ def test_protected_pdf_respects_user_permissions(tmp_path, make_pdf):
     with TestClient(create_app(tmp_path, 'pdf09-test')) as client:
         matter = client.post('/matters', headers=auth,
                              json={'name': 'Permissions test', 'court_profile': 'general-demo'}).json()
-        response = client.post(f'/matters/{matter["id"]}/documents/raw',
+        response = client.post(f'/matters/{matter["id"]}/documents/raw?included=true',
             headers={**auth, 'Content-Type': 'application/octet-stream',
                      'X-CourtBundle-Filename': 'restricted.pdf',
                      'X-CourtBundle-Pdf-Password': 'synthetic input secret'}, content=restricted)
@@ -136,7 +136,7 @@ def test_protected_pdf_signature_requires_review_before_working_copy(tmp_path):
                     json={'password': 'synthetic vault password'}).raise_for_status()
         matter = client.post('/matters', headers=auth, json={
             'name': 'Signed protected PDF', 'court_profile': 'general-demo'}).json()
-        endpoint = f'/matters/{matter["id"]}/documents/raw'
+        endpoint = f'/matters/{matter["id"]}/documents/raw?included=true'
         headers = {**auth, 'Content-Type': 'application/octet-stream',
                    'X-CourtBundle-Filename': 'signed.pdf',
                    'X-CourtBundle-Pdf-Password': 'synthetic input secret'}

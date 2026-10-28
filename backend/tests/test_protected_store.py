@@ -25,9 +25,9 @@ def test_protected_matter_import_build_backup_restore_has_no_plaintext_files(tmp
         matter = client.post('/matters', headers=auth, json={
             'name': 'Synthetic protected matter', 'court_profile': 'delhi-hc-illustrative',
             'case_type': 'Synthetic', 'max_pages_per_volume': 10}).json()
-        assert client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+        assert client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
             files=[('files', ('sample.pdf', source, 'application/pdf'))]).status_code == 415
-        uploaded = client.post(f'/matters/{matter["id"]}/documents/raw',
+        uploaded = client.post(f'/matters/{matter["id"]}/documents/raw?included=true',
             headers={**auth, 'Content-Type': 'application/octet-stream',
                      'X-CourtBundle-Filename': 'sample.pdf'}, content=source)
         assert uploaded.status_code == 201, uploaded.text
@@ -89,7 +89,7 @@ def test_protected_backup_cross_vault_requires_source_credential(tmp_path, make_
         matter = source.post('/matters', headers=auth, json={
             'name': 'Source synthetic matter', 'court_profile': 'delhi-hc-illustrative',
             'case_type': 'Synthetic', 'max_pages_per_volume': 10}).json()
-        uploaded = source.post(f'/matters/{matter["id"]}/documents/raw',
+        uploaded = source.post(f'/matters/{matter["id"]}/documents/raw?included=true',
             headers={**auth, 'Content-Type': 'application/octet-stream',
                      'X-CourtBundle-Filename': 'source.pdf'}, content=make_pdf(1))
         assert uploaded.status_code == 201, uploaded.text

@@ -1,5 +1,5 @@
 def test_archive_restore_preserves_records_files_and_storage(client, auth, matter, make_pdf):
-    imported = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    imported = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('synthetic.pdf', make_pdf(2), 'application/pdf'))])
     doc = imported.json()[0]
     store = client.app.state.store
@@ -33,7 +33,7 @@ def test_archive_restore_preserves_records_files_and_storage(client, auth, matte
 
 
 def test_portable_backup_includes_archived_document(client, auth, matter, make_pdf):
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('synthetic.pdf', make_pdf(1), 'application/pdf'))]).json()[0]
     client.delete(f'/documents/{uploaded["id"]}', headers=auth)
     backup = client.get(f'/matters/{matter["id"]}/portable', headers=auth)
@@ -50,7 +50,7 @@ def test_portable_backup_includes_archived_document(client, auth, matter, make_p
 
 def test_audit_records_actions_without_document_text_or_credentials(client, auth, matter, make_pdf):
     secret_title = 'Sensitive synthetic title 987654'
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('synthetic.pdf', make_pdf(1), 'application/pdf'))]).json()[0]
     client.patch(f'/documents/{uploaded["id"]}', headers=auth, json={'title': secret_title})
     events = client.get(f'/matters/{matter["id"]}/audit', headers=auth)

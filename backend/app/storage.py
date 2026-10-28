@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 18:
+            if version > 19:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -318,6 +318,15 @@ class Store:
                     con.execute("ALTER TABLE page_annotations ADD COLUMN output_scope TEXT NOT NULL DEFAULT 'private'")
                 con.execute("UPDATE page_annotations SET output_scope='pdf' WHERE kind='image'")
                 con.execute('PRAGMA user_version=18')
+            if version < 19:
+                # Every previously active document was effectively included.
+                if 'bundle_included' not in {row['name'] for row in con.execute('PRAGMA table_info(documents)')}:
+                    con.execute('ALTER TABLE documents ADD COLUMN bundle_included INTEGER NOT NULL DEFAULT 1 CHECK(bundle_included IN (0,1))')
+                con.execute('PRAGMA user_version=19')
+            con.execute('''CREATE TABLE IF NOT EXISTS bundle_membership_state (
+                matter_id TEXT PRIMARY KEY REFERENCES matters(id) ON DELETE CASCADE,
+                revision INTEGER NOT NULL DEFAULT 1
+            )''')
 
     def list_redactions(self, doc_id: str, active_only: bool = True) -> list[dict]:
         with self.connect() as con:
@@ -525,6 +534,48 @@ class Store:
                 ORDER BY position,created_at''', (matter_id,)).fetchall()
         return [dict(row) for row in rows]
 
+    def get_bundle_documents(self, matter_id: str) -> list[dict]:
+        return [doc for doc in self.get_documents(matter_id) if doc['bundle_included']]
+
+    def bundle_membership(self, matter_id: str) -> dict:
+        documents = self.get_documents(matter_id)
+        with self.connect() as con:
+            row = con.execute('SELECT revision FROM bundle_membership_state WHERE matter_id=?',
+                              (matter_id,)).fetchone()
+        included = [d for d in documents if d['bundle_included']]
+        return dict(bundle_id=f'{matter_id}:primary', title='Hearing bundle',
+                    revision=row['revision'] if row else 1,
+                    input_snapshot=self.build_input_digest(matter_id),
+                    documents=[{k: d[k] for k in ('id', 'title', 'part', 'group_key',
+                        'page_count', 'position', 'revision', 'bundle_included')} for d in documents],
+                    included_documents=len(included),
+                    included_source_pages=sum(d['page_count'] for d in included),
+                    reference_documents=len(documents)-len(included),
+                    reference_source_pages=sum(d['page_count'] for d in documents if not d['bundle_included']))
+
+    def set_bundle_membership(self, matter_id: str, included_ids: list[str], expected_snapshot: str) -> dict:
+        # Caller holds the same process lock as imports, page edits and builds.
+        if self.build_input_digest(matter_id) != expected_snapshot:
+            raise ValueError('Bundle inputs changed. Reload membership before applying your selection.')
+        documents = self.get_documents(matter_id)
+        ids = {d['id'] for d in documents}
+        if len(included_ids) != len(set(included_ids)) or not set(included_ids) <= ids:
+            raise ValueError('Membership must contain unique active documents from this matter.')
+        before = {d['id']: d['bundle_included'] for d in documents}
+        after = {d['id']: int(d['id'] in included_ids) for d in documents}
+        if before != after:
+            with self.connect() as con:
+                con.execute('BEGIN IMMEDIATE')
+                for doc_id, included in after.items():
+                    con.execute('UPDATE documents SET bundle_included=? WHERE id=? AND matter_id=?',
+                                (included, doc_id, matter_id))
+                con.execute('INSERT INTO bundle_membership_state(matter_id,revision) VALUES (?,2) '
+                            'ON CONFLICT(matter_id) DO UPDATE SET revision=revision+1', (matter_id,))
+                con.execute('UPDATE matters SET updated_at=? WHERE id=?', (utcnow(), matter_id))
+                self._record_edit(con, matter_id, 'bundle_membership', before, after)
+                self._audit(con, 'bundle_membership_applied', matter_id)
+        return self.bundle_membership(matter_id)
+
     def list_manual_bookmarks(self, matter_id: str) -> list[dict]:
         with self.connect() as con:
             rows = con.execute('''SELECT b.*, d.revision AS current_revision,
@@ -708,7 +759,12 @@ class Store:
 
     @staticmethod
     def default_output_marks() -> dict:
-        return {'index_style': 'compact', 'part_extracts_enabled': False,
+        return {'index_style': 'compact', 'numbering_style': 'arabic',
+                'numbering_restart': 'volume', 'numbering_start': 1, 'numbering_prefix': '',
+                'numbering_position': 'bottom_center', 'numbering_front_matter': 'physical',
+                'numbering_pdf_labels': True, 'numbering_linked_index': True, 'numbering_back_link': False, 'part_extracts_enabled': False,
+                'front_matter': 'index_only', 'index_date': False,
+                'cover_heading': '', 'cover_reference': '', 'cover_title': '',
                 'watermark_enabled': False, 'watermark_text': 'DRAFT',
                 'watermark_position': 'center', 'watermark_font_size': 32.0,
                 'watermark_opacity': .16, 'timestamp_enabled': False,
@@ -757,7 +813,7 @@ class Store:
                 WHERE matter_id=?''', (matter_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def apply_output_preset(self, matter_id: str, preset_id: str) -> dict:
+    def apply_output_preset(self, matter_id: str, preset_id: str, preserve_overrides: bool = False) -> dict:
         with self.connect() as con:
             con.execute('BEGIN IMMEDIATE')
             row = con.execute('SELECT * FROM output_presets WHERE id=?',
@@ -784,10 +840,22 @@ class Store:
                       'output_marks': current_marks,
                       'preset': json.loads(old_preset[0]) if old_preset else None}
             snapshot = {'id': row['id'], 'name': row['name'], 'version': row['version'],
-                        'settings': settings}
+                        'settings': settings, 'created_at': row['created_at'], 'provenance': 'Local user preset'}
             after = {'max_pages_per_volume': settings['max_pages_per_volume'],
                      'keep_groups_intact': settings['keep_groups_intact'],
                      'output_marks': applied_marks, 'preset': snapshot}
+            # Cover identity and document exceptions always belong to this matter.
+            for key in ('cover_heading', 'cover_reference', 'cover_title'):
+                applied_marks[key] = current_marks[key]
+            if preserve_overrides and before['preset']:
+                baseline = before['preset']['settings']
+                for key in ('max_pages_per_volume', 'keep_groups_intact'):
+                    if before[key] != baseline[key]:
+                        after[key] = before[key]
+                old_defaults = {**self.default_output_marks(), **baseline['output_marks']}
+                for key, value in current_marks.items():
+                    if value != old_defaults.get(key):
+                        applied_marks[key] = value
             if before == after:
                 return snapshot
             now = utcnow()
@@ -805,6 +873,31 @@ class Store:
             self._record_edit(con, matter_id, 'output_preset', before, after)
             self._audit(con, 'output_preset_applied', matter_id)
         return snapshot
+
+    def save_bundle_settings(self, matter_id: str, settings: dict) -> dict:
+        """One transaction/history entry for the complete accepted layout."""
+        matter = self.get_matter(matter_id)
+        before = {key: matter[key] for key in ('max_pages_per_volume', 'keep_groups_intact')}
+        before.update(output_marks=self.get_output_marks(matter_id),
+                      preset=self.get_applied_output_preset(matter_id))
+        after = {**settings, 'preset': before['preset']}
+        with self.connect() as con:
+            valid_ids = {r[0] for r in con.execute('SELECT id FROM documents WHERE matter_id=?', (matter_id,))}
+        if set(settings['output_marks']['annexure_overrides']) - valid_ids:
+            raise ValueError('Annexure exceptions must target documents in this matter')
+        if before == after:
+            return after
+        now = utcnow()
+        with self.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            con.execute('UPDATE matters SET max_pages_per_volume=?,keep_groups_intact=?,updated_at=? WHERE id=?',
+                        (after['max_pages_per_volume'], int(after['keep_groups_intact']), now, matter_id))
+            con.execute('INSERT INTO output_marks (matter_id,payload_json,updated_at) VALUES (?,?,?) '
+                        'ON CONFLICT(matter_id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at',
+                        (matter_id, json.dumps(after['output_marks'], sort_keys=True), now))
+            self._record_edit(con, matter_id, 'output_preset', before, after)
+            self._audit(con, 'bundle_settings_updated', matter_id)
+        return after
 
     def set_output_marks(self, matter_id: str, settings: dict) -> dict:
         overrides = settings.get('annexure_overrides', {})
@@ -1398,6 +1491,7 @@ class Store:
             return {
                 'document_batch': 'Batch document details',
                 'matter': 'Matter settings',
+                'bundle_membership': 'Bundle membership',
                 'order': 'Document order',
                 'bookmarks': 'Bookmarks',
                 'reviewed_links': 'Reviewed links',
@@ -1444,6 +1538,12 @@ class Store:
                                                 doc['group_key'], doc['group_role'])
                 con.execute('''UPDATE documents SET archived_at=?,position=?,updated_at=? WHERE id=?''',
                             (state['archived_at'], state['position'], now, state['id']))
+            elif row['kind'] == 'bundle_membership':
+                for doc_id, included in state.items():
+                    con.execute('UPDATE documents SET bundle_included=? WHERE id=? AND matter_id=?',
+                                (included, doc_id, matter_id))
+                con.execute('INSERT INTO bundle_membership_state(matter_id,revision) VALUES (?,2) '
+                            'ON CONFLICT(matter_id) DO UPDATE SET revision=revision+1', (matter_id,))
             elif row['kind'] == 'document':
                 doc = con.execute('''SELECT * FROM documents WHERE id=? AND matter_id=?
                     AND archived_at IS NULL''', (state['id'], matter_id)).fetchone()
@@ -1593,7 +1693,7 @@ class Store:
     def exports_root(self, matter_id: str) -> Path:
         return self.matter_dir(matter_id) / 'exports'
 
-    def build_input_digest(self, matter_id: str) -> str:
+    def build_input_digest(self, matter_id: str, *, effective: bool = False) -> str:
         """Fingerprint inputs that determine a generated bundle, including profile rules."""
         matter = self.get_matter(matter_id)
         if matter is None:
@@ -1601,19 +1701,23 @@ class Store:
         fields = ('name', 'court_profile', 'case_type', 'petitioner', 'respondent',
                   'advocate', 'case_number', 'max_pages_per_volume', 'keep_groups_intact')
         documents = []
+        included_ids = {d['id'] for d in self.get_bundle_documents(matter_id)}
         for doc in self.get_documents(matter_id):
+            if effective and doc['id'] not in included_ids:
+                continue
             documents.append({
                 key: doc[key] for key in ('id', 'position', 'title', 'kind', 'part',
                                            'label', 'label_status', 'label_source', 'group_key',
                                            'group_role',
                                            'document_date', 'date_status',
                                            'date_source', 'date_note', 'page_count',
-                                           'revision', 'source_sha256',
+                                           'revision', 'source_sha256', 'bundle_included',
                                            'certificate_signature_status',
                                            'certificate_signature_count',
                                            'visible_signature_status', 'signature_status')
             } | {'working_sha256': self.sha256(self.working_path(doc)),
-                 'original_sha256': self.sha256(self.original_path(doc))})
+                 'original_sha256': self.sha256(self.original_path(doc))}
+                | ({'input_updated_at': doc['updated_at']} if effective else {}))
         profiles_path = Path(__file__).resolve().parent / 'rules' / 'profiles.json'
         profiles = json.loads(profiles_path.read_text(encoding='utf-8'))
         profile = next((p for p in profiles if p['id'] == matter['court_profile']), None)
@@ -1640,6 +1744,16 @@ class Store:
                     self.matter_dir(matter_id) / item['asset_relpath'])
             annotations.append(item)
         payload['page_annotations'] = annotations
+        if effective:
+            # Relative included order matters; reference-only insertions do not.
+            for position, doc in enumerate(documents):
+                doc['position'] = position
+            payload['manual_bookmarks'] = [b for b in payload['manual_bookmarks']
+                                           if b['document_id'] in included_ids]
+            payload['reviewed_links'] = [link for link in payload['reviewed_links']
+                                        if link['source_document_id'] in included_ids]
+            payload['page_annotations'] = [a for a in annotations
+                                          if a['document_id'] in included_ids]
         encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'),
                              ensure_ascii=False).encode('utf-8')
         return hashlib.sha256(encoded).hexdigest()
@@ -1653,17 +1767,21 @@ class Store:
         exports = []
         try:
             current_digest = self.build_input_digest(matter_id)
+            effective_digest = self.build_input_digest(matter_id, effective=True)
         except (OSError, ValueError):
-            current_digest = None
+            current_digest = effective_digest = None
         for manifest in root.glob('*/export_manifest.json'):
             if manifest.parent.name.startswith('.'):
                 continue
             try:
                 info = json.loads(read_bytes(manifest))
                 recorded_digest = info.get('build_input_digest')
-                info['stale'] = (not recorded_digest or not matter or
-                                 info.get('matter_updated_at') != matter['updated_at'] or
-                                 recorded_digest != current_digest)
+                if info.get('effective_input_digest'):
+                    info['stale'] = info['effective_input_digest'] != effective_digest
+                else:
+                    info['stale'] = (not recorded_digest or not matter or
+                                     info.get('matter_updated_at') != matter['updated_at'] or
+                                     recorded_digest != current_digest)
                 exports.append(info)
             except (ValueError, OSError):
                 continue

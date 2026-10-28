@@ -1,3 +1,4 @@
+import { openReaderView, closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser } from './navigation'
 import { expect, test, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -40,7 +41,7 @@ test('document switches clear old PDF content before delayed reading state and i
   } })).json()
   const documents = []
   for (const label of ['ALPHA', 'BRAVO', 'CHARLIE']) {
-    const uploaded = await request.post(`${backend}/matters/${matter.id}/documents`, { headers,
+    const uploaded = await request.post(`${backend}/matters/${matter.id}/documents?included=true`, { headers,
       multipart: { files: { name: `${label.toLowerCase()}-switch.pdf`, mimeType: 'application/pdf', buffer: fixture(label) } } })
     expect(uploaded.ok()).toBeTruthy()
     documents.push((await uploaded.json())[0])
@@ -51,32 +52,42 @@ test('document switches clear old PDF content before delayed reading state and i
   expect(saved.ok()).toBeTruthy()
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/')
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'alpha-switch' }).click()
   await expect(page.locator('.pdf-text-layer')).toContainText('ALPHA page 1')
   await expect(page.locator('.thumbnail-strip canvas[data-rendered="true"]').first()).toBeVisible()
-  await page.getByRole('button', { name: 'PDF outline', exact: true }).click()
+  await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click()
   await expect(page.getByRole('button', { name: 'ALPHA outline · p1', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Find in this PDF', exact: true }).click()
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
   await page.getByRole('searchbox', { name: 'Find text in this PDF' }).fill('ALPHA')
   await expect(page.locator('.pdf-findbar')).toContainText('4 matches')
 
   const bravo = await holdPosition(page, `${documents[1].id}:1`)
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'bravo-switch' }).click()
   await bravo.requested
   await expect(page.locator('.reader-document strong')).toHaveText('bravo-switch')
   await expect(page.getByRole('status').filter({ hasText: 'Loading PDF' })).toBeVisible()
   await expect(page.locator('.pdf-find-results')).toHaveCount(0)
   await expect(page.locator('.pdf-findbar')).toContainText('0 matches')
+  await expect(page.getByRole('searchbox', { name: 'Find text in this PDF' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Source PDF outline' })).toContainText('Loading PDF outline')
+  await expect(page.getByRole('region', { name: 'Source PDF outline' })).not.toContainText('No outline')
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
   await expect(page.getByRole('button', { name: 'ALPHA outline · p1', exact: true })).toHaveCount(0)
   await expect(page.locator('.pdf-text-layer span')).toHaveCount(0)
   await expect(page.locator('.thumbnail-strip canvas[data-rendered="true"]')).toHaveCount(0)
   await expect.poll(() => page.locator('.viewer-root canvas').evaluateAll(items =>
     items.every(item => (item as HTMLCanvasElement).width * (item as HTMLCanvasElement).height <= 1))).toBeTruthy()
+  await openDocumentActions(page)
   await expect(page.getByRole('button', { name: 'Save working copy', exact: true })).toBeDisabled()
   bravo.release()
   await expect(page.getByRole('spinbutton', { name: 'Go to page', exact: true })).toHaveValue('3')
   await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('75')
+  await openReaderView(page)
   await expect(page.getByRole('combobox', { name: 'Reading mode' })).toHaveValue('continuous')
+  await page.getByRole('button',{name:'View options'}).click()
   await expect(page.locator('[data-reader-page="3"] .pdf-text-layer')).toContainText('BRAVO page 3')
 
   // Return to ALPHA while a third document's metadata is pending. Its late
@@ -84,9 +95,11 @@ test('document switches clear old PDF content before delayed reading state and i
   const charlie = await holdPosition(page, `${documents[2].id}:1`)
   let charliePdfRequests = 0
   page.on('request', item => { if (item.url().includes(`/documents/${documents[2].id}/pdf?`)) charliePdfRequests++ })
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'charlie-switch' }).click()
   await charlie.requested
   await expect(page.locator('.pdf-text-layer span')).toHaveCount(0)
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'alpha-switch' }).click()
   await expect(page.locator('.reader-document strong')).toHaveText('alpha-switch')
   await expect(page.locator('.pdf-text-layer').first()).toContainText('ALPHA')
@@ -107,11 +120,14 @@ test('same-document text edits retain their snapshot during delayed reading-stat
   const matter = await (await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Delayed Edit Refresh', court_profile: 'general-demo',
   } })).json()
-  const document = (await (await request.post(`${backend}/matters/${matter.id}/documents`, { headers,
+  const document = (await (await request.post(`${backend}/matters/${matter.id}/documents?included=true`, { headers,
     multipart: { files: { name: 'snapshot-refresh.pdf', mimeType: 'application/pdf', buffer: fixture('BEFORE') } } })).json())[0]
   await page.goto('/')
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'snapshot-refresh' }).click()
   await expect(page.locator('.pdf-text-layer')).toContainText('BEFORE page 1')
+  await closeWorkspaceNavigation(page)
+  await page.getByRole('tab', { name: 'Edit', exact: true }).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
   await page.getByRole('button', { name: 'Edit text: BEFORE page 1', exact: true }).click()
   await page.getByRole('textbox', { name: 'Replacement' }).fill('AFTER page 1')

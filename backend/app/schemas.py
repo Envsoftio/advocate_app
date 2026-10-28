@@ -260,6 +260,7 @@ class SignatureRiskAcknowledgement(BaseModel):
 
 
 class OcrRequest(SignatureRiskAcknowledgement):
+    expected_revision: int | None = Field(default=None, ge=1)
     language: Literal['eng', 'hin', 'eng+hin'] = 'eng'
 
 
@@ -326,7 +327,7 @@ class ReplaceDocument(SignatureRiskAcknowledgement):
     expected_source_revision: int | None = Field(default=None, ge=1, strict=True)
 
 
-READER_KEY_PATTERN = r'^(?:[0-9a-f]{32}:[1-9][0-9]*|export:[0-9a-f]{32}:[0-9a-f]{32}:[A-Za-z0-9_-]+\.pdf)$'
+READER_KEY_PATTERN = r'^(?:original:[0-9a-f]{32}|[0-9a-f]{32}:[1-9][0-9]*|export:[0-9a-f]{32}:[0-9a-f]{32}:[A-Za-z0-9_-]+\.pdf)$'
 
 
 class ReaderPosition(BaseModel):
@@ -357,6 +358,7 @@ class ManualBookmark(BaseModel):
 
 
 class ManualBookmarksUpdate(BaseModel):
+    expected_snapshot: str | None = Field(default=None, min_length=64, max_length=64)
     entries: list[ManualBookmark] = Field(max_length=500)
 
 
@@ -411,7 +413,21 @@ MarkPosition = Literal['top_left', 'top_center', 'top_right', 'center',
 class OutputMarks(BaseModel):
     """Matter-level technical output marks. This is not a court-rule preset."""
     model_config = ConfigDict(extra='forbid')
-    index_style: Literal['compact', 'readable'] = 'compact'
+    numbering_style: Literal['arabic', 'roman_lower', 'roman_upper'] = 'arabic'
+    numbering_restart: Literal['volume', 'continuous', 'section'] = 'volume'
+    numbering_start: int = Field(default=1, ge=1, le=3999)
+    numbering_prefix: str = Field(default='', max_length=24)
+    numbering_position: Literal['bottom_left', 'bottom_center', 'bottom_right', 'top_left', 'top_right'] = 'bottom_center'
+    numbering_front_matter: Literal['physical', 'roman', 'none'] = 'physical'
+    numbering_pdf_labels: bool = True
+    numbering_linked_index: bool = True
+    numbering_back_link: bool = False
+    index_style: Literal['compact', 'readable', 'review'] = 'compact'
+    front_matter: Literal['index_only', 'cover_index'] = 'index_only'
+    index_date: bool = False
+    cover_heading: str = Field(default='', max_length=200)
+    cover_reference: str = Field(default='', max_length=100)
+    cover_title: str = Field(default='', max_length=200)
     part_extracts_enabled: bool = False
     watermark_enabled: bool = False
     watermark_text: str = Field(default='DRAFT', max_length=120)
@@ -445,6 +461,14 @@ class OutputMarks(BaseModel):
     def printable_ascii(cls, value: str) -> str:
         if any(ord(char) < 32 or ord(char) > 126 for char in value):
             raise ValueError('Output marks currently support printable ASCII only')
+        return value
+
+    @field_validator('numbering_prefix')
+    @classmethod
+    def valid_numbering_prefix(cls, value: str) -> str:
+        remainder = value.replace('{volume}', '').replace('{section}', '')
+        if '{' in remainder or '}' in remainder or any(ord(c) < 32 or ord(c) > 255 for c in value):
+            raise ValueError('Use Latin-1 text and only {volume} or {section} placeholders')
         return value
 
     @field_validator('annexure_overrides')
@@ -488,9 +512,34 @@ class OutputPresetCreate(BaseModel):
 
     @model_validator(mode='after')
     def no_matter_specific_documents(self):
+        if any((self.output_marks.cover_heading, self.output_marks.cover_reference, self.output_marks.cover_title)):
+            raise ValueError('Reusable presets cannot contain matter-specific cover details')
         if self.output_marks.annexure_overrides:
             raise ValueError('Reusable presets cannot contain matter-specific document exceptions')
         return self
+
+
+class BundleSettingsUpdate(BundlePreviewRequest):
+    output_marks: OutputMarks
+    expected_snapshot: str = Field(min_length=64, max_length=64)
+
+
+class FrontMatterPreview(BundlePreviewRequest):
+    output_marks: OutputMarks
+    volume: int = Field(default=1, ge=1)
+    index_page: int = Field(default=1, ge=1)
+
+
+class NumberingPreview(FrontMatterPreview):
+    document_id: str
+    page: int = Field(default=1, ge=1)
+    expected_revision: int = Field(ge=1)
+
+
+class PresetApplication(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    preserve_overrides: bool = False
+    expected_snapshot: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class CropPages(SignatureRiskAcknowledgement):
@@ -657,3 +706,8 @@ class Check(BaseModel):
     code: str
     message: str
     document_id: str | None = None
+
+
+class BundleMembershipUpdate(BaseModel):
+    included_ids: list[str] = Field(max_length=10000)
+    expected_snapshot: str = Field(min_length=64, max_length=64)

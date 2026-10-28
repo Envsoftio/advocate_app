@@ -1,3 +1,4 @@
+import { openDocumentActions, openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -13,7 +14,7 @@ test('Save copy downloads exact revision bytes without private notes and refuses
   } })
   const matterId = (await created.json()).id as string
   const original = readFileSync(resolve(import.meta.dirname, '../../samples/01_petition.pdf'))
-  const imported = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const imported = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: 'save-working-synthetic.pdf', mimeType: 'application/pdf', buffer: original } } })
   expect(imported.ok()).toBeTruthy()
   const document = (await imported.json())[0]
@@ -30,14 +31,17 @@ test('Save copy downloads exact revision bytes without private notes and refuses
   expect(firstBytes).toEqual(original)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Exact Working Save' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Exact Working Save'})).toBeVisible()
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'save-working-synthetic' }).click()
+  await openDocumentActions(page)
   const save = page.getByRole('button', { name: 'Save working copy', exact: true })
   await expect(save).toBeEnabled()
   let downloadCount = 0
   page.on('download', () => downloadCount++)
   const firstRequest = page.waitForRequest(item => item.url().includes(`/documents/${document.id}/pdf?revision=1&editable=true`))
   const firstDownload = page.waitForEvent('download')
+  await openDocumentActions(page)
   await save.click()
   expect((await firstRequest).method()).toBe('GET')
   const downloaded = await firstDownload
@@ -55,6 +59,7 @@ test('Save copy downloads exact revision bytes without private notes and refuses
     data: { page_index: 0, degrees: 90, expected_revision: 1 } })
   expect(rotated.ok()).toBeTruthy()
   const conflict = page.waitForResponse(item => item.url().includes(`/documents/${document.id}/pdf?revision=1&editable=true`) && item.status() === 409)
+  await openDocumentActions(page)
   await save.click()
   await conflict
   await expect(page.getByRole('alert').filter({ hasText: /revision changed/i })).toBeVisible()
@@ -63,12 +68,14 @@ test('Save copy downloads exact revision bytes without private notes and refuses
 
   // Refresh to review r2; saving now must use exactly r2, not the old bytes.
   await page.reload()
+  await openDocumentActions(page)
   await expect(save).toBeEnabled()
   const secondBytes = await (await request.get(`${backend}/documents/${document.id}/pdf?revision=2`, { headers })).body()
   expect(secondBytes).not.toEqual(firstBytes)
   const beforeSecondSave = await history()
   const secondRequest = page.waitForRequest(item => item.url().includes(`/documents/${document.id}/pdf?revision=2&editable=true`))
   const secondDownload = page.waitForEvent('download')
+  await openDocumentActions(page)
   await save.click()
   await secondRequest
   const secondSaved = await secondDownload

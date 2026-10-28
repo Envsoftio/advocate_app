@@ -1,3 +1,4 @@
+import { closeWorkspaceNavigation } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -28,7 +29,7 @@ test('page organizer bounds previews, preserves explicit selections, and applies
   } })
   expect(created.ok()).toBeTruthy()
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: 'organizer-synthetic.pdf', mimeType: 'application/pdf', buffer: syntheticPdf() } },
   })
   expect(uploaded.ok()).toBeTruthy()
@@ -44,7 +45,8 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
 `], { input: await response.body(), encoding: 'utf8' })) as { text: string, rotation: number }[]
   }
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Page Organizer' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Page Organizer'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', { name: 'Pages', exact: true }).click()
   await page.getByRole('button', { name: 'Organize pages', exact: true }).click()
   const organizer = page.getByRole('dialog', { name: 'Organize pages' })

@@ -5,7 +5,7 @@ import pymupdf
 
 def test_add_text_preserves_prior_content_and_page_components(client, auth, matter, make_pdf):
     source = make_pdf(1, 'ORIGINAL')
-    doc = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    doc = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                       files=[('files', ('source.pdf', source, 'application/pdf'))]).json()[0]
     store = client.app.state.store
     source_hash = store.sha256(store.original_path(doc))
@@ -74,7 +74,7 @@ def test_add_text_preserves_prior_content_and_page_components(client, auth, matt
 
 def test_text_overlay_is_visible_searchable_undoable_and_exported(client, auth, matter, make_pdf):
     source = make_pdf(1, 'ORIGINAL')
-    response = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    response = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('source.pdf', source, 'application/pdf'))])
     assert response.status_code == 201, response.text
     doc = response.json()[0]
@@ -112,7 +112,7 @@ def test_text_overlay_is_visible_searchable_undoable_and_exported(client, auth, 
 
 
 def test_invalid_overlay_does_not_publish_revision(client, auth, matter, make_pdf):
-    response = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    response = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('source.pdf', make_pdf(1), 'application/pdf'))])
     doc = response.json()[0]
     url = f'/documents/{doc["id"]}/pages/text-overlay'

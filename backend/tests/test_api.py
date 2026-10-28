@@ -9,7 +9,8 @@ import pytest
 
 
 def upload(client, auth, matter, make_pdf, name='petition.pdf', pages=2):
-    r = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    # This helper explicitly imports into the bundle for the existing engine scenarios.
+    r = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                     files=[('files', (name, make_pdf(pages), 'application/pdf'))])
     assert r.status_code == 201, r.text
     return r.json()[0]

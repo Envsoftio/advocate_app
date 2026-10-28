@@ -35,7 +35,7 @@ test('generated PDFs above 25 MiB use bounded ranges, cancel cleanly, retry and 
   const matterId = (await created.json()).id as string
   const source = largeSyntheticPdf()
   expect(source.length).toBeGreaterThan(25 * 1024 * 1024)
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: 'large-synthetic.pdf', mimeType: 'application/pdf', buffer: source } },
   })
   expect(uploaded.ok()).toBeTruthy()
@@ -52,7 +52,7 @@ test('generated PDFs above 25 MiB use bounded ranges, cancel cleanly, retry and 
   const manifest = (await (await request.get(`${backend}/matters/${matterId}/exports`, { headers })).json())[0]
   const file = manifest.files.find((item: { name: string }) => item.name === 'combined.pdf')
   expect(file.bytes).toBeGreaterThan(25 * 1024 * 1024)
-  const pdfUrl = `${backend}/matters/${matterId}/exports/${exportId}/combined.pdf`
+  const pdfUrl = `${backend}/matters/${matterId}/exports/${exportId}/inspection/combined.pdf`
   const network = await page.context().newCDPSession(page)
   await network.send('Network.enable')
   const tracked = new Set<string>()
@@ -75,7 +75,7 @@ test('generated PDFs above 25 MiB use bounded ranges, cancel cleanly, retry and 
   })
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Large Generated Reader' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Large Generated Reader'})).toBeVisible()
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
   const review = page.getByRole('button', { name: 'Review combined.pdf', exact: true })
   const dialog = page.getByRole('dialog', { name: 'Review generated PDF' })
@@ -142,7 +142,7 @@ test('generated PDFs above 25 MiB use bounded ranges, cancel cleanly, retry and 
   phase = 'reload and restore'
   await page.reload()
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
-  await review.click()
+  await page.getByRole('button', {name:'Open earlier bundle',exact:true}).click()
   await expect(dialog).toContainText('Matter inputs changed since this export.')
   await expect(pageInput).toHaveValue('2')
   await expect(dialog.locator('.pdf-text-layer')).toContainText('Large synthetic document')

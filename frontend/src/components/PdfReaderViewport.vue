@@ -6,8 +6,8 @@ import { pageAtOffset, readerScale, type ReaderMode, type ReaderPosition } from 
 import type { PdfSearchMatch } from '../lib/pdfSearch'
 
 const props = withDefaults(defineProps<{pdf:PDFDocumentProxy|null,page:number,zoom:string,mode:ReaderMode,
-  interactive?:boolean, matches?:PdfSearchMatch[],activeMatchIndex?:number, surfaceClass?:Record<string,boolean>}>(),
-  {interactive:true,matches:()=>[],activeMatchIndex:-1})
+  horizontalGutter?:number, interactive?:boolean, matches?:PdfSearchMatch[],activeMatchIndex?:number, surfaceClass?:Record<string,boolean>}>(),
+  {horizontalGutter:20,interactive:true,matches:()=>[],activeMatchIndex:-1})
 const emit = defineEmits<{'update:page':[number],position:[ReaderPosition], ready:[{page:number,scale:number,width:number,height:number}],
   error:[string], internalLink:[number], externalLink:[string], surfaceClick:[MouseEvent],
   surfacePointerdown:[PointerEvent],surfacePointermove:[PointerEvent],surfacePointerup:[PointerEvent],surfacePointercancel:[PointerEvent]}>()
@@ -64,7 +64,7 @@ function capture():ReaderPosition {
   // Read the painted layout, not metrics that may already reflect a new zoom.
   if(wrap){
     const bounds=wrap.getBoundingClientRect(), density=bounds.width/wrap.offsetWidth || 1
-    const top=bounds.top+20*density
+    const top=bounds.top+(parseFloat(getComputedStyle(wrap).paddingTop)||0)*density
     const frames=Array.from(wrap.querySelectorAll<HTMLElement>('[data-reader-page]'))
     const frame=frames.find(item=>item.getBoundingClientRect().bottom>top) || frames[frames.length-1]
     if(frame){
@@ -229,9 +229,10 @@ watch(scroller,element=>{
   if (!element) return
   const measure=()=>{
     const anchor=capture()
-    if(width.value===element.clientWidth&&height.value===element.clientHeight)return
+    const availableWidth = element.clientWidth - 2 * (props.horizontalGutter - 20)
+    if(width.value===availableWidth&&height.value===element.clientHeight)return
     rendered.clear()
-    width.value=element.clientWidth; height.value=element.clientHeight
+    width.value=availableWidth; height.value=element.clientHeight
     void restore(anchor)
   }
   observer=new ResizeObserver(measure);observer.observe(element);measure()
@@ -241,7 +242,7 @@ defineExpose({getCanvas,getElement,getScroller,capture,restore,scrollToMatch,wai
 </script>
 <template>
   <div ref="scroller" class="canvas-scroll shared-reader-viewport" :class="{'continuous-reader':mode==='continuous'}" @scroll.passive="onScroll">
-    <div class="reader-page-stack" :style="{minWidth:`${maxWidth+40}px`}">
+    <div class="reader-page-stack" :style="{minWidth:`${maxWidth+horizontalGutter*2}px`}">
       <div v-if="topSpace" :style="{height:`${topSpace}px`}" aria-hidden="true"></div>
       <div v-for="number in visiblePages" :key="number" class="reader-page-frame" :data-reader-page="number" :aria-label="`PDF page ${number}`" :style="{height:`${metrics[number-1]?.renderHeight||0}px`,width:`${metrics[number-1]?.renderWidth||0}px`}">
         <PdfPageSurface :ref="(value:any)=>{if(value)surfaces.set(number,value);else {surfaces.delete(number);rendered.delete(number)}}" :pdf="pageMeasured(number)?pdf:null" :page-number="number" :scale="metrics[number-1]?.scale||1" :interactive="interactive" :active="true" :max-raster-pixels="rasterBudget"

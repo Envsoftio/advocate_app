@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { Maximize2, Minimize2, Archive, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, FilePlus2, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare, Eraser, Undo2, Redo2, X, Search, Square, Circle, Minus, ArrowUpRight, Check, CalendarDays, Printer } from 'lucide-vue-next'
-import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
+import { ArrowLeft, Save, Shield, PanelLeft, CheckCircle2, Ellipsis, Maximize2, Minimize2, Archive, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, FilePlus2, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare, Eraser, Undo2, Redo2, X, Search, Square, Circle, Minus, ArrowUpRight, Check, CalendarDays, Printer, BookOpen, Info, Focus } from 'lucide-vue-next'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
 import type { MatterDocument, OutputMarkPreview, OutputMarks, PageAnnotation, ReviewedLink } from '../lib/types'
 import { ApiError, api, downloadWorkingPdf, inTauri, pageAnnotationAsset, pdfDocumentSource, uploadPageAnnotationImage } from '../lib/api'
+import { engineBlocked } from '../lib/engineConnection'
 import { friendlyError } from '../lib/format'
 import { confirmSignatureTransformation } from '../lib/signatures'
 
@@ -18,14 +19,80 @@ const pdfOwner = usePdfDocument()
 const readerPdf = pdfOwner.pdf
 const readerViewport = ref<InstanceType<typeof PdfReaderViewport> | null>(null)
 const readerMode = ref<ReaderMode>('single')
-const zoomChoice = ref('fit-page')
+const zoomChoice = ref('fit-width')
 const readingHistory = ref<ReaderPosition[]>([])
-const outlineOpen = ref(false)
+type ReadPanel = 'search' | 'outline' | 'comments' | 'page-bookmarks' | 'information' | null
+const readPanel = ref<ReadPanel>(null)
+const panelElement = ref<HTMLElement | null>(null)
+const viewerElement = ref<HTMLElement | null>(null)
+let panelTrigger: HTMLElement | null = null
+const focusedReading = ref(false)
+const actionsMenu = ref<HTMLDetailsElement|null>(null)
+const headerSaving = ref(false)
+function closeActionMenu(event:Event) {
+  if (!(event.target as HTMLElement).closest('button')) return
+  actionsMenu.value?.removeAttribute('open')
+  actionsMenu.value?.querySelector<HTMLElement>('summary')?.focus({preventScroll:true})
+}
+async function saveHeaderDraft() {
+  if (headerSaving.value) return
+  headerSaving.value = true
+  try { if (!(await savePendingDraft())) emit('error','Finish the current tool draft before saving. Your draft is retained.') }
+  finally { headerSaving.value = false }
+}
+let focusWasExpanded = false
+let focusTrigger: HTMLElement | null = null
+function panelFlag(name: ReadPanel) {
+  return computed({get: () => readPanel.value === name, set: (open: boolean) => {
+    if (open) readPanel.value = name
+    else if (readPanel.value === name) readPanel.value = null
+  }})
+}
+const outlineOpen = panelFlag('outline')
+async function closeReadPanel() {
+  readPanel.value = null
+  await nextTick()
+  ;(panelTrigger?.isConnected ? panelTrigger : viewerElement.value)?.focus({preventScroll:true})
+}
+async function openReadPanel(panel: ReadPanel, event?: Event) {
+  if (readPanel.value === panel) { await closeReadPanel(); return }
+  panelTrigger = event?.currentTarget instanceof HTMLElement ? event.currentTarget : window.document.activeElement as HTMLElement
+  readPanel.value = panel
+  await nextTick()
+  if (panel === 'search') findInput.value?.focus({preventScroll:true})
+  else panelElement.value?.querySelector<HTMLButtonElement>('button')?.focus({preventScroll:true})
+}
+async function toggleFocusedReading(event?: Event) {
+  if (!focusedReading.value) {
+    focusTrigger = event?.currentTarget instanceof HTMLElement ? event.currentTarget : window.document.activeElement as HTMLElement
+    focusWasExpanded = !!props.expanded
+    focusedReading.value = true
+    if (!props.expanded) emit('toggleExpanded')
+    await nextTick()
+    viewerElement.value?.querySelector<HTMLButtonElement>('[aria-label="Exit focused reading"]')?.focus({preventScroll:true})
+  } else {
+    focusedReading.value = false
+    if (!focusWasExpanded && props.expanded) emit('toggleExpanded')
+    await nextTick()
+    ;(focusTrigger?.isConnected ? focusTrigger : viewerElement.value)?.focus({preventScroll:true})
+  }
+}
+function resultKey(event: KeyboardEvent, index: number) {
+  const target = event.key === 'ArrowDown' ? Math.min(index+1,findMatches.value.length-1) :
+    event.key === 'ArrowUp' ? Math.max(index-1,0) : event.key === 'Home' ? 0 :
+    event.key === 'End' ? findMatches.value.length-1 : null
+  if (target === null) return
+  event.preventDefault();event.stopPropagation()
+  chooseFind(target)
+  panelElement.value?.querySelectorAll<HTMLButtonElement>('.pdf-find-results button')[target]?.focus({preventScroll:true})
+}
+
 const sourceOutline = ref<Array<{title:string,page:number|null,url:string|null,level:number}>>([])
 const outlineError = ref('')
-const commentsOpen = ref(false)
+const outlineLoading = ref(false)
+const commentsOpen = panelFlag('comments')
 const commentQuery = ref('')
-const pageBookmarksOpen = ref(false)
+const pageBookmarksOpen = panelFlag('page-bookmarks')
 const organizerOpen = ref(false)
 const workingSaveBusy = ref(false)
 const workingSaveNotice = ref('')
@@ -89,8 +156,10 @@ function pageRendered(data:{page:number,scale:number,width:number,height:number}
   pageZoom.value=data.scale
   displayedPage.value=data.page
   switchingPage.value=false
+  viewerError.value=''
 }
 async function loadOutline(document:PDFDocumentProxy, call:number) {
+  outlineLoading.value=true
   try {
     const result=await readPdfSourceOutline(document,{isCancelled:()=>call!==epoch})
     if(call!==epoch)return
@@ -99,9 +168,10 @@ async function loadOutline(document:PDFDocumentProxy, call:number) {
     flatten(result.entries,0);sourceOutline.value=rows
     if(result.truncated)outlineError.value='Showing the first available outline entries.'
   }catch{if(call===epoch)outlineError.value='The source PDF outline could not be read.'}
+  finally{if(call===epoch)outlineLoading.value=false}
 }
 function tabKey(event:KeyboardEvent, category:EditorCategory) {
-  const categories:EditorCategory[]=['edit','review','stamps','pages','output']
+  const categories:EditorCategory[]=['read','edit','review','pages','ocr','redact']
   let index=categories.indexOf(category)
   if(event.key==='ArrowRight')index=(index+1)%categories.length
   else if(event.key==='ArrowLeft')index=(index+categories.length-1)%categories.length
@@ -112,8 +182,8 @@ function tabKey(event:KeyboardEvent, category:EditorCategory) {
   ;(event.currentTarget as HTMLElement).parentElement?.querySelector<HTMLButtonElement>(`[data-category="${categories[index]}"]`)?.focus()
 }
 
-const props = defineProps<{ expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], disabled?: boolean, canUndo?: boolean, canRedo?: boolean, undoLabel?: string | null, redoLabel?: string | null, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number} }>()
-const emit = defineEmits<{ toggleExpanded: [], toggleFocus: [], modified: [], undo: [], redo: [], error: [message: string], pageTools: [], toggleDetails: [], openBookmarks: [], ocr: [language: 'eng' | 'hin' | 'eng+hin'], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string], printWorking: [request:{documentId:string,revision:number,title:string,acknowledged:boolean}] }>()
+const props = defineProps<{ preparation?:boolean, artifactOptions?: Array<{value:string,label:string}>, expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], busy?: boolean, disabled?: boolean, canUndo?: boolean, canRedo?: boolean, undoLabel?: string | null, redoLabel?: string | null, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number, revision?:number} }>()
+const emit = defineEmits<{ openEditor:[], showDocumentList:[], browseDocuments: [], saveDetails: [], retryReader: [], artifact: [value:string], toggleExpanded: [], toggleFocus: [], modified: [], undo: [], redo: [], error: [message: string], pageTools: [], toggleDetails: [], openBookmarks: [], ocr: [language: 'eng' | 'hin' | 'eng+hin'], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string], printWorking: [request:{documentId:string,revision:number,title:string,acknowledged:boolean}] }>()
 const undoDescription = computed(() => props.undoLabel
   ? `Undo: ${props.undoLabel}. Applies to the last change anywhere in this matter.`
   : 'Undo last matter change. No change available.')
@@ -122,7 +192,6 @@ const redoDescription = computed(() => props.redoLabel
   : 'Redo matter change. No change available.')
 const ocrLanguage = ref<'eng' | 'hin' | 'eng+hin'>('eng')
 const canvas = ref<HTMLCanvasElement | null>(null)
-const thumbnailWrap = ref<HTMLDivElement | null>(null)
 const current = ref(1)
 const loading = ref(false)
 const editing = ref(false)
@@ -136,9 +205,17 @@ function toggleExpandedView() {
 }
 const pageZoom = ref(1)
 const showThumbnails = ref(true)
-type EditorCategory = 'edit' | 'review' | 'stamps' | 'pages' | 'output'
-const activeCategory = ref<EditorCategory>('edit')
-const findOpen = ref(false)
+const thumbnailsVisible = computed(() => showThumbnails.value && !readPanel.value && !focusedReading.value)
+function toggleThumbnails() {
+  if(readPanel.value) { readPanel.value=null;showThumbnails.value=true }
+  else showThumbnails.value=!showThumbnails.value
+}
+type EditorCategory = 'read' | 'edit' | 'review' | 'stamps' | 'pages' | 'output' | 'ocr' | 'redact'
+const activeCategory = ref<EditorCategory>('read')
+watch(()=>props.preparation,preparing=>{
+  if(preparing) { selectCategory('read');readPanel.value=null;focusedReading.value=false }
+})
+const findOpen = panelFlag('search')
 const findInput = ref<HTMLInputElement | null>(null)
 const findQuery = ref('')
 const {matches:findMatches,selectedIndex:findIndex,busy:findBusy,error:findError,truncated:findTruncated,select:selectFind,step:advanceFind} = usePdfSearch(readerPdf,findQuery)
@@ -152,6 +229,8 @@ const draggingPage = ref<number | null>(null)
 const dropTargetPage = ref<number | null>(null)
 type ManualBookmark = {id:string,title:string,document_id:string,page_index:number,target_revision:number,parent_id:string|null,resolved:boolean}
 const manualBookmarks = ref<ManualBookmark[]>([])
+const bookmarksLoading = ref(false), bookmarksError = ref('')
+const documentBookmarks = computed(() => manualBookmarks.value.filter(item => item.document_id === props.document?.id))
 const bookmarkOpen = ref(false)
 const bookmarkTitle = ref('')
 const bookmarkSaving = ref(false)
@@ -447,7 +526,8 @@ const marksError = ref('')
 const marksNotice = ref('')
 const markPreview = ref<OutputMarkPreview[]>([])
 const defaultMarks: OutputMarks = {
-  index_style:'compact',part_extracts_enabled:false,
+  numbering_style:'arabic',numbering_restart:'volume',numbering_start:1,numbering_prefix:'',numbering_position:'bottom_center',numbering_front_matter:'physical',numbering_pdf_labels:true,numbering_linked_index:true,numbering_back_link:false,
+  index_style:'compact',part_extracts_enabled:false,front_matter:'index_only',index_date:false,cover_heading:'',cover_reference:'',cover_title:'',
   watermark_enabled:false,watermark_text:'DRAFT',watermark_position:'center',
   watermark_font_size:32,watermark_opacity:.16,timestamp_enabled:false,
   timestamp_format:'datetime',timestamp_timezone:'UTC',timestamp_position:'bottom_right',
@@ -460,11 +540,14 @@ const defaultMarks: OutputMarks = {
   annexure_overrides:{},
 }
 const markSettings = reactive<OutputMarks>({...defaultMarks})
-let savedMarks = JSON.stringify(defaultMarks)
+const savedMarks = ref(JSON.stringify(defaultMarks))
 let markPreviewTimer: ReturnType<typeof setTimeout> | null = null
 let markLoadSequence = 0
 let markPreviewSequence = 0
-const marksDirty = computed(() => JSON.stringify(markSettings) !== savedMarks)
+const marksDirty = computed(() => {
+  const saved = JSON.parse(savedMarks.value) as OutputMarks
+  return (Object.keys(markSettings) as Array<keyof OutputMarks>).some(key => JSON.stringify(markSettings[key]) !== JSON.stringify(saved[key]))
+})
 const markPositions = [
   ['top_left','Top left'],['top_center','Top centre'],['top_right','Top right'],
   ['center','Centre'],['bottom_left','Bottom left'],['bottom_center','Bottom centre'],
@@ -480,9 +563,6 @@ const inlineEditorStyle = computed(() => {
 })
 let runsSequence = 0
 let pdf: PDFDocumentProxy | null = null
-let thumbnailTasks: RenderTask[] = []
-let thumbnailSequence = 0
-const renderedThumbnails = new Set<number>()
 let epoch = 0
 let activeDocumentId: string | null = null
 const displayedRevision = ref<number | null>(null)
@@ -491,7 +571,8 @@ const pageReady = computed(() => !loading.value && !switchingPage.value &&
   displayedPage.value === current.value && displayedRevision.value === props.document?.revision &&
   activeDocumentId === props.document?.id)
 function closeDraftWithEscape(event: KeyboardEvent) {
-  if (findOpen.value) findOpen.value = false
+  if (focusedReading.value) void toggleFocusedReading()
+  else if (readPanel.value) void closeReadPanel()
   else if (selectedOverlay.value) clearOverlaySelection()
   else if (selectedRun.value) cancelReplacement()
   else if (pendingMove.value) cancelMove()
@@ -511,8 +592,9 @@ function handleViewerKeydown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
     event.preventDefault()
     event.stopPropagation()
-    findOpen.value = true
-    void nextTick(() => findInput.value?.focus())
+    if(focusedReading.value) void toggleFocusedReading().then(() => openReadPanel('search', event))
+    else if(findOpen.value) findInput.value?.focus()
+    else void openReadPanel('search',event)
     return
   }
   if (event.key === 'Escape') { closeDraftWithEscape(event); return }
@@ -529,6 +611,8 @@ function handleViewerKeydown(event: KeyboardEvent) {
     navigateToPage(event.key==='Home'?1:event.key==='End'?total.value:Math.max(1,Math.min(total.value,current.value+(event.key==='PageDown'?1:-1))))
     return
   }
+  if (focusedReading.value) return
+  if(props.preparation && ['v','e','t','h'].includes(event.key.toLowerCase())) emit('openEditor')
   switch (event.key.toLowerCase()) {
     case 'v': activeCategory.value = 'edit'; activeTool.value = 'select'; break
     case 'e': activeCategory.value = 'edit'; if (activeTool.value !== 'edit-text') toggleTool('edit-text'); break
@@ -539,14 +623,17 @@ function handleViewerKeydown(event: KeyboardEvent) {
   event.preventDefault()
 }
 function selectCategory(category: EditorCategory) {
+  if(focusedReading.value && category!=='read') void toggleFocusedReading()
   if (activeCategory.value === category) return
+  if (category === 'read' && hasPendingDraft()) {
+    if (!window.confirm('Discard the unfinished PDF tool draft and return to Read?')) return
+    discardPendingDraft()
+  }
   activeCategory.value = category
   if (activeTool.value !== 'select') toggleTool(activeTool.value)
+  if (category === 'redact') toggleTool('redact')
 }
-function showFind() {
-  findOpen.value = !findOpen.value
-  if (findOpen.value) void nextTick(() => findInput.value?.focus())
-}
+function showFind(event?: Event) { void openReadPanel('search',event) }
 async function openReviewComment(item:PageAnnotation) {
   commentsOpen.value=false
   navigateToPage(item.page_index+1)
@@ -614,52 +701,8 @@ const toolTitle = computed(() => ({
   select: 'PDF tool',
 })[activeTool.value])
 const total = computed(() => loadedPageCount.value || props.document?.page_count || 0)
-const thumbnailPages = computed(() => {
-  const start = Math.max(1, Math.min(current.value - 3, total.value - 6))
-  return Array.from({length: Math.min(total.value, 7)}, (_, index) => start + index)
-})
-let thumbnailScrollTimer: ReturnType<typeof setTimeout> | null = null
-function scheduleThumbnailRender() {
-  if (thumbnailScrollTimer) clearTimeout(thumbnailScrollTimer)
-  thumbnailScrollTimer = setTimeout(() => void renderThumbnails(), 90)
-}
-async function renderThumbnails() {
-  const sequence = ++thumbnailSequence
-  thumbnailTasks.forEach(task => task.cancel())
-  thumbnailTasks = []
-  const currentPdf = pdf
-  if (props.expanded || !currentPdf || !thumbnailWrap.value || !showThumbnails.value) return
-  await nextTick()
-  if (currentPdf !== pdf || !thumbnailWrap.value) return
-  for (const element of thumbnailWrap.value.querySelectorAll<HTMLCanvasElement>('canvas[data-page]')) {
-    if (currentPdf !== pdf || sequence !== thumbnailSequence) return
-    const number = Number(element.dataset.page)
-    if (renderedThumbnails.has(number) && element.dataset.rendered === 'true' && element.width && element.height) continue
-    try {
-      const page = await currentPdf.getPage(number)
-      if (currentPdf !== pdf || sequence !== thumbnailSequence) return
-      const viewport = page.getViewport({scale: 0.18})
-      element.width = Math.round(viewport.width)
-      element.height = Math.round(viewport.height)
-      const context = element.getContext('2d')
-      if (!context) continue
-      const task = page.render({canvasContext:context, viewport})
-      thumbnailTasks.push(task)
-      await task.promise
-      if (currentPdf === pdf && sequence === thumbnailSequence) {
-        renderedThumbnails.add(number)
-        element.dataset.rendered = 'true'
-      }
-    } catch (err) {
-    if (currentPdf === pdf && sequence === thumbnailSequence &&
-        !(err instanceof Error && err.name === 'RenderingCancelledException'))
-      viewerError.value = friendlyError(err)
-    }
-  }
-}
-
-async function loadPdf(doc: MatterDocument | null) {
-  if (doc && pdf && doc.id === activeDocumentId && doc.revision === displayedRevision.value) return
+async function loadPdf(doc: MatterDocument | null, force = false) {
+  if (!force && doc && pdf && doc.id === activeDocumentId && doc.revision === displayedRevision.value) return
   rememberPosition()
   const call = ++epoch
   const sameDocument = doc?.id === activeDocumentId
@@ -679,17 +722,9 @@ async function loadPdf(doc: MatterDocument | null) {
   paragraphPreviewSequence++
   cancelMove()
   canvas.value = null
-  if (thumbnailScrollTimer) {clearTimeout(thumbnailScrollTimer);thumbnailScrollTimer=null}
-  thumbnailSequence++
-  thumbnailTasks.forEach(task => task.cancel())
-  thumbnailTasks = []
-  renderedThumbnails.clear()
-  for (const element of thumbnailWrap.value?.querySelectorAll<HTMLCanvasElement>('canvas[data-page]') || []) {
-    element.width=0;element.height=0;delete element.dataset.rendered
-  }
   draggingPage.value=null;dropTargetPage.value=null
   pdf = null
-  sourceOutline.value=[];outlineError.value=''
+  sourceOutline.value=[];outlineError.value='';outlineLoading.value=false
   displayedRevision.value = null
   displayedPage.value = 0
   // Invalidate the previous PDF, search, and canvases before navigation metadata
@@ -700,7 +735,7 @@ async function loadPdf(doc: MatterDocument | null) {
   if(call!==epoch)return
   current.value=saved?.page || retainedPage
   if(saved){zoomChoice.value=saved.zoom;readerMode.value=saved.mode}
-  else if(!sameDocument){zoomChoice.value='fit-page';readerMode.value='single'}
+  else if(!sameDocument){zoomChoice.value='fit-width';readerMode.value='single'}
   try {
     const loaded = await pdfOwner.open(() => pdfDocumentSource(doc.id, doc.revision))
     if(call!==epoch || !loaded){if(call===epoch)viewerError.value=pdfOwner.error.value;return}
@@ -708,13 +743,20 @@ async function loadPdf(doc: MatterDocument | null) {
     loadedPageCount.value = loaded.numPages
     current.value = Math.min(current.value, loaded.numPages)
     displayedRevision.value=doc.revision
-    if (!sameDocument && props.pageTarget?.documentId === doc.id) current.value = Math.min(Math.max(1, props.pageTarget.page), loaded.numPages)
+    if (props.pageTarget?.documentId === doc.id && props.pageTarget.sequence !== consumedPageTarget) {
+      const target = props.pageTarget
+      consumedPageTarget = target.sequence
+      if ((target.revision !== undefined && target.revision !== doc.revision) || target.page < 1 || target.page > loaded.numPages) {
+        viewerError.value = 'The requested finding page or revision is unavailable. Return to Preflight and run checks again.'
+        pdf = null; void pdfOwner.close(); return
+      }
+      current.value = target.page
+    }
     void loadOutline(loaded,call)
     await nextTick()
     if(call!==epoch)return
     if(saved && (!props.pageTarget || props.pageTarget.documentId!==doc.id)) await readerViewport.value?.restore(saved)
     if(call!==epoch)return
-    void renderThumbnails()
     const painted=await readerViewport.value?.waitForPage(current.value)
     if(call===epoch && !painted && !viewerError.value)viewerError.value='The page could not finish rendering. Reopen the document to retry.'
   } catch (err) { if (call === epoch) viewerError.value = friendlyError(err) }
@@ -730,10 +772,16 @@ watch(() => props.document?.id, async id => {
     if (props.document?.id === id) paragraphTrialAvailable.value = status.available
   } catch { /* ordinary text replacement remains available */ }
 }, {immediate:true})
+let consumedPageTarget = -1
 watch(() => props.pageTarget?.sequence, () => {
   const target = props.pageTarget
-  if (target && target.documentId === props.document?.id && pdf)
-    navigateToPage(Math.min(Math.max(1, target.page), total.value))
+  if (target && target.documentId === props.document?.id && pdf) {
+    consumedPageTarget = target.sequence
+    if ((target.revision !== undefined && target.revision !== displayedRevision.value) || target.page < 1 || target.page > total.value) {
+      emit('error', 'The requested finding page or revision is unavailable. Run checks again.'); return
+    }
+    navigateToPage(target.page)
+  }
 })
 watch(current, () => {switchingPage.value=true;canvas.value=null})
 watch(current, () => { placement.value = null; selectedRun.value = null; cancelMove(); clearOverlaySelection() })
@@ -759,17 +807,6 @@ watch([current, () => props.document?.id, () => props.document?.revision, editTe
   } catch (err) { if (sequence === runsSequence) runsError.value = friendlyError(err) }
 })
 watch([current, () => props.document?.id, editTextMode], () => { editNotice.value = '' })
-watch([showThumbnails, activeTool, () => props.expanded], ([shown, tool, expanded]) => {
-  if (!shown || tool !== 'select' || expanded) {
-    thumbnailSequence++
-    thumbnailTasks.forEach(task => task.cancel())
-    thumbnailTasks = []
-    renderedThumbnails.clear()
-    return
-  }
-  void nextTick(() => {void renderThumbnails()})
-})
-watch(current, () => void nextTick(()=>{if(!props.expanded)scheduleThumbnailRender()}))
 watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}`, () => {
   bookmarkOpen.value = false
   pageBookmarksOpen.value = false
@@ -777,6 +814,9 @@ watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}`, () 
   bookmarkNotice.value = ''
 })
 watch(() => props.document?.id, () => {
+  // Search stays open across document changes; usePdfSearch clears stale matches
+  // as soon as the old PDF closes, before position metadata can wait on I/O.
+  activeCategory.value='read'
   outlineOpen.value = false
   commentsOpen.value = false
   commentQuery.value = ''
@@ -785,27 +825,34 @@ watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}|${pro
   const sequence = ++bookmarkLoadSequence
   const doc = props.document
   if (!doc) { manualBookmarks.value = []; return }
+  bookmarksLoading.value=true;bookmarksError.value='';manualBookmarks.value=[]
   try {
     const entries = await api<ManualBookmark[]>(`/matters/${doc.matter_id}/bookmarks`)
     if (sequence === bookmarkLoadSequence) manualBookmarks.value = entries
-  } catch { if (sequence === bookmarkLoadSequence) manualBookmarks.value = [] }
+  } catch { if (sequence === bookmarkLoadSequence) bookmarksError.value='Manual bookmarks could not be loaded. Reopen the document to retry.' }
+  finally { if(sequence === bookmarkLoadSequence) bookmarksLoading.value=false }
 }, {immediate:true})
+let linksLoadSequence = 0
 watch(() => `${props.document?.matter_id || ''}|${(props.documents || []).map(item => `${item.id}:${item.revision}:${item.archived_at || ''}`).join(',')}|${props.bookmarkRefreshKey || 0}`, async () => {
+  const call = ++linksLoadSequence
   const doc = props.document
-  if (!doc) { reviewedLinks.value = []; return }
-  try { reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`) }
-  catch { reviewedLinks.value = [] }
+  reviewedLinks.value = []
+  if (!doc) return
+  try { const result = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`); if(call === linksLoadSequence) reviewedLinks.value = result }
+  catch { if(call === linksLoadSequence) reviewedLinks.value = [] }
 }, {immediate:true})
 watch(() => `${props.document?.matter_id || ''}|${props.document?.revision || ''}|${props.bookmarkRefreshKey || 0}`, () => void loadPageAnnotations(), {immediate:true})
 watch([current, pageAnnotations], () => void loadCurrentAnnotationImages())
+let marksMatterId = ''
 watch(() => [props.document?.matter_id || '', props.bookmarkRefreshKey || 0] as const, async ([matterId]) => {
   const sequence = ++markLoadSequence
-  if (!matterId) { Object.assign(markSettings, defaultMarks); savedMarks = JSON.stringify(defaultMarks); return }
+  if (marksMatterId !== matterId) { Object.assign(markSettings, defaultMarks); savedMarks.value = JSON.stringify(defaultMarks); marksMatterId = matterId }
+  if (!matterId) { Object.assign(markSettings, defaultMarks); savedMarks.value = JSON.stringify(defaultMarks); return }
   try {
     const settings = await api<OutputMarks>(`/matters/${matterId}/output-marks`)
-    if (sequence !== markLoadSequence) return
+    if (sequence !== markLoadSequence || marksDirty.value) return
     Object.assign(markSettings, settings)
-    savedMarks = JSON.stringify(settings)
+    savedMarks.value = JSON.stringify(settings)
   } catch (err) { if (sequence === markLoadSequence) marksError.value = friendlyError(err) }
 }, {immediate:true})
 watch(() => [marksPanelOpen.value, props.document?.id, props.document?.revision, current.value,
@@ -825,12 +872,13 @@ watch(() => [props.document?.id, props.document?.revision] as const, async ([doc
   } catch { /* The viewer can still display legacy PDFs without redaction records. */ }
 }, {immediate:true})
 function hasPendingDraft() {
-  return !!(overlayText.value.trim() || placement.value || replacement.value.trim() ||
+  return !!(marksDirty.value || overlayText.value.trim() || placement.value || replacement.value.trim() ||
     pendingMove.value || redactionRegion.value || annotationRegion.value ||
     annotationImage.value || (annotationDraft.body.trim() && (annotationRegion.value || editingAnnotationId.value)) ||
     linkRegion.value || (bookmarkOpen.value && bookmarkTitle.value.trim()))
 }
 function discardPendingDraft() {
+  Object.assign(markSettings, JSON.parse(savedMarks.value))
   overlayText.value=''; placement.value=null; replacement.value=''; selectedRun.value=null
   cancelMove(); redactionRegion.value=null; annotationRegion.value=null
   annotationImage.value=null; annotationDraft.body=''; editingAnnotationId.value=null
@@ -838,8 +886,20 @@ function discardPendingDraft() {
   if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value)
   annotationPreviewUrl.value=''
 }
-defineExpose({hasPendingDraft, discardPendingDraft})
-onBeforeUnmount(() => { rememberPosition(); void flushReadingPositions(); epoch++; if (thumbnailScrollTimer) clearTimeout(thumbnailScrollTimer); if (bookmarkNoticeTimer) clearTimeout(bookmarkNoticeTimer); thumbnailSequence++; thumbnailTasks.forEach(task => task.cancel()); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value) })
+async function savePendingDraft() {
+  // An incomplete tool has no valid commit yet; keep its draft and origin open.
+  if (marksDirty.value) { await saveMarks(); if (marksDirty.value) return false }
+  if (pendingMove.value && movingRun.value) await applyMove(movingRun.value, horizontalOffset.value, verticalOffset.value)
+  else if (placement.value && overlayText.value.trim()) await placeText()
+  else if (selectedRun.value && replacement.value.trim() && !pendingMove.value) await applyReplacement()
+  else if (redactionRegion.value) await applyRedaction()
+  else if (annotationRegion.value || editingAnnotationId.value) await savePageAnnotation()
+  else if (linkRegion.value) await saveReviewedLink()
+  else if (bookmarkOpen.value && bookmarkTitle.value.trim()) await addPageBookmark()
+  return !hasPendingDraft()
+}
+defineExpose({hasPendingDraft, discardPendingDraft, savePendingDraft, reloadReader: () => loadPdf(props.document,true)})
+onBeforeUnmount(() => { rememberPosition(); void flushReadingPositions(); epoch++; if (bookmarkNoticeTimer) clearTimeout(bookmarkNoticeTimer); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value) })
 
 async function addPageBookmark() {
   const doc = props.document
@@ -1077,9 +1137,7 @@ async function applyRedaction() {
     emit('modified')
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
-      redactionRegion.value = null
-      redactionError.value = 'The working PDF changed. Reload the document and draw the area again.'
-      emit('modified')
+      redactionError.value = 'The working PDF changed. This draft was retained; cancel navigation and review before redrawing.'
     } else redactionError.value = friendlyError(err)
   }
   finally { redactionBusy.value = false }
@@ -1311,10 +1369,12 @@ async function saveMarks() {
   if (!doc || marksBusy.value) return
   marksBusy.value = true
   marksError.value = ''
+  const draft = JSON.stringify(markSettings)
   try {
-    const saved = await api<OutputMarks>(`/matters/${doc.matter_id}/output-marks`, 'PUT', {...markSettings})
-    Object.assign(markSettings, saved)
-    savedMarks = JSON.stringify(saved)
+    const saved = await api<OutputMarks>(`/matters/${doc.matter_id}/output-marks`, 'PUT', JSON.parse(draft))
+    if (props.document?.matter_id !== doc.matter_id) return
+    if (JSON.stringify(markSettings) === draft) Object.assign(markSettings, saved)
+    savedMarks.value = JSON.stringify(saved)
     marksNotice.value = 'Output marks saved. Existing exports remain unchanged; rebuild to apply them.'
     emit('modified')
   } catch (err) { marksError.value = friendlyError(err) }
@@ -1588,7 +1648,7 @@ async function applyMove(run: TextRun, offsetX: number, offsetY: number) {
     editNotice.value = 'Text moved by removing and redrawing the selected glyphs in the working copy. Review font and position; Undo can restore the prior revision.'
     emit('modified')
   } catch (err) { emit('error', conciseTextEditError(err)) }
-  finally { editing.value = false; replacingText.value = false; editSnapshot.value = ''; cancelMove() }
+  finally { editing.value = false; replacingText.value = false; editSnapshot.value = '' }
 }
 async function applyReplacement() {
   if (!props.document || !selectedRun.value || !replacement.value.trim() || props.disabled || editing.value) return
@@ -1620,6 +1680,7 @@ async function applyReplacement() {
       ? `Whole paragraph updated in ${result.edit_layout.line_count} line(s)${result.edit_layout.following_text_objects_moved ? `; ${result.edit_layout.following_text_objects_moved} following text line(s) moved down to make room` : ''}${result.edit_layout.font_substituted ? ` with substituted ${result.edit_layout.font_name}` : ''}. Inspect the page, extraction, and export.`
       : `Removed and redrew selected text in ${result.edit_layout.line_count} line(s) at ${result.edit_layout.font_size} pt${result.edit_layout.font_size_reduced ? ' (reduced to fit)' : ''}. Review font, layout and extraction.`
     selectedRun.value = null
+    replacement.value = ''
     try { editSnapshot.value = canvas.value?.toDataURL('image/png') || '' } catch { editSnapshot.value = '' }
     editSnapshotFading.value = false
     await loadPdf(result)
@@ -1636,33 +1697,39 @@ async function applyReplacement() {
 </script>
 
 <template>
-  <div class="viewer-root" tabindex="0" @keydown="handleViewerKeydown">
+  <div ref="viewerElement" class="viewer-root read-workspace" :class="{'focused-reading':focusedReading, 'preparation-preview':preparation}" tabindex="0" @keydown="handleViewerKeydown">
     <template v-if="document">
-      <div class="viewer-toolbar">
-        <div class="toolbar-group reader-document"><FileSearch :size="16"/><div><strong :title="document.title">{{document.title}}</strong><span title="This is the editable PDF created when you imported the file. The imported original is kept separately.">Editable copy · Original preserved</span></div></div>
-        <button class="btn secondary small" aria-label="Save working copy" title="Save this working revision with editable PDF marks flattened. Private notes stay out." :disabled="workingSaveBusy || disabled || editing || loading" @click="saveWorkingCopy">{{workingSaveBusy ? 'Saving…' : 'Save copy'}}</button>
-        <button class="btn secondary small" aria-label="Print working copy" title="Print this working revision with resolved PDF marks; private notes stay out" :disabled="disabled || editing || loading" @click="printWorkingCopy"><Printer :size="16"/> Print</button>
-        <div class="toolbar-group"><button class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :aria-description="undoDescription" :disabled="!canUndo || disabled || editing" @click="emit('undo')"><Undo2 :size="17"/></button><button class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :aria-description="redoDescription" :disabled="!canRedo || disabled || editing" @click="emit('redo')"><Redo2 :size="17"/></button></div>
-        <div class="toolbar-group"><button class="icon-btn small" aria-label="Find in this PDF" title="Find in this PDF (Ctrl/⌘+F)" :aria-pressed="findOpen" @click="showFind"><Search :size="16"/></button><button class="btn secondary small editor-expand-button" :aria-pressed="!!expanded" :title="expanded ? 'Exit full screen (Esc)' : 'Expand editor and fit the page to the window'" @click="toggleExpandedView"><Minimize2 v-if="expanded" :size="16"/><Maximize2 v-else :size="16"/><span>{{expanded ? 'Exit full screen' : 'Full screen'}}</span></button><button class="icon-btn small" :aria-label="focusMode ? 'Show document list' : 'Focus on PDF'" :title="focusMode ? 'Show document list' : 'Focus on PDF'" :aria-pressed="!!focusMode" @click="emit('toggleFocus')"><PanelRightClose :size="16"/></button><button class="icon-btn small" :aria-label="showThumbnails?'Hide thumbnails':'Show thumbnails'" :aria-pressed="showThumbnails" title="Toggle page thumbnails" @click="showThumbnails=!showThumbnails"><LayoutGrid :size="16"/></button></div>
+      <div class="viewer-toolbar document-header">
+        <button v-if="!preparation" class="btn secondary small document-browser-trigger" aria-label="Browse documents" @click="emit('browseDocuments')"><ArrowLeft :size="16"/> Documents</button>
+        <button v-if="preparation" class="icon-btn small preparation-list-toggle" aria-label="Toggle documents panel" title="Toggle documents panel" @click="emit('showDocumentList')"><PanelLeft :size="16"/></button>
+        <div class="toolbar-group reader-document"><div><strong :title="document.title">{{document.title}}</strong><div class="document-version-line"><select v-if="artifactOptions" class="artifact-select" aria-label="Document version" value="working" :disabled="editing || loading" @change="emit('artifact',($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value='working'"><option v-for="option in artifactOptions" :key="option.value" :value="option.value">{{preparation && option.value==='working' ? 'Working Copy' : option.label}}</option></select><span v-else>Working Copy · Editable</span><span class="document-revision">Revision {{document.revision}} · {{preparation ? 'Original preserved' : `${document.page_count} source pages`}}</span></div></div></div>
+        <template v-if="preparation"><button class="btn secondary small open-editor" @click="emit('openEditor')">Open editor</button><button class="icon-btn small" aria-label="Document details" :aria-expanded="!!detailsOpen" aria-controls="document-details-panel" title="Document details" @click="emit('toggleDetails')"><PanelRightOpen :size="16"/></button></template>
+        <span v-if="!preparation" class="document-save-state" role="status"><CheckCircle2 v-if="!hasPendingDraft() && !detailsDirty && !editing && !headerSaving" :size="14"/>{{editing || headerSaving ? 'Saving…' : hasPendingDraft() || detailsDirty ? 'Unsaved changes' : 'Saved locally'}}</span>
+        <button v-if="!preparation" class="btn primary small document-save" :disabled="busy || headerSaving || engineBlocked || editing || loading || (!detailsDirty && (!hasPendingDraft() || disabled))" @click="detailsDirty ? emit('saveDetails') : saveHeaderDraft()"><Save :size="15"/> Save</button>
       </div>
       <div v-if="workingSaveNotice || workingSaveError" class="preview-status" :class="{'error-msg':!!workingSaveError}" :role="workingSaveError ? 'alert' : 'status'">{{workingSaveError || workingSaveNotice}}<button class="icon-btn small" aria-label="Dismiss save notice" @click="workingSaveNotice='';workingSaveError=''"><X :size="14"/></button></div>
-      <div v-if="findOpen" class="pdf-findbar" role="search" aria-label="Find in working PDF">
-        <Search :size="16" aria-hidden="true"/>
-        <input ref="findInput" v-model="findQuery" type="search" placeholder="Find text in this PDF" aria-label="Find text in this PDF" @keydown.enter.prevent="stepFind($event.shiftKey ? -1 : 1)"/>
-        <span v-if="findBusy">Searching…</span><span v-else-if="findError" class="error-msg" role="alert">{{findError}}</span><span v-else-if="findQuery.trim().length">{{findMatches.length}}{{findTruncated ? '+' : ''}} match{{findMatches.length===1?'':'es'}}<template v-if="findMatches.length"> · {{findIndex+1}}/{{findMatches.length}}</template></span>
-        <button class="icon-btn small" aria-label="Previous search result" :disabled="!findMatches.length" @click="stepFind(-1)"><ChevronLeft :size="16"/></button>
-        <button class="icon-btn small" aria-label="Next search result" :disabled="!findMatches.length" @click="stepFind(1)"><ChevronRight :size="16"/></button>
-        <button class="icon-btn small" aria-label="Close PDF search" @click="findOpen=false"><X :size="16"/></button>
+      <div v-show="!preparation" class="reader-tool-navigation">
+        <div class="pdf-tool-tabs" role="tablist" aria-label="PDF tools">
+          <button v-for="category in (['read','edit','review','pages','ocr','redact'] as const)" :key="category" role="tab" :aria-selected="activeCategory===category" :class="{active:activeCategory===category}" :data-category="category" :id="`pdf-tab-${category}`" :tabindex="activeCategory===category?0:-1" aria-controls="pdf-tool-panel" @keydown="tabKey($event,category)" @click="selectCategory(category)"><component :is="category==='read'?BookOpen:category==='edit'?Pencil:category==='review'?Highlighter:category==='pages'?LayoutGrid:category==='ocr'?ScanText:Shield" :size="15"/>{{category==='read'?'Read':category==='edit'?'Edit':category==='review'?'Annotate':category==='pages'?'Pages':category==='ocr'?'OCR':'Redact'}}</button>
+        </div>
+        <div class="reader-mode-actions">
+          <button class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :aria-description="undoDescription" :disabled="!canUndo || disabled || editing" @click="emit('undo')"><Undo2 :size="16"/></button>
+          <button class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :aria-description="redoDescription" :disabled="!canRedo || disabled || editing" @click="emit('redo')"><Redo2 :size="16"/></button>
+          <button class="icon-btn small" :aria-label="focusedReading ? 'Exit focused reading' : 'Focused reading'" :title="focusedReading ? 'Exit focused reading' : 'Focused reading'" @click="toggleFocusedReading"><Maximize2 :size="16"/></button>
+          <button class="btn secondary small index-trigger" aria-label="Open bundle index" @click="emit('openBookmarks')">Index &amp; Bookmarks</button>
+          <details ref="actionsMenu" class="reader-more" @keydown.esc.stop="actionsMenu?.removeAttribute('open'); actionsMenu?.querySelector('summary')?.focus()"><summary role="button" class="icon-btn small" aria-label="More document actions" title="More document actions"><Ellipsis :size="17"/></summary><div class="reader-more-menu" @click.capture="closeActionMenu" role="tablist" aria-label="Additional PDF tools">
+            <button class="text-tool" role="tab" :aria-selected="activeCategory==='stamps'" data-category="stamps" id="pdf-tab-stamps" @click="selectCategory('stamps')"><Stamp :size="15"/> Stamps</button>
+            <button class="text-tool" role="tab" :aria-selected="activeCategory==='output'" data-category="output" id="pdf-tab-output" @click="selectCategory('output')"><FilePenLine :size="15"/> Output</button>
+            <button class="text-tool" aria-label="Save working copy" :disabled="workingSaveBusy || disabled || editing || loading" @click="saveWorkingCopy"><Save :size="15"/> {{workingSaveBusy ? 'Saving…' : 'Save copy'}}</button>
+            <button class="text-tool" aria-label="Print working copy" :disabled="disabled || editing || loading" @click="printWorkingCopy"><Printer :size="15"/> Print</button>
+            <button class="text-tool" :disabled="editing || loading || disabled" aria-label="Archive document" @click="emit('archiveDocument')"><Archive :size="15"/> Archive document</button>
+            <button class="text-tool" aria-label="Document details" :aria-expanded="!!detailsOpen" aria-controls="document-details-panel" @click="emit('toggleDetails')"><PanelRightOpen :size="15"/> Details</button>
+            <button class="text-tool" :aria-label="expanded ? 'Exit full screen' : 'Full screen'" @click="toggleExpandedView"><Maximize2 :size="15"/> {{expanded ? 'Exit expanded editor' : 'Expand editor'}}</button>
+          </div></details>
+        </div>
       </div>
-      <div v-if="findOpen && findMatches.length" class="pdf-find-results" aria-label="PDF search occurrences">
-        <button v-for="(match,index) in findMatches" :key="match.index" :class="{active:index===findIndex}" :title="match.snippet" @click="chooseFind(index)">Page {{match.page}} · {{match.snippet}}</button>
-      </div>
-      <div class="reader-secondary-actions" aria-label="PDF navigation and review"><button class="text-tool" :aria-expanded="outlineOpen" title="Navigate using entries already in this source PDF" @click="outlineOpen=!outlineOpen;commentsOpen=false;pageBookmarksOpen=false">PDF outline</button><button class="text-tool" :aria-expanded="commentsOpen" title="Private review comments; omitted from Save copy and bundles" @click="commentsOpen=!commentsOpen;outlineOpen=false;pageBookmarksOpen=false">Comments ({{documentComments.length}})</button><button v-if="pageBookmarks.length" class="text-tool reader-bookmark-trigger" :aria-expanded="pageBookmarksOpen" :aria-label="`Page ${current} bookmarks${pageBookmarks.some(item=>!item.resolved)?' need review':''}`" title="Manual bundle bookmarks pointing to this page" @click="pageBookmarksOpen=!pageBookmarksOpen;outlineOpen=false;commentsOpen=false"><BookMarked :size="14"/> {{pageBookmarks.length}} page bookmark{{pageBookmarks.length===1?'':'s'}}<span v-if="pageBookmarks.some(item=>!item.resolved)" class="reader-review-dot">Needs review</span></button><span v-if="activeTool!=='select' && readerMode==='continuous'">Editing page {{current}} · Select returns to continuous reading</span></div>
-      <div class="pdf-tool-tabs" role="tablist" aria-label="PDF tools">
-        <button v-for="category in (['edit','review','stamps','pages','output'] as const)" :key="category" role="tab" :aria-selected="activeCategory===category" :class="{active:activeCategory===category}" :data-category="category" :id="`pdf-tab-${category}`" :tabindex="activeCategory===category?0:-1" aria-controls="pdf-tool-panel" @keydown="tabKey($event,category)" @click="selectCategory(category)">{{category==='edit'?'Edit':category==='review'?'Annotate':category==='stamps'?'Stamps':category==='pages'?'Pages':'Output'}}</button>
-        <span class="pdf-tool-shortcuts">V Select · E Edit text · T Add text · H Highlight</span>
-      </div>
-      <div id="pdf-tool-panel" class="page-editbar" role="tabpanel" :aria-labelledby="`pdf-tab-${activeCategory}`">
+      <div v-show="!focusedReading && !preparation && activeCategory!=='read'" id="pdf-tool-panel" class="page-editbar" role="tabpanel" :aria-labelledby="`pdf-tab-${activeCategory}`">
+        <div v-if="activeCategory==='ocr'" class="document-actionbar" role="group" aria-label="Document tools"><label for="ocr-language">OCR language</label><select id="ocr-language" v-model="ocrLanguage" :disabled="editing || loading || disabled"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr', ocrLanguage)"><ScanText :size="15"/> Run {{ocrLanguage==='eng'?'English':ocrLanguage==='hin'?'Hindi':'English + Hindi'}} OCR</button><span>Review recognized text before use.</span></div>
         <div v-if="activeCategory==='edit'" class="editor-tool-group" role="group" aria-label="Edit PDF">
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="toggleTool('add-text')"><Type :size="15"/> Add text</button>
@@ -1709,23 +1776,57 @@ async function applyReplacement() {
       </div>
       <p v-if="bookmarkNotice" class="page-bookmark-notice" role="status">{{bookmarkNotice}}</p>
       <Transition name="soft"><div v-if="detailsDirty" class="preview-draft-warning" role="status">Save document details to use PDF tools.<button v-if="!detailsOpen" class="text-tool" @click="emit('toggleDetails')">Open details</button></div></Transition>
-      <div class="viewer-edit-workspace" :class="{'has-tool-inspector':inspectorVisible,'expanded-pages':expanded}">
-      <PdfThumbnailRail v-if="expanded && total > 0 && showThumbnails" :pdf="readerPdf" :count="total" :page="current" :title="document.title"
+
+      <PdfReaderControls :compact="preparation" editing-tools :page="current" :count="total" v-model:zoom="zoomChoice" :scale="pageZoom" v-model:mode="readerMode" :busy="loading || editing" :can-back="!!readingHistory.length" @update:page="navigateToPage($event)" @back="goBack"><template #actions><button class="icon-btn small" aria-label="Search" title="Search document" :aria-expanded="findOpen" @click="showFind"><Search :size="16"/></button><button class="icon-btn small reader-info-trigger" aria-label="Document information" title="Document information" :aria-expanded="readPanel==='information'" @click="openReadPanel('information',$event)"><Info :size="16"/></button></template></PdfReaderControls>
+      <div class="viewer-edit-workspace" :class="{'has-tool-inspector':inspectorVisible,'expanded-pages':expanded,'has-read-panel':!!readPanel && !focusedReading, 'has-document-information':readPanel==='information' && !focusedReading}">
+      <div v-show="!focusedReading && !preparation" class="reader-panel-tabs" aria-label="Reader panels">
+        <button class="icon-btn small" :class="{active:thumbnailsVisible}" :aria-label="thumbnailsVisible?'Hide thumbnails':'Show thumbnails'" title="Pages" @click="toggleThumbnails"><PanelLeft :size="16"/></button>
+        <button class="icon-btn small" :class="{active:findOpen}" aria-label="Search panel" title="Search" @click="showFind"><Search :size="16"/></button>
+        <button class="icon-btn small" :class="{active:outlineOpen}" aria-label="Document bookmarks" title="PDF outline and document bookmarks" @click="openReadPanel('outline',$event)"><BookMarked :size="16"/></button>
+        <button class="icon-btn small" :class="{active:commentsOpen}" :aria-label="`Comments (${documentComments.length})`" title="Comments" @click="openReadPanel('comments',$event)"><MessageSquare :size="16"/></button>
+        <button v-if="pageBookmarks.length" class="icon-btn small" :aria-label="`Page ${current} bookmarks${pageBookmarks.some(item=>!item.resolved)?' need review':''}`" @click="openReadPanel('page-bookmarks',$event)"><BookOpen :size="16"/></button>
+      </div>
+      <PdfThumbnailRail v-if="!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading && (expanded || activeTool==='select')" :pdf="readerPdf" :count="total" :page="current" :title="document.title"
         :disabled="disabled || editing || loading" :dragging-page="draggingPage" :drop-target-page="dropTargetPage" @select="navigateToPage($event)" @reorder="reorderThumbnailPage"
         @dragstart="startPageDrag" @dragover="overPage" @drop="dropPage" @dragend="draggingPage=null;dropTargetPage=null"/>
-      <aside v-if="outlineOpen || commentsOpen || (pageBookmarksOpen && pageBookmarks.length)" class="reader-side-panel" role="region" :aria-label="outlineOpen ? 'Source PDF outline' : commentsOpen ? 'Private review comments' : `Bookmarks on page ${current}`">
-        <div class="reader-side-panel-heading"><strong>{{outlineOpen ? 'PDF outline' : commentsOpen ? `Comments (${documentComments.length})` : `Page ${current} bookmarks`}}</strong><button class="icon-btn small" :aria-label="outlineOpen ? 'Close PDF outline' : commentsOpen ? 'Close comments' : 'Close page bookmarks'" @click="outlineOpen=false;commentsOpen=false;pageBookmarksOpen=false"><X :size="16"/></button></div>
+      <aside v-if="readPanel && !focusedReading" ref="panelElement" id="pdf-read-panel" class="reader-side-panel" :class="{'document-information-panel':readPanel==='information'}" role="region" :aria-label="findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Source PDF outline' : commentsOpen ? 'Private review comments' : `Bookmarks on page ${current}`">
+        <div class="reader-side-panel-heading"><strong>{{findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Document bookmarks' : commentsOpen ? `Comments (${documentComments.length})` : `Page ${current} bookmarks`}}</strong><button v-if="!findOpen" class="icon-btn small" :aria-label="readPanel==='information' ? 'Close document information' : outlineOpen ? 'Close PDF outline' : commentsOpen ? 'Close comments' : 'Close page bookmarks'" @click="closeReadPanel"><X :size="16"/></button></div>
+      <div v-if="findOpen" class="pdf-findbar" role="search" aria-label="Find in working PDF">
+        <Search :size="16" aria-hidden="true"/>
+        <input ref="findInput" v-model="findQuery" :disabled="!readerPdf" type="search" placeholder="Find text in this PDF" aria-label="Find text in this PDF" @keydown.enter.prevent="stepFind($event.shiftKey ? -1 : 1)"/>
+        <span role="status" v-if="findBusy">Searching…</span><span v-else-if="findError" class="error-msg" role="alert">{{findError}}</span><span role="status" v-else-if="findQuery.trim().length">{{findMatches.length}}{{findTruncated ? '+' : ''}} match{{findMatches.length===1?'':'es'}}<template v-if="findMatches.length"> · {{findIndex+1}}/{{findMatches.length}}</template></span>
+        <button class="icon-btn small" aria-label="Previous search result" :disabled="!findMatches.length" @click="stepFind(-1)"><ChevronLeft :size="16"/></button>
+        <button class="icon-btn small" aria-label="Next search result" :disabled="!findMatches.length" @click="stepFind(1)"><ChevronRight :size="16"/></button>
+        <button class="icon-btn small" aria-label="Close PDF search" @click="closeReadPanel"><X :size="16"/></button>
+      </div>
+      <div v-if="findOpen && findMatches.length" class="pdf-find-results" aria-label="PDF search occurrences">
+        <button v-for="(match,index) in findMatches" :key="match.index" :class="{active:index===findIndex}" :title="match.snippet" :aria-current="index===findIndex?'true':undefined" @keydown="resultKey($event,index)" @click="chooseFind(index)">Page {{match.page}} · {{match.snippet}}</button>
+      </div>
+      <p v-if="findOpen && !findQuery.trim()" class="reader-side-panel-intro">Search text in this working PDF. Image-only pages need OCR before their text can be searched.</p>
+      <p v-if="findOpen && !readerPdf" class="reader-side-panel-intro" role="status">{{loading ? 'Opening PDF…' : 'Search unavailable until the PDF loads.'}}</p>
+        <dl v-if="readPanel==='information'" class="reader-document-information">
+          <dt>Document</dt><dd>{{document.title}}</dd>
+          <dt>Imported original</dt><dd>{{document.original_name}}<small>Preserved separately; reading and editing use the working copy.</small></dd>
+          <dt>Working copy</dt><dd>Revision {{document.revision}} · {{total || document.page_count}} source pages</dd>
+          <dt>Document date</dt><dd>{{document.document_date || 'Not recorded'}}<small>{{document.date_status}} · source: {{document.date_source}}</small></dd>
+          <dt>OCR processing</dt><dd>{{document.ocr_status}}<small>OCR text is not legally verified. Search checks text available in this PDF.</small></dd>
+          <dt>Source SHA-256</dt><dd class="source-hash">{{document.source_sha256 || 'Unavailable'}}</dd>
+        </dl>
         <p v-if="outlineOpen" class="reader-side-panel-intro">Navigation embedded in the source PDF. It does not change the bundle index.</p>
         <p v-if="commentsOpen" class="reader-side-panel-intro">Private review notes, omitted from Save copy and bundles.</p>
         <p v-if="pageBookmarksOpen" class="reader-side-panel-intro">Manual bookmarks for this source page. Check their bundle destinations under Index & bookmarks.</p>
         <label v-if="commentsOpen && documentComments.length" class="reader-comment-search"><Search :size="15" aria-hidden="true"/><input v-model="commentQuery" type="search" aria-label="Search private comments" placeholder="Search comments or page"/></label>
         <div v-if="commentsOpen && commentQuery.trim()" class="reader-filter-count">{{filteredComments.length}} of {{documentComments.length}} comments</div>
         <div class="reader-side-panel-list">
-          <template v-if="outlineOpen"><p v-if="outlineError" role="status">{{outlineError}}</p><p v-if="!sourceOutline.length">No outline in this source PDF.</p><button v-for="(item,index) in sourceOutline" :key="index" class="text-tool" :disabled="!item.page && !item.url" :style="{paddingLeft:`${10+item.level*12}px`}" @click="item.page?navigateToPage(item.page):item.url&&emit('openExternalLink',item.url)">{{item.title}}<small v-if="item.page"> · p{{item.page}}</small></button></template>
+          <template v-if="outlineOpen"><p v-if="outlineError" role="status">{{outlineError}}</p><p v-if="outlineLoading || loading" role="status">Loading PDF outline…</p><p v-else-if="!readerPdf" role="status">Outline unavailable until the PDF loads.</p><p v-else-if="!outlineError && !sourceOutline.length">No outline in this source PDF.</p><button v-for="(item,index) in sourceOutline" :key="index" class="text-tool" :disabled="!item.page && !item.url" :style="{paddingLeft:`${10+item.level*12}px`}" @click="item.page?navigateToPage(item.page):item.url&&emit('openExternalLink',item.url)">{{item.title}}<small v-if="item.page"> · p{{item.page}}</small></button>
+            <h4 class="reader-section-label">Manual document bookmarks</h4>
+            <p v-if="bookmarksLoading" role="status">Loading manual bookmarks…</p><p v-else-if="bookmarksError" role="alert">{{bookmarksError}}</p><p v-else-if="!documentBookmarks.length">No manual bookmarks for this document.</p>
+            <button v-for="item in documentBookmarks" :key="item.id" class="text-tool" :disabled="!item.resolved || item.target_revision!==document.revision || item.page_index>=total" @click="navigateToPage(item.page_index+1)">{{item.title}} · Source {{item.page_index+1}}<small v-if="!item.resolved || item.target_revision!==document.revision"> · Needs review</small></button>
+          </template>
           <template v-if="commentsOpen"><p v-if="!documentComments.length">No private comments in this document.</p><p v-else-if="!filteredComments.length">No matching comments.</p><button v-for="item in filteredComments" :key="item.id" class="text-tool reader-comment-entry" :title="item.body" @click="openReviewComment(item)">Page {{item.page_index+1}} · {{item.body}}{{item.resolved?'':' · needs review'}}</button></template>
           <template v-if="pageBookmarksOpen"><div v-for="item in pageBookmarks" :key="item.id" class="reader-bookmark-row"><strong>{{item.title}}</strong><span v-if="!item.resolved">Needs review after a source revision or page change</span><span v-else>Destination currently linked</span></div></template>
         </div>
-        <button v-if="pageBookmarksOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
+        <button v-if="pageBookmarksOpen || outlineOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
       </aside>
       <aside v-if="inspectorVisible" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen}" aria-label="PDF editing controls">
         <div class="viewer-tool-inspector-heading"><strong>{{toolTitle}}</strong><button class="icon-btn small" aria-label="Close PDF tool" title="Close tool" @click="toggleTool(activeTool)"><X :size="16"/></button></div>
@@ -1805,15 +1906,12 @@ async function applyReplacement() {
       </aside>
       <div class="viewer-page-column">
       <div v-if="activeTool!=='select'" class="pdf-tool-hint" role="status"><strong>{{toolTitle}}</strong><span>{{toolFeedback || toolHint}}</span><button class="icon-btn small" aria-label="Cancel PDF tool" title="Cancel tool (Esc)" @click="toggleTool(activeTool)"><X :size="14"/></button></div>
-      <div v-if="!expanded && total > 0 && showThumbnails && activeTool==='select'" ref="thumbnailWrap" class="thumbnail-strip" aria-label="Page thumbnails">
-        <span class="thumbnail-hint">Drag to reorder working-copy pages</span>
-        <button v-for="number in thumbnailPages" :key="number" :data-thumbnail-page="number" class="thumbnail-button" :class="{selected:number===current,dragging:draggingPage===number,'drop-target':dropTargetPage===number}" :aria-label="'Go to page '+number" :aria-current="number===current?'page':undefined" :draggable="!disabled && !editing" @dragstart="startPageDrag($event,number)" @dragend="draggingPage=null;dropTargetPage=null" @dragover="overPage($event,number)" @drop.prevent="dropPage($event,number)" @click="current=number"><canvas :data-page="number" width="1" height="1"></canvas><span>{{number}}</span></button>
-      </div>
+
       <div v-if="(loading || editing) && !(replacingText && editSnapshot)" class="preview-status" role="status"><LoaderCircle :size="18" class="spin"/> {{editing?'Updating PDF…':'Loading PDF…'}}</div>
-      <div v-if="readingPositionError" class="preview-status error-msg" role="status">{{readingPositionError}}</div>
-      <div v-if="viewerError" class="preview-status error-msg" role="alert">{{viewerError}}</div>
-      <PdfReaderViewport ref="readerViewport" :pdf="readerPdf" v-model:page="current" :zoom="zoomChoice" :mode="activeTool==='select'?readerMode:'single'" :interactive="activeTool==='select' && !disabled" :matches="findOpen?findMatches:[]" :active-match-index="findOpen?findIndex:-1"
-        :surface-class="{'selecting-text':activeTool==='select' && !disabled,'placing-text':textMode && !disabled,'drawing-link':linkPanelOpen && !disabled,'drawing-annotation':annotationPanelOpen && !disabled,'drawing-redaction':redactionOpen && !disabled,'is-busy':(loading || editing) && !replacingText,'is-edit-refreshing':replacingText,'is-stale':!pageReady,'is-rotating':rotatingPage}"
+      <div v-if="readingPositionError && !engineBlocked" class="preview-status error-msg" role="status">{{readingPositionError}}</div>
+      <div v-if="viewerError" class="preview-status error-msg" role="alert">Page {{current}} unavailable. {{engineBlocked ? 'Its data may not be loaded. Reconnect, then retry this PDF.' : viewerError}} <button class="btn secondary small" :disabled="engineBlocked" @click="emit('retryReader')">Retry PDF</button></div>
+      <PdfReaderViewport :horizontal-gutter="32" ref="readerViewport" :pdf="readerPdf" v-model:page="current" :zoom="zoomChoice" :mode="activeTool==='select'?readerMode:'single'" :interactive="activeTool==='select' && (!disabled || engineBlocked)" :matches="findOpen?findMatches:[]" :active-match-index="findOpen?findIndex:-1"
+        :surface-class="{'selecting-text':activeTool==='select' && (!disabled || engineBlocked),'placing-text':textMode && !disabled,'drawing-link':linkPanelOpen && !disabled,'drawing-annotation':annotationPanelOpen && !disabled,'drawing-redaction':redactionOpen && !disabled,'is-busy':(loading || editing) && !replacingText,'is-edit-refreshing':replacingText,'is-stale':!pageReady,'is-rotating':rotatingPage}"
         @position="rememberPosition" @ready="pageRendered" @error="viewerError=$event" @internal-link="navigateToPage($event)" @external-link="emit('openExternalLink',$event)"
         @surface-click="clickPageSurface" @surface-pointerdown="beginLinkRegion($event);beginAnnotationRegion($event);beginRedactionRegion($event)" @surface-pointermove="updateLinkRegion($event);updateAnnotationRegion($event);updateRedactionRegion($event)" @surface-pointerup="finishLinkRegion($event);finishAnnotationRegion($event);finishRedactionRegion($event)" @surface-pointercancel="finishLinkRegion($event);finishAnnotationRegion($event);finishRedactionRegion($event)">
           <span v-if="textMode && placement && placement.page===current && overlayText" class="pdf-add-text-preview" :style="{left:`${placement.x*100}%`,top:`${placement.y*100}%`,fontSize:`${overlaySize*pageZoom}px`}">{{overlayText}}</span>
@@ -1865,16 +1963,12 @@ async function applyReplacement() {
             </div>
           </div>
       </PdfReaderViewport>
-      <PdfReaderControls editing-tools :page="current" :count="total" v-model:zoom="zoomChoice" :scale="pageZoom" v-model:mode="readerMode" :busy="loading || editing" :can-back="!!readingHistory.length" @update:page="navigateToPage($event)" @back="goBack"/>
+
       </div>
       </div>
       <PageOrganizer v-if="organizerOpen" :document="document" :disabled="!!disabled || editing" @close="organizerOpen=false" @modified="emit('modified')" @error="emit('error',$event)"/>
-      <div class="document-actionbar" role="group" aria-label="Document tools"><label for="ocr-language">OCR language</label><select id="ocr-language" v-model="ocrLanguage" :disabled="editing || loading || disabled"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr', ocrLanguage)"><ScanText :size="15"/> Run {{ ocrLanguage === 'eng' ? 'English' : ocrLanguage === 'hin' ? 'Hindi' : 'English + Hindi' }} OCR</button>
-        <button class="text-tool page-icon-tool danger" :disabled="editing || loading || disabled" aria-label="Archive document" title="Archive document" @click="emit('archiveDocument')"><Archive :size="16"/></button>
-        <span class="page-editbar-divider" aria-hidden="true"></span>
-        <button class="text-tool" :aria-expanded="!!detailsOpen" @click="emit('toggleDetails')"><PanelRightClose v-if="detailsOpen" :size="15"/><PanelRightOpen v-else :size="15"/> Document details<span v-if="detailsDirty" class="details-unsaved-indicator">Unsaved</span></button>
-      </div>
+
     </template>
-    <div v-else class="viewer-empty"><FileSearch :size="44"/><strong>Document preview</strong><span>Select a file to review its pages</span></div>
+    <div v-else class="viewer-empty"><FileSearch :size="44"/><strong>Document preview</strong><span>Select a file to review its pages</span><div class="empty-reader-history"><button class="btn secondary small" aria-label="Undo last matter change" :title="undoDescription" :disabled="!canUndo || disabled" @click="emit('undo')"><Undo2 :size="16"/> Undo</button><button class="btn secondary small" aria-label="Redo last matter change" :title="redoDescription" :disabled="!canRedo || disabled" @click="emit('redo')"><Redo2 :size="16"/> Redo</button></div></div>
   </div>
 </template>

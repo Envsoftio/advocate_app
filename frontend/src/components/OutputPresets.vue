@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { api } from '../lib/api'
+import {differences,displaySetting,presetMarks} from '../lib/bundleSettings'
 import { friendlyError } from '../lib/format'
 import type { MatterDocument, MarkPosition, OutputMarks } from '../lib/types'
 
@@ -14,7 +15,7 @@ interface Preset { id: string; name: string; version: number; settings: Settings
 interface Applied { id: string; name: string; version: number; settings: Settings }
 
 const props = defineProps<{matterId: string; maxPages: number; keepGroups: boolean; settingsDirty: boolean; disabled: boolean; refreshKey: number; documents: MatterDocument[]}>()
-const emit = defineEmits<{applyRequested: [id: string]; modified: []; openDocument: [id: string]; dirtyChanged: [dirty: boolean]}>()
+const emit = defineEmits<{applyRequested: [id: string]; modified: []; openDocument: [id: string]; dirtyChanged: [dirty: boolean]; configure: [name:string]}>()
 const presets = ref<Preset[]>([])
 const applied = ref<Applied | null>(null)
 const name = ref('')
@@ -51,13 +52,19 @@ const policySummary = computed(() => {
   return `${numbering} · ${annexures} · ${exceptionCount.value} document exception${exceptionCount.value === 1 ? '' : 's'}`
 })
 
+let loadSequence = 0
+let loadedMatterId = ''
 async function load() {
+  const call = ++loadSequence
+  const matterId = props.matterId
+  if (loadedMatterId !== matterId) { marks.value = null; savedMarks = ''; loadedMatterId = matterId }
   try {
     const [available, current, outputMarks] = await Promise.all([
       api<Preset[]>('/output-presets'),
       api<Applied | null>(`/matters/${props.matterId}/output-preset`),
       api<OutputMarks>(`/matters/${props.matterId}/output-marks`),
     ])
+    if (call !== loadSequence || props.matterId !== matterId) return
     presets.value = available
     applied.value = current
     if (!marksDirty.value) { marks.value = outputMarks; savedMarks = JSON.stringify(outputMarks) }
@@ -77,10 +84,13 @@ function setOverride(id: string, value: string) {
 async function saveFormatting() {
   if (!marks.value || busy.value) return
   busy.value = true; error.value = ''; notice.value = ''
+  const matterId = props.matterId
+  const draft = JSON.stringify(marks.value)
   try {
     const saved = await api<OutputMarks>(`/matters/${props.matterId}/output-marks`,
-                                         'PUT', marks.value)
-    marks.value = saved
+                                         'PUT', JSON.parse(draft))
+    if (props.matterId !== matterId) return
+    if (JSON.stringify(marks.value) === draft) marks.value = saved
     savedMarks = JSON.stringify(saved)
     notice.value = 'Output policy saved. Existing exports remain unchanged; rebuild to apply it.'
     emit('modified')
@@ -96,7 +106,7 @@ async function saveVersion() {
     const preset = await api<Preset>('/output-presets', 'POST', {
       name: name.value.trim(), max_pages_per_volume: props.maxPages,
       keep_groups_intact: props.keepGroups,
-      output_marks: {...currentMarks, annexure_overrides:{}},
+      output_marks: presetMarks(currentMarks),
     })
     await load()
     selectedId.value = preset.id
@@ -110,7 +120,8 @@ function requestApply() {
 function discard() {
   if (savedMarks) marks.value = JSON.parse(savedMarks) as OutputMarks
 }
-defineExpose({discard})
+async function saveDraft() { await saveFormatting(); return !marksDirty.value }
+defineExpose({discard, saveDraft})
 </script>
 
 <template>
@@ -119,13 +130,7 @@ defineExpose({discard})
     <div class="preset-body">
       <p v-if="marks" class="preset-live-summary" role="status">Output policy: {{policySummary}}<span v-if="marksDirty"> · Unsaved</span></p>
       <div v-if="marks" class="preset-formatting">
-        <details class="preset-section"><summary>Cover &amp; sections <span>Current technical layout</span></summary>
-          <p class="setting-description">Choose a technical index density. The readable option gives titles more space and changes index-page counts and every later page destination. Add a cover as a normal source document. Neither layout is court-approved.</p>
-          <label>Index layout<select v-model="marks.index_style"><option value="compact">Compact · up to 23 rows per page</option><option value="readable">Readable · up to 16 rows per page</option></select></label>
-          <p class="setting-description">Devanagari titles use a visual font fallback and need review in the saved PDF; Hindi text extraction is unverified. Other scripts block generated output until qualified.</p>
-          <label class="checkbox-line"><input v-model="marks.part_extracts_enabled" type="checkbox"/> Also create separate technical Part PDFs</label>
-          <p class="setting-description">Part PDFs contain the marked source pages assigned to each non-empty Part, in register order. They omit volume indexes and separators. Combined PDF and indexed volumes remain the primary outputs.</p>
-        </details>
+        <button class="membership-button secondary" @click="emit('configure','Preview')">Cover &amp; index preview</button>
         <details class="preset-section"><summary>Numbering <span>{{marks.bates_enabled ? 'Bates enabled' : 'Physical pages only'}}</span></summary>
         <p class="setting-description">Physical volume page numbers remain separate from Bates identifiers. Bates runs across selected pages in document order.</p>
         <label class="checkbox-line"><input v-model="marks.bates_enabled" type="checkbox"/><span>Bates identifiers</span></label>
@@ -159,18 +164,9 @@ defineExpose({discard})
         <button class="btn secondary" :disabled="disabled || busy || !marksDirty" @click="saveFormatting">Save numbering & annexure policy</button>
         <p v-if="marksDirty" class="hint" role="status">Unsaved output policy. Save it before building or creating a preset.</p>
       </div>
-      <p v-if="applied" class="setting-description">Applied: <strong>{{applied.name}} v{{applied.version}}</strong><span v-if="overrides"> · Matter settings differ from this version</span><span v-if="exceptionCount"> · {{exceptionCount}} document exception(s)</span>. Existing exports keep their recorded inputs.</p>
-      <p v-else class="setting-description">This matter uses its own settings. Choose a saved preset to copy its settings here.</p>
-      <label class="field">Saved version
-        <select v-model="selectedId"><option value="" disabled>Choose a preset</option><option v-for="preset in presets" :key="preset.id" :value="preset.id">{{preset.name}} v{{preset.version}}</option></select>
-      </label>
-      <p v-if="selected" class="setting-description">{{selected.settings.max_pages_per_volume}} pages per volume · {{selected.settings.keep_groups_intact ? 'groups kept together' : 'groups may split' }} · {{selected.settings.output_marks.watermark_enabled ? 'watermark on' : 'watermark off' }} · {{selected.settings.output_marks.timestamp_enabled ? 'timestamp on' : 'timestamp off' }} · {{selected.settings.output_marks.bates_enabled ? 'Bates on' : 'Bates off' }} · {{selected.settings.output_marks.annexure_mode || 'none'}} annexure mode</p>
-      <button class="btn secondary" :disabled="disabled || !selectedId || busy" @click="requestApply">Apply selected version to this matter</button>
-      <label class="field">Save current matter settings as a new version
-        <input v-model="name" maxlength="80" placeholder="Technical layout name"/>
-      </label>
-      <p class="setting-description">Using an existing name creates the next version. Document exceptions stay with this matter and are not copied to another matter.</p>
-      <button class="btn secondary" :disabled="disabled || busy || settingsDirty || marksDirty || !name.trim()" @click="saveVersion">Save new version</button>
+      <p v-if="applied" class="setting-description">Applied: <strong>{{applied.name}} v{{applied.version}}</strong> · {{overrides ? 'Matter has overrides' : 'Preset settings unchanged'}}</p>
+      <ul v-if="marks&&applied" class="policy-overrides"><li v-for="item in differences({max_pages_per_volume:maxPages,keep_groups_intact:keepGroups,output_marks:marks},applied)" :key="item.field">{{item.label}}: {{displaySetting(item.baseline)}} → {{displaySetting(item.current)}}</li></ul>
+      <button class="membership-button secondary" @click="emit('configure','Presets')">Bundle presets</button>
       <p v-if="error" role="alert" class="hint">{{error}}</p><p v-if="notice" role="status" class="hint">{{notice}}</p>
     </div>
   </section>

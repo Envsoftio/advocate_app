@@ -234,7 +234,7 @@ def test_compression_keeps_text_navigation_and_is_undoable(client, auth, matter)
                          'page': 0, 'to': pymupdf.Point(0, 0)})
         pdf.set_toc([[1, 'Evidence', 1]])
         blob = pdf.tobytes()
-    response = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    response = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('compression.pdf', blob, 'application/pdf'))])
     doc = response.json()[0]
     store = client.app.state.store

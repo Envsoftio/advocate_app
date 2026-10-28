@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def upload(client, auth, matter_id, name, data):
-    response = client.post(f'/matters/{matter_id}/documents', headers=auth,
+    response = client.post(f'/matters/{matter_id}/documents?included=true', headers=auth,
                            files=[('files', (name, data, 'application/pdf'))])
     assert response.status_code == 201, response.text
     return response.json()[0]
@@ -113,7 +113,7 @@ def test_extract_and_split_are_read_only_and_keep_requested_order(client, auth, 
 def test_append_normalized_image_page_matches_source_dimensions(client, auth, matter, make_pdf):
     target = upload(client, auth, matter['id'], 'target.pdf', make_pdf(2, 'TARGET'))
     image = Path(__file__).resolve().parents[2] / 'samples' / '04_scanned_annexure.jpg'
-    response = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    response = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', (image.name, image.read_bytes(), 'image/jpeg'))])
     assert response.status_code == 201, response.text
     source = response.json()[0]

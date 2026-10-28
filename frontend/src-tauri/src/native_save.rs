@@ -268,6 +268,7 @@ pub(crate) async fn save_export(
     export_id: String,
     filename: String,
     save_as: bool,
+    release: Option<bool>,
 ) -> Result<bool, String> {
     if !valid_id(&matter_id) || !valid_id(&export_id) || !valid_filename(&filename) {
         return Err("Invalid export selection".into());
@@ -314,7 +315,7 @@ pub(crate) async fn save_export(
     }
     transfer(
         &backend.connection,
-        &format!("/matters/{matter_id}/exports/{export_id}/{filename}"),
+        &format!("/matters/{matter_id}/exports/{export_id}/{filename}{}", if release.unwrap_or(false) { "?release=true" } else { "" }),
         &destination,
         None,
     )

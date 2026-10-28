@@ -45,8 +45,9 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
-                // Keep only the standard macOS application menu. CourtBundle actions
-                // live in the app UI rather than the default desktop menus.
+                // WebKit routes standard clipboard shortcuts through the native
+                // responder chain. Keep these Edit items even though matter/PDF
+                // actions live in the app UI.
                 let app_menu = Submenu::with_items(
                     app,
                     app.package_info().name.clone(),
@@ -57,7 +58,19 @@ pub fn run() {
                         &PredefinedMenuItem::quit(app, None)?,
                     ],
                 )?;
-                app.set_menu(Menu::with_items(app, &[&app_menu])?)?;
+                let edit_menu = Submenu::with_items(
+                    app,
+                    "Edit",
+                    true,
+                    &[
+                        &PredefinedMenuItem::cut(app, None)?,
+                        &PredefinedMenuItem::copy(app, None)?,
+                        &PredefinedMenuItem::paste(app, None)?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &PredefinedMenuItem::select_all(app, None)?,
+                    ],
+                )?;
+                app.set_menu(Menu::with_items(app, &[&app_menu, &edit_menu])?)?;
             }
             app.manage(native_save::SaveState::default());
             #[cfg(debug_assertions)]

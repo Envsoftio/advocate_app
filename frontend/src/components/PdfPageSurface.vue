@@ -288,11 +288,11 @@ defineExpose({getCanvas:() => canvas.value,getTextLayer:() => textContainer.valu
 .pdf-page-surface.is-rendering{pointer-events:none}
 .pdf-page-surface.is-rendering :deep(*){pointer-events:none!important}
 .pdf-page-surface>.pdf-paper{display:block;width:100%;height:100%;margin:0}
-.pdf-text-layer{position:absolute;inset:0;overflow:hidden;line-height:1;text-align:initial;pointer-events:none;user-select:text;-webkit-text-size-adjust:none;text-size-adjust:none;z-index:1;transform-origin:0 0}
+.pdf-text-layer{position:absolute;inset:0;overflow:hidden;line-height:1;text-align:initial;pointer-events:none;-webkit-user-select:text;user-select:text;-webkit-text-size-adjust:none;text-size-adjust:none;z-index:1;transform-origin:0 0}
 .pdf-text-layer[data-main-rotation="90"]{transform:rotate(90deg) translateY(-100%)}
 .pdf-text-layer[data-main-rotation="180"]{transform:rotate(180deg) translate(-100%,-100%)}
 .pdf-text-layer[data-main-rotation="270"]{transform:rotate(270deg) translateX(-100%)}
-.pdf-text-layer :deep(:is(span,br)){position:absolute;color:transparent;white-space:pre;transform-origin:0 0;cursor:text}
+.pdf-text-layer :deep(:is(span,br)){position:absolute;color:transparent;white-space:pre;transform-origin:0 0;cursor:text;-webkit-user-select:text;user-select:text}
 .pdf-text-layer :deep(span.markedContent){top:0;height:0}
 .pdf-page-surface.is-interactive:not(.is-rendering)>.pdf-text-layer{pointer-events:auto}
 .pdf-text-layer :deep(::selection){background:#499cf077}

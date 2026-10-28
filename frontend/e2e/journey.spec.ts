@@ -1,3 +1,5 @@
+import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation'
+import { includeAllDocuments, openReaderView, closeDocumentActions, closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser, openWorkspaceNavigation, openWorkspaces } from './navigation'
 import { expect, test } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -12,14 +14,16 @@ test('court-neutral checklist and reviewed CSV index import persist', async ({pa
     name:'E2E Court Neutral Review', court_profile:'general-demo', max_pages_per_volume:300,
   }})
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, {headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, {headers,
     multipart:{files:{name:'01_petition.pdf', mimeType:'application/pdf',
       buffer:await readFile(resolve(samples,'01_petition.pdf'))}},
   })
   const doc = (await uploaded.json())[0]
   await page.goto('/')
-  await expect(page.getByRole('heading', {name:'E2E Court Neutral Review'})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Court Neutral Review'})).toBeVisible()
   await page.getByRole('button', {name:'Index & bookmarks'}).click()
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await page.locator('.bookmark-import>summary').click()
   const importer = page.getByRole('region', {name:'Import reviewed index rows'})
   await importer.getByLabel('Choose index file').setInputFiles({name:'index.csv',
     mimeType:'text/csv', buffer:Buffer.from('title,document,page\n"Petition, reviewed",unknown.pdf,2\n')})
@@ -38,6 +42,7 @@ test('court-neutral checklist and reviewed CSV index import persist', async ({pa
   await expect(importer.getByRole('alert')).toContainText('already exists as a bookmark')
   expect((await (await request.get(`${backend}/matters/${matterId}/bookmarks`, {headers})).json())).toHaveLength(1)
   await page.getByRole('button', {name:/Preflight checks/}).click()
+  await page.getByRole('button',{name:'Open review checklist',exact:true}).click()
   const checklist = page.getByRole('region', {name:'User-authored filing review checklist'})
   await checklist.getByLabel('Court or forum').fill('Synthetic forum')
   await checklist.getByLabel('Case type').fill('Synthetic case')
@@ -51,15 +56,17 @@ test('court-neutral checklist and reviewed CSV index import persist', async ({pa
   const review = await (await request.get(`${backend}/matters/${matterId}/filing-review`, {headers})).json()
   expect(review).toMatchObject({court:'Synthetic forum', case_type:'Synthetic case', stage:'Initial',
     items:[{title:'Review petition', part:1, status:'present'}]})
-  await page.getByRole('button', {name:'Build bundle', exact:true}).click()
-  const presets = page.getByRole('region', {name:'Reusable output presets'})
-  await presets.locator('details.preset-section').filter({hasText:'Cover & sections'}).locator('summary').click()
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
+  await openBuildTool(page,'Preview')
+  const presets=page.locator('.bundle-structure')
+  await presets.locator('.front-settings details>summary').click()
   await presets.getByRole('combobox', {name:'Index layout'}).selectOption('readable')
   await presets.getByRole('checkbox', {name:'Also create separate technical Part PDFs'}).check()
-  await presets.getByRole('button', {name:'Save numbering & annexure policy'}).click()
-  await expect(page.getByText('Technical Part PDFs:', {exact:false})).toBeVisible()
-  await page.locator('.build-panel').getByRole('button', {name:'Build filing bundle'}).click()
-  await expect(page.locator('.exports-panel')).toContainText('part-01.pdf', {timeout:90_000})
+  await presets.getByRole('button', {name:'Apply settings',exact:true}).click()
+  await presets.getByRole('button',{name:'Back to page map',exact:true}).click()
+  await expect(presets.getByText('Technical Part PDFs:', {exact:false})).toBeVisible()
+  await submitBundleBuild(page)
+  await expect(page.locator('.generated-files')).toContainText('part-01.pdf', {timeout:90_000})
   const exports = await (await request.get(`${backend}/matters/${matterId}/exports`, {headers})).json()
   expect(exports[0].part_extracts).toMatchObject([{part:1, pages:doc.page_count}])
 })
@@ -69,7 +76,7 @@ test('build workspace explains a late addition against a named prior build', asy
     name: 'E2E Rebuild Comparison', court_profile: 'general-demo', max_pages_per_volume: 300,
   } })
   const matterId = (await created.json()).id as string
-  const upload = async (name:string) => request.post(`${backend}/matters/${matterId}/documents`, {headers,
+  const upload = async (name:string) => request.post(`${backend}/matters/${matterId}/documents?included=true`, {headers,
     multipart: {files: {name, mimeType:'application/pdf', buffer:await readFile(resolve(samples, name))}},
   })
   expect((await upload('01_petition.pdf')).ok()).toBeTruthy()
@@ -85,15 +92,15 @@ test('build workspace explains a late addition against a named prior build', asy
   await expect.poll(async () => (await (await request.get(`${backend}/jobs/${rebuiltJobId}`, {headers})).json()).status,
     {timeout:90_000}).toBe('completed')
   await page.goto('/')
-  await expect(page.getByRole('heading', {name:'E2E Rebuild Comparison'})).toBeVisible()
-  await page.getByRole('button', {name:'Build bundle', exact:true}).click()
-  await page.getByRole('combobox', {name:'Compare current plan with build'}).selectOption(priorId)
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Rebuild Comparison'})).toBeVisible()
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
+  await page.getByRole('combobox', {name:'Saved build'}).selectOption(priorId)
+  await page.locator('.build-workspace').getByRole('button',{name:'Review changes',exact:true}).click()
   const comparison = page.getByRole('region', {name:'What changed since the selected build'})
   await expect(comparison.getByText('03_affidavit', {exact:false})).toBeVisible()
   await expect(comparison.getByText('added', {exact:true})).toBeVisible()
   await expect(comparison.getByText('Page shifts can affect references outside this package.', {exact:false})).toBeVisible()
-  await expect(page.getByText('Selected prior package')).toBeVisible()
-  await expect(page.locator('.exports-panel .export-summary')).toContainText(priorId.slice(0, 8))
+  await expect(page.locator('.build-workspace')).toContainText(priorId.slice(0, 8))
 })
 
 test('Bates and annexure policy update the page-map preview and actual-page mark preview', async ({ page, request }) => {
@@ -102,7 +109,7 @@ test('Bates and annexure policy update the page-map preview and actual-page mark
     max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '03_affidavit.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '03_affidavit.pdf')) } },
   })
@@ -113,11 +120,12 @@ test('Bates and annexure policy update the page-map preview and actual-page mark
   })
   expect(labelled.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', {name:'E2E Bates and separators'})).toBeVisible()
-  await page.getByRole('button', {name:'Build bundle',exact:true}).click()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Bates and separators'})).toBeVisible()
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
+  await openBuildTool(page,'Output options')
   const presets = page.getByRole('region', {name:'Reusable output presets'})
   await expect(presets.getByText('Output policy: No Bates identifiers · No added annexure mark · 0 document exceptions')).toBeVisible()
-  await expect(presets.locator('details.preset-section')).toHaveCount(4)
+  await expect(presets.locator('details.preset-section')).toHaveCount(3)
   await presets.locator('details.preset-section').filter({hasText:'Numbering'}).locator('summary').click()
   await presets.locator('details.preset-section').filter({hasText:'Annexure output'}).locator('summary').click()
   await presets.getByRole('checkbox', {name:'Bates identifiers'}).check()
@@ -129,11 +137,18 @@ test('Bates and annexure policy update the page-map preview and actual-page mark
   await expect(presets.getByText('Output policy: Bates E2E-000042 at bottom left · Separator before each annexure · 0 document exceptions · Unsaved')).toBeVisible()
   await presets.getByRole('button', {name:'Save numbering & annexure policy'}).click()
   await expect(presets.getByText('Output policy saved.', {exact:false})).toBeVisible()
-  await expect(page.getByText('Separator: printed page 2', {exact:false})).toBeVisible()
+  await openBuildTool(page,'Preview')
+  await page.getByRole('button',{name:'Back to page map',exact:true}).click()
+  await page.locator('.structure-map .page-map-details summary').click()
+  await expect(page.locator('.structure-map').getByText('separator at physical 2', {exact:false})).toBeVisible()
+  await openBuildTool(page,'Output options')
   const policy = await (await request.get(`${backend}/matters/${matterId}/output-marks`, {headers})).json()
   expect(policy.bates_start).toBe(42)
   expect(policy.annexure_mode).toBe('separator')
+  await presets.locator('details.preset-section').filter({hasText:'Annexure output'}).locator('summary').click()
   await presets.getByRole('button', {name:'Preview page'}).click()
+  await openDocumentActions(page)
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Output', exact:true}).click()
   await page.getByRole('button', {name:/Output marks/}).click()
   await expect(page.locator('.pdf-output-mark-preview.bates')).toContainText('E2E-000044')
@@ -144,24 +159,29 @@ test('technical output preset is saved and explicitly applied in the build works
     name: 'E2E Output Preset', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Output Preset' })).toBeVisible()
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
-  const presets = page.getByRole('region', { name: 'Reusable output presets' })
-  await presets.getByRole('textbox', { name: 'Save current matter settings as a new version' }).fill('E2E chamber technical')
-  await presets.getByRole('button', { name: 'Save new version' }).click()
-  await expect(presets.getByText('E2E chamber technical v1 saved as a technical preset.', {exact:false})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Output Preset'})).toBeVisible()
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
+  await openBuildTool(page,'Presets')
+  const presets = page.getByRole('dialog', { name: 'Bundle presets' })
+  await presets.getByRole('textbox', { name: 'Preset name' }).fill('E2E chamber technical')
+  await presets.getByRole('button', { name: 'Save preset' }).click()
+  await expect(presets.getByText('E2E chamber technical v1 saved locally.', {exact:false})).toBeVisible()
+  await openBuildTool(page)
   await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('6')
   await page.getByRole('button', { name: 'Save bundle settings' }).click()
   await expect(page.getByRole('spinbutton', { name: /Maximum pages per volume/ })).toHaveValue('6')
-  await presets.getByRole('button', { name: 'Apply selected version to this matter' }).click()
+  await openBuildTool(page,'Presets')
+  await presets.getByLabel('E2E chamber technical',{exact:false}).check()
+  await presets.getByRole('button',{name:'Use selected preset'}).click()
+  await expect(page.locator('.bundle-structure')).toContainText('Applied: E2E chamber technical v1')
+  await openBuildTool(page)
   await expect(page.getByRole('spinbutton', { name: /Maximum pages per volume/ })).toHaveValue('10')
-  await expect(presets.getByText('Applied:')).toContainText('E2E chamber technical v1')
   const snapshot = await request.get(`${backend}/matters/${matterId}/output-preset`, {headers})
   expect((await snapshot.json()).version).toBe(1)
 })
@@ -171,16 +191,20 @@ test('Hindi OCR selection reaches the local engine', async ({ page, request }) =
     name: 'E2E Hindi OCR', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '05_hindi_scan.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '05_hindi_scan.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Hindi OCR' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Hindi OCR'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
+  await page.getByRole('tab',{name:'OCR',exact:true}).click()
   await page.getByRole('combobox', { name: 'OCR language' }).selectOption('eng+hin')
   const submitted = page.waitForRequest(request => request.url().endsWith('/ocr') &&
     request.method() === 'POST')
+  await closeWorkspaceNavigation(page)
+  await page.getByRole('tab',{name:'OCR',exact:true}).click()
   await page.getByRole('button', { name: 'Run English + Hindi OCR' }).click()
   expect((await submitted).postDataJSON().language).toBe('eng+hin')
 })
@@ -204,7 +228,7 @@ test('visible-signature review warns before a working-copy transformation', asyn
     name: 'E2E Signature Warning', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name:'01_petition.pdf', mimeType:'application/pdf',
       buffer:await readFile(resolve(samples, '01_petition.pdf')) } },
   })
@@ -217,14 +241,17 @@ test('visible-signature review warns before a working-copy transformation', asyn
   expect((await reviewed.json()).signature_status).toBe('visible_signature_only')
 
   await page.goto('/')
-  await expect(page.getByRole('heading', {name:'E2E Signature Warning'})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Signature Warning'})).toBeVisible()
+  await openDocumentActions(page)
   await page.getByRole('button', {name:/Document details/}).click()
+  await openDocumentActions(page)
   const details = page.getByRole('region', {name:'Document details'})
   await expect(details).toContainText('Visible/scanned signature only')
   await expect(details.getByRole('combobox', {name:'Visible/scanned signature review'}))
     .toHaveValue('present')
 
   page.once('dialog', dialog => void dialog.dismiss())
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   await page.getByRole('button', {name:'Rotate right'}).click()
   await expect.poll(async () => {
@@ -236,6 +263,7 @@ test('visible-signature review warns before a working-copy transformation', asyn
     expect(dialog.message()).toContain('Imported originals remain unchanged')
     void dialog.accept()
   })
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   await page.getByRole('button', {name:'Rotate right'}).click()
   await expect.poll(async () => {
@@ -250,7 +278,7 @@ test('document table preserves explicit selection and previews batch ordering be
   } })
   const matterId = (await created.json()).id as string
   for (const name of ['03_affidavit.pdf', '01_petition.pdf', '02_impugned_order.pdf']) {
-    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
       multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
     })
     expect(uploaded.ok()).toBeTruthy()
@@ -258,29 +286,31 @@ test('document table preserves explicit selection and previews batch ordering be
   const initial = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
 
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Document Table' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Document Table'})).toBeVisible()
+  await openDocumentBrowser(page)
   await page.getByRole('button', { name: 'Open table' }).click()
   const register = page.getByRole('region', { name: 'Editable document table' })
-  await expect(register.getByRole('heading', { name: 'Document table' })).toBeVisible()
+  await expect(register.getByRole('heading', { name: 'Batch review' })).toBeVisible()
   const firstRow = register.locator('tr', { hasText: '03_affidavit.pdf' })
   const lastRow = register.locator('tr', { hasText: '02_impugned_order.pdf' })
   await firstRow.getByRole('checkbox', { name: /Select/ }).check()
   await lastRow.getByRole('checkbox', { name: /Select/ }).check()
   await expect(register.getByText('2 selected', { exact: true })).toBeVisible()
   await register.getByRole('searchbox', { name: 'Filter rows' }).fill('impugned')
-  await expect(register.getByText('1 visible in this filter')).toBeVisible()
+  await expect(register.getByText('2 selected', {exact:true})).toHaveAttribute('title','1 visible in this filter')
+  await register.getByRole('button',{name:'More tools',exact:true}).click()
 
-  await register.getByRole('combobox', { name: 'Type' }).selectOption('annexure')
-  await register.getByRole('combobox', { name: 'Part' }).selectOption('2')
-  await register.getByRole('checkbox', { name: 'Change group' }).check()
-  await register.getByPlaceholder('Blank clears group').fill('selected-pair')
+  await register.getByRole('combobox', { name: 'Document type',exact:true }).selectOption('annexure')
+  await register.getByRole('combobox', { name: 'Assign selected Part',exact:true }).selectOption('2')
+  await register.getByRole('checkbox', { name: 'Change selected group' }).check()
+  await register.locator('.batch-advanced>label input:not([type=checkbox])').fill('selected-pair')
   await register.getByRole('button', { name: 'Apply batch change' }).click()
   await expect(register.getByText('Updated 2 selected document(s) in one undoable action.')).toBeVisible()
   const changed = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
   expect(changed.filter((doc:{kind:string}) => doc.kind === 'annexure')).toHaveLength(2)
   expect(changed.find((doc:{original_name:string}) => doc.original_name === '01_petition.pdf').kind).toBe('other')
 
-  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await page.getByRole('button', { name: /^Undo(?: last matter change)?$/, exact: true }).first().click()
   await expect(page.getByText('Last edit undone.')).toBeVisible()
   const undone = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
   expect(undone.every((doc:{kind:string,part:number,group_key:string}) =>
@@ -303,10 +333,12 @@ test('document table preserves explicit selection and previews batch ordering be
   expect(sorted.map((doc:{original_name:string}) => doc.original_name)).toEqual([
     '01_petition.pdf', '02_impugned_order.pdf', '03_affidavit.pdf'])
 
+  await register.getByRole('button',{name:'More tools',exact:true}).click()
   const petitionRow = register.locator('tr', { hasText: '01_petition.pdf' })
   await petitionRow.locator('input[type="date"]').fill('2026-10-16')
-  const dateSaved = page.waitForResponse(response => response.url().includes('/documents/') &&
-    response.request().method() === 'PATCH')
+  const dateSaved = page.waitForResponse(response => response.url().includes('/metadata-review') &&
+    response.request().method() === 'PUT')
+  await petitionRow.locator('summary').click()
   await petitionRow.getByRole('button', { name: 'Save row' }).click()
   expect((await dateSaved).ok()).toBeTruthy()
   const dated = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
@@ -320,7 +352,7 @@ test('label proposal preview cancels cleanly and applies one undoable grouped ma
   } })
   const matterId = (await created.json()).id as string
   for (const name of ['01_petition.pdf', '02_impugned_order.pdf', '03_affidavit.pdf']) {
-    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
       multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
     })
     expect(uploaded.ok()).toBeTruthy()
@@ -332,14 +364,17 @@ test('label proposal preview cancels cleanly and applies one undoable grouped ma
   expect(grouped.ok()).toBeTruthy()
 
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Label Proposal' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Label Proposal'})).toBeVisible()
+  await openDocumentBrowser(page)
   await page.getByRole('button', { name: 'Open table' }).click()
   const register = page.getByRole('region', { name: 'Editable document table' })
   const designatedParent = register.locator('tr', { hasText: '02_impugned_order.pdf' })
-  await designatedParent.getByRole('combobox', { name: 'Hierarchy role for 02_impugned_order' })
+  await designatedParent.locator('summary').click()
+  await designatedParent.getByRole('combobox', { name: 'Hierarchy',exact:true })
     .selectOption('parent')
   await designatedParent.getByRole('button', { name: 'Save row' }).click()
-  await expect(register.getByText('Saved “02_impugned_order”.')).toBeVisible()
+  await expect(register.getByText('Changes saved in one undoable action.')).toBeVisible()
+  await register.getByRole('button',{name:'More tools',exact:true}).click()
   await register.getByRole('checkbox', { name: 'Select all filtered documents' }).check()
   await register.getByRole('combobox', { name: 'Method', exact: true }).selectOption('grouped_suffix')
   await register.getByRole('combobox', { name: 'Suffix style' }).selectOption('upper_alpha')
@@ -362,7 +397,7 @@ test('label proposal preview cancels cleanly and applies one undoable grouped ma
   expect(current.every((doc:{label_status:string,label_source:string}) =>
     doc.label_status === 'confirmed' && doc.label_source === 'proposal')).toBeTruthy()
 
-  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await page.getByRole('button', { name: /^Undo(?: last matter change)?$/, exact: true }).first().click()
   await expect(page.getByText('Last edit undone.')).toBeVisible()
   current = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
   expect(current.every((doc:{label:string}) => doc.label === '')).toBeTruthy()
@@ -375,17 +410,17 @@ test('the workspace build flow blocks generation when settings cannot save', asy
   } })
   const matterId = (await created.json()).id as string
   for (const name of ['01_petition.pdf', '02_impugned_order.pdf']) {
-    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
       multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
     })
     expect(uploaded.ok()).toBeTruthy()
   }
 
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Bundle Flow' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Bundle Flow'})).toBeVisible()
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('1 volume(s)')
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
 
   let buildRequests = 0
   await page.route(`**/matters/${matterId}`, async route => {
@@ -394,14 +429,14 @@ test('the workspace build flow blocks generation when settings cannot save', asy
     } else await route.continue()
   })
   await page.route(`**/matters/${matterId}/build`, async route => { buildRequests += 1; await route.continue() })
-  const buildPanel = page.locator('.build-panel')
-  await buildPanel.getByRole('button', { name: 'Build filing bundle' }).click()
+  const buildPanel = page.locator('.build-workspace')
+  await submitBundleBuild(page)
   await expect(page.getByText('synthetic settings failure')).toBeVisible()
   expect(buildRequests).toBe(0)
 
   await page.unroute(`**/matters/${matterId}`)
-  await buildPanel.getByRole('button', { name: 'Build filing bundle' }).click()
-  await expect(page.getByText('Latest filing package')).toBeVisible({ timeout: 90_000 })
+  await submitBundleBuild(page)
+  await expect(page.getByRole('heading',{name:'Bundle ready for review'})).toBeVisible({ timeout: 90_000 })
   expect(buildRequests).toBe(1)
   await page.getByRole('button', { name: 'Review combined.pdf' }).click()
   const pdfReview = page.getByRole('dialog', { name: 'Review generated PDF' })
@@ -414,14 +449,14 @@ test('compression exposes measured results and retains a usable PDF', async ({ p
     name: 'E2E Compression', court_profile: 'general-demo', max_pages_per_volume: 300,
   } })
   const id = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${id}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${id}/documents?included=true`, { headers,
     multipart: { files: { name: '04_scanned_annexure.jpg', mimeType: 'image/jpeg',
       buffer: await readFile(resolve(samples, '04_scanned_annexure.jpg')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   const doc = (await uploaded.json())[0]
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Compression' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Compression'})).toBeVisible()
   await expect(page.locator('.page-counter input')).toHaveValue('1')
   await expect(page.locator('.page-counter')).toContainText('/ 1')
   await expect(page.getByRole('button', { name: 'Go to page 1' })).toBeVisible()
@@ -436,6 +471,7 @@ test('compression exposes measured results and retains a usable PDF', async ({ p
   await expect.poll(() => preview.evaluate((node: HTMLCanvasElement) => node.getBoundingClientRect().width)).toBeCloseTo(originalWidth / 2, 0)
   await page.getByRole('combobox', { name: 'Zoom' }).selectOption('25')
   await expect.poll(() => preview.evaluate((node: HTMLCanvasElement) => node.getBoundingClientRect().width)).toBeCloseTo(originalWidth / 4, 0)
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   await page.getByRole('button', { name: 'Page tools', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Page tools' })
@@ -459,19 +495,19 @@ test('document import undo and redo refresh the workspace list', async ({ page, 
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Import History' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Import History'})).toBeVisible()
   await expect(page.locator('.doc-item')).toHaveCount(1)
-  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await page.getByRole('button', { name: /^Undo(?: last matter change)?$/, exact: true }).first().click()
   await expect(page.locator('.doc-item')).toHaveCount(0)
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Redo', exact: true })).toBeEnabled()
-  await page.getByRole('button', { name: 'Redo', exact: true }).click()
+  await expect(page.getByRole('button', { name: /^Redo(?: last matter change)?$/, exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: /^Redo(?: last matter change)?$/, exact: true }).click()
   await expect(page.locator('.doc-item')).toHaveCount(1)
 })
 
@@ -481,30 +517,39 @@ test('manual bookmark survives reload and shows revision review', async ({ page,
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   const docId = (await uploaded.json())[0].id as string
   await page.goto('/')
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
-  await page.getByRole('textbox', { name: 'New bookmark title' }).fill('Reviewed synthetic page')
-  await page.getByRole('combobox', { name: 'Bookmark document' }).selectOption(docId)
-  await page.getByRole('button', { name: 'Add bookmark' }).click()
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Reviewed synthetic page')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await page.getByRole('button',{name:'Add bookmark',exact:true}).click()
+  await page.getByRole('textbox', { name: 'Bookmark label' }).fill('Reviewed synthetic page')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await page.getByRole('combobox', { name: 'Target document' }).selectOption(docId)
+  await page.getByRole('button', { name: 'Save bookmark',exact:true }).click()
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Reviewed synthetic page')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Index & page map',exact:true}).click()
+  await page.locator('.page-map-details>summary').click()
   await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('Reviewed synthetic page')
-  await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('combined page 2')
+  await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('combined 2')
   await page.reload()
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Reviewed synthetic page')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Reviewed synthetic page')
   const rotated = await request.post(`${backend}/documents/${docId}/pages/rotate`,
     { headers, data: { page_index: 0, degrees: 90 } })
   expect(rotated.ok()).toBeTruthy()
   await page.reload()
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
-  await expect(page.getByText('Needs review', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Resolve to current page' }).click()
-  await expect(page.getByText('Needs review', { exact: true })).toBeHidden()
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await expect(page.getByText('Needs resolution', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Confirm selected destination' }).click()
+  await page.getByRole('button',{name:'Save bookmark',exact:true}).click()
+  await expect(page.getByText('Needs resolution', { exact: true })).toBeHidden()
 })
 
 test('index preview updates with draft volume cap and opens the source document', async ({ page, request }) => {
@@ -513,7 +558,7 @@ test('index preview updates with draft volume cap and opens the source document'
   } })
   const matterId = (await created.json()).id as string
   for (const name of ['01_petition.pdf', '02_impugned_order.pdf']) {
-    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
       multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
     })
     expect(uploaded.ok()).toBeTruthy()
@@ -522,29 +567,35 @@ test('index preview updates with draft volume cap and opens the source document'
   await expect(page.locator('.matter-index-overview')).toHaveCount(0)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('1 volume(s)')
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
-  const preview = page.getByRole('region', { name: 'Index and page number preview' })
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
+  await openBuildTool(page)
+  const preview = page.getByRole('dialog',{name:'Plan volumes',exact:true}).getByRole('region', { name: 'Index and page number preview' })
   await expect(preview).toContainText('1 volume(s)')
+  await openBuildTool(page)
   await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('4')
   await expect(preview).toContainText('2 volume(s)')
-  await expect(preview).toContainText('combined starts at page 5')
+  await expect(preview).toContainText('5–7')
   page.once('dialog', dialog => void dialog.accept())
   await preview.getByRole('button', { name: 'Open 02_impugned_order working copy' }).click()
   await expect(page.locator('.doc-item.selected')).toContainText('02_impugned_order')
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
-  await page.locator('.build-panel').getByRole('button', { name: 'Build filing bundle' }).click()
-  await expect(page.getByText('Latest filing package')).toBeVisible({timeout:90_000})
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
+  await submitBundleBuild(page)
+  await expect(page.getByRole('heading',{name:'Bundle ready for review'})).toBeVisible({timeout:90_000})
   await page.getByRole('button', { name: 'Review combined.pdf' }).click()
   const review = page.getByRole('dialog', { name: 'Review generated PDF' })
-  await expect(review.getByText('PDF bookmarks')).toBeVisible()
+  if(await review.getByRole('button',{name:'PDF bookmarks',exact:true}).getAttribute('aria-expanded')!=='true')await review.getByRole('button',{name:'PDF bookmarks',exact:true}).click()
+  await expect(review.getByRole('heading', { name: 'Bookmarks', exact: true })).toBeVisible()
   await expect(review.getByRole('button', { name: /02_impugned_order/ })).toBeVisible()
   await expect.poll(() => review.locator('canvas').evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0)
   const indexLink=review.getByRole('button',{name:/Go to PDF page/}).first()
   await expect(indexLink).toBeVisible()
   await indexLink.click()
   await expect(review.getByRole('spinbutton',{name:'PDF page number'})).not.toHaveValue('1')
+  await openReaderView(page)
   await review.getByRole('button',{name:'Back to previous reading position'}).click()
+  await review.getByRole('button',{name:'View options'}).click()
   await expect(review.getByRole('spinbutton',{name:'PDF page number'})).toHaveValue('1')
+  await review.getByRole('button',{name:'Search artifact'}).click()
   await review.getByRole('searchbox',{name:'Find text in generated PDF'}).fill('Synthetic')
   await expect(review.getByLabel('Generated PDF search occurrences').getByRole('button').first()).toBeVisible()
   await review.getByLabel('Generated PDF search occurrences').getByRole('button').first().click()
@@ -552,6 +603,7 @@ test('index preview updates with draft volume cap and opens the source document'
   await review.getByRole('searchbox',{name:'Find text in generated PDF'}).fill('')
   await review.getByRole('button', { name: /02_impugned_order/ }).click()
   await expect(review.getByRole('spinbutton', { name: 'PDF page number' })).not.toHaveValue('1')
+  await openReaderView(page)
   await review.getByRole('combobox',{name:'Reading mode'}).selectOption('continuous')
   await expect(review.locator('.canvas-scroll')).toHaveClass(/continuous-reader/)
   await review.getByRole('button', { name: 'Close review' }).click()
@@ -563,14 +615,14 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
     name:'E2E Page Bookmark', court_profile:'general-demo', max_pages_per_volume:10,
   }})
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, {headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, {headers,
     multipart:{files:{name:'01_petition.pdf',mimeType:'application/pdf',
       buffer:await readFile(resolve(samples,'01_petition.pdf'))}},
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.setViewportSize({width:1024,height:800})
   await page.goto('/')
-  await expect(page.getByRole('heading', {name:'E2E Page Bookmark'})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Page Bookmark'})).toBeVisible()
   await expect.poll(() => page.locator('.preview-panel').evaluate(node => {
     const gap = window.innerHeight - node.getBoundingClientRect().bottom
     return gap >= -20 && gap <= 60
@@ -580,6 +632,7 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
   expect(bottomGap).toBeGreaterThanOrEqual(-20)
   expect(bottomGap).toBeLessThanOrEqual(60)
   await page.setViewportSize({width:1440,height:800})
+  await openDocumentActions(page)
   await page.getByRole('button', {name:'Document details',exact:true}).click()
   await expect(page.locator('.inspector-panel')).toBeVisible()
   await expect.poll(() => page.locator('.inspector-panel').evaluate(node => {
@@ -590,15 +643,18 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
     window.innerHeight - node.getBoundingClientRect().bottom)
   expect(inspectorGap).toBeGreaterThanOrEqual(-20)
   expect(inspectorGap).toBeLessThanOrEqual(60)
+  await openDocumentActions(page)
   await page.getByRole('button', {name:'Document details',exact:true}).click()
   await page.getByRole('button', {name:'Next page'}).click()
+  await openWorkspaceNavigation(page)
   await page.getByRole('combobox', {name:'Theme'}).selectOption('dark')
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Annotate', exact:true}).click()
   await page.getByRole('button', {name:'Bookmark page'}).click()
   await expect(page.locator('.page-bookmark-editor')).toBeVisible()
   await page.getByRole('textbox', {name:'Bookmark title'}).fill('Reviewed second page')
   await page.getByRole('button', {name:'Add bookmark'}).click()
-  await expect(page.getByRole('status')).toContainText('Bookmarked page 2')
+  await expect(page.getByRole('status').filter({hasText:'Bookmarked page 2'})).toContainText('Bookmarked page 2')
   const noticeContrast = await page.locator('.page-bookmark-notice').evaluate(node => {
     const channel = (value:number) => {
       const normalized = value / 255
@@ -633,8 +689,11 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
   await page.getByRole('button', {name:/Page 2 bookmarks/}).click()
   await expect(savedOnPage).toContainText('Reviewed second page')
   await page.getByRole('button', {name:'Open Index & bookmarks',exact:true}).click()
-  await expect(page.getByRole('textbox', {name:'Bookmark title 1'})).toHaveValue('Reviewed second page')
-  await expect(page.getByRole('region', {name:'Index and page number preview'})).toContainText('combined page 3')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await expect(page.getByRole('textbox', {name:'Bookmark label'})).toHaveValue('Reviewed second page')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Index & page map',exact:true}).click()
+  await page.locator('.page-map-details>summary').click()
+  await expect(page.getByRole('region', {name:'Index and page number preview'})).toContainText('combined 3')
 })
 
 test('manual bookmark order is keyboard accessible and persists', async ({ page, request }) => {
@@ -643,27 +702,35 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   const docId = (await uploaded.json())[0].id as string
   await page.goto('/')
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
-  await page.getByRole('combobox', { name: 'Bookmark document' }).selectOption(docId)
-  await page.getByRole('textbox', { name: 'New bookmark title' }).fill('First')
-  await page.getByRole('button', { name: 'Add bookmark' }).click()
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('First')
-  await page.getByRole('combobox', { name: 'Bookmark document' }).selectOption(docId)
-  await page.getByRole('textbox', { name: 'New bookmark title' }).fill('Second')
-  await page.getByRole('button', { name: 'Add bookmark' }).click()
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 2' })).toHaveValue('Second')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await page.getByRole('button',{name:'Add bookmark',exact:true}).click()
+  await page.getByRole('combobox', { name: 'Target document' }).selectOption(docId)
+  await page.getByRole('textbox', { name: 'Bookmark label' }).fill('First')
+  await page.getByRole('button', { name: 'Save bookmark',exact:true }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('First')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await page.getByRole('button',{name:'Add bookmark',exact:true}).click()
+  await page.getByRole('combobox', { name: 'Target document' }).selectOption(docId)
+  await page.getByRole('textbox', { name: 'Bookmark label' }).fill('Second')
+  await page.getByRole('button', { name: 'Save bookmark',exact:true }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Second')
+  await expect(page.getByRole('button',{name:'Add bookmark',exact:true})).toBeEnabled()
   await page.getByRole('button', { name: /Reorder bookmark 2:/ }).focus()
   await page.keyboard.press('ArrowUp')
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Second')
+  await page.getByRole('button',{name:'Save bookmark',exact:true}).click()
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Second')
   await page.reload()
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('Second')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Second')
 })
 
 test('dragging document, bookmark and page order updates the shared index plan', async ({ page, request }) => {
@@ -672,38 +739,44 @@ test('dragging document, bookmark and page order updates the shared index plan',
   } })
   const matterId = (await created.json()).id as string
   for (const name of ['01_petition.pdf', '02_impugned_order.pdf']) {
-    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
       multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
     })
     expect(uploaded.ok()).toBeTruthy()
   }
   await page.goto('/')
-  await expect(page.locator('body')).toHaveCSS('font-family', /Manrope Variable/)
+  await expect(page.locator('body')).toHaveCSS('font-family', /^Inter,/)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   const order = page.getByRole('region', { name: 'Index document order' }).locator('.index-order-row')
   await dragWithPointer(page, order.nth(0).locator('.grip'), order.nth(1))
   await expect(order.first()).toContainText('02_impugned_order')
   const preview = page.getByRole('region', { name: 'Index and page number preview' })
   await expect(preview.locator('tbody tr').first()).toContainText('02_impugned_order')
-  await expect(preview).toContainText('Printed volume pages')
+  await expect(preview).toContainText('Printed volume')
   await preview.getByRole('button', { name: 'Bookmark 02_impugned_order first page' }).click()
-  await expect(page.getByRole('textbox', { name: 'New bookmark title' })).toHaveValue('02_impugned_order')
-  await page.getByRole('button', { name: 'Add bookmark' }).click()
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('02_impugned_order')
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('02_impugned_order')
+  await page.getByRole('button', { name: 'Save bookmark',exact:true }).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('02_impugned_order')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Index & page map',exact:true}).click()
   await preview.getByRole('button', { name: 'Bookmark 01_petition first page' }).click()
-  await page.getByRole('button', { name: 'Add bookmark' }).click()
-  const bookmarks = page.getByRole('region', { name: 'Manual bookmarks' }).locator('.manual-bookmark-row')
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 2' })).toHaveValue('01_petition')
-  await dragWithPointer(page, bookmarks.nth(1).locator('.grip'), bookmarks.nth(0))
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('01_petition')
+  await page.getByRole('button', { name: 'Save bookmark',exact:true }).click()
+  const bookmarks = page.getByRole('region', { name: 'Manual bookmarks' }).locator('.bookmark-tree-row')
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('01_petition')
+  await expect(page.getByRole('button',{name:'Add bookmark',exact:true})).toBeEnabled()
+  await dragWithPointer(page, bookmarks.nth(1).locator('.bookmark-drag-handle'), bookmarks.nth(0))
+  await page.getByRole('button',{name:'Save bookmark',exact:true}).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('01_petition')
   await expect(page.getByRole('button', { name: 'Add bookmark' })).toBeEnabled()
   await page.reload()
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
-  await expect(page.getByRole('textbox', { name: 'Bookmark title 1' })).toHaveValue('01_petition')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
+  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('01_petition')
+  await page.locator('.structure-tabs').getByRole('button',{name:'Index & page map',exact:true}).click()
   await expect(order.first()).toContainText('02_impugned_order')
-  await expect(preview).toContainText('source page 1')
+  await expect(preview).toContainText('Source 1')
   await page.setViewportSize({ width: 1440, height: 1100 })
   await page.getByRole('button', { name: 'Documents', exact: true }).click()
+  await openDocumentBrowser(page)
   const rows = page.locator('.docs-list .doc-item')
   await expect(rows.first()).toContainText('02_impugned_order')
   await expect(rows.first()).toHaveCSS('user-select', 'none')
@@ -739,6 +812,7 @@ test('dragging document, bookmark and page order updates the shared index plan',
     .map((document: {title:string}) => document.title)).toEqual(['01_petition', '02_impugned_order'])
   await page.reload()
   await expect(rows.first()).toContainText('01_petition')
+  await openDocumentBrowser(page)
   await rows.first().click()
   const thumbs = page.locator('.thumbnail-strip .thumbnail-button')
   await expect(thumbs).toHaveCount(3)
@@ -756,7 +830,7 @@ test('text editing works on a page already marked as rotated', async ({ page, re
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
@@ -767,7 +841,8 @@ test('text editing works on a page already marked as rotated', async ({ page, re
   })
   expect(rotated.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Rotated Text' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Rotated Text'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
   const run = page.getByRole('button', { name: /Edit text: DRAFT PETITION/ })
@@ -794,13 +869,14 @@ test('selectable PDF text can be selected and replaced from the preview', async 
   } })
   expect(created.ok()).toBeTruthy()
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Replace Text' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Replace Text'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
   await page.getByRole('button', { name: /Edit text: DRAFT PETITION/ }).click()
@@ -840,7 +916,7 @@ test('Edit text reviews signature risk without a failed request or inline error'
     name: 'E2E Signed Text Edit', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
@@ -850,7 +926,8 @@ test('Edit text reviews signature risk without a failed request or inline error'
   })
   expect(marked.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', {name: 'E2E Signed Text Edit'})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Signed Text Edit'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name: 'Edit', exact: true}).click()
   await page.getByRole('button', {name: 'Edit text', exact: true}).click()
   await page.getByRole('button', {name: /Edit text: DRAFT PETITION/}).click()
@@ -885,13 +962,14 @@ test('PDFium paragraph trial edits a synthetic working revision from the viewer'
   } })
   expect(created.ok()).toBeTruthy()
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E PDFium Paragraph' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E PDFium Paragraph'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
   await page.getByRole('button', { name: /Edit text: IN THE COURT/ }).click()
@@ -915,7 +993,7 @@ test('selectable text can be dragged diagonally and saved to the working copy', 
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
@@ -924,14 +1002,15 @@ test('selectable text can be dragged diagonally and saved to the working copy', 
   const before = await request.get(runsUrl, { headers })
   const original = (await before.json()).runs.find((run: {text:string}) => run.text.startsWith('IN THE COURT'))
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Move Text' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Move Text'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Move text vertically' })).toHaveCount(0)
   const run = page.getByRole('button', { name: /Edit text: IN THE COURT/ })
   await expect(page.locator('.preview-status')).toHaveCount(0)
   const preview = page.locator('.pdf-placement-surface')
-  await expect.poll(async () => (await preview.boundingBox())!.y - (await page.locator('.canvas-scroll').boundingBox())!.y).toBeCloseTo(20, 0)
+  await expect.poll(async () => (await preview.boundingBox())!.y - (await page.locator('.canvas-scroll').boundingBox())!.y).toBeCloseTo(24, 0)
   await run.scrollIntoViewIfNeeded()
   const previewTop = (await preview.boundingBox())!.y
   await page.route('**/documents/*/pdf?revision=*', async route => {
@@ -964,13 +1043,14 @@ test('added text remains movable and enters saved PDF output', async ({ page, re
     name: 'E2E Text Overlay', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   const doc = (await uploaded.json())[0]
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Text Overlay' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Text Overlay'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Add text' }).click()
   await page.locator('.pdf-paper').click({ position: { x: 120, y: 180 } })
@@ -994,6 +1074,7 @@ test('added text remains movable and enters saved PDF output', async ({ page, re
   expect(snapshot.ok()).toBeTruthy()
   expect(snapshot.headers()['content-type']).toContain('application/pdf')
   const download=page.waitForEvent('download')
+  await openDocumentActions(page)
   await page.getByRole('button',{name:'Save working copy'}).click()
   const saved=await download
   expect(saved.suggestedFilename()).toContain('working-r1.pdf')
@@ -1006,7 +1087,7 @@ test('redaction mark stays movable and is applied in saved PDF output', async ({
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
@@ -1020,7 +1101,8 @@ test('redaction mark stays movable and is applied in saved PDF output', async ({
   const run = (await runsResponse.json()).runs.find((item: {text:string}) => item.text.includes('DRAFT PETITION'))
   expect(run).toBeDefined()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Permanent Redaction' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Permanent Redaction'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Redact', exact: true }).click()
   await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50')
@@ -1093,7 +1175,7 @@ test('redaction applies to a rotated synthetic scan', async ({ page, request }) 
     name: 'E2E Rotated Scan Redaction', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '04_scanned_annexure.jpg', mimeType: 'image/jpeg',
       buffer: await readFile(resolve(samples, '04_scanned_annexure.jpg')) } },
   })
@@ -1104,7 +1186,8 @@ test('redaction applies to a rotated synthetic scan', async ({ page, request }) 
   })
   expect(rotated.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Rotated Scan Redaction' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Rotated Scan Redaction'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Redact', exact: true }).click()
   await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50')
@@ -1127,14 +1210,15 @@ test('image overlays, highlights and comments can be placed, edited and removed'
     name: 'E2E PDF Annotations', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name:'01_petition.pdf', mimeType:'application/pdf',
       buffer:await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
 
   await page.goto('/')
-  await expect(page.getByRole('heading', {name:'E2E PDF Annotations'})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E PDF Annotations'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Annotate', exact:true}).click()
   await page.getByRole('button', {name:'Highlight', exact:true}).click()
   const paper = page.locator('.pdf-paper')
@@ -1163,6 +1247,8 @@ test('image overlays, highlights and comments can be placed, edited and removed'
   await page.getByRole('button', {name:'Add mark'}).click()
   await expect(page.locator('.pdf-review-comment')).toHaveCount(1)
 
+  await openDocumentActions(page)
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Stamps', exact:true}).click()
   await page.getByRole('button', {name:'Image / stamp', exact:true}).click()
   await page.getByLabel('PNG or JPEG').setInputFiles(resolve(samples, '04_scanned_annexure.jpg'))
@@ -1194,7 +1280,7 @@ test('reviewed link and output-mark preview persist through the matter workspace
   } })
   const matterId = (await created.json()).id as string
   for (const name of ['01_petition.pdf', '02_impugned_order.pdf']) {
-    const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
       multipart: { files: { name, mimeType: 'application/pdf',
         buffer: await readFile(resolve(samples, name)) } },
     })
@@ -1203,12 +1289,15 @@ test('reviewed link and output-mark preview persist through the matter workspace
   const documents = await (await request.get(`${backend}/matters/${matterId}/documents`, {headers})).json()
 
   await page.goto('/')
-  await expect(page.getByRole('heading', {name:'E2E Links And Marks'})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Links And Marks'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Annotate', exact:true}).click()
   await page.getByRole('button', {name:'Links', exact:true}).click()
   const paper = page.locator('.pdf-paper')
   await expect(paper).toBeVisible()
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
+  // Wait for the paper's actionability after opening a tool changes panel width.
+  await paper.click({trial:true,position:{x:90,y:12}})
   const bounds = await paper.boundingBox()
   expect(bounds).toBeTruthy()
   await page.mouse.move(bounds!.x + 90, bounds!.y + 12)
@@ -1224,6 +1313,8 @@ test('reviewed link and output-mark preview persist through the matter workspace
   expect(links[0].target_document_id).toBe(documents[1].id)
   expect(links[0].resolved).toBeTruthy()
 
+  await openDocumentActions(page)
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Output', exact:true}).click()
   await page.getByRole('button', {name:'Output marks', exact:true}).click()
   await page.getByRole('checkbox', {name:/Watermark/}).check()
@@ -1246,130 +1337,88 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   } })
   expect(created.ok()).toBeTruthy()
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Appearance Matter' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Appearance Matter'})).toBeVisible()
+  // Check readable rendered controls rather than pinning the previous palette.
+  const contrast = async (selector: string) => page.locator(selector).first().evaluate(el => {
+    const luminance = (color: string) => {
+      const channels = color.match(/[\d.]+/g)!.slice(0, 3).map(Number).map(value => {
+        const c = value / 255
+        return c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4
+      })
+      return channels[0]! * .2126 + channels[1]! * .7152 + channels[2]! * .0722
+    }
+    let background = el
+    while (getComputedStyle(background).backgroundColor === 'rgba(0, 0, 0, 0)' && background.parentElement) background = background.parentElement
+    const fg = luminance(getComputedStyle(el).color)
+    const bg = luminance(getComputedStyle(background).backgroundColor)
+    return (Math.max(fg, bg) + .05) / (Math.min(fg, bg) + .05)
+  })
+  await openWorkspaceNavigation(page)
   await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark')
+  await openWorkspaceNavigation(page)
   await page.getByRole('combobox', { name: 'Interface size' }).selectOption('125')
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'dark')
   await expect(page.locator('html')).toHaveCSS('zoom', '1.25')
-  await expect(page.locator('.panel').first()).toHaveCSS('background-color', 'rgb(29, 41, 58)')
-  await expect(page.locator('.upload-zone')).toHaveCSS('background-color', 'rgb(43, 60, 82)')
-  await expect(page.locator('.canvas-scroll')).toHaveCSS('background-color', 'rgb(17, 25, 39)')
-  await expect(page.locator('.page-editbar')).toHaveCSS('background-color', 'rgb(38, 54, 74)')
-  await expect(page.locator('.topbar')).toHaveCount(0)
-  await expect(page.locator('.open-workspace-tabs')).toBeVisible()
-  const tabBarHeight = await page.locator('.open-workspace-tabs').evaluate(element => getComputedStyle(element).height)
-  await expect(page.locator('.sidebar-profile')).toContainText('Local workspace')
-  const pageTool = page.getByRole('button', { name: 'Add text' })
+  await expect.poll(() => contrast('.panel')).toBeGreaterThan(4.5)
+  await expect.poll(() => contrast('.upload-zone')).toBeGreaterThan(4.5)
+  await expect.poll(() => contrast('.canvas-scroll')).toBeGreaterThan(4.5)
+  await expect.poll(() => contrast('.page-editbar')).toBeGreaterThan(4.5)
+  await page.getByRole('button',{name:'Close workspace navigation',exact:true}).click()
+  await expect(page.locator('.application-bar')).toBeVisible()
+  await expect(page.locator('.matter-rail')).toBeVisible()
+  await expect(page.locator('.workspace-drawer')).toBeHidden()
+  await closeWorkspaceNavigation(page)
+  await page.getByRole('tab',{name:'Edit',exact:true}).click()
+  const pageTool=page.getByRole('button',{name:'Add text',exact:true})
   await expect(pageTool).toBeEnabled()
-  await pageTool.hover()
-  await expect(pageTool).toHaveCSS('background-color', 'rgb(49, 68, 93)')
-  await page.getByRole('button', { name: 'Collapse sidebar' }).click()
-  await expect(page.locator('.sidebar')).toHaveCSS('width', '68px')
-  await expect(page.locator('.sidebar .nav-label').first()).toBeHidden()
-  await page.getByRole('button', { name: 'Expand sidebar' }).click()
-  await expect(page.locator('.sidebar .nav-label').first()).toBeVisible()
-  expect(await page.locator('.documents-workspace').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(2)
-  expect(await page.locator('.docs-panel').evaluate(element => element.getBoundingClientRect().top)).toBeLessThan(280)
-  expect(await page.locator('.canvas-scroll').evaluate(element => element.getBoundingClientRect().top)).toBeLessThan(620)
-  await expect(page.locator('.inspector-panel')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Document details' }).click()
-  expect(await page.locator('.documents-workspace').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(3)
-  await expect.poll(() => page.locator('.inspector-panel').evaluate(element => window.innerHeight - element.getBoundingClientRect().bottom)).toBeLessThan(18)
-  expect(await page.locator('.inspector-panel').evaluate(element => window.innerHeight - element.getBoundingClientRect().bottom)).toBeGreaterThan(-2)
-  await expect(page.locator('.thumbnail-strip')).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Search documents' })).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  await expect(page.getByRole('textbox', { name: 'Display title' })).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
-  await expect(page.getByRole('button', { name: 'Build filing bundle' }).first()).toBeInViewport()
-  await page.getByRole('tab', {name:'Pages', exact:true}).click()
-  await page.getByRole('button', { name: 'Page tools', exact: true }).click()
-  const pageToolsDialog = page.getByRole('dialog', { name: 'Page tools' })
-  await expect(pageToolsDialog).toBeVisible()
-  await expect(pageToolsDialog).toContainText('01_petition')
-  await expect(pageToolsDialog.getByRole('combobox', { name: 'Source document' })).toHaveCSS('color-scheme', 'dark')
-  await expect(pageToolsDialog.getByRole('combobox', { name: 'Source document' })).toHaveCSS('height', '44px')
-  await expect(pageToolsDialog.locator('.page-tools input').first()).toHaveCSS('height', '44px')
-  await pageToolsDialog.getByRole('button', { name: 'Close page tools' }).click()
-  await expect(pageToolsDialog).toBeHidden()
-  await page.getByRole('tab', {name:'Pages', exact:true}).click()
-  await page.getByRole('button', { name: 'Page tools', exact: true }).click()
-  await page.keyboard.press('Escape')
-  await expect(pageToolsDialog).toBeHidden()
-  await page.getByRole('button', { name: 'Close document details' }).click()
-  await expect(page.locator('.inspector-panel')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Court rules' }).click()
-  await expect(page.locator('.open-workspace-tabs')).toHaveCSS('height', tabBarHeight)
-  await expect(page.locator('.guide-card').first()).toHaveCSS('background-color', 'rgb(29, 41, 58)')
-  await expect(page.locator('.template-row').first()).toHaveCSS('background-color', 'rgb(38, 56, 79)')
-  await expect(page.locator('.party-form').first()).toHaveCSS('background-color', 'rgb(38, 56, 79)')
-  await expect(page.locator('.party-form textarea').first()).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  await expect(page.locator('.party-form select').first()).toHaveCSS('color-scheme', 'dark')
-  await expect(page.locator('.party-form select').first()).toHaveCSS('height', '44px')
-  await expect(page.locator('.party-form input').first()).toHaveCSS('height', '44px')
-  await expect(page.locator('.party-form select').first()).toHaveCSS('font-size', '13px')
-  await expect(page.locator('.party-form input').first()).toHaveCSS('font-size', '13px')
-  await page.getByRole('button', { name: 'New matter' }).click()
-  await expect(page.getByRole('dialog', { name: 'Create matter' })).toHaveCSS('background-color', 'rgb(29, 41, 58)')
-  await expect(page.getByRole('dialog', { name: 'Create matter' }).getByPlaceholder('Example: ABC Pvt Ltd v. XYZ'))
-    .toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  await expect(page.getByRole('dialog', { name: 'Create matter' }).getByRole('combobox', { name: 'Court profile' }))
-    .toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  await expect(page.getByRole('dialog', { name: 'Create matter' }).getByRole('combobox', { name: 'Court profile' }))
-    .toHaveCSS('color-scheme', 'dark')
-  await expect(page.getByRole('dialog', { name: 'Create matter' }).getByRole('combobox', { name: 'Court profile' }))
-    .toHaveCSS('height', '44px')
-  await page.getByRole('dialog', { name: 'Create matter' }).getByRole('button', { name: 'Close' }).click()
-  await page.getByRole('button', { name: 'About POC' }).click()
-  await expect(page.locator('.open-workspace-tabs')).toHaveCSS('height', tabBarHeight)
-  await expect(page.locator('.feature-strip > div').first()).toHaveCSS('background-color', 'rgb(29, 41, 58)')
-  await page.getByRole('button', { name: 'Matters', exact: true }).click()
-  await page.locator('.matter-home-card').filter({hasText:'E2E Appearance Matter'}).click()
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
-  await expect(page.locator('.open-workspace-tabs')).toHaveCSS('height', tabBarHeight)
-  await expect(page.locator('.checkbox-line').first()).toHaveCSS('background-color', 'rgb(43, 60, 82)')
-  await page.getByRole('button', { name: /Preflight checks/ }).click()
-  await expect(page.locator('.validation-intro')).toHaveCSS('background-color', 'rgb(43, 60, 82)')
-  await page.getByRole('button', { name: 'Documents', exact: true }).click()
-  await page.reload()
-  await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveValue('dark')
-  await expect(page.getByRole('combobox', { name: 'Interface size' })).toHaveValue('125')
-  await page.getByRole('link', { name: 'Skip to main content' }).focus()
-  await page.keyboard.press('Enter')
-  await expect(page.locator('#main-content')).toHaveCount(1)
+  const beforeHover=await pageTool.evaluate(el=>getComputedStyle(el).backgroundColor)
+  await pageTool.hover();await expect(pageTool).not.toHaveCSS('background-color',beforeHover)
+  await openDocumentActions(page);await page.getByRole('button',{name:'Document details',exact:true}).click()
+  const readerBox=await page.locator('.canvas-scroll').boundingBox(),detailsBox=await page.locator('.inspector-panel').boundingBox()
+  expect(readerBox!.width).toBeGreaterThan(300);expect(readerBox!.height).toBeGreaterThan(180)
+  expect(readerBox!.x+readerBox!.width).toBeLessThanOrEqual(detailsBox!.x+1)
+  await expect.poll(()=>contrast('.inspector-panel .field input')).toBeGreaterThan(4.5)
+  await page.getByRole('button',{name:'Close document details'}).click()
+  await closeWorkspaceNavigation(page)
+  await page.getByRole('tab',{name:'Pages',exact:true}).click();await page.getByRole('button',{name:'Page tools',exact:true}).click()
+  const tools=page.getByRole('dialog',{name:'Page tools'});await expect(tools).toBeVisible()
+  await expect(tools.getByRole('combobox',{name:'Source document'})).toHaveCSS('color-scheme','dark')
+  await page.keyboard.press('Escape');await expect(tools).toBeHidden()
+  await openWorkspaceNavigation(page);await page.locator('.sidebar').getByRole('button',{name:'Court rules'}).click()
+  await expect.poll(()=>contrast('.guide-card')).toBeGreaterThan(4.5)
+  await expect(page.locator('.party-form select').first()).toHaveCSS('color-scheme','dark')
+  await page.getByRole('button',{name:'Documents',exact:true}).click();await page.reload()
+  await openWorkspaceNavigation(page)
+  await expect(page.getByRole('combobox',{name:'Theme'})).toHaveValue('dark')
+  await expect(page.getByRole('combobox',{name:'Interface size'})).toHaveValue('125')
+  await page.getByRole('button',{name:'Close workspace navigation',exact:true}).click()
+  await expect(page.locator('.pdf-paper')).toBeVisible()
+  await page.getByRole('link',{name:'Skip to main content'}).focus();await page.keyboard.press('Enter')
   await expect(page.locator('#main-content')).toBeFocused()
-  await page.locator('#main-content').click({ position: { x: 20, y: 20 } })
   await page.keyboard.press('/')
-  await expect(page.getByRole('textbox', { name: 'Search documents' })).toBeFocused()
-  await page.keyboard.type('sample')
-  await page.keyboard.press('Control+z')
-  await expect(page.getByRole('textbox', { name: 'Search documents' })).toBeFocused()
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
-  await page.keyboard.press('/')
-  await expect(page.getByRole('textbox', { name: 'Search documents' })).toBeFocused()
-  await page.setViewportSize({ width: 820, height: 700 })
-  await expect(page.getByRole('button', { name: 'Open navigation' })).toBeVisible()
-  await expect.poll(() => page.locator('.sidebar').evaluate(element => element.getBoundingClientRect().right <= 0)).toBeTruthy()
-  await expect(page.getByRole('button', { name: 'Build bundle', exact: true })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
-  await page.getByRole('button', { name: 'Open navigation' }).click()
-  await expect(page.getByRole('combobox', { name: 'Theme' })).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect.poll(() => page.locator('.sidebar').evaluate(element => element.getBoundingClientRect().right <= 0)).toBeTruthy()
-  await page.getByRole('button', { name: 'Open navigation' }).click()
-  await page.emulateMedia({ colorScheme: 'dark' })
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('system')
-  await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'dark')
-  await page.emulateMedia({ colorScheme: 'light' })
-  await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'light')
-  await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveCSS('color-scheme', 'light')
-  await expect(page.locator('.panel').first()).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(page.getByRole('textbox',{name:'Search documents'})).toBeFocused()
+  await page.keyboard.type('sample');await page.keyboard.press('Control+z')
+  await expect(page.getByRole('textbox',{name:'Search documents'})).toBeFocused()
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await page.keyboard.press('/')
+  await expect(page.getByRole('textbox',{name:'Search documents'})).toBeFocused()
+  await page.setViewportSize({width:820,height:700})
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+  await openWorkspaceNavigation(page);await expect(page.getByRole('combobox',{name:'Theme'})).toBeVisible()
+  await page.getByRole('combobox',{name:'Theme'}).focus();await page.keyboard.press('Escape')
+  await expect(page.locator('.workspace-drawer')).toBeHidden()
+  await openWorkspaceNavigation(page);await page.emulateMedia({colorScheme:'dark'})
+  await page.getByRole('combobox',{name:'Theme'}).selectOption('system')
+  await expect(page.locator('html')).toHaveAttribute('data-effective-theme','dark')
+  await page.emulateMedia({colorScheme:'light'});await expect(page.locator('html')).toHaveAttribute('data-effective-theme','light')
+  await expect(page.getByRole('combobox',{name:'Theme'})).toHaveCSS('color-scheme','light')
+
 })
 
 test('working-copy page tools edit and save synthetic pages', async ({ page, request }) => {
@@ -1379,13 +1428,14 @@ test('working-copy page tools edit and save synthetic pages', async ({ page, req
   } })
   const id = (await created.json()).id as string
   for (const name of ['01_petition.pdf', '03_affidavit.pdf']) {
-    const uploaded = await request.post(`${backend}/matters/${id}/documents`, { headers,
+    const uploaded = await request.post(`${backend}/matters/${id}/documents?included=true`, { headers,
       multipart: { files: { name, mimeType: 'application/pdf', buffer: await readFile(resolve(samples, name)) } },
     })
     expect(uploaded.ok()).toBeTruthy()
   }
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Page Tools' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Page Tools'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   await page.getByRole('button', { name: 'Page tools', exact: true }).click()
   const tools = page.getByRole('dialog', { name: 'Page tools' })
@@ -1452,19 +1502,22 @@ test('preview owns document actions while details stay collapsed until toggled',
   } })
   const id = (await created.json()).id as string
   for (const filename of ['01_petition.pdf', '02_impugned_order.pdf']) {
-    const uploaded = await request.post(`${backend}/matters/${id}/documents`, { headers,
+    const uploaded = await request.post(`${backend}/matters/${id}/documents?included=true`, { headers,
       multipart: { files: { name: filename, mimeType: 'application/pdf',
         buffer: await readFile(resolve(samples, filename)) } },
     })
     expect(uploaded.ok()).toBeTruthy()
   }
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Preview Actions' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Preview Actions'})).toBeVisible()
   await expect.poll(() => page.locator('.pdf-paper').evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0)
   await expect(page.getByText('Loading PDF…')).toBeHidden()
   await expect(page.locator('.inspector-panel')).toHaveCount(0)
+  await openDocumentActions(page)
   await expect(page.getByRole('button', { name: 'Document details', exact: true })).toHaveAttribute('aria-expanded', 'false')
+  await openDocumentActions(page)
   await expect(page.getByRole('button', { name: 'Document details', exact: true })).toBeInViewport()
+  await openDocumentActions(page)
   await page.getByRole('button', { name: 'Document details', exact: true }).click()
   await expect.poll(() => page.locator('.preview-panel').evaluate(panel => {
     const canvas = panel.querySelector('canvas.pdf-paper')!.getBoundingClientRect()
@@ -1472,10 +1525,14 @@ test('preview owns document actions while details stay collapsed until toggled',
     return canvas.width <= scroll.width - 20
   })).toBeTruthy()
   await expect(page.locator('.inspector-panel')).toBeVisible()
+  await page.getByRole('tab',{name:'OCR',exact:true}).click()
   await expect(page.getByRole('button', { name: 'Run English OCR' })).toBeInViewport()
+  await openDocumentActions(page)
   await expect(page.getByRole('button', { name: 'Document details', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await closeDocumentActions(page)
   await page.getByRole('button', { name: 'Close document details' }).click()
   await expect(page.locator('.inspector-panel')).toHaveCount(0)
+  await openDocumentBrowser(page)
   await expect(page.getByRole('button', { name: 'Move document down' })).toHaveCount(0)
   await page.getByRole('button', { name: /Reorder document 01_petition/ }).focus()
   await page.keyboard.press('ArrowDown')
@@ -1498,7 +1555,7 @@ test('visible rotation controls turn the selected PDF page in either direction',
     name: 'E2E Page Rotation', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
@@ -1509,7 +1566,7 @@ test('visible rotation controls turn the selected PDF page in either direction',
     if (request.url().includes('/documents/') && request.url().includes('/pdf?revision=')) pdfRequests.push(request.url())
   })
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Page Rotation' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Page Rotation'})).toBeVisible()
   await page.getByRole('button', { name: 'Next page' }).click()
   await expect(page.locator('.page-counter input')).toHaveValue('2')
   await expect(page.locator('.page-counter')).toContainText('/ 3')
@@ -1521,6 +1578,7 @@ test('visible rotation controls turn the selected PDF page in either direction',
     await new Promise(resolve => setTimeout(resolve, 350))
     await route.continue()
   })
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   await page.getByRole('button', { name: 'Rotate left' }).click()
   const surface = page.locator('.pdf-placement-surface')
@@ -1531,6 +1589,7 @@ test('visible rotation controls turn the selected PDF page in either direction',
   await expect.poll(ratio).toBeCloseTo(1 / originalRatio, 1)
   await expect(surface).not.toHaveClass(/is-rotating/)
   await page.unroute('**/pages/rotate')
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   await page.getByRole('button', { name: 'Rotate right' }).click()
   await expect(page.locator('.page-counter input')).toHaveValue('2')
@@ -1544,11 +1603,11 @@ test('visible rotation controls turn the selected PDF page in either direction',
 test('unavailable engine shows a bounded error and reconnects', async ({ page }) => {
   await page.route('**/health', route => route.abort())
   await page.goto('/')
-  await expect(page.getByText('Engine disconnected')).toBeVisible({ timeout: 20_000 })
-  await expect(page.getByText('Python engine unavailable')).toBeVisible()
+  await expect(page.locator('.application-status').getByText('Engine disconnected',{exact:true})).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('.engine-notice').getByRole('status')).toContainText('Local engine unavailable')
   await page.unroute('**/health')
   await page.getByRole('button', { name: 'Retry connection' }).click()
-  await expect(page.getByText('Local engine connected')).toBeVisible()
+  await expect(page.locator('.application-status').getByText('Processing locally',{exact:true})).toBeVisible()
 })
 
 test('page text search opens a result and thumbnails navigate', async ({ page, request }) => {
@@ -1557,26 +1616,31 @@ test('page text search opens a result and thumbnails navigate', async ({ page, r
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const id = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${id}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${id}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Search Matter' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Search Matter'})).toBeVisible()
+  await openDocumentBrowser(page)
   await page.getByRole('textbox', {name:'Find text on pages'}).fill('page 3/3')
   await expect(page.getByRole('button', {name:/01_petition · page 3/})).toBeVisible()
+  await openDocumentBrowser(page)
   await page.getByRole('button', {name:/01_petition · page 3/}).click()
   await expect(page.locator('.page-counter input')).toHaveValue('3')
   await page.getByRole('button', {name:'Go to page 1'}).click()
   await expect(page.locator('.page-counter input')).toHaveValue('1')
   await expect(page.locator('.page-counter')).toContainText('/ 3')
   await expect(page.locator('.thumbnail-button canvas').first()).toHaveAttribute('data-rendered', 'true')
+  await openDocumentBrowser(page)
   await page.getByRole('button', {name:/01_petition · page 3/}).click()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   page.once('dialog', dialog => void dialog.accept())
   await page.getByRole('button', {name:/Delete page \d+/}).click()
   await expect(page.locator('.page-counter')).toContainText('/ 2')
+  await openDocumentBrowser(page)
   await expect(page.getByText('0 matching page(s)')).toBeVisible()
 })
 
@@ -1585,22 +1649,24 @@ test('PDF editor groups tools and finds text in the current working PDF', async 
     name: 'E2E PDF Editor Navigation', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', {name:'E2E PDF Editor Navigation'})).toBeVisible()
-  await expect(page.getByRole('tab', {name:'Edit'})).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.application-matter').filter({hasText:'E2E PDF Editor Navigation'})).toBeVisible()
+  await expect(page.getByRole('tab', {name:'Read'})).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', {name:'Go to page 1'})).toBeVisible()
-  await page.getByRole('button', {name:'Find in this PDF'}).click()
+  await page.getByRole('button', {name:'Search',exact:true}).click()
   await page.getByRole('searchbox', {name:'Find text in this PDF'}).fill('page 3/3')
   await expect(page.locator('.pdf-findbar').getByText('1 match', {exact:false})).toBeVisible()
   await page.getByRole('button', {name:/Page 3 ·/}).click()
   await expect(page.locator('.page-counter input')).toHaveValue('3')
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages'}).click()
   await expect(page.getByRole('button', {name:'Rotate right'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Annotate'}).click()
   await expect(page.getByRole('button', {name:'Bookmark page'})).toBeVisible()
   await expect(page.getByRole('button', {name:'Rotate right'})).toHaveCount(0)
@@ -1609,11 +1675,12 @@ test('PDF editor groups tools and finds text in the current working PDF', async 
 test('synthetic browser journey, retained export and download bytes', async ({ page, request }) => {
   page.setDefaultTimeout(10_000)
   await page.goto('/')
-  await expect(page.getByText('Local engine connected')).toBeVisible()
-  await page.getByRole('button', { name: 'New matter' }).click()
+  await expect(page.locator('.application-status').getByText('Processing locally',{exact:true})).toBeVisible()
+  await openWorkspaceNavigation(page)
+  await page.locator('.sidebar').getByRole('button', { name: 'New matter' }).click()
   await page.getByRole('dialog', { name: 'Create matter' }).getByPlaceholder('Example: ABC Pvt Ltd v. XYZ').fill('E2E Synthetic Matter')
   await page.getByRole('dialog', { name: 'Create matter' }).getByRole('button', { name: 'Create matter' }).click()
-  await expect(page.getByRole('heading', { name: 'E2E Synthetic Matter' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Synthetic Matter'})).toBeVisible()
 
   await page.locator('input[accept=".pdf,.jpg,.jpeg,.png"]').setInputFiles([
     resolve(samples, '01_petition.pdf'),
@@ -1622,11 +1689,13 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
     resolve(samples, '04_scanned_annexure.jpg'),
   ])
   await expect(page.locator('.doc-item')).toHaveCount(4)
+  await includeAllDocuments(page)
   await expect(page.locator('.page-counter input')).toHaveValue('1')
   await expect(page.locator('.page-counter')).toContainText('/ 3')
   const canvas = page.locator('.pdf-paper')
   await expect.poll(() => canvas.evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0)
   const before = await canvas.evaluate((node: HTMLCanvasElement) => `${node.width}x${node.height}`)
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   await page.getByRole('button', { name: 'Rotate right' }).click()
   await expect.poll(() => canvas.evaluate((node: HTMLCanvasElement) => `${node.width}x${node.height}`)).not.toBe(before)
@@ -1638,10 +1707,14 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await expect(page.locator('.page-counter input')).toHaveValue('2')
   await expect(page.locator('.page-counter')).toContainText('/ 2')
 
+  await openDocumentBrowser(page)
   await page.locator('.doc-item', { hasText: '04_scanned_annexure' }).click()
   await expect(page.locator('.page-counter input')).toHaveValue('1')
   await expect(page.locator('.page-counter')).toContainText('/ 1')
+  await closeWorkspaceNavigation(page)
+  await page.getByRole('tab',{name:'OCR',exact:true}).click()
   await page.getByRole('button', { name: 'Run English OCR' }).click()
+  await openDocumentActions(page)
   await page.getByRole('button', { name: 'Document details' }).click()
   await expect(page.locator('.inspector-heading')).toContainText('processed', { timeout: 90_000 })
   await expect(page.locator('.ocr-provenance')).toContainText('Revision 2: eng')
@@ -1651,15 +1724,18 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await expect(page.getByText('Document details updated.')).toBeVisible()
   await page.reload()
   await expect(page.locator('.doc-item')).toHaveCount(4)
+  await openDocumentBrowser(page)
   await page.locator('.doc-item', { hasText: 'Synthetic OCR Annexure' }).click()
+  await openDocumentActions(page)
   await page.getByRole('button', { name: 'Document details' }).click()
   await expect(page.locator('.inspector-heading')).toContainText('processed')
   await expect(page.locator('.ocr-provenance')).toContainText('Revision 2: eng')
 
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
+  await openBuildTool(page)
   await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('6')
-  await page.locator('.build-panel').getByRole('button', { name: 'Build filing bundle' }).click()
-  await expect(page.getByText('Latest filing package')).toBeVisible({ timeout: 90_000 })
+  await submitBundleBuild(page)
+  await expect(page.getByRole('heading',{name:'Bundle ready for review'})).toBeVisible({ timeout: 90_000 })
 
   const matterResponse = await request.get(`${backend}/matters`, { headers })
   expect(matterResponse.ok()).toBeTruthy()
@@ -1670,6 +1746,7 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   const stored = await request.get(`${backend}/matters/${matterId}/exports/${exportId}/filing-package.zip`, { headers })
   expect(stored.ok()).toBeTruthy()
   const downloadPromise = page.waitForEvent('download')
+  await openOutputTools(page)
   await page.getByRole('button', { name: 'Download filing-package.zip' }).click()
   const downloaded = await downloadPromise
   const bytes = await readFile(await downloaded.path())
@@ -1677,10 +1754,11 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   expect(createHash('sha256').update(bytes).digest('hex'))
     .toBe(createHash('sha256').update(await stored.body()).digest('hex'))
 
+  await openBuildTool(page)
   await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('2')
-  await page.locator('.build-panel').getByRole('button', { name: 'Build filing bundle' }).click()
-  await expect(page.getByText('Previous filing package')).toBeVisible({ timeout: 90_000 })
-  await expect(page.locator('.notice.error')).toContainText('exceeds', { timeout: 90_000 })
+  await submitBundleBuild(page)
+  await expect(page.locator('.build-workspace')).toContainText('Earlier build', { timeout: 90_000 })
+  await expect(page.locator('.build-error-detail')).toContainText('exceeds', { timeout: 90_000 })
   const retained = await request.get(`${backend}/matters/${matterId}/exports`, { headers })
   expect((await retained.json()).map((item: {id: string}) => item.id)).toEqual([exportId])
 })
@@ -1693,7 +1771,8 @@ test('Memo of Parties autosaves per matter and reports a failed save', async ({ 
   expect(created.ok()).toBeTruthy()
   const id = (await created.json()).id as string
   await page.goto('/')
-  await expect(page.getByText('Local engine connected')).toBeVisible()
+  await expect(page.locator('.application-status').getByText('Processing locally',{exact:true})).toBeVisible()
+  await openWorkspaceNavigation(page)
   await page.getByRole('button', { name: 'Court rules' }).click()
   const helper = page.locator('.memo-helper')
   await expect(helper.getByRole('status')).toContainText('Saved to this matter')
@@ -1702,6 +1781,7 @@ test('Memo of Parties autosaves per matter and reports a failed save', async ({ 
   const stored = await request.get(`${backend}/matters/${id}/memo-parties`, { headers })
   expect((await stored.json()).parties[0].name).toBe('Synthetic Saved Party')
   await page.reload()
+  await openWorkspaceNavigation(page)
   await page.getByRole('button', { name: 'Court rules' }).click()
   await expect(page.locator('.memo-helper').getByRole('textbox', { name: 'Party name' }))
     .toHaveValue('Synthetic Saved Party')
@@ -1711,11 +1791,16 @@ test('Memo of Parties autosaves per matter and reports a failed save', async ({ 
   await page.locator('.memo-helper').getByRole('textbox', { name: 'Party name' })
     .fill('Synthetic Retried Party')
   await expect(page.locator('.memo-helper').getByRole('status')).toContainText('Save failed', { timeout: 10_000 })
+  await page.locator('.memo-helper').getByRole('textbox', { name: 'Party name' }).fill('Synthetic Retried Party after disconnect')
+  await expect(page.locator('.memo-helper').getByRole('button', { name: 'Retry save' })).toBeDisabled()
   await page.unroute(`**/matters/${id}/memo-parties`)
+  await page.getByRole('button', { name: 'Retry connection', exact: true }).click()
+  await expect(page.locator('.engine-notice')).toHaveCount(0)
+  await expect(page.locator('.memo-helper').getByRole('textbox', { name: 'Party name' })).toHaveValue('Synthetic Retried Party after disconnect')
   await page.locator('.memo-helper').getByRole('button', { name: 'Retry save' }).click()
   await expect(page.locator('.memo-helper').getByRole('status')).toContainText('Saved to this matter')
   const retried = await request.get(`${backend}/matters/${id}/memo-parties`, { headers })
-  expect((await retried.json()).parties[0].name).toBe('Synthetic Retried Party')
+  expect((await retried.json()).parties[0].name).toBe('Synthetic Retried Party after disconnect')
 })
 
 test('Memo of Parties Undo flushes a pending edit and reloads saved rows', async ({ page, request }) => {
@@ -1725,6 +1810,7 @@ test('Memo of Parties Undo flushes a pending edit and reloads saved rows', async
   } })
   const id = (await created.json()).id as string
   await page.goto('/')
+  await openWorkspaceNavigation(page)
   await page.getByRole('button', { name: 'Court rules' }).click()
   const helper = page.locator('.memo-helper')
   const name = helper.getByRole('textbox', { name: 'Party name' })
@@ -1744,35 +1830,38 @@ test('unsaved details are guarded and a failed settings save stops a build', asy
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const id = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${id}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${id}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Draft Guard' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Draft Guard'})).toBeVisible()
+  await openDocumentActions(page)
   await page.getByRole('button', { name: 'Document details' }).click()
   await page.getByRole('textbox', { name: 'Display title' }).fill('Unsaved synthetic title')
   await expect(page.getByText('Unsaved document changes')).toBeVisible()
   await page.getByRole('button', { name: 'Close document details' }).click()
   await expect(page.getByText('Save document details to use PDF tools.')).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   await expect(page.getByRole('button', { name: 'Rotate left' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Rotate right' })).toBeDisabled()
   await page.getByRole('button', { name: 'Open details' }).click()
   await expect(page.getByRole('textbox', { name: 'Display title' })).toHaveValue('Unsaved synthetic title')
   page.once('dialog', dialog => void dialog.dismiss())
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
   await expect(page.getByText('Unsaved document changes')).toBeVisible()
   page.once('dialog', dialog => void dialog.accept())
-  await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
+  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
   await expect(page.getByText('Unsaved document changes')).toBeHidden()
+  await openBuildTool(page)
   await page.getByRole('spinbutton', { name: /Maximum pages per volume/ }).fill('6')
-  await expect(page.getByText('Unsaved bundle settings.')).toBeVisible()
+  await expect(page.getByText('Unsaved bundle settings',{exact:true})).toBeVisible()
   await page.route(`**/matters/${id}`, route =>
     route.request().method() === 'PATCH' ? route.abort() : route.continue())
-  await page.locator('.build-panel').getByRole('button', { name: 'Build filing bundle' }).click()
-  await expect(page.getByText('No exports yet')).toBeVisible()
+  await submitBundleBuild(page)
+  await expect(page.locator('.generated-files')).toHaveCount(0)
   const jobs = await request.get(`${backend}/matters/${id}/jobs`, { headers })
   expect(await jobs.json()).toEqual([])
 })
@@ -1783,7 +1872,7 @@ test('portable matter backup restores a separate local copy', async ({ page, req
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
@@ -1792,8 +1881,9 @@ test('portable matter backup restores a separate local copy', async ({ page, req
   expect((await request.post(`${backend}/documents/${docId}/pages/rotate`, { headers,
     data: { page_index: 0, degrees: 90 } })).ok()).toBeTruthy()
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Portable Matter' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Portable Matter'})).toBeVisible()
   const pendingDownload = page.waitForEvent('download')
+  await page.getByRole('button',{name:'Overview',exact:true}).click()
   await page.locator('.matter-more summary').click()
   await page.getByRole('button', { name: 'Back up matter' }).click()
   const download = await pendingDownload
@@ -1822,24 +1912,28 @@ test('archived document and matter remain recoverable', async ({ page, request }
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const id = (await created.json()).id as string
-  await request.post(`${backend}/matters/${id}/documents`, { headers,
+  await request.post(`${backend}/matters/${id}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Archive Matter' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Archive Matter'})).toBeVisible()
   page.once('dialog', dialog => void dialog.accept())
+  await openDocumentActions(page)
   await page.getByRole('button', { name: 'Archive document' }).click()
   await expect(page.locator('.doc-item')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Restore', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Restore', exact: true }).click()
   await expect(page.locator('.doc-item')).toHaveCount(1)
+  await expect(page.getByText('Archived document restored.',{exact:true})).toBeVisible()
   page.once('dialog', dialog => void dialog.accept())
+  await page.getByRole('button',{name:'Overview',exact:true}).click()
   await page.locator('.matter-more summary').click()
   await page.getByRole('button', { name: 'Archive matter', exact: true }).click()
+  await openWorkspaceNavigation(page)
   await expect(page.locator('button[title="Restore E2E Archive Matter"]')).toBeVisible()
   await page.locator('button[title="Restore E2E Archive Matter"]').click()
-  await expect(page.getByRole('heading', { name: 'E2E Archive Matter' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Archive Matter'})).toBeVisible()
   await expect(page.locator('.doc-item')).toHaveCount(1)
 })
 
@@ -1849,20 +1943,21 @@ test('undo and redo metadata persist across browser reload', async ({ page, requ
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const id = (await created.json()).id as string
-  await request.post(`${backend}/matters/${id}/documents`, { headers,
+  await request.post(`${backend}/matters/${id}/documents?included=true`, { headers,
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E History Matter' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E History Matter'})).toBeVisible()
+  await openDocumentActions(page)
   await page.getByRole('button', { name: 'Document details' }).click()
   await page.getByRole('textbox', { name: 'Display title' }).fill('Changed title')
   await page.getByRole('button', { name: 'Save document details' }).click()
   await expect(page.locator('.doc-item')).toContainText('Changed title')
-  await page.getByRole('button', { name: 'Undo', exact: true }).click()
+  await page.getByRole('button', { name: /^Undo(?: last matter change)?$/, exact: true }).first().click()
   await expect(page.locator('.doc-item')).toContainText('01_petition')
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Redo', exact: true })).toBeEnabled()
-  await page.getByRole('button', { name: 'Redo', exact: true }).click()
+  await expect(page.getByRole('button', { name: /^Redo(?: last matter change)?$/, exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: /^Redo(?: last matter change)?$/, exact: true }).click()
   await expect(page.locator('.doc-item')).toContainText('Changed title')
 })

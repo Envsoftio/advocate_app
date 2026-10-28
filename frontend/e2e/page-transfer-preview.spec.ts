@@ -1,3 +1,4 @@
+import { closeWorkspaceNavigation, openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -28,7 +29,7 @@ test('page transfer preview shows actual source and destination pages and revisi
   } })
   const matterId = (await created.json()).id as string
   async function upload(name: string, label: string) {
-    const response = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+    const response = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
       multipart: { files: { name, mimeType: 'application/pdf', buffer: syntheticPdf(label) } } })
     expect(response.ok()).toBeTruthy()
     return (await response.json())[0]
@@ -44,8 +45,10 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
 `], { input: await response.body(), encoding: 'utf8' })) as string[]
   }
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Visual Page Transfer' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Visual Page Transfer'})).toBeVisible()
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'transfer-target' }).click()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', { name: 'Pages', exact: true }).click()
   await page.getByRole('button', { name: 'Add pages', exact: true }).click()
   const tools = page.getByRole('dialog', { name: 'Page tools' })

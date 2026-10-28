@@ -11,7 +11,7 @@ def test_pdfium_paragraph_trial_revision_original_and_undo(client, auth, matter)
         page.insert_text((72, 115), 'Second paragraph line', fontsize=12)
         page.insert_text((72, 250), 'UNTOUCHED', fontsize=12)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('paragraph.pdf', original, 'application/pdf'))])
     assert uploaded.status_code == 201, uploaded.text
     doc = uploaded.json()[0]
@@ -65,7 +65,7 @@ def test_pdfium_paragraph_trial_revision_original_and_undo(client, auth, matter)
 
 
 def test_pdfium_trial_rejects_unfittable_edit_without_revision(client, auth, matter, make_pdf):
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('short.pdf', make_pdf(1, 'SHORT'), 'application/pdf'))])
     doc = uploaded.json()[0]
     base = f'/documents/{doc["id"]}'
@@ -89,7 +89,7 @@ def test_pdfium_trial_allows_expanding_a_paragraph_that_contains_old_text(client
         page = source.new_page()
         page.insert_text((72, 100), 'Original wording', fontsize=12)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('expand.pdf', original, 'application/pdf'))])
     doc = uploaded.json()[0]
     base = f'/documents/{doc["id"]}'
@@ -114,7 +114,7 @@ def test_pdfium_trial_rejects_a_link_over_the_paragraph(client, auth, matter):
         page.insert_link({'kind': pymupdf.LINK_URI, 'from': pymupdf.Rect(70, 85, 170, 105),
                           'uri': 'https://example.invalid/'})
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('linked.pdf', original, 'application/pdf'))])
     doc = uploaded.json()[0]
     base = f'/documents/{doc["id"]}'
@@ -136,7 +136,7 @@ def test_pdfium_trial_preserves_same_words_elsewhere_on_page(client, auth, matte
         page.insert_text((72, 100), 'Repeated wording', fontsize=12)
         page.insert_text((72, 250), 'Repeated wording', fontsize=12)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('repeated.pdf', original, 'application/pdf'))])
     doc = uploaded.json()[0]
     base = f'/documents/{doc["id"]}'
@@ -161,7 +161,7 @@ def test_pdfium_trial_moves_following_text_to_fit_added_lines(client, auth, matt
         page.insert_text((72, 127), 'NEXT PARAGRAPH', fontsize=12)
         page.insert_text((72, 145), 'STAYS IN ORDER', fontsize=12)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('flow.pdf', original, 'application/pdf'))])
     assert uploaded.status_code == 201, uploaded.text
     doc = uploaded.json()[0]
@@ -192,7 +192,7 @@ def test_pdfium_trial_keeps_revision_when_following_text_cannot_fit(client, auth
         page.insert_text((72, 795), 'BOTTOM PARAGRAPH', fontsize=12)
         page.insert_text((72, 825), 'BOTTOM FOLLOWER', fontsize=12)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('bottom.pdf', original, 'application/pdf'))])
     doc = uploaded.json()[0]
     base = f'/documents/{doc["id"]}'

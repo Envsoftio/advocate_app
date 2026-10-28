@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import MetadataSuggestions from './MetadataSuggestions.vue'
 import { api } from '../lib/api'
 import { friendlyError } from '../lib/format'
 import type { DocKind, MatterDocument } from '../lib/types'
@@ -38,9 +39,29 @@ const emit = defineEmits<{
   openDocument: [id:string]
   error: [error:unknown]
   close: []
+  dirtyChanged: [value:boolean]
 }>()
 const kinds: DocKind[] = ['petition','affidavit','order','annexure','application','evidence','other']
 const query = ref('')
+const suggestionsOpen=ref(false),suggestionsRef=ref<InstanceType<typeof MetadataSuggestions>|null>(null),suggestionsDirty=ref(false),reviewIds=ref<string[]>([])
+const baseline=ref<MatterDocument[]>([]),snapshot=ref(''),loadError=ref(''),advanced=ref(false),compact=ref(true),showColumns=ref(false)
+const hiddenColumns=ref<string[]>([])
+let loadSequence=0,alive=true
+onBeforeUnmount(()=>{alive=false;loadSequence++})
+const dirtyRows=computed(()=>baseline.value.filter(rowDirty))
+const dirty=computed(()=>!!dirtyRows.value.length||suggestionsDirty.value)
+watch(dirty,v=>emit('dirtyChanged',v),{immediate:true})
+async function loadReview(force=false){const seq=++loadSequence;const startDraft=JSON.stringify(drafts);try{const value=await api<{input_snapshot:string;documents:MatterDocument[]}>(`/matters/${props.matterId}/metadata-review`);if(!alive||seq!==loadSequence)return;if(!force&&startDraft!==JSON.stringify(drafts)&&dirty.value){loadError.value='A refresh arrived while you were editing. Your draft is retained.';return}baseline.value=value.documents;selectedIds.value=selectedIds.value.filter(id=>baseline.value.some(d=>d.id===id));snapshot.value=value.input_snapshot;resetRows();loadError.value=''}catch(e){loadError.value=friendlyError(e)}}
+function resetRows(){for(const doc of baseline.value){drafts[doc.id]={title:doc.title,label:doc.label,kind:doc.kind,part:doc.part,group_key:doc.group_key,group_role:doc.group_role,document_date:doc.document_date,date_confirmed:doc.date_status==='confirmed'};moveTargets[doc.id]=doc.position+1}}
+function discard(){suggestionsRef.value?.discard();resetRows()}
+function rowChanges(doc:MatterDocument){const d=drafts[doc.id];const fields:Record<string,unknown>={};for(const k of ['title','label','kind','part','group_key','group_role'] as const)if(d[k]!==doc[k])fields[k]=typeof d[k]==='string'?(d[k] as string).trim():d[k];if('label' in fields){fields.label_status=fields.label?'confirmed':'unreviewed';fields.label_source=fields.label?'user':'none'}if(d.document_date!==doc.document_date||d.date_confirmed!==(doc.date_status==='confirmed'))Object.assign(fields,{document_date:d.document_date,date_status:d.document_date?'confirmed':'unknown',date_source:d.document_date?'user':'none',date_note:''});return fields}
+async function saveRows(ids?:string[]){if(localBusy.value)return false;const rows=dirtyRows.value.filter(d=>!ids||ids.includes(d.id));const retained=Object.fromEntries(dirtyRows.value.filter(d=>ids&&!ids.includes(d.id)).map(d=>[d.id,{...drafts[d.id]}]));if(!rows.length)return true;localBusy.value=true;loadError.value='';try{await api(`/matters/${props.matterId}/metadata-review`,'PUT',{expected_snapshot:snapshot.value,rows:rows.map(d=>({document_id:d.id,changes:rowChanges(d)}))});await loadReview();Object.assign(drafts,retained);emit('modified');message.value='Changes saved in one undoable action.';return true}catch(e){loadError.value=friendlyError(e);return false}finally{localBusy.value=false}}
+async function save(){return suggestionsOpen.value?!!(await suggestionsRef.value?.save()):await saveRows()}
+async function openSuggestions(){if(dirtyRows.value.length){loadError.value='Save or discard table changes before reviewing source suggestions.';return}reviewIds.value=selectedIds.value.length?[...selectedIds.value]:baseline.value.map(d=>d.id);suggestionsOpen.value=true}
+function closeSuggestions(){if(suggestionsDirty.value){emit('close');return}suggestionsOpen.value=false;void loadReview()}
+function escapeCell(doc:MatterDocument,event:KeyboardEvent){if(event.key==='Escape'){const d=baseline.value.find(d=>d.id===doc.id);if(d){drafts[d.id]={title:d.title,label:d.label,kind:d.kind,part:d.part,group_key:d.group_key,group_role:d.group_role,document_date:d.document_date,date_confirmed:d.date_status==='confirmed'}}}}
+defineExpose({save,discard,hasPendingDraft:()=>dirty.value,closeSuggestions:()=>{suggestionsOpen.value=false;void loadReview()},isSuggestionsOpen:()=>suggestionsOpen.value})
+
 const selectedIds = ref<string[]>([])
 const collapsedParts = ref<number[]>([])
 const localBusy = ref(false)
@@ -61,25 +82,12 @@ const labelOptions = reactive<{mode:LabelMode,prefix:string,start:number,group_s
 const labelPreview = ref<LabelPreview | null>(null)
 const labelAcks = reactive({existing:false,exports:false,references:false})
 
-function syncDrafts() {
-  const current = new Set(props.documents.map(doc => doc.id))
-  selectedIds.value = selectedIds.value.filter(id => current.has(id))
-  for (const key of Object.keys(drafts)) if (!current.has(key)) delete drafts[key]
-  for (const doc of props.documents) {
-    if (!drafts[doc.id] || rowBusy.value !== doc.id) {
-      drafts[doc.id] = {title:doc.title,label:doc.label,kind:doc.kind,part:doc.part,
-        group_key:doc.group_key,group_role:doc.group_role,document_date:doc.document_date,
-        date_confirmed:doc.date_status === 'confirmed'}
-      moveTargets[doc.id] = doc.position + 1
-    }
-  }
-}
-watch(() => props.documents, syncDrafts, {immediate:true, deep:true})
+watch(() => props.documents, ()=>{if(!dirty.value&&!localBusy.value&&!suggestionsOpen.value)void loadReview()}, {immediate:true})
 
 const filtered = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
-  if (!needle) return props.documents
-  return props.documents.filter(doc => [doc.title, doc.original_name, doc.label, doc.kind,
+  if (!needle) return baseline.value
+  return baseline.value.filter(doc => [doc.title, doc.original_name, doc.label, doc.kind,
     doc.group_key, doc.document_date].join(' ').toLocaleLowerCase().includes(needle))
 })
 const parts = computed(() => [1,2,3,4].map(part => ({part,
@@ -170,28 +178,7 @@ function rowDirty(doc:MatterDocument) {
     draft.part !== doc.part || draft.group_key !== doc.group_key || draft.group_role !== doc.group_role ||
     draft.document_date !== doc.document_date || desiredStatus !== doc.date_status
 }
-async function saveRow(doc:MatterDocument) {
-  const draft = drafts[doc.id]
-  if (!draft?.title.trim() || localBusy.value) return
-  rowBusy.value = doc.id; localBusy.value = true; message.value = ''
-  try {
-    const dateChanged = draft.document_date !== doc.document_date
-    const confirmed = !!draft.document_date && (draft.date_confirmed || dateChanged)
-    const preserveAmbiguous = !draft.document_date && doc.date_status === 'ambiguous'
-    await api(`/documents/${doc.id}`, 'PATCH', {
-      title:draft.title.trim(), label:draft.label.trim(),
-      label_status:draft.label.trim() ? 'confirmed' : 'unreviewed',
-      label_source:draft.label.trim() ? 'user' : 'none', kind:draft.kind, part:draft.part,
-      group_key:draft.group_key, group_role:draft.group_role, document_date:draft.document_date,
-      date_status:draft.document_date ? (confirmed ? 'confirmed' : doc.date_status) : (preserveAmbiguous ? 'ambiguous' : 'unknown'),
-      date_source:draft.document_date ? (confirmed ? 'user' : doc.date_source) : (preserveAmbiguous ? doc.date_source : 'none'),
-      date_note:preserveAmbiguous ? doc.date_note : '',
-    })
-    message.value = `Saved “${draft.title.trim()}”.`
-    emit('modified')
-  } catch (error) { emit('error', error) }
-  finally { rowBusy.value = ''; localBusy.value = false }
-}
+async function saveRow(doc:MatterDocument) {if(await saveRows([doc.id]))document.querySelectorAll('.batch-row-menu[open]').forEach(el=>el.removeAttribute('open'))}
 async function previewLabels() {
   if (!selectedIds.value.length || localBusy.value) return
   localBusy.value = true; message.value = ''; labelPreview.value = null
@@ -224,6 +211,7 @@ async function applyLabels() {
     })
     message.value = `Applied ${labelPreview.value.rows.length} reviewed label mapping(s) in one undoable action.`
     labelPreview.value = null
+    await loadReview()
     emit('modified')
   } catch (error) { emit('error', error) }
   finally { localBusy.value = false }
@@ -239,6 +227,7 @@ async function applyBatch() {
   try {
     await api(`/matters/${props.matterId}/documents/batch`, 'PATCH', payload)
     message.value = `Updated ${selectedIds.value.length} selected document(s) in one undoable action.`
+    await loadReview()
     emit('modified')
   } catch (error) { emit('error', error) }
   finally { localBusy.value = false }
@@ -258,6 +247,7 @@ async function applySort() {
     await api(`/matters/${props.matterId}/documents/reorder`, 'POST', {ids:sortPreview.value.ids})
     message.value = `Applied ${sortPreview.value.mode.replace('_',' ')} order.`
     sortPreview.value = null
+    await loadReview()
     emit('modified')
   } catch (error) { emit('error', error) }
   finally { localBusy.value = false }
@@ -272,6 +262,7 @@ async function moveDocument(doc:MatterDocument) {
   try {
     await api(`/matters/${props.matterId}/documents/reorder`, 'POST', {ids})
     message.value = `Moved “${doc.title}” to position ${target + 1}.`
+    await loadReview()
     emit('modified')
   } catch (error) { emit('error', error) }
   finally { localBusy.value = false }
@@ -279,32 +270,14 @@ async function moveDocument(doc:MatterDocument) {
 </script>
 
 <template>
-  <section class="document-register" aria-label="Editable document table">
-    <header class="document-register-head">
-      <div><span class="page-eyebrow">BATCH REVIEW</span><h2>Document table</h2><p>Edit identity and filing metadata without changing original filenames. Dates remain unknown or unreviewed until you confirm them.</p></div>
-      <button class="btn secondary" @click="emit('close')">Close table</button>
-    </header>
-
-    <div class="document-register-tools">
-      <label class="register-search">Filter rows<input v-model="query" type="search" placeholder="Title, filename, label, type, group or date"/></label>
-      <div class="register-selection"><strong>{{selectedIds.length}} selected</strong><span>{{visibleSelected}} visible in this filter</span><button class="text-tool" :disabled="!selectedIds.length" @click="selectedIds=[]">Clear selection</button></div>
-    </div>
-
-    <div v-if="duplicateLabels.size || labelGaps.length" class="notice amber label-review" role="status">
-      <strong>Label review required.</strong>
-      <span v-if="duplicateLabels.size">Duplicate: {{[...duplicateLabels].join(', ')}}.</span>
-      <span v-if="labelGaps.length">Possible gaps: {{labelGaps.join(', ')}}.</span>
-      Labels are independent of filenames and page numbers; no automatic correction was made.
-    </div>
-
-    <div class="batch-bar">
-      <div><strong>Apply to the explicit selection</strong><small>Filtering or sorting does not change the {{selectedIds.length}} selected document(s).</small></div>
-      <label>Type<select v-model="batch.kind"><option value="">No change</option><option v-for="kind in kinds" :key="kind" :value="kind">{{kind}}</option></select></label>
-      <label>Part<select v-model="batch.part"><option value="">No change</option><option v-for="part in 4" :key="part" :value="part">Part {{part}}</option></select></label>
-      <label class="batch-group"><span><input v-model="batch.applyGroup" type="checkbox"/> Change group</span><input v-model="batch.group_key" :disabled="!batch.applyGroup" placeholder="Blank clears group" maxlength="100"/></label>
-      <button class="btn primary small" :disabled="busy || localBusy || !selectedIds.length" @click="applyBatch">Apply batch change</button>
-    </div>
-
+ <div class="metadata-batch-root">
+ <MetadataSuggestions v-if="suggestionsOpen" ref="suggestionsRef" :matter-id="matterId" :documents="documents" :ids="reviewIds" :disabled="busy" @dirty-changed="suggestionsDirty=$event" @modified="emit('modified')" @close="closeSuggestions"/>
+ <section v-show="!suggestionsOpen" class="document-register batch-review" aria-label="Editable document table">
+  <header class="batch-review-heading"><div><h1>Batch review</h1><p>{{documents.length}} documents · Edit metadata, labels and Parts in place.</p></div><button class="membership-button secondary" :disabled="!selectedIds.length" @click="emit('openDocument',selectedIds[0])">Open document</button><button class="text-tool" @click="emit('close')">Close table</button></header>
+  <div class="batch-review-toolbar"><input type="checkbox" aria-label="Select all filtered documents" :checked="allVisibleSelected" @change="toggleVisible(($event.target as HTMLInputElement).checked)"/><strong :title="`${visibleSelected} visible in this filter`">{{selectedIds.length}} selected</strong><label><span class="sr-only">Assign selected Part</span><select v-model="batch.part" aria-label="Assign selected Part"><option value="">Assign selected → Part</option><option v-for="part in 4" :value="part" :key="part">Part {{part}}</option></select></label><select v-model="batch.kind" aria-label="Document type"><option value="">Document type</option><option v-for="kind in kinds" :value="kind" :key="kind">{{kind}}</option></select><button class="text-tool" :disabled="busy||localBusy||!selectedIds.length||!!dirtyRows.length" @click="applyBatch">Apply batch change</button><button class="membership-button quiet" :disabled="!documents.length||!!dirtyRows.length" @click="openSuggestions">Review title &amp; dates</button><input v-model="query" type="search" aria-label="Filter rows" placeholder="Filter documents"/><button class="membership-button secondary" :aria-expanded="showColumns" @click="showColumns=!showColumns">Columns</button><button class="membership-button secondary" :aria-pressed="compact" @click="compact=!compact">{{compact?'Compact':'Comfortable'}}</button><button class="text-tool" :aria-expanded="advanced" @click="advanced=!advanced">More tools</button></div>
+  <div v-if="showColumns" class="batch-columns"><label v-for="name in ['File name','Group','OCR','Status']" :key="name"><input type="checkbox" :checked="!hiddenColumns.includes(name)" @change="hiddenColumns=hiddenColumns.includes(name)?hiddenColumns.filter(x=>x!==name):[...hiddenColumns,name]"/>{{name}}</label></div>
+  <div v-if="loadError" role="alert" class="review-error">{{loadError}} <button class="text-tool" @click="loadReview(true)">Discard table drafts and reload</button></div>
+  <div v-if="advanced" class="batch-advanced"><slot name="history"/><button class="text-tool" @click="selectedIds=[]">Clear selection</button><label><input v-model="batch.applyGroup" type="checkbox"/>Change selected group<input v-model="batch.group_key" maxlength="100" :disabled="!batch.applyGroup"/></label><button class="text-tool" :disabled="!!dirtyRows.length" @click="applyBatch">Apply group</button>
     <div class="label-proposal-bar">
       <div><strong>Propose labels for the explicit selection</strong><small>Preview only. Labels stay independent of filenames and page numbers until you confirm the full mapping.</small></div>
       <label>Method<select v-model="labelOptions.mode"><option value="sequential">Sequential</option><option value="grouped_suffix">Grouped suffix</option><option value="filename">Conservative filename scan</option></select></label>
@@ -357,30 +330,15 @@ async function moveDocument(doc:MatterDocument) {
       <ol><li v-for="row in sortPreview.rows" :key="row.id" :class="{'sort-moved':row.old_position!==row.new_position}"><span>{{row.new_position+1}}</span><div><strong>{{row.title}}</strong><small>{{row.original_name}}<template v-if="row.group_key"> · Group {{row.group_key}}</template></small></div><span class="date-badge" :class="row.date_status">{{row.document_date || (row.date_status==='ambiguous' ? row.date_note : 'Unknown date')}} · {{row.date_status}}</span><small>#{{row.old_position+1}} → #{{row.new_position+1}}</small></li></ol>
     </div>
 
-    <p v-if="message" class="register-message" role="status">{{message}}</p>
-    <div class="register-table-wrap">
-      <table class="register-table">
-        <thead><tr><th><input type="checkbox" aria-label="Select all filtered documents" :checked="allVisibleSelected" @change="toggleVisible(($event.target as HTMLInputElement).checked)"/></th><th>Order</th><th>Original filename / status</th><th>Display title</th><th>Label</th><th>Document date</th><th>Type</th><th>Part</th><th>Group / hierarchy</th><th>Pages</th><th>Actions</th></tr></thead>
-        <tbody v-for="section in parts" :key="section.part">
-          <tr class="part-row"><th colspan="11"><button @click="togglePart(section.part)" :aria-expanded="!collapsedParts.includes(section.part)"><span>{{collapsedParts.includes(section.part)?'▸':'▾'}}</span> Part {{section.part}} <small>{{section.visible.length}} shown / {{section.all.length}} document(s)</small></button></th></tr>
-          <template v-if="!collapsedParts.includes(section.part)">
-            <tr v-for="doc in section.visible" :key="doc.id" :class="{'row-selected':selectedSet.has(doc.id)}">
-              <td><input type="checkbox" :aria-label="'Select '+doc.title" :checked="selectedSet.has(doc.id)" @change="toggleSelected(doc.id, ($event.target as HTMLInputElement).checked)"/></td>
-              <td><div class="move-target"><input v-model.number="moveTargets[doc.id]" type="number" min="1" :max="documents.length" :aria-label="'Move '+doc.title+' to position'"/><button class="text-tool" :disabled="busy || localBusy" @click="moveDocument(doc)">Move</button></div></td>
-              <td class="identity-cell"><strong :title="doc.original_name">{{doc.original_name}}</strong><small>{{doc.ocr_status.split('_').join(' ')}} · {{doc.page_count}} page(s)</small><small>{{sourceTimestamp(doc)}}</small></td>
-              <td><input v-model="drafts[doc.id].title" maxlength="250"/></td>
-              <td class="label-cell"><input v-model="drafts[doc.id].label" maxlength="60" :class="{'input-warning':duplicateLabels.has(drafts[doc.id].label.trim().toLocaleLowerCase())}"/><small>{{doc.label_status}} · {{doc.label_source}}</small></td>
-              <td class="date-cell"><input v-model="drafts[doc.id].document_date" type="date" @input="drafts[doc.id].date_confirmed=true"/><label v-if="drafts[doc.id].document_date"><input v-model="drafts[doc.id].date_confirmed" type="checkbox"/> Confirmed from document</label><small :class="doc.date_status">{{dateStatus(doc)}}</small></td>
-              <td><select v-model="drafts[doc.id].kind"><option v-for="kind in kinds" :key="kind" :value="kind">{{kind}}</option></select></td>
-              <td><select v-model.number="drafts[doc.id].part"><option v-for="part in 4" :key="part" :value="part">{{part}}</option></select></td>
-              <td class="group-cell"><input v-model="drafts[doc.id].group_key" maxlength="100" placeholder="None" :aria-label="'Group for '+doc.title"/><select v-model="drafts[doc.id].group_role" :aria-label="'Hierarchy role for '+doc.title"><option value="member">Member</option><option value="parent">Designated parent</option></select></td>
-              <td class="pages-cell">{{doc.page_count}}</td>
-              <td class="row-actions"><button class="text-tool" @click="emit('openDocument',doc.id)">Preview</button><button class="btn primary small" :disabled="busy || localBusy || !rowDirty(doc) || !drafts[doc.id].title.trim()" @click="saveRow(doc)">{{rowBusy===doc.id?'Saving…':'Save row'}}</button></td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-      <div v-if="!filtered.length" class="register-empty">No documents match this filter. The existing selection is unchanged.</div>
-    </div>
-  </section>
+
+  </div>
+  <p v-if="message" role="status" class="review-notice">{{message}}</p>
+  <p v-if="duplicateLabels.size||labelGaps.length" class="review-notice">Label review: {{[...duplicateLabels,...labelGaps].join(', ')}}. No automatic correction made.</p>
+  <div class="batch-table-scroll" :inert="localBusy"><table :class="['batch-table',{'comfortable':!compact}]"><colgroup><col style="width:3.3%"/><col style="width:3%"/><col style="width:19.3%"/><col v-if="!hiddenColumns.includes('File name')" style="width:12.9%"/><col style="width:10.1%"/><col style="width:8.2%"/><col style="width:5.7%"/><col style="width:7.7%"/><col v-if="!hiddenColumns.includes('Group')" style="width:7.7%"/><col style="width:7.7%"/><col v-if="!hiddenColumns.includes('OCR')" style="width:5.7%"/><col v-if="!hiddenColumns.includes('Status')" style="width:8.8%"/></colgroup>
+   <thead><tr><th></th><th>↕</th><th>Title</th><th v-if="!hiddenColumns.includes('File name')">File name</th><th>Document date</th><th>Type</th><th>Part</th><th>Label</th><th v-if="!hiddenColumns.includes('Group')">Group</th><th>Source pages</th><th v-if="!hiddenColumns.includes('OCR')">OCR</th><th v-if="!hiddenColumns.includes('Status')">Status</th></tr></thead>
+   <tbody><tr v-for="doc in filtered" :key="doc.id" :class="{'row-selected':selectedSet.has(doc.id),'row-dirty':rowDirty(doc)}" @keydown="escapeCell(doc,$event)"><td><input type="checkbox" :aria-label="'Select '+doc.title" :checked="selectedSet.has(doc.id)" @change="toggleSelected(doc.id,($event.target as HTMLInputElement).checked)"/></td><td><details class="batch-row-menu"><summary :aria-label="'Actions for '+doc.title">⋮</summary><div><button class="text-tool" @click="emit('openDocument',doc.id)">Preview</button><button class="text-tool" :disabled="!rowDirty(doc)||localBusy" @click="saveRow(doc)">Save row</button><label>Position<input v-model.number="moveTargets[doc.id]" type="number" min="1" :max="documents.length"/></label><button class="text-tool" :disabled="!!dirtyRows.length" @click="moveDocument(doc)">Move</button><label>Hierarchy<select v-model="drafts[doc.id].group_role"><option value="member">Member</option><option value="parent">Designated parent</option></select></label></div></details></td><td><input v-model="drafts[doc.id].title" :aria-label="'Title for '+doc.original_name" maxlength="250"/></td><td v-if="!hiddenColumns.includes('File name')" :title="doc.original_name+' · '+sourceTimestamp(doc)">{{doc.original_name}}</td><td><input v-model="drafts[doc.id].document_date" :aria-label="'Date for '+doc.original_name" type="date" @input="drafts[doc.id].date_confirmed=true" :title="dateStatus(doc)"/></td><td><select v-model="drafts[doc.id].kind" :aria-label="'Type for '+doc.original_name"><option v-for="kind in kinds" :value="kind" :key="kind">{{kind}}</option></select></td><td><select v-model.number="drafts[doc.id].part" :aria-label="'Part for '+doc.original_name"><option v-for="part in 4" :value="part" :key="part">{{part}}</option></select></td><td><input v-model="drafts[doc.id].label" :aria-label="'Label for '+doc.original_name" maxlength="60"/></td><td v-if="!hiddenColumns.includes('Group')"><input v-model="drafts[doc.id].group_key" :aria-label="'Group for '+doc.original_name" maxlength="100"/></td><td>{{doc.page_count}}</td><td v-if="!hiddenColumns.includes('OCR')" :title="doc.ocr_status">{{doc.ocr_status==='native_text'?'Text':doc.ocr_status.split('_').join(' ')}}</td><td v-if="!hiddenColumns.includes('Status')">{{rowDirty(doc)?'Unsaved':doc.date_status==='confirmed'?'Reviewed':'Review date'}}</td></tr></tbody>
+  </table><p v-if="!filtered.length" class="review-empty">No documents match this filter. Your selection is unchanged.</p></div>
+  <footer class="batch-savebar"><span>{{dirtyRows.length}} unsaved changes</span><small>Tab moves cells · Enter edits · Escape cancels row</small><button class="membership-button quiet" :disabled="!dirtyRows.length||localBusy" @click="discard">Discard changes</button><button class="membership-button primary" :disabled="!dirtyRows.length||busy||localBusy" @click="save">{{localBusy?'Saving…':'Save changes'}}</button></footer>
+ </section>
+ </div>
 </template>

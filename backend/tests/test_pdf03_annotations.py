@@ -66,7 +66,7 @@ def test_editable_pdf_marks_move_and_save_with_real_redaction(client, auth, matt
         source.set_metadata({'title': 'SECRET_META_5524'})
         source.embfile_add('secret.txt', b'SECRET_ATTACHMENT_5524')
         original = source.tobytes()
-    response = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    response = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('editable.pdf', original, 'application/pdf'))])
     assert response.status_code == 201, response.text
     doc = response.json()[0]
@@ -322,7 +322,7 @@ def test_editable_redaction_save_uses_rotated_display_coordinates(client, auth, 
             rect_width=displayed.width / screen.width,
             rect_height=displayed.height / screen.height)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('rotated-editable.pdf', original, 'application/pdf'))])
     assert uploaded.status_code == 201, uploaded.text
     doc = uploaded.json()[0]

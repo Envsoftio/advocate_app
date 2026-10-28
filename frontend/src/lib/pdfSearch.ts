@@ -1,4 +1,5 @@
 import { computed, onScopeDispose, ref, shallowRef, watch, type Ref } from 'vue'
+import { engineBlocked } from './engineConnection'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 
 /** Offsets refer to the original PDF.js item's str, in UTF-16 DOM Range units. */
@@ -154,6 +155,16 @@ export function usePdfSearch(document: Ref<PDFDocumentProxy | null>, query: Ref<
     if (matches.value.length) selectedIndex.value = ((selectedIndex.value + delta) % matches.value.length + matches.value.length) % matches.value.length
     return activeMatch.value
   }
+  // PDF.js range failures can leave a text promise pending. Bound each read,
+  // retain earlier results, and do not infer that unvisited pages have no text.
+  async function available<T>(work: Promise<T>): Promise<T> {
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([work, new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('PDF data unavailable')), engineBlocked.value ? 2000 : 10000)
+      })])
+    } finally { if (timeout) clearTimeout(timeout) }
+  }
   async function search(pdf: PDFDocumentProxy, needle: string, call: number) {
     const stale = () => call !== generation || document.value !== pdf
     const found: PdfSearchMatch[] = []
@@ -161,9 +172,9 @@ export function usePdfSearch(document: Ref<PDFDocumentProxy | null>, query: Ref<
     try {
       for (; pageNumber <= pdf.numPages; pageNumber++) {
         if (stale()) return
-        const page = await pdf.getPage(pageNumber)
+        const page = await available(pdf.getPage(pageNumber))
         if (stale()) return
-        const content = await page.getTextContent()
+        const content = await available(page.getTextContent())
         if (stale()) return
         const result = findPdfTextMatches(content.items, needle, { page: pageNumber, matchIndexOffset: found.length, limit: maxResults - found.length })
         found.push(...result.matches)

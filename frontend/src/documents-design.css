@@ -1,0 +1,158 @@
+/* JSON references: 05A / 23B, compact 22A / 22F, and ED01 / ED36 / ED40.
+   Geometry is in design pixels; the shared interface zoom is applied once. */
+.document-version-line {display:flex;align-items:center;gap:14px;min-width:0;width:100%}
+.document-revision {color:var(--cb-muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reader-mode-switch {display:flex;gap:8px}
+.reader-mode-switch .btn {height:34px;font-size:13px;padding:0 12px}
+:root .design-shell .reader-mode-switch .btn.active {border-color:var(--cb-link);background:var(--cb-selected);color:var(--cb-text)}
+.matter-rail>button[aria-label=Matters] {display:none}
+.matter-rail {padding-top:84px}
+.design-shell .reader-navigation>button:first-child:disabled {display:grid}
+@media(min-width:1200px) {
+  .design-shell .read-workspace .viewer-edit-workspace:has(>.virtual-thumbnail-rail),
+  .design-shell .read-workspace .viewer-edit-workspace:has(>.reader-side-panel) {grid-template-columns:232px minmax(0,1fr)}
+  .design-shell .read-workspace .virtual-thumbnail-rail,.design-shell .read-workspace .reader-side-panel {width:232px}
+  .design-shell .read-workspace .virtual-thumbnail-rail {padding-inline:44px}
+  .design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.virtual-thumbnail-rail),
+  .design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.reader-side-panel) {grid-template-columns:232px 250px minmax(0,1fr)}
+}
+@media(max-width:1199px) {.reader-mode-switch {display:none}.document-revision {display:none}}
+
+.app-shell.design-shell[data-preparation=true] {grid-template-rows:32px minmax(0,1fr) 28px}
+.design-shell[data-preparation=true] .application-bar {font-size:12px}
+.design-shell[data-preparation=true] .application-brand,.design-shell[data-preparation=true] .application-matter {height:30px}
+.design-shell[data-preparation=true] .app-main {padding-top:84px}
+.design-shell[data-preparation=true] .matter-rail {padding-top:104px}
+.design-shell[data-preparation=true] .open-workspace-tabs {position:fixed;top:32px;left:0;width:100%;max-width:none;height:40px;max-height:40px;display:flex;flex-direction:row;gap:0;padding:0;background:var(--cb-surface2);border:0;border-radius:0;box-shadow:none;overflow-x:auto;overflow-y:hidden;z-index:30}
+.design-shell[data-preparation=true] .open-workspace-tab {width:220px;min-width:180px;height:40px;flex:0 0 220px;border:0;border-radius:0;background:transparent}
+.design-shell[data-preparation=true] .open-workspace-tab.active {background:var(--cb-surface);box-shadow:inset 0 -2px var(--cb-link)}
+.design-shell[data-preparation=true] .open-workspace-tab-select {font-size:13px;max-width:190px}
+.design-shell[data-preparation=true] .mobile-nav-toggle {display:none}
+.preparation-utility {position:fixed;top:72px;left:0;right:0;height:44px;z-index:29;display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--cb-surface);border-bottom:1px solid var(--cb-border);font-size:12px;color:var(--cb-muted)}
+.preparation-search-trigger {display:flex;align-items:center;gap:12px;border:0;background:none;color:var(--cb-muted);font-size:13px;padding:0;text-align:left}
+.preparation-search-trigger kbd {margin-left:42px;font:inherit;font-size:12px}
+.preparation-save-state {display:flex;align-items:center;gap:8px;margin-left:auto}
+.preparation-save-state svg {color:var(--cb-warning)}
+.preparation-engine {display:flex;align-items:center;gap:8px;padding-left:16px;border-left:1px solid var(--cb-border)}
+.preparation-engine svg {color:var(--cb-success)}
+.design-shell[data-preparation=true] .documents-workspace {height:auto!important}
+.document-navigator {display:flex;flex-direction:column;flex:0 0 280px;width:280px;min-height:0;background:var(--cb-surface);border-right:1px solid var(--cb-border);font-size:13px;z-index:22}
+.document-navigator>header {display:flex;align-items:center;gap:10px;height:52px;flex-shrink:0;padding:0 12px 0 16px}
+.document-navigator h2 {font-size:16px;margin:0;font-weight:650}
+.document-navigator>header>span {margin-left:auto;color:var(--cb-muted);font-size:12px}
+.navigator-search {display:flex;align-items:center;gap:8px;margin:0 12px;height:34px;flex:0 0 34px;border:1px solid var(--cb-control-border);border-radius:8px;padding:0 10px;color:var(--cb-muted)}
+.navigator-search input {border:0;background:transparent;min-width:0;width:100%;height:30px;font:inherit;color:var(--cb-text);outline-offset:3px}
+.navigator-filters {display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;gap:12px}
+.navigator-filters>label {display:flex;align-items:center;border:1px solid var(--cb-control-border);border-radius:8px;height:34px;padding-left:10px}
+.navigator-filters select {border:0;background:transparent;font:inherit;font-weight:600;color:var(--cb-text);min-width:0;max-width:104px;padding:0 5px}
+.navigator-filters>.btn {height:34px;padding:0 12px;font-size:13px}
+.navigator-groups {flex:1;overflow:auto;min-height:0;padding:0 8px}
+.navigator-part {border-bottom:1px solid var(--cb-border);padding:4px 0 12px}
+.navigator-part:last-child {border-bottom:0}
+.navigator-part-heading {display:flex;align-items:flex-start;gap:10px;width:100%;padding:12px 8px 6px;text-align:left;border:0;background:none;color:var(--cb-text);font-size:13px;font-weight:600}
+.navigator-part-heading>svg {margin-top:2px;color:var(--cb-muted)}
+.navigator-part-heading small {display:block;margin-top:5px;font-size:12px;color:var(--cb-muted);font-weight:400}
+.navigator-part-heading[aria-expanded=true] {text-transform:uppercase;color:var(--cb-muted);font-size:12px}
+.navigator-part-heading[aria-expanded=true] small {display:none}
+.navigator-document {display:flex;align-items:center;min-height:38px;border-radius:8px;gap:2px}
+.navigator-document:hover {background:var(--cb-surface2)}
+.navigator-document.selected {background:var(--cb-selected)}
+.navigator-document .navigator-grip {width:18px;height:30px;flex-shrink:0;padding:0;cursor:grab;color:var(--cb-muted)}
+.navigator-document-select {display:flex;align-items:flex-start;gap:9px;flex:1;min-width:0;padding:4px 6px 4px 0;border:0;background:none;text-align:left;color:var(--cb-text);font-size:13px}
+.navigator-document-select>svg {flex-shrink:0;margin-top:3px;color:var(--cb-muted)}
+.navigator-document-select>span {min-width:0;flex:1}
+.navigator-document-select strong {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;line-height:17px}
+.navigator-document.selected strong {font-weight:600}
+.navigator-document-select small {display:block;font-size:12px;line-height:17px;color:var(--cb-text-onCanvas)}
+.navigator-actions {display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-top:1px solid var(--cb-border);gap:8px}
+.navigator-actions .text-tool {font-size:12px}
+.navigator-actions details {position:relative}
+.navigator-actions summary {list-style:none;cursor:pointer}
+.navigator-actions summary::-webkit-details-marker {display:none}
+.navigator-menu {position:absolute;bottom:36px;left:0;min-width:230px;background:var(--cb-surface);border:1px solid var(--cb-control-border);border-radius:8px;padding:5px;box-shadow:0 8px 24px #0002;z-index:35}
+.navigator-menu button {display:block;width:100%;border:0;background:none;color:var(--cb-text);text-align:left;padding:10px;font-size:13px}
+.navigator-menu button:hover {background:var(--cb-selected)}
+.document-navigator>footer {flex-shrink:0;min-height:48px;border-top:1px solid var(--cb-border);padding:12px 14px;color:var(--cb-muted);font-size:12px}
+.navigator-empty {padding:16px;color:var(--cb-muted);line-height:1.6}
+.design-shell .preparation-preview .viewer-edit-workspace {grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+.design-shell .preparation-preview .viewer-edit-workspace:has(>.reader-side-panel) {grid-template-columns:200px minmax(0,1fr)}
+.design-shell .preparation-preview .viewer-page-column {grid-row:1;grid-column:-2/-1}
+.design-shell .preparation-preview .reader-side-panel {grid-row:1;width:200px}
+.design-shell .preparation-preview .reader-tool-navigation {display:none!important}
+.design-shell .preparation-preview .document-header .reader-document strong {font-size:14px}
+.design-shell .preparation-preview .document-header .artifact-select {width:160px}
+.design-shell .preparation-preview .document-header {padding-inline:20px}
+.design-shell .preparation-preview .open-editor {width:124px;flex-shrink:0;height:34px;font-size:13px}
+.design-shell .preparation-preview .preparation-list-toggle {display:none}
+.design-shell .preparation-preview .reader-navigation {padding-inline:10px;gap:4px}
+.design-shell .preparation-preview .reader-navigation .page-counter {border:0;min-width:130px}
+.design-shell .preparation-preview .reader-navigation .zoom-select {border:0;background:transparent}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace>.inspector-panel {position:relative;inset:auto;flex:0 0 272px;width:272px;height:100%;border-left:1px solid var(--cb-border);box-shadow:none}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace.details-open .viewer-edit-workspace {margin-right:0}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-panel>.panel-header {min-height:52px;padding:12px 16px;border-bottom:0}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-panel h2 {font-size:16px}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-panel .panel-header>div>span,
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-heading {display:none}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content {padding:2px 16px 12px;gap:16px}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content .field {font-size:12px;gap:8px}
+:root .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content .field input,
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content .field select {min-height:36px;height:36px;font-size:13px;border-color:var(--cb-control-border);border-radius:8px}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content>.btn {position:sticky;bottom:0;flex-shrink:0;min-height:36px;box-shadow:0 -10px 0 6px var(--cb-surface)}
+.preparation-metadata-state {display:flex;align-items:center;gap:7px;min-height:26px;padding:4px 8px;border-radius:16px;background:var(--cb-successBg);color:var(--cb-status-success-text);font-size:12px;font-weight:600}
+.preparation-metadata-state.dirty {background:var(--cb-warningBg);color:var(--cb-status-warning-text)}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace:not(.navigator-open) .preparation-list-toggle {display:grid}
+@media(max-width:1199px) {
+  .design-shell[data-preparation=true] .document-navigator {position:absolute;inset:0 auto 0 0;box-shadow:10px 0 24px #0002}
+  .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace>.inspector-panel {position:absolute;inset:64px 0 0 auto;width:272px;height:auto;box-shadow:-8px 0 24px #0002}
+  .design-shell .preparation-preview .preparation-list-toggle {display:grid}
+  .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace.details-open .viewer-edit-workspace {margin-right:272px}
+  .design-shell[data-preparation=true] .preparation-save-state {display:none}
+  .preparation-search-trigger {flex:1}
+  .preparation-search-trigger kbd {display:none}
+}
+@media(max-width:800px) {
+  .preparation-engine {display:none}
+  .design-shell .preparation-preview .document-header {padding-inline:10px}
+  .design-shell .preparation-preview .open-editor {width:90px;padding:0 8px;font-size:12px}
+}
+
+.design-shell[data-preparation=true][data-compact-preparation=true] .document-navigator {position:absolute;inset:0 auto 0 0;box-shadow:10px 0 24px #0002}
+.app-shell.design-shell[data-preparation=true][data-compact-preparation=true] .documents-workspace.preparation-workspace>.inspector-panel {position:absolute;inset:64px 0 0 auto;flex:none;width:272px;height:auto;box-shadow:-8px 0 24px #0002}
+.design-shell[data-preparation=true][data-compact-preparation=true] .preparation-list-toggle {display:grid}
+.app-shell.design-shell[data-preparation=true][data-compact-preparation=true] .documents-workspace.preparation-workspace.details-open .viewer-edit-workspace {margin-right:272px}
+.design-shell[data-preparation=true] .inspector-content {display:flex;flex-direction:column}
+.design-shell[data-preparation=true] .document-revision {min-width:0}
+.design-shell[data-preparation=true] .preparation-metadata-state {margin-bottom:8px}
+.design-shell[data-preparation=true] .inspector-content .field {flex-shrink:0}
+
+.inspector-save-footer {flex-shrink:0;padding:12px 16px;border-top:1px solid var(--cb-border);background:var(--cb-surface)}
+.inspector-save-footer .btn {min-height:34px;height:34px;font-size:12px}
+:root .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content .field input {height:36px;min-height:36px;padding:7px 10px}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content .field {margin:0}
+.metadata-signature-review {font-size:13px}
+.metadata-signature-review summary {cursor:pointer;min-height:30px;padding:7px 0}
+.metadata-signature-review[open] summary {margin-bottom:8px}
+
+/* ED01I docks information on the right, retaining page navigation. */
+.design-shell .read-workspace .viewer-edit-workspace.has-document-information {grid-template-columns:200px minmax(0,1fr) 292px}
+.design-shell .read-workspace .viewer-edit-workspace.has-document-information>.viewer-page-column {grid-column:2}
+.design-shell .read-workspace .viewer-edit-workspace.has-document-information>.document-information-panel {grid-column:3;grid-row:1/-1;width:292px;border-left:1px solid var(--cb-border);border-right:0}
+@media(min-width:1200px) {.design-shell .read-workspace .viewer-edit-workspace.has-document-information {grid-template-columns:232px minmax(0,1fr) 292px}}
+.design-shell .preparation-preview .viewer-edit-workspace.has-document-information {grid-template-columns:minmax(0,1fr) 292px}
+.design-shell .preparation-preview .viewer-edit-workspace.has-document-information>.viewer-page-column {grid-column:1}
+.design-shell .preparation-preview .viewer-edit-workspace.has-document-information>.document-information-panel {grid-column:2}
+/* ED24 retains document identity and modes; page controls float over the canvas. */
+.app-shell.design-shell:has(.focused-reading) {grid-template-columns:minmax(0,1fr);grid-template-rows:40px minmax(0,1fr) 28px}
+.app-shell.design-shell:has(.focused-reading)>.application-bar {display:flex;grid-row:1}
+.app-shell.design-shell:has(.focused-reading)>.application-status {display:flex;grid-row:3}
+.app-shell.design-shell:has(.focused-reading)>.matter-rail {display:none}
+.app-shell.design-shell:has(.focused-reading)>.app-main {grid-column:1;grid-row:2}
+.design-shell .focused-reading>.reader-navigation {position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:24;height:36px;min-height:36px;gap:2px;padding:2px 6px;border:1px solid var(--cb-control-border);border-radius:8px;box-shadow:0 4px 12px #0002}
+.design-shell .focused-reading>.reader-navigation>* {display:none}
+.design-shell .focused-reading>.reader-navigation>:nth-child(-n+6) {display:flex}
+.design-shell .focused-reading>.reader-navigation>.icon-btn {width:24px;height:30px;min-height:30px}
+.design-shell .focused-reading>.reader-navigation .page-counter {min-width:110px;height:30px;border:0;padding:0}
+.design-shell .focused-reading>.reader-navigation .zoom-select {width:70px;flex-basis:70px;height:30px;min-height:30px;border:0}
+
+.navigator-filters select {height:32px;min-height:32px}
+:root[data-effective-theme] .navigator-filters select {background:transparent}

@@ -9,6 +9,13 @@ import {
   watch,
 } from "vue";
 import {
+  ChevronDown,
+  LayoutGrid,
+  ListTree,
+  ListChecks,
+  Box,
+  Files,
+  HardDrive,
   Archive,
   ArrowDownToLine,
   ArrowRight,
@@ -49,16 +56,25 @@ import {
   X,
 } from "lucide-vue-next";
 import PdfViewer from "./components/PdfViewer.vue";
+import DocumentNavigator from "./components/DocumentNavigator.vue";
 import DocumentThumbnail from "./components/DocumentThumbnail.vue";
 import PasswordInput from "./components/PasswordInput.vue";
 import PageTools from "./components/PageTools.vue";
-import ManualBookmarks from "./components/ManualBookmarks.vue";
+import BundleMembership from "./components/BundleMembership.vue";
 import BundlePreview from "./components/BundlePreview.vue";
 import BuildComparison from "./components/BuildComparison.vue";
 import FilingReview from "./components/FilingReview.vue";
 import IndexImport from "./components/IndexImport.vue";
+import BundleStructure from "./components/BundleStructure.vue";
 import OutputPresets from "./components/OutputPresets.vue";
 import DocumentTable from "./components/DocumentTable.vue";
+import EngineNotice from "./components/EngineNotice.vue";
+import { engineState, engineBlocked, engineReviewReason, autosaveHeld, disconnectEngine } from "./lib/engineConnection";
+import FindingReviewPanel from './components/FindingReviewPanel.vue';
+import PreflightWorkspace from './components/PreflightWorkspace.vue';
+import OutputChecksDialog from './components/OutputChecksDialog.vue';
+import BuildWorkspace from "./components/BuildWorkspace.vue";
+import BundleExportDialog from "./components/BundleExportDialog.vue";
 import ExportPdfReview from "./components/ExportPdfReview.vue";
 import MatterForm from "./components/MatterForm.vue";
 import MatterHome from "./components/MatterHome.vue";
@@ -141,11 +157,48 @@ const tabDiscardRequest = ref<{
   message: string;
   resolve: (allow: boolean) => void;
   focusReturn: HTMLElement | null;
+  discardAll: boolean;
+  canSave: boolean;
 } | null>(null);
-function askTabDiscard(message: string): Promise<boolean> {
+const membershipOpen = ref(false);
+const membershipDirty = ref(false);
+const membershipCollapsed = ref(false);
+const membershipPanel = ref<InstanceType<typeof BundleMembership>|null>(null);
+let membershipInvoker: HTMLElement|null = null;
+async function openMembership() {
+  if (!(await guardArtifactTransition('Bundle membership'))) return;
+  membershipInvoker = document.activeElement as HTMLElement;
+  membershipOpen.value = true;
+  membershipCollapsed.value = window.innerWidth < 1200;
+}
+async function leaveMembership() {
+  if (!membershipOpen.value) return true;
+  if (membershipPanel.value?.isSaving()) return false;
+  if (membershipDirty.value && !(await askTabDiscard('Apply or discard membership changes before leaving?', false))) return false;
+  membershipPanel.value?.discard();
+  membershipDirty.value = false;
+  membershipOpen.value = false;
+  await nextTick();
+  const target = membershipInvoker?.isConnected ? membershipInvoker : document.querySelector<HTMLElement>('.membership-status-entry');
+  target?.focus({preventScroll:true});
+  return true;
+}
+async function membershipApplied() { await loadMatterResources(); }
+async function openMembershipDocument(id:string) {
+  if (await leaveMembership()) await openDocumentTab(id);
+}
+const includedDocuments = computed(()=>docs.value.filter(d=>d.bundle_included));
+const inclusionSummary = computed(()=>`${includedDocuments.value.length} included / ${includedDocuments.value.reduce((sum,d)=>sum+d.page_count,0)} source pages · ${docs.value.length-includedDocuments.value.length} reference-only`);
+const navigationSaving = ref(false);
+const navigationError = ref("");
+function askTabDiscard(message: string, discardAll = false, canSave = true): Promise<boolean> {
+  if (tabDiscardRequest.value) return Promise.resolve(false);
+  navigationError.value = "";
   return new Promise((resolve) => {
     tabDiscardRequest.value = {
       message,
+      discardAll,
+      canSave,
       resolve,
       focusReturn: document.activeElement as HTMLElement | null,
     };
@@ -157,10 +210,46 @@ function askTabDiscard(message: string): Promise<boolean> {
   });
 }
 function answerTabDiscard(allow: boolean) {
+  if (navigationSaving.value) return;
   const request = tabDiscardRequest.value;
+  if (allow && request?.discardAll) resetDrafts();
   tabDiscardRequest.value = null;
   request?.resolve(allow);
   if (!allow) void nextTick(() => request?.focusReturn?.focus());
+}
+function trapNavigationFocus(event: KeyboardEvent) {
+  const buttons = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+  const first = buttons[0], last = buttons[buttons.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+}
+async function saveBeforeNavigation() {
+  const request = tabDiscardRequest.value;
+  if (!request || navigationSaving.value || busy.value) return;
+  navigationSaving.value = true;
+  navigationError.value = '';
+  try {
+    if (tableDirty.value && !(await documentTablePanel.value?.save())) throw new Error('Review changes could not be saved. Check the selected fields and source context.');
+    if (membershipDirty.value && !(await membershipPanel.value?.apply(false))) throw new Error('Membership could not be applied.');
+    if (documentDirty.value && !(await saveDocument(true))) throw new Error('Document details could not be saved.');
+    if (settingsDirty.value && !(await savePolicy(true))) throw new Error('Bundle settings could not be saved.');
+    if (formattingDirty.value && !(await outputPresetsPanel.value?.saveDraft())) throw new Error('Output policy could not be saved.');
+    if (pdfViewer.value?.hasPendingDraft() && !(await pdfViewer.value.savePendingDraft()))
+      throw new Error('The PDF tool draft could not be saved. Complete its required fields or placement before leaving.');
+    if (documentDirty.value || settingsDirty.value || formattingDirty.value) throw new Error('Newer unsaved changes remain. Save again before leaving.');
+    tabDiscardRequest.value = null;
+    request.resolve(true);
+    await resumeAutosaveWhenClean();
+  } catch (err) { navigationError.value = `${friendlyError(err)} Your work and pending destination are retained.`; }
+  finally { navigationSaving.value = false; }
+}
+async function guardArtifactTransition(destination: string) {
+  if (!tableDirty.value && !documentDirty.value && !settingsDirty.value && !formattingDirty.value && !pdfViewer.value?.hasPendingDraft()) return true;
+  if (!(await askTabDiscard(`Save changes before opening ${destination}?`, true))) return false;
+  pdfViewer.value?.discardPendingDraft();
+  outputPresetsPanel.value?.discard();
+  formattingDirty.value = false;
+  return true;
 }
 const activeTab = computed(
   () => workspaceTabs.value.find((tab) => tab.id === activeTabId.value) || null,
@@ -243,8 +332,96 @@ const selectedOcrRuns = computed<OcrRun[]>(() => {
   }
 });
 const detailsOpen = ref(false);
-const readerFocus = ref(false);
+const compactDocuments = ref(false);
+const documentDetailsPanel = ref<HTMLElement | null>(null);
+let detailsTrigger: HTMLElement | null = null;
+async function toggleDocumentDetails() {
+  if (detailsOpen.value) return closeDocumentDetails();
+  detailsTrigger = document.activeElement as HTMLElement | null;
+  detailsOpen.value = true;
+  if(preparationVisible.value && compactDocuments.value) preparationListOpen.value = false;
+  await nextTick();
+  documentDetailsPanel.value?.querySelector<HTMLButtonElement>("button")?.focus({preventScroll:true});
+  window.requestAnimationFrame(() => {
+    if (detailsOpen.value && document.activeElement === detailsTrigger)
+      documentDetailsPanel.value?.querySelector<HTMLButtonElement>("button")?.focus({preventScroll:true});
+  });
+}
+async function closeDocumentDetails() {
+  detailsOpen.value = false;
+  await nextTick();
+  const trigger = detailsTrigger?.isConnected ? detailsTrigger :
+    documentsWorkspace.value?.querySelector<HTMLElement>('[aria-controls="document-details-panel"]');
+  const menu = trigger?.closest('details');
+  (menu && !menu.open ? menu.querySelector<HTMLElement>('summary') : trigger)?.focus({preventScroll:true});
+}
+const preparationMode = ref(false);
+const preparationVisible = computed(() => preparationMode.value && activeView.value === 'documents' && !documentTableOpen.value);
+const preparationListOpen = ref(true);
+async function showPreparation() {
+  if (!(await leaveMembership())) return;
+  if (pdfViewer.value?.hasPendingDraft() && !(await guardArtifactTransition('Documents'))) return;
+  await showView('documents');
+  if (activeView.value !== 'documents') return;
+  await nextTick();
+  fitDocumentsWorkspace();
+  preparationMode.value = true;
+  preparationListOpen.value = !compactDocuments.value;
+  readerFocus.value = true;
+  detailsOpen.value = !compactDocuments.value;
+  editorExpanded.value = false;
+  await nextTick();
+  fitDocumentsWorkspace();
+}
+async function closePreparationList() {
+  preparationListOpen.value = false;
+  await nextTick();
+  documentsWorkspace.value?.querySelector<HTMLButtonElement>('.preparation-list-toggle')?.focus({preventScroll:true});
+}
+async function selectPreparationDocument(id:string) {
+  await openDocumentTab(id);
+  if (selectedDocId.value !== id) return;
+  preparationMode.value = true;
+  detailsOpen.value = !compactDocuments.value;
+}
+function openEditor() {
+  preparationMode.value = false;
+  detailsOpen.value = false;
+  readerFocus.value = true;
+  void nextTick(() => documentsWorkspace.value?.querySelector<HTMLElement>(".viewer-root")?.focus({preventScroll:true}));
+}
+async function openPreparationSearch() {
+  if (membershipOpen.value) { if (await leaveMembership()) await openDocumentSearch(); return; }
+  preparationMode.value = false;
+  readerFocus.value = true;
+  await toggleDocumentBrowser();
+}
+const readerFocus = ref(true);
+const workspaceMenuOpen = ref(false);
+const tabsMenuOpen = ref(false);
 const editorExpanded = ref(false);
+async function toggleDocumentBrowser() {
+  readerFocus.value = !readerFocus.value;
+  if (!readerFocus.value && compactDocuments.value) detailsOpen.value = false;
+  await nextTick();
+  if (!readerFocus.value) documentsWorkspace.value?.querySelector<HTMLInputElement>('[aria-label="Search documents"]')?.focus({preventScroll:true});
+  else documentsWorkspace.value?.querySelector<HTMLButtonElement>('.document-browser-trigger')?.focus({preventScroll:true});
+}
+async function closeDocumentBrowser() {
+  readerFocus.value = false;
+  await toggleDocumentBrowser();
+}
+async function browseMatterDocuments() {
+  await showView('documents');
+  if (activeView.value !== 'documents') return;
+  readerFocus.value = true;
+  await toggleDocumentBrowser();
+}
+async function activateTabFromMenu(tab:WorkspaceTab) {
+  await activateTab(tab);
+  if (activeTabId.value === tab.id && activeView.value === tab.view) tabsMenuOpen.value = false;
+}
+
 let previousReaderFocus = false;
 function toggleEditorExpanded() {
   if (editorExpanded.value) {
@@ -258,10 +435,34 @@ function toggleEditorExpanded() {
 }
 
 const documentTableOpen = ref(false);
+const documentTablePanel = ref<InstanceType<typeof DocumentTable>|null>(null);
+const tableDirty = ref(false);
 const pageToolsOpen = ref(false);
 const pageToolsDialog = ref<HTMLDialogElement | null>(null);
 const documentsWorkspace = ref<HTMLElement | null>(null);
 const documentsWorkspaceHeight = ref<number | null>(null);
+let pendingDocumentSearchFocus = false;
+function restoreDocumentSearchFocus() {
+  if (!pendingDocumentSearchFocus || activeView.value !== 'documents') return;
+  const input = documentsWorkspace.value?.querySelector<HTMLInputElement>('[aria-label="Search documents"]');
+  if (input?.getClientRects().length) {
+    input.focus({preventScroll:true});
+    pendingDocumentSearchFocus = false;
+  }
+}
+async function openDocumentSearch() {
+  pendingDocumentSearchFocus = true;
+  if (activeView.value !== 'documents') await showView('documents');
+  if (activeView.value !== 'documents') { pendingDocumentSearchFocus = false; return; }
+  preparationMode.value = false;
+  readerFocus.value = false;
+  workspaceMenuOpen.value = false;
+  tabsMenuOpen.value = false;
+  if (compactDocuments.value) detailsOpen.value = false;
+  await nextTick();
+  restoreDocumentSearchFocus();
+}
+watch(documentsWorkspace, restoreDocumentSearchFocus, {flush:'post'});
 const activeView = ref<View>("documents");
 async function focusMain() {
   await nextTick();
@@ -285,7 +486,7 @@ const pageQuery = ref("");
 const pageSearch = ref<PageSearchResult | null>(null);
 const pageSearchBusy = ref(false);
 const pageSearchError = ref("");
-const pageTarget = ref<{ documentId: string; page: number; sequence: number }>({
+const pageTarget = ref<{ documentId: string; page: number; sequence: number; revision?: number }>({
   documentId: "",
   page: 1,
   sequence: 0,
@@ -324,6 +525,15 @@ const toast = ref<{
   kind: "success" | "error" | "info";
 } | null>(null);
 const activeJob = ref<Job | null>(null);
+const cancelPending = ref(false);
+const buildSubmitting = ref(false);
+const buildWorkspace = ref<InstanceType<typeof BuildWorkspace> | null>(null);
+const outputChecksArtifact = ref<ExportManifest|null>(null);
+const preflightFilter = ref('all');
+const exportDialogArtifact = ref<ExportManifest | null>(null);
+const buildShell = computed(() => !!currentMatterId.value && ['index','build','storage','validation'].includes(activeView.value));
+const expandedBuildShell = computed(() => buildShell.value && !reviewingPdf.value);
+
 const retryOcrLanguage = ref<"eng" | "hin" | "eng+hin">("eng");
 const savingExport = ref(false);
 const printRequest = ref<
@@ -346,7 +556,80 @@ const printBusy = ref(false);
 const printError = ref("");
 const printPreviewUrl = ref("");
 const printFrame = ref<HTMLIFrameElement | null>(null);
-const reviewingPdf = ref<{ exportId: string; filename: string } | null>(null);
+const reviewingPdf = ref<{ exportId: string; filename: string; originalId?: string } | null>(null);
+const artifactOptions = computed(() => [
+  {value:'working',label:'Working Copy · Editable'},
+  {value:'original',label:'Imported original · Read only'},
+  ...exportsList.value.flatMap(build => build.files.filter(file => file.name.endsWith('.pdf')).map(file => ({
+    value:`export:${build.id}:${file.name}`,
+    label:`Build ${build.id.slice(0,8)} · ${file.name}${build.stale ? ' · Stale' : ''} · Read only`,
+  }))),
+]);
+async function retryWorkingReader() {
+  if (engineBlocked.value || !(await guardArtifactTransition('this working PDF again'))) return;
+  await pdfViewer.value?.reloadReader();
+}
+async function switchArtifact(value: string) {
+  if (value === 'working') {
+    reviewingPdf.value = null;
+    if (selectedDocId.value && activeView.value !== 'documents') await openDocumentTab(selectedDocId.value);
+    return;
+  }
+  const selected = selectedDoc.value;
+  if (!selected || !(await guardArtifactTransition(artifactOptions.value.find(item => item.value === value)?.label || 'artifact'))) return;
+  if (value === 'original') reviewingPdf.value = {exportId:'', filename:selected.original_name, originalId:selected.id};
+  else {
+    const [,exportId,filename] = value.split(':');
+    if (exportsList.value.some(build => build.id === exportId && build.files.some(file => file.name === filename)))
+      reviewingPdf.value = {exportId,filename};
+  }
+}
+const preflightContext = ref<{finding:PreflightCheck, tabId:string, matterId:string, focusId:string,outputBuildId?:string}|null>(null);
+let findingNavigationSequence=0;
+async function openFinding(check: PreflightCheck, outputBuildId?: string) {
+  if (!check.document_id || !currentMatterId.value || !activeTabId.value) return;
+  const call=++findingNavigationSequence;
+  const origin = {outputBuildId, finding:{...check},tabId:activeTabId.value,matterId:currentMatterId.value,focusId:`finding-${check.finding_id}`};
+  try {
+    const currentDocs = await api<MatterDocument[]>(`/matters/${origin.matterId}/documents`);
+    const doc = currentDocs.find(item => item.id === check.document_id);
+    if (!doc) throw new Error("This finding’s document is unavailable. Run checks again.");
+    if (doc.archived_at || (check.target_revision !== undefined && doc.revision !== check.target_revision) ||
+        (check.page_index !== undefined && (check.page_index < 0 || check.page_index >= doc.page_count)))
+      throw new Error('This finding targets an unavailable or older revision. Run checks again; no substitute page was opened.');
+    if (currentMatterId.value !== origin.matterId || activeTabId.value !== origin.tabId || call !== findingNavigationSequence) return;
+    docs.value = currentDocs;
+    await openDocumentTab(doc.id, check.page_index === undefined ? undefined : check.page_index + 1, check.target_revision);
+    if (selectedDocId.value === doc.id && activeView.value === 'documents') {
+      preparationMode.value = false;
+      detailsOpen.value = false;
+      preflightContext.value = origin;
+      if (check.artifact === 'original') await switchArtifact('original');
+    }
+  } catch (err) { issue(err); }
+}
+async function returnToPreflight() {
+  const context = preflightContext.value;
+  if (!context) return;
+  const tab = workspaceTabs.value.find(item => item.id === context.tabId);
+  if (!tab) { notify('The originating Preflight tab was closed.', 'error'); return; }
+  tab.view = context.outputBuildId ? 'build' : 'validation';
+  await activateTab(tab);
+  if (activeTabId.value !== tab.id) return;
+  pendingFindingFocusId = context.focusId;
+  await validate();
+  if(context.outputBuildId) {
+    // Source edits cannot repair an immutable output. Recheck its actual bytes,
+    // retaining the originating historical run/selection for review.
+    try { await api(`/matters/${context.matterId}/exports/${context.outputBuildId}/validation/run`,'POST',{}); }
+    catch (err) { issue(err); }
+    if (activeTabId.value !== tab.id || currentMatterId.value !== context.matterId) return;
+    outputChecksArtifact.value=exportsList.value.find(b=>b.id===context.outputBuildId)||null;
+  }
+  await nextTick();
+  restoreFindingFocus();
+  preflightContext.value = null;
+}
 const pdfImportRequest = ref<{ name: string; error: string } | null>(null);
 const pdfImportPassword = ref("");
 let pdfImportResolve: ((password: string | null) => void) | null = null;
@@ -379,8 +662,14 @@ const settingsAutosaveState = ref<"idle" | "saving" | "failed">("idle");
 let documentAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
 let settingsAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
 const formattingDirty = ref(false);
-const outputPresetsPanel = ref<InstanceType<typeof OutputPresets> | null>(null);
+const outputPresetsPanel = ref<InstanceType<typeof OutputPresets> | InstanceType<typeof BundleStructure> | null>(null);
+const structureMode = ref("map");
+async function openStructure(name:string) { structureMode.value=name; await showView("index"); }
+async function openStructurePolicy(name:string) { if (!(await guardArtifactTransition(name))) return; await showView("build"); await nextTick(); buildWorkspace.value?.openTool(name); }
+async function structureModified() { await refreshMatters(); resetDrafts(); await loadMatterResources(); }
 let jobTimer: ReturnType<typeof setInterval> | null = null;
+let jobPollSequence=0;
+watch(currentMatterId,()=>{jobPollSequence++;if(jobTimer)clearInterval(jobTimer);jobTimer=null;activeJob.value=null;cancelPending.value=false;exportDialogArtifact.value=null;});
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let healthTimer: ReturnType<typeof setInterval> | null = null;
 let connecting = false;
@@ -422,6 +711,7 @@ function scrollToExports() {
   const target =
     exportsPanel.value?.querySelector<HTMLElement>(".office-quick-export") ||
     exportsPanel.value;
+  void buildWorkspace.value?.showOutputTools();
   target?.scrollIntoView({ behavior: "instant", block: "center" });
 }
 function focusExportActions() {
@@ -446,8 +736,20 @@ function openExports() {
   focusExportsAfterEnter = true;
   showView("build");
 }
+let pendingFindingFocusId: string | null = null;
+function restoreFindingFocus() {
+  if (!pendingFindingFocusId || activeView.value !== 'validation') return;
+  const entry = document.getElementById(pendingFindingFocusId);
+  if (entry) { entry.focus(); pendingFindingFocusId = null; }
+  else {
+    const runChecks = document.querySelector<HTMLButtonElement>('.preflight-workspace .build-heading button');
+    if (runChecks) { runChecks.focus(); pendingFindingFocusId = null; notify('The original finding is no longer in the current results. Review the updated checks.', 'info'); }
+  }
+}
 function afterWorkspaceSectionEnter() {
   fitDocumentsWorkspace();
+  restoreDocumentSearchFocus();
+  restoreFindingFocus();
   if (focusExportsAfterEnter && activeView.value === "build") {
     focusExportsAfterEnter = false;
     focusExportActions();
@@ -472,7 +774,7 @@ const errorChecks = computed(() =>
 const warningChecks = computed(() =>
   checks.value.filter((c) => c.severity === "warning"),
 );
-const signatureRiskDocs = computed(() => signatureRiskDocuments(docs.value));
+const signatureRiskDocs = computed(() => signatureRiskDocuments(includedDocuments.value));
 const totalPages = computed(() =>
   docs.value.reduce((n, d) => n + d.page_count, 0),
 );
@@ -510,13 +812,13 @@ const settingsDirty = computed(
 function queueDocumentAutosave() {
   if (documentAutosaveTimer) clearTimeout(documentAutosaveTimer);
   const id = selectedDocId.value;
-  if (!documentDirty.value || !id || !docEditor.title.trim()) return;
+  if (engineBlocked.value || autosaveHeld.value || !documentDirty.value || !id || !docEditor.title.trim()) return;
   if (documentAutosaveState.value === "failed")
     documentAutosaveState.value = "idle";
   documentAutosaveTimer = setTimeout(() => {
     documentAutosaveTimer = null;
-    if (selectedDocId.value !== id || !documentDirty.value) return;
-    if (busy.value) {
+    if (engineBlocked.value || autosaveHeld.value || selectedDocId.value !== id || !documentDirty.value) return;
+    if (busy.value || tabDiscardRequest.value) {
       queueDocumentAutosave();
       return;
     }
@@ -541,13 +843,13 @@ watch(
 function queueSettingsAutosave() {
   if (settingsAutosaveTimer) clearTimeout(settingsAutosaveTimer);
   const id = currentMatterId.value;
-  if (!settingsDirty.value || !id) return;
+  if (engineBlocked.value || autosaveHeld.value || !settingsDirty.value || !id) return;
   if (settingsAutosaveState.value === "failed")
     settingsAutosaveState.value = "idle";
   settingsAutosaveTimer = setTimeout(() => {
     settingsAutosaveTimer = null;
-    if (currentMatterId.value !== id || !settingsDirty.value) return;
-    if (busy.value || isJobActive.value) {
+    if (engineBlocked.value || autosaveHeld.value || currentMatterId.value !== id || !settingsDirty.value) return;
+    if (busy.value || isJobActive.value || tabDiscardRequest.value) {
       queueSettingsAutosave();
       return;
     }
@@ -565,6 +867,7 @@ watch(
 );
 
 function resetDrafts() {
+  documentTablePanel.value?.discard();
   const doc = selectedDoc.value;
   docEditor.title = doc?.title || "";
   docEditor.kind = doc?.kind || "other";
@@ -580,7 +883,7 @@ function resetDrafts() {
   matterEditor.keep_groups_intact = matter?.keep_groups_intact ?? true;
 }
 function confirmDiscardDrafts() {
-  if (!documentDirty.value && !settingsDirty.value && !formattingDirty.value)
+  if (!tableDirty.value && !documentDirty.value && !settingsDirty.value && !formattingDirty.value)
     return true;
   if (
     !window.confirm(
@@ -644,7 +947,10 @@ function tabHasDraft(tab: WorkspaceTab) {
     (tab.id === activeTabId.value && formattingDirty.value)
   );
 }
+let tabActivationSequence = 0;
 async function activateTab(tab: WorkspaceTab) {
+  if (tableDirty.value && !(await guardArtifactTransition("the selected tab"))) return;
+  if (!(await leaveMembership())) return;
   if (
     activeTabId.value === tab.id &&
     activeView.value === tab.view &&
@@ -665,11 +971,12 @@ async function activateTab(tab: WorkspaceTab) {
     outputPresetsPanel.value?.discard();
     formattingDirty.value = false;
   }
+  const activation = ++tabActivationSequence;
   if (activeTabId.value !== tab.id) captureActiveTab();
   activeTabId.value = tab.id;
   pageToolsOpen.value = false;
   documentTableOpen.value = false;
-  readerFocus.value = false;
+  readerFocus.value = true;
   const matterChanged = currentMatterId.value !== tab.matterId;
   currentMatterId.value = tab.matterId;
   selectedDocId.value =
@@ -680,10 +987,14 @@ async function activateTab(tab: WorkspaceTab) {
   mobileNavOpen.value = false;
   if (matterChanged) await loadMatterResources();
   await nextTick();
+  if (activation !== tabActivationSequence || activeTabId.value !== tab.id || currentMatterId.value !== tab.matterId) return;
   resetDrafts();
   restoreTabDraft(tab);
 }
 async function openMatterTab(matterId: string, view: View = "overview") {
+  if (tableDirty.value && !(await guardArtifactTransition(view))) return;
+  if (view!=="documents") {documentTableOpen.value=false;tableDirty.value=false;}
+  if (!(await leaveMembership())) return;
   const id = `matter:${matterId}`;
   let tab = workspaceTabs.value.find((item) => item.id === id);
   const created = !tab;
@@ -718,7 +1029,7 @@ async function openMatterTab(matterId: string, view: View = "overview") {
     else if (previousView) tab.view = previousView;
   }
 }
-async function openDocumentTab(documentId: string, page?: number) {
+async function openDocumentTab(documentId: string, page?: number, revision?: number) {
   const matterId = currentMatterId.value;
   if (!matterId) return;
   const id = `document:${matterId}:${documentId}`;
@@ -742,22 +1053,26 @@ async function openDocumentTab(documentId: string, page?: number) {
     workspaceTabs.value = workspaceTabs.value.filter(
       (item) => item.id !== tab.id,
     );
+  if (activeTabId.value === tab.id) { preparationMode.value = false; readerFocus.value = true; workspaceMenuOpen.value = false; tabsMenuOpen.value = false; }
   if (activeTabId.value === tab.id && page !== undefined)
     pageTarget.value = {
       documentId,
       page,
+      revision,
       sequence: pageTarget.value.sequence + 1,
     };
 }
 async function closeWorkspaceTab(tab: WorkspaceTab) {
+  if (tableDirty.value && !(await guardArtifactTransition("closing this tab"))) return;
+  if (!(await leaveMembership())) return;
   const closing = tab.documentId
     ? [tab]
     : workspaceTabs.value.filter((item) => item.matterId === tab.matterId);
-  const pendingPdfAction =
-    tab.id === activeTabId.value && !!pdfViewer.value?.hasPendingDraft();
+  const closesActive = closing.some(item => item.id === activeTabId.value);
+  const pendingPdfAction = closesActive && !!pdfViewer.value?.hasPendingDraft();
   if (
     (pendingPdfAction || closing.some(tabHasDraft)) &&
-    !(await askTabDiscard("Discard unsaved changes in the closing tab(s)?"))
+    !(await askTabDiscard("Save or discard unsaved changes in the closing tab(s)?", closesActive, !closing.some(item => item.id !== activeTabId.value && item.hadUnsavedChanges)))
   )
     return;
   if (pendingPdfAction) pdfViewer.value?.discardPendingDraft();
@@ -783,33 +1098,53 @@ function selectDocument(id: string) {
 function openPreviewDocument(id: string) {
   void openDocumentTab(id);
 }
-function prepareIndexBookmark(id: string) {
+async function applyIncludedDocumentSort(ordered:MatterDocument[]) {
+  let index=0;
+  await applyDocumentSort(docs.value.map(d=>d.bundle_included?ordered[index++]!:d));
+}
+async function moveIncludedDocument(id:string,direction:number) {
+  const ordered=[...includedDocuments.value], index=ordered.findIndex(d=>d.id===id), target=index+direction;
+  if(index<0||target<0||target>=ordered.length)return;
+  [ordered[index],ordered[target]]=[ordered[target]!,ordered[index]!];
+  await applyIncludedDocumentSort(ordered);
+}
+async function prepareIndexBookmark(id: string) {
+  if (outputPresetsPanel.value && "showBookmarks" in outputPresetsPanel.value) outputPresetsPanel.value.showBookmarks();
+  await nextTick();
   bookmarkPreset.value = {
     documentId: id,
     sequence: bookmarkPreset.value.sequence + 1,
   };
 }
+watch([activeView, currentMatterId], () => { workspaceMenuOpen.value = false; tabsMenuOpen.value = false; });
 watch(selectedDocId, (id) => {
   pageToolsOpen.value = false;
   if (!id) readerFocus.value = false;
 });
 function fitDocumentsWorkspace() {
   const workspace = documentsWorkspace.value;
-  if (!workspace || (window.innerWidth <= 700 && !editorExpanded.value)) {
+  if (!workspace) {
     documentsWorkspaceHeight.value = null;
     return;
   }
   const scale = uiScale.value / 100;
+  // Retain all three panels when there is room for a roughly 500px reader.
+  compactDocuments.value = workspace.getBoundingClientRect().width / scale < 1150;
+  if (window.innerWidth <= 700 && !editorExpanded.value) {
+    documentsWorkspaceHeight.value = null;
+    return;
+  }
   const minimum = window.innerWidth <= 1120 ? 240 : 320;
   documentsWorkspaceHeight.value = Math.max(
     minimum,
     Math.floor(
-      (window.innerHeight - workspace.getBoundingClientRect().top - 8) / scale,
+      (window.innerHeight - workspace.getBoundingClientRect().top) / scale - 28,
     ),
   );
 }
-watch([uiScale, activeView, currentMatterId, editorExpanded], async () => {
+watch([uiScale, activeView, currentMatterId, editorExpanded, documentTableOpen, preflightContext], async () => {
   await nextTick();
+  onResize();
   window.requestAnimationFrame(fitDocumentsWorkspace);
 });
 watch(pageToolsOpen, async (open) => {
@@ -818,7 +1153,9 @@ watch(pageToolsOpen, async (open) => {
   if (open && dialog && !dialog.open) dialog.showModal();
   if (!open && dialog?.open) dialog.close();
 });
-function showView(view: View) {
+async function showView(view: View) {
+  if (!(await leaveMembership())) return;
+  workspaceMenuOpen.value = false;
   if (activeView.value === view) {
     mobileNavOpen.value = false;
     return;
@@ -829,37 +1166,30 @@ function showView(view: View) {
     view !== "matters" &&
     currentMatterId.value
   ) {
-    void openMatterTab(currentMatterId.value, view);
+    await openMatterTab(currentMatterId.value, view);
     if (view === "validation") void validate();
     return;
   }
-  if (
-    pdfViewer.value?.hasPendingDraft() &&
-    !window.confirm(
-      "Discard the unfinished PDF tool action before leaving the document?",
-    )
-  )
-    return;
-  if (formattingDirty.value && !confirmDiscardDrafts()) return;
-  pdfViewer.value?.discardPendingDraft();
+  if (!(await guardArtifactTransition(view))) return;
   captureActiveTab();
   activeView.value = view;
   mobileNavOpen.value = false;
   if (view === "validation") void validate();
 }
 function toggleNavigation() {
-  if (smallScreen.value) mobileNavOpen.value = !mobileNavOpen.value;
-  else sidebarCollapsed.value = !sidebarCollapsed.value;
+  workspaceMenuOpen.value = !workspaceMenuOpen.value;
   void nextTick(() => window.requestAnimationFrame(fitDocumentsWorkspace));
 }
 function onResize() {
-  const narrow = window.matchMedia("(max-width: 900px)").matches;
+  const narrow = window.matchMedia(activeView.value === "documents" ? "(max-width: 1120px)" : "(max-width: 900px)").matches;
   if (smallScreen.value !== narrow) mobileNavOpen.value = false;
   smallScreen.value = narrow;
   fitDocumentsWorkspace();
 }
 function beforeUnload(event: BeforeUnloadEvent) {
   if (
+    !membershipDirty.value &&
+    !tableDirty.value &&
     !documentDirty.value &&
     !settingsDirty.value &&
     !formattingDirty.value &&
@@ -871,9 +1201,21 @@ function beforeUnload(event: BeforeUnloadEvent) {
   event.returnValue = "";
 }
 function onKeydown(event: KeyboardEvent) {
+  if (documentTableOpen.value && !tabDiscardRequest.value && (event.ctrlKey || event.metaKey) && event.key.toLowerCase()==='s') {event.preventDefault();void documentTablePanel.value?.save();return;}
+
   if (event.key === "Escape" && tabDiscardRequest.value) {
     answerTabDiscard(false);
     return;
+  }
+  if (tabDiscardRequest.value) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveBeforeNavigation(); }
+    return;
+  }
+  if (membershipOpen.value) {
+    if (event.key === 'Escape') { event.preventDefault(); void leaveMembership(); return; }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); return; }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void membershipPanel.value?.apply(); return; }
+    if (event.key === '/' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k')) { event.preventDefault(); void openPreparationSearch(); return; }
   }
   if (event.key === "Escape" && reviewingPdf.value) {
     reviewingPdf.value = null;
@@ -907,16 +1249,7 @@ function onKeydown(event: KeyboardEvent) {
     ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k")
   ) {
     event.preventDefault();
-    readerFocus.value = false;
-    if (activeView.value !== "documents") showView("documents");
-    if (activeView.value === "documents")
-      void nextTick(() =>
-        document
-          .querySelector<HTMLInputElement>(
-            'input[aria-label="Search documents"]',
-          )
-          ?.focus(),
-      );
+    void openDocumentSearch();
   }
   if (
     (event.ctrlKey || event.metaKey) &&
@@ -987,7 +1320,7 @@ watch(currentMatterId, () => {
   if (currentMatterId.value) {
     void loadMatterResources();
   }
-});
+}, {flush: "sync"});
 watch(pageQuery, () => {
   if (searchTimer) clearTimeout(searchTimer);
   if (pageQuery.value.trim().length < 2) {
@@ -1087,7 +1420,9 @@ async function openReviewedExternalLink(url: string) {
 }
 
 async function init() {
+  if (engineBlocked.value && currentMatterId.value) { await retryEngine(); return; }
   if (connecting) return;
+  const recoveringStartup = engineBlocked.value;
   connecting = true;
   apiStatus.value = "connecting";
   try {
@@ -1122,8 +1457,11 @@ async function init() {
     profileList.value = await api<CourtProfile[]>("/profiles");
     await refreshMatters();
     apiStatus.value = "online";
+    engineState.value = "ready";
+    if (recoveringStartup) { await loadMatterResources(); await resumeAutosaveWhenClean(); }
   } catch (err) {
     apiStatus.value = "offline";
+    disconnectEngine();
     issue(err);
   } finally {
     connecting = false;
@@ -1209,6 +1547,7 @@ async function checkHealth() {
     await api("/health", "GET", undefined, 1_500);
   } catch {
     if (apiStatus.value === "online") {
+      disconnectEngine();
       apiStatus.value = "offline";
       notify(
         inTauri()
@@ -1255,9 +1594,85 @@ async function refreshMatters() {
     activeTabId.value = id;
   }
 }
-async function loadMatterResources() {
-  if (!currentMatterId.value) return;
+let resourceSequence = 0;
+let validationSequence = 0;
+const checksLoading = ref(false);
+const checksError = ref("");
+let recoverySnapshot = '';
+let recoveryInputSnapshot: string | null | undefined;
+function savedContext() { return JSON.stringify({matter: currentMatter.value, documents: docs.value}); }
+watch(engineState, (state, previous) => {
+  if (state === 'disconnected') {
+    if (previous === 'ready') {
+      recoverySnapshot = savedContext();
+      recoveryInputSnapshot = checks.value.find(check => check.input_snapshot)?.input_snapshot;
+    }
+    apiStatus.value = 'offline';
+    ++resourceSequence; ++validationSequence;
+    checks.value = []; checksLoading.value = false;
+    checksError.value = 'Local engine unavailable. Run checks again after recovery.';
+    if (documentAutosaveTimer) clearTimeout(documentAutosaveTimer);
+    if (settingsAutosaveTimer) clearTimeout(settingsAutosaveTimer);
+  }
+  void nextTick(fitDocumentsWorkspace);
+}, {flush: 'sync'});
+async function retryEngine() {
+  if (engineState.value === 'checking') return;
+  if (!currentMatterId.value) { await init(); return; }
+  engineState.value = 'checking';
   const id = currentMatterId.value;
+  try {
+    await api('/health', 'GET', undefined, 1500);
+    const [matters, documents, findings] = await Promise.all([
+      api<Matter[]>('/matters'), api<MatterDocument[]>(`/matters/${id}/documents`),
+      api<PreflightCheck[]>(`/matters/${id}/validate`),
+    ]);
+    if (id !== currentMatterId.value) throw new Error('Workspace changed during recovery. Retry for this workspace.');
+    const fresh = JSON.stringify({matter: matters.find(item => item.id === id), documents});
+    const fingerprint = findings.find(check => check.input_snapshot)?.input_snapshot;
+    const changed = fresh !== recoverySnapshot || !!(recoveryInputSnapshot && fingerprint !== recoveryInputSnapshot);
+    if (changed || workspaceTabs.value.some(tab => tab.id !== activeTabId.value && tab.hadUnsavedChanges)) {
+      engineReviewReason.value = changed ? 'Saved inputs changed. Review the latest state before editing.' : 'Retained drafts in other tabs need review before saving.';
+      engineState.value = 'changed';
+      return;
+    }
+    // Preserve mounted readers, query, positions and drafts. Never replay saves/jobs.
+    checks.value = findings; checksError.value = '';
+    engineState.value = 'ready'; apiStatus.value = 'online';
+    previewRefreshKey.value++;
+    await nextTick();
+    (document.querySelector<HTMLElement>('.export-review[open] [aria-controls="artifact-navigation"]') || document.querySelector<HTMLElement>('.viewer-root'))?.focus({preventScroll:true});
+    notify('Local engine reconnected. Retained drafts require an explicit Save; no operations were replayed.', 'info');
+  } catch (err) { disconnectEngine(); issue(err); }
+}
+async function reviewRecoveredState() {
+  // The existing focus-contained guard keeps drafts until explicit discard.
+  if (!(await askTabDiscard(`${engineReviewReason.value} Discard retained drafts in all open tabs and load the latest state? Existing Preflight targets remain tied to their old revision.`, false, false))) return;
+  membershipPanel.value?.discard();
+  membershipDirty.value = false; membershipOpen.value = false;
+  pdfViewer.value?.discardPendingDraft(); outputPresetsPanel.value?.discard();
+  workspaceTabs.value.forEach(tab => { delete tab.documentDraft; delete tab.settingsDraft; tab.hadUnsavedChanges = false; });
+  formattingDirty.value = false;
+  try {
+    await api('/health', 'GET', undefined, 1500);
+    // Stay blocked until all required current resources have been read successfully.
+    const id = currentMatterId.value;
+    const [matters, documents] = await Promise.all([api<Matter[]>('/matters'), api<MatterDocument[]>(`/matters/${id}/documents`), api<PreflightCheck[]>(`/matters/${id}/validate`)]);
+    if (!matters.some(item => item.id === id)) throw new Error('This matter is no longer available. Retained reading context remains open.');
+    matterList.value = matters; docs.value = documents;
+    resetDrafts();
+    engineState.value = 'ready'; apiStatus.value = 'online';
+    await loadMatterResources();
+    await resumeAutosaveWhenClean();
+    await nextTick(); pdfViewer.value && document.querySelector<HTMLElement>('.viewer-root')?.focus();
+  } catch (err) { disconnectEngine(); issue(err); }
+}
+async function loadMatterResources() {
+  if (engineBlocked.value || !currentMatterId.value) return;
+  const id = currentMatterId.value;
+  const call = ++resourceSequence;
+  const validationCall = ++validationSequence;
+  checksLoading.value = true; checksError.value = ""; checks.value = [];
   try {
     const [d, c, e, j, h, archived, usage, bookmarks] = await Promise.all([
       api<MatterDocument[]>(`/matters/${id}/documents`),
@@ -1269,9 +1684,9 @@ async function loadMatterResources() {
       api<typeof storageUsage.value>(`/matters/${id}/storage`),
       api<ManualBookmark[]>(`/matters/${id}/bookmarks`),
     ]);
-    if (currentMatterId.value !== id) return;
+    if (engineBlocked.value || currentMatterId.value !== id || call !== resourceSequence) return;
     docs.value = d;
-    checks.value = c;
+    if (validationCall === validationSequence) checks.value = c;
     exportsList.value = e;
     recentJobs.value = j;
     history.value = h;
@@ -1285,14 +1700,15 @@ async function loadMatterResources() {
     );
     if (ongoing && (!activeJob.value || activeJob.value.id !== ongoing.id))
       watchJob(ongoing);
+    if (!ongoing) { activeJob.value = j.find(item=>item.id===activeJob.value?.id) || j[0] || null; cancelPending.value=false; }
     if (
       !selectedDocId.value ||
       !d.some((doc) => doc.id === selectedDocId.value)
     )
       selectedDocId.value = d[0]?.id || null;
   } catch (err) {
-    issue(err);
-  }
+    if (call === resourceSequence) { checksError.value = "Checks unavailable; retry before relying on them."; issue(err); }
+  } finally { if (validationCall === validationSequence) checksLoading.value = false; }
 }
 async function refreshHistory() {
   if (currentMatterId.value)
@@ -1301,6 +1717,7 @@ async function refreshHistory() {
     );
 }
 async function traverseHistory(direction: "undo" | "redo") {
+  if (membershipOpen.value) return;
   if (!currentMatterId.value || busy.value || !confirmDiscardDrafts()) return;
   if (filingGuide.value && !(await filingGuide.value.flushPendingSave())) {
     notify("Save the Memo of Parties before using Undo or Redo.", "error");
@@ -1487,7 +1904,7 @@ async function onUpload(files: FileList | File[]) {
     await loadMatterResources();
     if (imported)
       notify(
-        `${imported} document(s) imported. Original files preserved.`,
+        `${imported} document(s) imported as reference-only. Choose Bundle membership to include them. Original files preserved.`,
         "success",
       );
   } catch (err) {
@@ -1532,8 +1949,14 @@ async function generateCover() {
     busy.value = false;
   }
 }
+async function resumeAutosaveWhenClean() {
+  await nextTick();
+  if (!engineBlocked.value && !documentDirty.value && !settingsDirty.value && !formattingDirty.value &&
+      !pdfViewer.value?.hasPendingDraft() && !filingGuide.value?.hasPendingDraft() && !workspaceTabs.value.some(tab => tab.id !== activeTabId.value && tab.hadUnsavedChanges))
+    autosaveHeld.value = false;
+}
 async function saveDocument(quiet = false) {
-  if (!selectedDoc.value) return;
+  if (!selectedDoc.value) return false;
   const document = selectedDoc.value;
   const draft = { ...docEditor };
   busy.value = true;
@@ -1574,13 +1997,25 @@ async function saveDocument(quiet = false) {
     await validate();
     await loadMatterResources();
     documentAutosaveState.value = "idle";
+    await resumeAutosaveWhenClean();
     if (!quiet) notify("Document details updated.", "success");
+    return true;
   } catch (err) {
     documentAutosaveState.value = "failed";
     issue(err);
+    return false;
   } finally {
     busy.value = false;
   }
+}
+async function closeDocumentTable() {
+  if (!(await guardArtifactTransition(documentTablePanel.value?.isSuggestionsOpen() ? 'batch review' : 'Documents'))) return;
+  if(documentTablePanel.value?.isSuggestionsOpen()) documentTablePanel.value.closeSuggestions();
+  else {documentTableOpen.value=false; tableDirty.value=false; await nextTick(); document.querySelector<HTMLElement>('.navigator-actions button')?.focus();}
+}
+async function openDocumentTable() {
+  if (!(await guardArtifactTransition('Batch review'))) return;
+  documentTableOpen.value=true;
 }
 async function documentTableModified() {
   await refreshMatters();
@@ -1590,7 +2025,8 @@ async function documentTableModified() {
     "success",
   );
 }
-function openDocumentFromTable(id: string) {
+async function openDocumentFromTable(id: string) {
+  if (!(await guardArtifactTransition("this document"))) return;
   documentTableOpen.value = false;
   detailsOpen.value = true;
   void openDocumentTab(id);
@@ -1682,9 +2118,15 @@ function moveDocumentFromHandle(
 }
 async function refreshDocument() {
   await loadMatterResources();
+  await resumeAutosaveWhenClean();
+}
+async function refreshGuide() {
+  await refreshHistory();
+  await resumeAutosaveWhenClean();
 }
 async function startOcr(language: "eng" | "hin" | "eng+hin") {
   if (!selectedDoc.value || isJobActive.value) return;
+  if (!(await guardArtifactTransition("OCR for the working copy"))) return;
   const signature = confirmSignatureTransformation([selectedDoc.value], "OCR");
   if (!signature.proceed) return;
   try {
@@ -1693,6 +2135,7 @@ async function startOcr(language: "eng" | "hin" | "eng+hin") {
       "POST",
       {
         acknowledge_signature_risk: signature.acknowledged,
+        expected_revision: selectedDoc.value.revision,
         language,
       },
     );
@@ -1706,23 +2149,21 @@ async function startOcr(language: "eng" | "hin" | "eng+hin") {
   }
 }
 async function validate(): Promise<PreflightCheck[]> {
-  if (!currentMatterId.value) return [];
+  const id = currentMatterId.value;
+  if (!id || engineBlocked.value) return [];
+  const call = ++validationSequence;
+  checksLoading.value = true; checksError.value = ''; checks.value = [];
   try {
-    checks.value = await api<PreflightCheck[]>(
-      `/matters/${currentMatterId.value}/validate`,
-    );
-    return checks.value;
+    const result = await api<PreflightCheck[]>(`/matters/${id}/validate`);
+    if (!engineBlocked.value && id === currentMatterId.value && call === validationSequence) checks.value = result;
+    return result;
   } catch (err) {
-    issue(err);
-    return [
-      {
-        severity: "error",
-        code: "VALIDATION_UNAVAILABLE",
-        message: "Technical checks could not be loaded.",
-        document_id: null,
-      },
-    ];
-  }
+    if (id === currentMatterId.value && call === validationSequence) {
+      checksError.value = 'Technical checks could not be loaded. Previous results are not current.';
+      issue(err);
+    }
+    return [{severity:'error',code:'VALIDATION_UNAVAILABLE',message:'Technical checks could not be loaded.',document_id:null}];
+  } finally { if (call === validationSequence) checksLoading.value = false; }
 }
 async function savePolicy(quiet = false) {
   if (!currentMatter.value) return false;
@@ -1739,6 +2180,7 @@ async function savePolicy(quiet = false) {
     await refreshHistory();
     await loadMatterResources();
     settingsAutosaveState.value = "idle";
+    await resumeAutosaveWhenClean();
     if (!quiet) notify("Bundle settings saved.", "success");
     return true;
   } catch (err) {
@@ -1766,34 +2208,39 @@ async function applyOutputPreset(presetId: string) {
   }
 }
 async function startBuild(): Promise<boolean> {
-  if (!currentMatterId.value || isJobActive.value) return false;
+  if (!currentMatterId.value || isJobActive.value || buildSubmitting.value) return false;
+  buildSubmitting.value=true;
+  const submittedMatterId=currentMatterId.value;
   try {
     if (formattingDirty.value) {
       notify("Save numbering and annexure policy before building.", "error");
       return false;
     }
-    if (!(await savePolicy())) return false;
+    if (!(await savePolicy()) || currentMatterId.value!==submittedMatterId) return false;
     const signature = confirmSignatureTransformation(
-      docs.value,
+      includedDocuments.value,
       "Bundle generation",
     );
     if (!signature.proceed) return false;
     const job = await api<Job>(
-      `/matters/${currentMatterId.value}/build`,
+      `/matters/${submittedMatterId}/build`,
       "POST",
       {
         acknowledge_signature_risk: signature.acknowledged,
       },
     );
-    watchJob(job);
+    if(currentMatterId.value===submittedMatterId)watchJob(job);
     return true;
   } catch (err) {
     issue(err);
     return false;
-  }
+  } finally { buildSubmitting.value=false; }
 }
 function watchJob(job: Job) {
   activeJob.value = job;
+  cancelPending.value = false;
+  const matterId = currentMatterId.value;
+  const pollSequence=++jobPollSequence;
   if (jobTimer) clearInterval(jobTimer);
   let fetching = false;
   jobTimer = setInterval(async () => {
@@ -1801,10 +2248,12 @@ function watchJob(job: Job) {
     fetching = true;
     try {
       const next = await api<Job>(`/jobs/${job.id}`);
+      if (pollSequence!==jobPollSequence || currentMatterId.value !== matterId || activeJob.value?.id !== job.id) return;
       activeJob.value = next;
-      if (["completed", "failed", "cancelled"].includes(next.status)) {
+      if (["completed", "failed", "cancelled", "interrupted"].includes(next.status)) {
         if (jobTimer) clearInterval(jobTimer);
         jobTimer = null;
+        cancelPending.value = false;
         if (next.status === "failed")
           notify(next.error || "Job failed", "error");
         if (next.status === "completed")
@@ -1821,6 +2270,7 @@ function watchJob(job: Job) {
         await loadMatterResources();
       }
     } catch (err) {
+      if(pollSequence!==jobPollSequence)return;
       if (jobTimer) clearInterval(jobTimer);
       jobTimer = null;
       issue(err);
@@ -1830,15 +2280,18 @@ function watchJob(job: Job) {
   }, 650);
 }
 async function cancelJob() {
-  if (activeJob.value)
-    await api(`/jobs/${activeJob.value.id}/cancel`, "POST").catch(issue);
+  if (!activeJob.value || cancelPending.value) return;
+  const id = activeJob.value.id;
+  cancelPending.value = true;
+  try { await api(`/jobs/${id}/cancel`, "POST"); }
+  catch (err) { if (activeJob.value?.id===id) cancelPending.value=false; issue(err); }
 }
 async function retryInterrupted(job: Job) {
   try {
     const relevant =
       job.kind === "ocr"
         ? docs.value.filter((document) => document.id === job.target_id)
-        : docs.value;
+        : includedDocuments.value;
     const signature = confirmSignatureTransformation(
       relevant,
       job.kind === "ocr" ? "Retrying OCR" : "Retrying bundle generation",
@@ -2024,10 +2477,18 @@ async function saveProtectedExport() {
     savingExport.value = false;
   }
 }
-function reviewGeneratedPdf(exportId: string, filename: string) {
+async function openGeneratedSource(id:string, page:number, revision:number) {
+  const doc=docs.value.find(item=>item.id===id);
+  if (!doc || doc.revision!==revision) { notify('The working revision has changed or is unavailable. The generated PDF remains the authoritative earlier output.', 'error'); return; }
+  reviewingPdf.value=null;
+  await openDocumentTab(id,page,revision);
+}
+async function reviewGeneratedPdf(exportId: string, filename: string) {
+  if (!(await guardArtifactTransition(`build ${exportId.slice(0,8)} · ${filename}`))) return;
   reviewingPdf.value = { exportId, filename };
 }
 function selectMatter(id: string, view: View = "documents") {
+  workspaceMenuOpen.value = false;
   void openMatterTab(id, view);
 }
 async function removeMatter() {
@@ -2079,7 +2540,12 @@ const iconsBySeverity = {
   info: Info,
 };
 const matterMore = ref<HTMLDetailsElement | null>(null);
+function closeWorkspaceTabsOutside(event: Event) {
+  const target = event.target as HTMLElement;
+  if (tabsMenuOpen.value && !target.closest('.open-workspace-tabs, .application-matter, dialog, [role="alertdialog"]')) tabsMenuOpen.value = false;
+}
 function closeMatterMoreOnOutsideClick(event: PointerEvent) {
+  closeWorkspaceTabsOutside(event);
   if (matterMore.value && !matterMore.value.contains(event.target as Node)) {
     matterMore.value.open = false;
   }
@@ -2097,6 +2563,7 @@ onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("resize", onResize);
   document.addEventListener("pointerdown", closeMatterMoreOnOutsideClick);
+  document.addEventListener("focusin", closeWorkspaceTabsOutside);
 });
 onUnmounted(() => {
   clearPrintPreview();
@@ -2109,6 +2576,7 @@ onUnmounted(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("resize", onResize);
   document.removeEventListener("pointerdown", closeMatterMoreOnOutsideClick);
+  document.removeEventListener("focusin", closeWorkspaceTabsOutside);
 });
 watch(sidebarCollapsed, (collapsed) => {
   try {
@@ -2270,23 +2738,38 @@ watch(sidebarCollapsed, (collapsed) => {
       </div>
     </section>
   </main>
-  <div v-else class="app-shell" :data-editor-expanded="editorExpanded">
+  <div v-else class="app-shell design-shell" :data-batch="documentTableOpen" :data-finding="!!preflightContext && activeView==='documents'" :data-preparation="preparationVisible || documentTableOpen || buildShell" :data-build="expandedBuildShell" :data-membership="membershipOpen" :data-membership-collapsed="membershipCollapsed" :data-compact-preparation="compactDocuments" :data-engine-unavailable="engineBlocked" :data-editor-expanded="editorExpanded" :data-documents="activeView === 'documents'" :style="{ '--documents-interface-scale': uiScale / 100 }">
     <a class="skip-link" href="#main-content" @click.prevent="focusMain"
       >Skip to main content</a
     >
-    <button
-      v-if="smallScreen && mobileNavOpen"
-      class="sidebar-backdrop"
-      aria-label="Close navigation"
-      @click="mobileNavOpen = false"
-    ></button>
+    <header class="application-bar">
+      <button class="application-brand" aria-label="Workspace navigation" :aria-expanded="workspaceMenuOpen" @click="workspaceMenuOpen=!workspaceMenuOpen"><span><FileStack :size="14"/></span><strong>CourtBundle</strong></button>
+      <button class="application-matter" aria-label="Open workspaces" :aria-expanded="tabsMenuOpen" @click="tabsMenuOpen=!tabsMenuOpen">{{currentMatter?.name || 'Your matters'}}<ChevronDown :size="13"/></button>
+      <span class="application-local"><ShieldCheck :size="16"/> Local workspace</span>
+      <button class="icon-btn small" aria-label="Workspace settings" title="Workspace settings" @click="workspaceMenuOpen=!workspaceMenuOpen"><Settings2 :size="16"/></button>
+    </header>
+    <nav class="matter-rail" aria-label="Workspace navigation rail">
+      <div v-if="membershipOpen || expandedBuildShell" class="membership-matter"><strong>{{currentMatter?.name}}</strong><span>{{currentMatter?.case_number || 'Draft matter'}}</span></div>
+      <button aria-label="Matters" title="Matters" @click="showView('matters')"><BriefcaseBusiness :size="18"/></button>
+      <template v-if="currentMatter">
+        <button aria-label="Overview" title="Overview" :aria-current="!membershipOpen && activeView==='overview'?'page':undefined" @click="showView('overview')"><LayoutGrid :size="18"/><span v-if="membershipOpen || expandedBuildShell">Overview</span></button>
+        <button aria-label="Documents" title="Documents" :aria-current="!membershipOpen && activeView==='documents'?'page':undefined" @click="showPreparation"><Files v-if="membershipOpen || expandedBuildShell" :size="18"/><FileStack v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Documents</span></button>
+        <button aria-label="Index & bookmarks" title="Index & bookmarks" :aria-current="membershipOpen || activeView==='index'?'page':undefined" @click="showView('index')"><ListTree v-if="membershipOpen || expandedBuildShell" :size="18"/><BookMarked v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Index & Bookmarks</span></button>
+        <button aria-label="Preflight checks" title="Preflight checks" :aria-current="!membershipOpen && activeView==='validation'?'page':undefined" @click="showView('validation')"><ListChecks v-if="membershipOpen || expandedBuildShell" :size="18"/><FileCheck2 v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Preflight</span></button>
+        <button aria-label="Build bundle" title="Build bundle" :aria-current="!membershipOpen && activeView==='build'?'page':undefined" @click="showView('build')"><Box v-if="membershipOpen || expandedBuildShell" :size="18"/><Layers3 v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Build bundle</span></button>
+        <button aria-label="Storage" title="Storage" :aria-current="!membershipOpen && activeView==='storage'?'page':undefined" @click="showView('storage')"><HardDrive v-if="membershipOpen || expandedBuildShell" :size="18"/><Archive v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Storage</span></button>
+      </template>
+      <button v-if="!membershipOpen && !expandedBuildShell" class="rail-settings" aria-label="Navigation and appearance" title="Navigation and appearance" @click="workspaceMenuOpen=!workspaceMenuOpen"><PanelLeftOpen :size="18"/></button>
+    <div v-if="membershipOpen || expandedBuildShell" class="membership-rail-bottom"><button disabled title="Opening a matter folder is not exposed by this local service"><FolderOpen :size="16"/><span>Open matter folder</span></button><button :aria-label="membershipCollapsed?'Expand sidebar':'Collapse sidebar'" @click="membershipCollapsed=!membershipCollapsed"><PanelLeftOpen :size="16"/><span>{{membershipCollapsed?'Expand sidebar':'Collapse sidebar'}}</span></button></div></nav>
+    <button v-if="workspaceMenuOpen" class="navigation-scrim" aria-label="Dismiss navigation backdrop" @click="workspaceMenuOpen=false"></button>
     <aside
-      class="sidebar"
+      v-show="workspaceMenuOpen"
+      class="sidebar workspace-drawer"
       :class="{
-        collapsed: sidebarCollapsed && !smallScreen,
-        'mobile-open': mobileNavOpen,
+        collapsed: false,
+        'mobile-open': true,
       }"
-      :inert="smallScreen && !mobileNavOpen"
+      @keydown.esc="workspaceMenuOpen=false"
     >
       <div class="brand-area">
         <div class="brand-mark"><Layers3 :size="22" :stroke-width="2.3" /></div>
@@ -2296,29 +2779,8 @@ watch(sidebarCollapsed, (collapsed) => {
           </div>
           <div class="brand-sub">LEGAL WORKSPACE / POC</div>
         </div>
-        <button
-          class="sidebar-toggle"
-          :aria-label="
-            smallScreen
-              ? 'Close navigation'
-              : sidebarCollapsed
-                ? 'Expand sidebar'
-                : 'Collapse sidebar'
-          "
-          :aria-expanded="smallScreen ? mobileNavOpen : !sidebarCollapsed"
-          :title="
-            smallScreen
-              ? 'Close navigation'
-              : sidebarCollapsed
-                ? 'Expand sidebar'
-                : 'Collapse sidebar'
-          "
-          @click="toggleNavigation"
-        >
-          <X v-if="smallScreen" :size="19" /><PanelLeftOpen
-            v-else-if="sidebarCollapsed"
-            :size="19"
-          /><PanelLeftClose v-else :size="19" />
+        <button class="sidebar-toggle" aria-label="Close workspace navigation" title="Close workspace navigation" @click="workspaceMenuOpen=false">
+          <X :size="19" />
         </button>
       </div>
       <div class="side-label">WORKSPACE</div>
@@ -2490,9 +2952,10 @@ watch(sidebarCollapsed, (collapsed) => {
       }"
     >
       <nav
-        v-if="workspaceTabs.length || smallScreen"
+        v-show="tabsMenuOpen || preparationVisible || documentTableOpen || membershipOpen || buildShell"
         class="open-workspace-tabs"
         aria-label="Open matter and document tabs"
+        @keydown.esc="tabsMenuOpen=false"
       >
         <button
           v-if="smallScreen"
@@ -2522,7 +2985,7 @@ watch(sidebarCollapsed, (collapsed) => {
             class="open-workspace-tab-select"
             :aria-current="tabIsActive(tab) ? 'page' : undefined"
             :title="`${tab.documentId ? 'Document' : 'Matter'}: ${tabLabel(tab)}`"
-            @click="activateTab(tab)"
+            @click="activateTabFromMenu(tab)"
           >
             <FileText v-if="tab.documentId" :size="14" /><BriefcaseBusiness
               v-else
@@ -2531,7 +2994,7 @@ watch(sidebarCollapsed, (collapsed) => {
             ><span
               v-if="
                 tab.id === activeTabId
-                  ? documentDirty || settingsDirty || formattingDirty
+                  ? tableDirty || documentDirty || settingsDirty || formattingDirty
                   : tab.hadUnsavedChanges
               "
               class="tab-dirty-dot"
@@ -2552,6 +3015,14 @@ watch(sidebarCollapsed, (collapsed) => {
         </div>
       </nav>
 
+      <div v-if="preparationVisible || documentTableOpen || membershipOpen || buildShell" class="preparation-utility">
+        <button class="preparation-search-trigger" @click="openPreparationSearch"><Search :size="16"/> Search documents and page text <kbd>Ctrl K</kbd></button>
+        <span class="preparation-save-state"><CircleAlert v-if="tableDirty || documentDirty || settingsDirty || formattingDirty || membershipDirty" :size="14"/><CheckCircle2 v-else-if="membershipOpen" class="membership-saved-icon" :size="14"/>{{membershipDirty ? 'Unapplied changes' : (tableDirty || documentDirty || settingsDirty || formattingDirty) ? 'Unsaved changes' : 'Saved locally'}}</span>
+        <button class="icon-btn small" aria-label="Undo last matter change" :disabled="membershipOpen || engineBlocked || busy || !history.can_undo" :title="undoDescription" @click="traverseHistory('undo')"><Undo2 :size="16"/></button>
+        <button class="icon-btn small" aria-label="Redo last matter change" :disabled="membershipOpen || engineBlocked || busy || !history.can_redo" :title="redoDescription" @click="traverseHistory('redo')"><Redo2 :size="16"/></button>
+        <span class="preparation-engine"><CheckCircle2 :size="14"/>{{engineBlocked?'Engine disconnected':'Engine connected'}}</span>
+      </div>
+
       <div
         v-if="tabDiscardRequest"
         class="vault-restore-overlay"
@@ -2559,6 +3030,7 @@ watch(sidebarCollapsed, (collapsed) => {
       >
         <section
           class="vault-card tab-discard-dialog"
+          @keydown.tab="trapNavigationFocus"
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="tab-discard-title"
@@ -2566,32 +3038,23 @@ watch(sidebarCollapsed, (collapsed) => {
         >
           <h2 id="tab-discard-title">Unsaved work in this tab</h2>
           <p id="tab-discard-message">{{ tabDiscardRequest.message }}</p>
+          <p v-if="navigationError" role="alert" class="error-msg">{{navigationError}}</p>
+          <p v-if="!tabDiscardRequest.canSave" class="hint">Activate each inactive tab to save its retained draft before closing these tabs.</p>
           <div class="tab-discard-actions">
-            <button class="btn secondary" @click="answerTabDiscard(false)">
+            <button class="btn secondary" :disabled="navigationSaving" @click="answerTabDiscard(false)">
               Keep editing</button
-            ><button class="btn danger" @click="answerTabDiscard(true)">
+            ><button class="btn danger" :disabled="navigationSaving" @click="answerTabDiscard(true)">
               Discard changes
-            </button>
+            </button><button class="btn primary" :disabled="engineBlocked || navigationSaving || busy || !tabDiscardRequest.canSave" @click="saveBeforeNavigation">{{navigationSaving ? 'Saving…' : 'Save changes'}}</button>
           </div>
         </section>
       </div>
-      <div v-if="apiStatus === 'offline'" class="backend-error">
-        <CircleAlert :size="19" />
-        <div>
-          <strong>Python engine unavailable</strong>
-          <p v-if="inTauri()">
-            Quit and reopen CourtBundle to start a new local engine session. If
-            it still fails, inspect the packaged sidecar and local port.
-          </p>
-          <p v-else>
-            Run <code>cd backend && ./dev.sh</code>, then retry. The browser
-            development token is for local testing only.
-          </p>
-        </div>
-        <button class="btn secondary" @click="init">Retry connection</button>
-      </div>
+      <BundleMembership v-if="membershipOpen && currentMatterId" ref="membershipPanel" :matter-id="currentMatterId" :blocked="engineBlocked || busy || isJobActive" @dirty="membershipDirty=$event" @applied="membershipApplied" @close="leaveMembership" @open="openMembershipDocument" @retry="retryEngine" @review="reviewRecoveredState" />
+      <EngineNotice v-if="!membershipOpen" @retry="retryEngine" @review="reviewRecoveredState" />
 
-      <Transition name="view" @after-enter="fitDocumentsWorkspace">
+      <FindingReviewPanel v-if="preflightContext && activeView === 'documents' && currentMatterId === preflightContext.matterId" :matter-id="currentMatterId" :finding="preflightContext.finding" :changed="preflightContext.finding.target_revision !== undefined && selectedDoc?.revision !== preflightContext.finding.target_revision" @return="returnToPreflight" @tools="pageToolsOpen=true"/>
+
+      <Transition name="view" mode="out-in" @after-enter="fitDocumentsWorkspace">
         <main
           v-if="activeView === 'rules'"
           id="main-content"
@@ -2678,7 +3141,7 @@ watch(sidebarCollapsed, (collapsed) => {
             :can-undo="history.can_undo"
             :can-redo="history.can_redo"
             @open-url="openOfficialReference"
-            @modified="refreshHistory"
+            @modified="refreshGuide"
             @undo="traverseHistory('undo')"
             @redo="traverseHistory('redo')"
           />
@@ -2789,9 +3252,9 @@ watch(sidebarCollapsed, (collapsed) => {
           v-else
           id="main-content"
           tabindex="-1"
-          class="page-content workspace-page"
+          class="page-content workspace-page" :inert="membershipOpen" :aria-hidden="membershipOpen || undefined"
         >
-          <div class="matter-heading">
+          <div v-if="activeView !== 'documents' && !buildShell" class="matter-heading">
             <div class="matter-heading-copy">
               <h1>{{ currentMatter.name }}</h1>
               <p class="matter-description">
@@ -2850,7 +3313,7 @@ watch(sidebarCollapsed, (collapsed) => {
               </button>
             </div>
           </div>
-          <div class="matter-summary" aria-label="Matter summary">
+          <div v-if="activeView !== 'documents' && !buildShell" class="matter-summary" aria-label="Matter summary">
             <span
               ><strong>{{ docs.length }}</strong> documents</span
             ><span
@@ -2862,7 +3325,7 @@ watch(sidebarCollapsed, (collapsed) => {
               ><strong>{{ exportsList.length }}</strong> prepared packages</span
             >
           </div>
-          <nav class="workspace-tabs" aria-label="Matter preparation">
+          <nav v-show="false" class="workspace-tabs" aria-label="Matter preparation">
             <button
               :class="{ active: activeView === 'overview' }"
               @click="showView('overview')"
@@ -2903,7 +3366,8 @@ watch(sidebarCollapsed, (collapsed) => {
 
           <Transition
             name="section"
-            mode="out-in"
+            :css="!inTauri()"
+            :mode="inTauri() ? undefined : 'out-in'"
             @after-enter="afterWorkspaceSectionEnter"
           >
             <section
@@ -3031,24 +3495,28 @@ watch(sidebarCollapsed, (collapsed) => {
                 </section>
               </div>
             </section>
-            <DocumentTable
+            <DocumentTable ref="documentTablePanel"
               v-else-if="activeView === 'documents' && documentTableOpen"
               :matter-id="currentMatterId!"
               :documents="docs"
               :busy="busy || isJobActive"
               :keep-groups="currentMatter.keep_groups_intact"
+              @dirty-changed="tableDirty=$event"
               @modified="documentTableModified"
               @open-document="openDocumentFromTable"
               @error="issue"
-              @close="documentTableOpen = false"
-            />
+              @close="closeDocumentTable"
+            ><template #history><div class="table-history"><button class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :disabled="membershipOpen || engineBlocked || busy || !history.can_undo" @click="traverseHistory('undo')"><Undo2 :size="16"/></button><button class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :disabled="membershipOpen || engineBlocked || busy || !history.can_redo" @click="traverseHistory('redo')"><Redo2 :size="16"/></button></div></template></DocumentTable>
             <div
               v-else-if="activeView === 'documents'"
               ref="documentsWorkspace"
               class="documents-workspace"
               :class="{
                 'details-open': detailsOpen && !!selectedDoc,
+                'preparation-workspace': preparationVisible,
+                'navigator-open': preparationListOpen,
                 'reader-focus': readerFocus,
+                'compact-documents': compactDocuments,
               }"
               :style="
                 documentsWorkspaceHeight
@@ -3056,21 +3524,24 @@ watch(sidebarCollapsed, (collapsed) => {
                   : undefined
               "
             >
+              <DocumentNavigator v-if="preparationVisible && preparationListOpen" :documents="docs" :selected-id="selectedDocId" :busy="engineBlocked || busy || isJobActive" @select="selectPreparationDocument" @open="openDocumentTab" @reorder="applyDocumentSort" @import="fileInput?.click()" @table="openDocumentTable" @cover="generateCover" @search-pages="openPreparationSearch" @collapse="closePreparationList"/>
               <section
-                v-show="!readerFocus"
+                v-show="!preparationVisible && (!readerFocus || !selectedDoc) && !(compactDocuments && detailsOpen && selectedDoc)"
                 class="panel docs-panel"
+                @keydown.esc.stop.prevent="closeDocumentBrowser"
                 :class="{ 'has-documents': docs.length > 0 }"
               >
                 <div class="panel-header">
+                  <button v-if="selectedDoc" class="icon-btn small close-document-browser" aria-label="Close document browser" @click="closeDocumentBrowser"><X :size="16"/></button>
                   <div>
-                    <h2>Source documents</h2>
+                    <h2>Documents <span class="document-count">{{ docs.length }}</span></h2>
                     <span>Drag or use ↑/↓ to reorder</span>
                   </div>
                   <div class="panel-header-actions">
                     <button
                       class="text-tool"
                       :disabled="!docs.length"
-                      @click="documentTableOpen = true"
+                      @click="openDocumentTable"
                     >
                       Open table</button
                     ><button
@@ -3254,6 +3725,7 @@ watch(sidebarCollapsed, (collapsed) => {
                     {{ busy ? "Importing…" : "Browse files" }}
                   </button>
                 </div>
+                <div class="docs-total">{{ docs.length }} documents · {{ totalPages }} source pages</div>
                 <div class="docs-help">
                   <LockKeyhole :size="14" /> Original files are never
                   overwritten.
@@ -3264,13 +3736,15 @@ watch(sidebarCollapsed, (collapsed) => {
                 <PdfViewer
                   ref="pdfViewer"
                   :key="currentMatterId || 'none'"
+                  :preparation="preparationVisible"
                   :expanded="editorExpanded"
                   @toggle-expanded="toggleEditorExpanded"
                   :focus-mode="readerFocus"
                   @toggle-focus="readerFocus = !readerFocus"
                   :document="selectedDoc"
                   :documents="docs"
-                  :disabled="busy || isJobActive || documentDirty"
+                  :busy="busy || isJobActive"
+                  :disabled="engineBlocked || busy || isJobActive || documentDirty"
                   :can-undo="history.can_undo"
                   :can-redo="history.can_redo"
                   :undo-label="history.undo_label"
@@ -3279,13 +3753,20 @@ watch(sidebarCollapsed, (collapsed) => {
                   :details-dirty="documentDirty"
                   :bookmark-refresh-key="previewRefreshKey"
                   :page-target="pageTarget"
+                  :artifact-options="artifactOptions"
+                  @artifact="switchArtifact"
+                  @browse-documents="showPreparation"
+                  @open-editor="openEditor"
+                  @show-document-list="preparationListOpen=!preparationListOpen; compactDocuments && preparationListOpen && (detailsOpen=false)"
+                  @save-details="saveDocument()"
+                  @retry-reader="retryWorkingReader"
                   @modified="refreshDocument"
                   @undo="traverseHistory('undo')"
                   @redo="traverseHistory('redo')"
                   @error="issue"
                   @page-tools="pageToolsOpen = true"
                   @open-bookmarks="showView('index')"
-                  @toggle-details="detailsOpen = !detailsOpen"
+                  @toggle-details="toggleDocumentDetails"
                   @ocr="startOcr"
                   @archive-document="deleteDocument"
                   @open-internal-link="openSearchMatch"
@@ -3298,6 +3779,8 @@ watch(sidebarCollapsed, (collapsed) => {
                 <section
                   v-if="detailsOpen && selectedDoc"
                   id="document-details-panel"
+                  ref="documentDetailsPanel"
+                  @keydown.esc.stop.prevent="closeDocumentDetails"
                   class="panel inspector-panel"
                   aria-label="Document details"
                 >
@@ -3309,12 +3792,13 @@ watch(sidebarCollapsed, (collapsed) => {
                     <button
                       class="icon-btn"
                       aria-label="Close document details"
-                      @click="detailsOpen = false"
+                      @click="closeDocumentDetails"
                     >
                       <X :size="18" />
                     </button>
                   </div>
                   <div class="inspector-content">
+                    <div v-if="preparationVisible" class="preparation-metadata-state" :class="{'dirty':documentDirty}" role="status"><CircleAlert v-if="documentDirty" :size="14"/><CheckCircle2 v-else :size="14"/>{{documentAutosaveState==='failed'?'Save failed — retry below':documentAutosaveState==='saving'?'Saving…':documentDirty?'Unsaved changes':'Saved locally'}}</div>
                     <div class="inspector-heading">
                       <div class="doc-icon big"><FileText :size="22" /></div>
                       <div>
@@ -3366,31 +3850,6 @@ watch(sidebarCollapsed, (collapsed) => {
                         maxlength="250"
                     /></label>
                     <label class="field"
-                      >Document type<select v-model="docEditor.kind">
-                        <option
-                          v-for="kind in documentKindOptions"
-                          :key="kind"
-                          :value="kind"
-                        >
-                          {{ kind[0].toUpperCase() + kind.slice(1) }}
-                        </option>
-                      </select></label
-                    >
-                    <div class="field-row">
-                      <label class="field"
-                        >Part<select v-model.number="docEditor.part">
-                          <option v-for="part in 4" :value="part">
-                            Part {{ part }}
-                          </option>
-                        </select></label
-                      ><label class="field"
-                        >Label<input
-                          v-model="docEditor.label"
-                          placeholder="P-1"
-                          maxlength="60"
-                      /></label>
-                    </div>
-                    <label class="field"
                       >Document date<input
                         v-model="docEditor.document_date"
                         type="date"
@@ -3425,6 +3884,32 @@ watch(sidebarCollapsed, (collapsed) => {
                         ></span
                       ></label
                     >
+                    <label class="field"
+                      >Document type<select v-model="docEditor.kind">
+                        <option
+                          v-for="kind in documentKindOptions"
+                          :key="kind"
+                          :value="kind"
+                        >
+                          {{ kind[0].toUpperCase() + kind.slice(1) }}
+                        </option>
+                      </select></label
+                    >
+                    <div class="field-row">
+                      <label class="field"
+                        >Part<select v-model.number="docEditor.part">
+                          <option v-for="part in 4" :value="part">
+                            Part {{ part }}
+                          </option>
+                        </select></label
+                      ><label class="field"
+                        >Label<input
+                          v-model="docEditor.label"
+                          placeholder="P-1"
+                          maxlength="60"
+                      /></label>
+                    </div>
+                    <details class="metadata-signature-review" :open="!preparationVisible"><summary>Signature review</summary>
                     <div
                       :class="[
                         'notice',
@@ -3465,6 +3950,7 @@ watch(sidebarCollapsed, (collapsed) => {
                         signature.</span
                       >
                     </label>
+                    </details>
                     <label class="field"
                       >Keep-together group<input
                         v-model="docEditor.group_key"
@@ -3474,9 +3960,20 @@ watch(sidebarCollapsed, (collapsed) => {
                         when enabled.</span
                       ></label
                     >
-                    <p role="status" class="hint">
+                    <p
+                      v-if="!preparationVisible || documentDirty || documentAutosaveState==='failed'"
+                      role="status"
+                      class="hint metadata-status"
+                      :class="{
+                        'is-dirty': documentDirty,
+                        'is-saving': documentAutosaveState === 'saving',
+                        'is-failed': documentAutosaveState === 'failed',
+                      }"
+                    >
                       {{
-                        documentAutosaveState === "failed"
+                        autosaveHeld && documentDirty
+                          ? "Unsaved draft retained · use Save after recovery"
+                          : documentAutosaveState === "failed"
                           ? "Autosave failed. Retry Save."
                           : documentAutosaveState === "saving"
                             ? "Saving document details…"
@@ -3485,10 +3982,12 @@ watch(sidebarCollapsed, (collapsed) => {
                               : "Document details saved"
                       }}
                     </p>
+                  </div>
+                  <div class="inspector-save-footer">
                     <button
                       class="btn primary block"
                       :disabled="
-                        busy || !docEditor.title.trim() || !documentDirty
+                        engineBlocked || busy || !docEditor.title.trim() || !documentDirty
                       "
                       @click="saveDocument()"
                     >
@@ -3499,65 +3998,26 @@ watch(sidebarCollapsed, (collapsed) => {
               </Transition>
             </div>
 
-            <div v-else-if="activeView === 'index'" class="index-preparation">
-              <div class="notice subtle">
-                <Info :size="17" /> Prepare the index and manual bookmarks as
-                you arrange documents. Page ranges update from current matter
-                order and the saved volume settings; review all destinations
-                before export.
-              </div>
-              <section
-                class="panel part-overview"
-                aria-label="Part 1 to 4 assignments"
-              >
-                <div class="panel-header">
-                  <div>
-                    <h2>Part 1–4 assignments</h2>
-                    <span
-                      >Set each document’s Part in Documents; the map below
-                      shows its page destination.</span
-                    >
-                  </div>
-                </div>
-                <div class="part-overview-grid">
-                  <div v-for="part in 4" :key="part">
-                    <strong>Part {{ part }}</strong
-                    ><span
-                      >{{
-                        docs.filter((doc) => doc.part === part).length
-                      }}
-                      document(s) ·
-                      {{
-                        docs
-                          .filter((doc) => doc.part === part)
-                          .reduce((sum, doc) => sum + doc.page_count, 0)
-                      }}
-                      source page(s)</span
-                    >
-                  </div>
-                </div>
-                <p class="hint">
-                  These are technical assignments. The optional Part PDFs are
-                  source-page extracts; required contents and court-specific
-                  file schemes need a reviewed filing specification.
-                </p>
-              </section>
-              <section
+            <BundleStructure v-else-if="activeView === 'index'" :key="currentMatterId!" ref="outputPresetsPanel"
+              :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :initial-mode="structureMode" :bookmark-preset="bookmarkPreset"
+              :disabled="engineBlocked || busy || isJobActive || documentDirty || settingsDirty"
+              @dirty-changed="formattingDirty=$event" @modified="structureModified" @membership="openMembership"
+              @build="showView('build')" @policy="openStructurePolicy">
+              <template #order>              <section
                 v-if="docs.length"
                 class="panel index-order-panel"
                 aria-label="Index document order"
               >
                 <div class="panel-header">
                   <div>
-                    <h2>Index order</h2>
+                    <h2>Document order</h2>
                     <span
-                      >Drag or focus a handle and press ↑/↓ to change order and
-                      page ranges.</span
+                      >Drag to reorder · {{includedDocuments.length}} included documents</span
                     >
                   </div>
                 </div>
                 <VueDraggable
-                  :model-value="docs"
+                  :model-value="includedDocuments"
                   class="index-order-list"
                   item-key="id"
                   handle=".drag-handle"
@@ -3570,14 +4030,15 @@ watch(sidebarCollapsed, (collapsed) => {
                   chosen-class="sortable-chosen"
                   drag-class="sortable-drag"
                   fallback-class="sortable-fallback"
-                  @update:model-value="applyDocumentSort"
+                  @update:model-value="applyIncludedDocumentSort"
                   ><div
-                    v-for="(doc, index) in docs"
+                    v-for="(doc, index) in includedDocuments"
                     :key="doc.id"
-                    class="index-order-row"
+                    class="index-order-item"
                     :data-document-id="doc.id"
                   >
-                    <span
+                    <h3 v-if="index===0||includedDocuments[index-1].part!==doc.part" class="index-part-heading">⌄ Part {{doc.part}}</h3>
+                    <div class="index-order-row" :class="{selected:doc.id===selectedDocId}"><span
                       class="grip drag-handle"
                       role="button"
                       :tabindex="busy ? -1 : 0"
@@ -3587,226 +4048,48 @@ watch(sidebarCollapsed, (collapsed) => {
                         '. Press Up or Down arrow keys.'
                       "
                       @click.stop
-                      @keydown.up.prevent="moveDocumentFromHandle(doc.id, -1)"
-                      @keydown.down.prevent="moveDocumentFromHandle(doc.id, 1)"
+                      @keydown.up.prevent="moveIncludedDocument(doc.id, -1)"
+                      @keydown.down.prevent="moveIncludedDocument(doc.id, 1)"
                       ><GripVertical :size="16" /></span
                     ><strong
-                      >{{ index + 1 }}. {{ doc.label ? doc.label + " · " : ""
+                      >{{ doc.label ? doc.label + " · " : ""
                       }}{{ doc.title }}</strong
-                    ><span>{{ doc.page_count }} page(s)</span>
+                    ><span>{{ doc.page_count }}</span></div>
                   </div></VueDraggable
                 >
               </section>
-              <BundlePreview
+</template>
+              <template #map="{recalculateKey}">              <BundlePreview
+                  :inputs-pending="engineBlocked || busy || isJobActive || checksLoading || documentDirty || settingsDirty || formattingDirty"
                 :matter-id="currentMatterId!"
+                :documents="docs" :recalculate-key="recalculateKey"
                 :max-pages="matterEditor.max_pages_per_volume"
                 :keep-groups="matterEditor.keep_groups_intact"
                 :refresh-key="previewRefreshKey"
                 @open-document="openPreviewDocument"
                 @bookmark-document="prepareIndexBookmark"
               />
-              <IndexImport
+</template>
+              <template #import>              <IndexImport
                 :matter-id="currentMatterId!"
                 :documents="docs"
-                :disabled="busy || isJobActive"
+                :disabled="engineBlocked || busy || isJobActive"
                 @modified="loadMatterResources"
               />
-              <ManualBookmarks
-                :key="currentMatterId!"
-                :matter-id="currentMatterId!"
-                :documents="docs"
-                :refresh-key="previewRefreshKey"
-                :preset="bookmarkPreset"
-                :disabled="busy || isJobActive"
-                @modified="loadMatterResources"
-              />
-              <button
-                class="btn primary"
-                :disabled="!docs.length"
-                @click="showView('build')"
-              >
-                <Layers3 :size="17" /> Continue to Build bundle
-              </button>
-            </div>
+</template>
 
-            <div v-else-if="activeView === 'build'" class="build-layout">
-              <div class="build-main">
-                <div
-                  v-if="comparisonExport"
-                  class="panel build-export-shortcut"
-                >
-                  <div>
-                    <strong>Completed bundle ready</strong
-                    ><span
-                      >Review and save PDF, Word, Excel and PowerPoint
-                      files.</span
-                    >
-                  </div>
-                  <button class="btn secondary small" @click="openExports">
-                    <ArrowDownToLine :size="16" /> View exports
-                  </button>
-                </div>
-                <div class="panel build-panel">
-                  <div class="panel-header">
-                    <div>
-                      <h2>Collation & export settings</h2>
-                      <span
-                        >Configured per matter—not universal legal rules</span
-                      >
-                    </div>
-                    <Settings2 :size="18" class="muted-icon" />
-                  </div>
-                  <div class="build-body">
-                    <label class="field"
-                      >Maximum pages per volume
-                      <span class="help-inline">(including index pages)</span
-                      ><input
-                        v-model.number="matterEditor.max_pages_per_volume"
-                        type="number"
-                        min="2"
-                        max="2000"
-                    /></label>
-                    <p class="setting-description">
-                      Client-configured document packaging limit. It is not a
-                      nationwide Indian court requirement.
-                    </p>
-                    <label class="checkbox-line"
-                      ><input
-                        v-model="matterEditor.keep_groups_intact"
-                        type="checkbox"
-                      />
-                      <div>
-                        <strong>Keep document groups together</strong
-                        ><span
-                          >Grouped adjacent documents must fit in the same
-                          volume.</span
-                        >
-                      </div></label
-                    >
-                    <button
-                      class="btn secondary"
-                      :disabled="!settingsDirty || isJobActive"
-                      @click="savePolicy()"
-                    >
-                      <Check :size="16" /> Save bundle settings
-                    </button>
-                    <div class="checklist">
-                      <div>
-                        <CheckCircle2 :size="17" /> Generate index pages in
-                        every volume
-                      </div>
-                      <div>
-                        <CheckCircle2 :size="17" /> Include clickable index
-                        links and PDF bookmarks
-                      </div>
-                      <div>
-                        <CheckCircle2 :size="17" /> Generate combined PDF +
-                        separate volumes
-                      </div>
-                      <div>
-                        <CheckCircle2 :size="17" /> Archive in ZIP with
-                        validation report
-                      </div>
-                    </div>
-                    <div class="notice amber">
-                      <ShieldAlert :size="18" /><span
-                        >Working-copy PDF annotation objects and imported/source
-                        link actions are omitted from volume and combined PDFs;
-                        flattened marks remain. Generated index links, bookmarks
-                        and explicitly reviewed CourtBundle links are retained
-                        only when their revision-anchored targets resolve.
-                        Cross-volume reviewed links work in the combined PDF and
-                        are omitted from standalone volumes. Review all
-                        warnings; signature integrity and filing acceptance are
-                        not certified.</span
-                      >
-                    </div>
-                    <div v-if="signatureRiskDocs.length" class="notice amber">
-                      <ShieldAlert :size="18" /><span
-                        ><strong
-                          >{{ signatureRiskDocs.length }} signature-risk
-                          document(s) require acknowledgment before
-                          build.</strong
-                        ><small
-                          >Bundle generation rewrites pages and cannot preserve
-                          certificate protections. Imported originals remain
-                          unchanged; no signature validity is asserted.</small
-                        ></span
-                      >
-                    </div>
-                    <p role="status" class="hint">
-                      {{
-                        settingsAutosaveState === "failed"
-                          ? "Autosave failed. Retry Save before building."
-                          : settingsAutosaveState === "saving"
-                            ? "Saving bundle settings…"
-                            : settingsDirty
-                              ? "Unsaved bundle settings. Autosaves after a short pause."
-                              : "Bundle settings saved"
-                      }}
-                    </p>
-                    <button
-                      class="btn primary large"
-                      :disabled="!docs.length || isJobActive"
-                      @click="startBuild"
-                    >
-                      <Layers3 :size="19" />
-                      {{ isJobActive ? "Processing…" : "Build filing bundle" }}
-                    </button>
-                    <div v-if="isJobActive && activeJob" class="job-progress">
-                      <div class="job-progress-line">
-                        <span>{{ activeJob.message }}</span
-                        ><strong>{{ activeJob.progress }}%</strong>
-                      </div>
-                      <div class="progress-track">
-                        <div :style="{ width: activeJob.progress + '%' }"></div>
-                      </div>
-                      <button class="text-tool danger" @click="cancelJob">
-                        Cancel operation
-                      </button>
-                    </div>
-                    <div
-                      v-else-if="activeJob?.status === 'failed'"
-                      class="notice error"
-                    >
-                      <CircleAlert :size="18" /> {{ activeJob.error }}
-                    </div>
-                    <div
-                      v-for="job in interruptedJobs"
-                      :key="job.id"
-                      class="notice amber"
-                    >
-                      <CircleAlert :size="18" /><span
-                        >{{
-                          job.kind === "ocr"
-                            ? "OCR"
-                            : job.kind === "compress"
-                              ? "Compression"
-                              : "Bundle build"
-                        }}
-                        was interrupted by an engine restart. Review the current
-                        revision and exports before retrying.</span
-                      ><span v-if="job.kind === 'compress'"
-                        >Choose compression again in page tools.</span
-                      ><label v-if="job.kind === 'ocr'"
-                        >OCR language
-                        <select v-model="retryOcrLanguage">
-                          <option value="eng">English</option>
-                          <option value="hin">Hindi</option>
-                          <option value="eng+hin">English + Hindi</option>
-                        </select></label
-                      ><button
-                        v-if="job.kind !== 'compress'"
-                        class="text-tool"
-                        :disabled="isJobActive"
-                        @click="retryInterrupted(job)"
-                      >
-                        Retry
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <OutputPresets
+            </BundleStructure>
+
+            <BuildWorkspace v-else-if="activeView === 'build'" :key="currentMatterId!" ref="buildWorkspace"
+              :matter-id="currentMatterId!" :documents="docs" :artifacts="exportsList" :job="activeJob"
+              :busy="isJobActive" :blocked="engineBlocked || busy || buildSubmitting" :cancel-pending="cancelPending"
+              :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact"
+              :refresh-key="previewRefreshKey" :dirty="settingsDirty || formattingDirty" :profile="selectedProfile"
+              :checks-text="checksLoading ? 'Preflight loading' : checksError || `${errorChecks.length} preflight blockers · ${warningChecks.length} warnings to review`"
+              @build="startBuild" @cancel="cancelJob" @retry="retryInterrupted" @review="reviewGeneratedPdf"
+              @finding="openFinding" @export="exportDialogArtifact=$event" @documents="showPreparation" @checks="showView('validation')"
+              @configure="openStructure" @membership="openMembership" @storage="showView('storage')" @backup="backupCurrentMatter">
+              <template #settings>                <OutputPresets
                   :key="currentMatterId!"
                   ref="outputPresetsPanel"
                   :matter-id="currentMatterId!"
@@ -3816,163 +4099,32 @@ watch(sidebarCollapsed, (collapsed) => {
                   :disabled="isJobActive"
                   :refresh-key="previewRefreshKey"
                   :documents="docs"
-                  @apply-requested="applyOutputPreset"
+                  @apply-requested="applyOutputPreset" @configure="openStructure"
                   @dirty-changed="formattingDirty = $event"
                   @modified="loadMatterResources"
                   @open-document="openPreviewDocument"
                 />
-                <BundlePreview
+</template>
+              <template #preview>                <BundlePreview
+                  :inputs-pending="engineBlocked || busy || isJobActive || checksLoading || documentDirty || settingsDirty || formattingDirty"
                   :matter-id="currentMatterId!"
                   :max-pages="matterEditor.max_pages_per_volume"
                   :keep-groups="matterEditor.keep_groups_intact"
                   :refresh-key="previewRefreshKey"
                   @open-document="openPreviewDocument"
                 />
-                <div v-if="comparisonExport" class="comparison-picker">
-                  <label class="field"
-                    >Compare current plan with build
-                    <select v-model="comparisonExportId">
-                      <option
-                        v-for="item in exportsList"
-                        :key="item.id"
-                        :value="item.id"
-                      >
-                        {{ prettyDate(item.created_at) }} ·
-                        {{ item.id.slice(0, 8)
-                        }}{{ item.stale ? " · outdated" : "" }}
-                      </option>
-                    </select></label
-                  >
-                </div>
-                <BuildComparison
-                  v-if="comparisonExport"
+</template>
+              <template #volumes><div class="build-volume-controls"><label class="field">Maximum pages per volume<input v-model.number="matterEditor.max_pages_per_volume" type="number" min="2" max="2000" :disabled="isJobActive"/></label><label class="check-row"><input v-model="matterEditor.keep_groups_intact" type="checkbox" :disabled="isJobActive"/>Keep document groups together</label><button class="btn primary" :disabled="engineBlocked || isJobActive || !settingsDirty" @click="savePolicy()">Save bundle settings</button><p role="status">{{settingsAutosaveState==='failed'?'Settings save failed — retry Save':settingsDirty?'Unsaved bundle settings':'Bundle settings saved'}}</p></div>                <BundlePreview
+                  :inputs-pending="engineBlocked || busy || isJobActive || checksLoading || documentDirty || settingsDirty || formattingDirty"
                   :matter-id="currentMatterId!"
-                  :export-id="comparisonExport.id"
                   :max-pages="matterEditor.max_pages_per_volume"
                   :keep-groups="matterEditor.keep_groups_intact"
                   :refresh-key="previewRefreshKey"
+                  @open-document="openPreviewDocument"
                 />
-                <div ref="exportsPanel" class="panel exports-panel">
-                  <div class="panel-header">
-                    <div>
-                      <h2>Generated exports</h2>
-                      <span>Stored locally for repeat downloads</span>
-                    </div>
-                    <Archive :size="18" class="muted-icon" />
-                  </div>
-                  <div v-if="comparisonExport" class="export-body">
-                    <div v-if="comparisonExport.stale" class="notice amber">
-                      <ShieldAlert :size="18" /> Matter inputs changed since
-                      this export. Rebuild before using it.
-                    </div>
-                    <div
-                      v-if="
-                        activeJob?.kind === 'build' &&
-                        activeJob.status === 'failed'
-                      "
-                      class="notice amber"
-                    >
-                      <ShieldAlert :size="18" /> The latest build failed. These
-                      files are from an earlier completed export; review them
-                      before use.
-                    </div>
-                    <div class="export-summary">
-                      <div class="export-icon"><FileCheck2 :size="25" /></div>
-                      <div>
-                        <strong>{{
-                          activeJob?.kind === "build" &&
-                          activeJob.status === "failed"
-                            ? "Previous filing package"
-                            : comparisonExport.id === activeExport?.id
-                              ? "Latest filing package"
-                              : "Selected prior package"
-                        }}</strong
-                        ><span
-                          >{{ prettyDate(comparisonExport.created_at) }} ·
-                          {{ comparisonExport.id.slice(0, 8) }} ·
-                          {{ comparisonExport.volumes }} volume(s) ·
-                          {{ comparisonExport.pages }} pages</span
-                        >
-                      </div>
-                    </div>
-                    <div
-                      v-if="
-                        comparisonExport.checks.some(
-                          (check) =>
-                            check.code === 'SOURCE_ANNOTATIONS_OMITTED' ||
-                            check.code === 'SOURCE_LINKS_OMITTED',
-                        )
-                      "
-                      class="notice amber"
-                    >
-                      <ShieldAlert :size="18" /> This export omitted source
-                      annotations or links. See validation-report.json for
-                      affected documents; generated index links remain.
-                    </div>
-                    <div
-                      v-if="
-                        comparisonExport.files.some(
-                          (file) => file.name === 'combined.pdf',
-                        )
-                      "
-                      class="office-quick-export"
-                      role="group"
-                      aria-label="Office review exports"
-                    >
-                      <div>
-                        <strong>Editable review exports</strong>
-                        <p>
-                          Word and PowerPoint use PDF text; Excel uses the
-                          generated index. Compare each draft with the PDF.
-                        </p>
-                      </div>
-                      <div class="office-quick-actions">
-                        <button
-                          class="btn secondary small"
-                          :disabled="savingExport"
-                          @click="
-                            saveOfficeReview(
-                              comparisonExport.id,
-                              'combined.pdf',
-                              'docx',
-                            )
-                          "
-                        >
-                          Word (.docx)</button
-                        ><button
-                          v-if="
-                            comparisonExport.files.some(
-                              (file) => file.name === 'index.csv',
-                            )
-                          "
-                          class="btn secondary small"
-                          :disabled="savingExport"
-                          @click="
-                            saveOfficeReview(
-                              comparisonExport.id,
-                              'index.csv',
-                              'xlsx',
-                            )
-                          "
-                        >
-                          Excel (.xlsx)</button
-                        ><button
-                          class="btn secondary small"
-                          :disabled="savingExport"
-                          @click="
-                            saveOfficeReview(
-                              comparisonExport.id,
-                              'combined.pdf',
-                              'pptx',
-                            )
-                          "
-                        >
-                          PowerPoint (.pptx)
-                        </button>
-                      </div>
-                    </div>
-                    <div
-                      v-for="file in comparisonExport.files"
+</template>
+              <template #output-tools="{artifact}">                    <div
+                      v-for="file in artifact.files"
                       :key="file.name"
                       class="export-file"
                     >
@@ -3986,7 +4138,7 @@ watch(sidebarCollapsed, (collapsed) => {
                         class="text-tool"
                         :aria-label="'Review ' + file.name"
                         @click="
-                          reviewGeneratedPdf(comparisonExport.id, file.name)
+                          reviewGeneratedPdf(artifact.id, file.name)
                         "
                       >
                         Review PDF</button
@@ -4003,7 +4155,7 @@ watch(sidebarCollapsed, (collapsed) => {
                             ? 'Save ' + file.name
                             : 'Download ' + file.name
                         "
-                        @click="download(comparisonExport.id, file.name)"
+                        @click="download(artifact.id, file.name)"
                       >
                         <ArrowDownToLine :size="18" /></button
                       ><button
@@ -4011,14 +4163,14 @@ watch(sidebarCollapsed, (collapsed) => {
                         class="text-tool"
                         :disabled="savingExport"
                         :title="'Save ' + file.name + ' as'"
-                        @click="download(comparisonExport.id, file.name, true)"
+                        @click="download(artifact.id, file.name, true)"
                       >
                         Save As</button
                       ><button
                         v-if="file.name.endsWith('.pdf')"
                         class="text-tool"
                         :aria-label="'Print ' + file.name"
-                        @click="beginPrint(comparisonExport.id, file.name)"
+                        @click="beginPrint(artifact.id, file.name)"
                       >
                         Print…</button
                       ><button
@@ -4028,7 +4180,7 @@ watch(sidebarCollapsed, (collapsed) => {
                         :aria-label="'Save Word review draft from ' + file.name"
                         @click="
                           saveOfficeReview(
-                            comparisonExport.id,
+                            artifact.id,
                             file.name,
                             'docx',
                           )
@@ -4044,7 +4196,7 @@ watch(sidebarCollapsed, (collapsed) => {
                         "
                         @click="
                           saveOfficeReview(
-                            comparisonExport.id,
+                            artifact.id,
                             file.name,
                             'pptx',
                           )
@@ -4058,7 +4210,7 @@ watch(sidebarCollapsed, (collapsed) => {
                         aria-label="Save Excel index workbook"
                         @click="
                           saveOfficeReview(
-                            comparisonExport.id,
+                            artifact.id,
                             file.name,
                             'xlsx',
                           )
@@ -4074,99 +4226,22 @@ watch(sidebarCollapsed, (collapsed) => {
                         :disabled="savingExport"
                         :aria-label="'Save password-protected ' + file.name"
                         @click="
-                          beginProtectedExport(comparisonExport.id, file.name)
+                          beginProtectedExport(artifact.id, file.name)
                         "
                       >
                         Protect PDF…
                       </button>
                     </div>
-                    <p class="export-footnote">
-                      Office files are editable review drafts from this build.
-                      Word and PPT use extractable PDF text; layout, images and
-                      signatures are not reproduced. The Excel workbook follows
-                      the build index CSV. Compare each with the saved PDF.
-                    </p>
-                    <p
-                      v-if="selectedProfile?.disallow_pdf_encryption"
-                      class="export-footnote"
-                    >
-                      Encrypted PDF output is disabled by this illustrative
-                      profile as an unapproved technical setting. This is not a
-                      reviewed court rule.
-                    </p>
-                    <p class="export-footnote">
-                      The ZIP contains PDFs, an index CSV, and a technical
-                      validation report. It is not submitted to a court.
-                    </p>
-                  </div>
-                  <div v-else class="empty-export">
-                    <Archive :size="28" /><strong>No exports yet</strong
-                    ><span
-                      >Build a bundle to see PDF, Word, Excel and PowerPoint
-                      export options.</span
-                    >
-                  </div>
-                </div>
-              </div>
-              <div class="build-side">
-                <div class="panel snapshot-panel">
-                  <h3>Matter snapshot</h3>
-                  <div>
-                    <span>Documents</span><strong>{{ docs.length }}</strong>
-                  </div>
-                  <div>
-                    <span>Local storage</span
-                    ><strong>{{ bytesLabel(storageUsage.bytes) }}</strong>
-                  </div>
-                  <div>
-                    <span>Originals</span
-                    ><strong>{{
-                      bytesLabel(storageUsage.by_category.originals)
-                    }}</strong>
-                  </div>
-                  <div>
-                    <span>Working revisions</span
-                    ><strong>{{
-                      bytesLabel(storageUsage.by_category.working)
-                    }}</strong>
-                  </div>
-                  <div>
-                    <span>Exports</span
-                    ><strong>{{
-                      bytesLabel(storageUsage.by_category.exports)
-                    }}</strong>
-                  </div>
-                  <div>
-                    <span>Source pages</span><strong>{{ totalPages }}</strong>
-                  </div>
-                  <div>
-                    <span>Volume page cap</span
-                    ><strong>{{ matterEditor.max_pages_per_volume }}</strong>
-                  </div>
-                  <div>
-                    <span>Court profile</span
-                    ><strong>{{ selectedProfile?.id }}</strong>
-                  </div>
-                  <div>
-                    <span>Review flags</span
-                    ><strong>{{
-                      checks.filter((c) => c.severity !== "info").length
-                    }}</strong>
-                  </div>
-                </div>
-                <div class="notice subtle">
-                  <Info :size="17" /> Review every output against the required
-                  court directions. Grouping and page policy are configurable.
-                </div>
-              </div>
-            </div>
+<p>Office files are editable text review drafts; layout, images and verified signatures are not reproduced.</p></template>
+            </BuildWorkspace>
 
             <section
               v-else-if="activeView === 'storage'"
               class="matter-storage"
               aria-label="Matter storage"
             >
-              <div class="panel">
+              <BuildWorkspace :key="currentMatterId!" storage :matter-id="currentMatterId!" :documents="docs" :artifacts="exportsList" :job="activeJob" :busy="isJobActive" :blocked="engineBlocked" :cancel-pending="cancelPending" :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact" :refresh-key="previewRefreshKey" :dirty="settingsDirty" checks-text="" @review="reviewGeneratedPdf" @finding="openFinding" @export="exportDialogArtifact=$event" @build="showView('build')" @storage="loadMatterResources" @backup="backupCurrentMatter"/>
+              <details class="storage-maintenance"><summary>Storage usage, originals, revisions and backup tools</summary><div class="panel">
                 <div class="panel-header">
                   <div>
                     <h2>Local matter storage</h2>
@@ -4314,79 +4389,16 @@ watch(sidebarCollapsed, (collapsed) => {
                   No completed builds yet.
                 </p>
               </div>
-            </section>
+            </details></section>
 
-            <div
-              v-else-if="activeView === 'validation'"
-              class="validation-layout"
-            >
-              <div class="panel validation-panel">
-                <div class="panel-header">
-                  <div>
-                    <h2>Technical preflight</h2>
-                    <span>Checks that are automated in this POC</span>
-                  </div>
-                  <button class="btn secondary small" @click="validate">
-                    <RefreshCw :size="15" /> Run checks
-                  </button>
-                </div>
-                <div class="validation-intro">
-                  <div class="validation-icon"><ShieldCheck :size="25" /></div>
-                  <div>
-                    <strong
-                      >{{ errorChecks.length }} errors ·
-                      {{ warningChecks.length }} warnings</strong
-                    >
-                    <p>
-                      No legal judgment is made about your documents. Fix
-                      flagged items and review all other filing requirements
-                      with the advocate.
-                    </p>
-                  </div>
-                </div>
-                <div
-                  v-for="(check, index) in checks"
-                  :key="index"
-                  :class="['check-entry', check.severity]"
-                >
-                  <component :is="iconsBySeverity[check.severity]" :size="18" />
-                  <div>
-                    <strong>{{ check.code.split("_").join(" ") }}</strong>
-                    <p>{{ check.message }}</p>
-                  </div>
-                  <span class="check-severity">{{ check.severity }}</span>
-                </div>
-                <div v-if="!checks.length" class="empty-export">
-                  No checks reported.
-                </div>
-              </div>
-              <div class="panel review-panel">
-                <h3>Human review remains essential</h3>
-                <p>These items are not certified by this application:</p>
-                <div>
-                  <Check :size="16" /> Court-specific case-type requirements
-                </div>
-                <div>
-                  <Check :size="16" /> Signature and attestation validity
-                </div>
-                <div>
-                  <Check :size="16" /> Evidence authenticity and translations
-                </div>
-                <div>
-                  <Check :size="16" /> Limitation, fees and registry acceptance
-                </div>
-              </div>
-              <FilingReview
-                :matter-id="currentMatterId!"
-                :refresh-key="previewRefreshKey"
-                :disabled="busy || isJobActive"
-                @modified="loadMatterResources"
-              />
-            </div>
+            <PreflightWorkspace v-else-if="activeView === 'validation'" :checks="checks" :loading="checksLoading" :error="checksError" :pending="documentDirty || settingsDirty || formattingDirty || busy || isJobActive" :blocked="engineBlocked" v-model:filter="preflightFilter" @run="validate" @finding="openFinding($event)" @build="showView('build')">
+              <FilingReview :matter-id="currentMatterId!" :refresh-key="previewRefreshKey" :disabled="engineBlocked || busy || isJobActive" @modified="loadMatterResources"/>
+            </PreflightWorkspace>
           </Transition>
         </main>
       </Transition>
     </div>
+    <footer class="application-status"><button v-if="currentMatter && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="inclusionSummary">Bundle membership</button><span v-if="membershipOpen || activeView==='index'" class="membership-status-step">03 / 06 &nbsp; Prepare index</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="currentMatter" class="text-tool" @click="membershipOpen ? leaveMembership() : showPreparation()">{{membershipOpen ? 'Return to caller' : 'Back to preparation'}}</button></footer>
     <dialog
       v-if="selectedDoc && pageToolsOpen"
       ref="pageToolsDialog"
@@ -4418,7 +4430,7 @@ watch(sidebarCollapsed, (collapsed) => {
       <PageTools
         :document="selectedDoc"
         :documents="docs"
-        :disabled="busy || isJobActive || documentDirty"
+        :disabled="engineBlocked || busy || isJobActive || documentDirty"
         :job="activeJob"
         expanded
         @modified="refreshDocument"
@@ -4426,11 +4438,22 @@ watch(sidebarCollapsed, (collapsed) => {
         @cancel="cancelJob"
       />
     </dialog>
+    <OutputChecksDialog v-if="outputChecksArtifact && currentMatterId" :key="outputChecksArtifact.id" :matter-id="currentMatterId" :artifact="outputChecksArtifact" @close="outputChecksArtifact=null" @changed="previewRefreshKey++" @review="reviewGeneratedPdf(outputChecksArtifact.id,'combined.pdf');outputChecksArtifact=null" @finding="openFinding($event,outputChecksArtifact.id);outputChecksArtifact=null"/>
+    <BundleExportDialog v-if="exportDialogArtifact && currentMatterId" :matter-id="currentMatterId" :artifact="exportDialogArtifact" @close="exportDialogArtifact=null"/>
     <ExportPdfReview
       v-if="reviewingPdf && currentMatterId"
       :matter-id="currentMatterId"
       :export-id="reviewingPdf.exportId"
       :filename="reviewingPdf.filename"
+      :original-id="reviewingPdf.originalId"
+      :artifact-options="selectedDoc ? artifactOptions : undefined"
+      :manifest="exportsList.find(item=>item.id===reviewingPdf!.exportId)"
+      @source="openGeneratedSource"
+      @checks="outputChecksArtifact=exportsList.find(item=>item.id===reviewingPdf!.exportId)||null"
+      @export="exportDialogArtifact=exportsList.find(item=>item.id===reviewingPdf!.exportId)||null"
+      @rebuild="reviewingPdf=null;showView('build');nextTick(()=>buildWorkspace?.showSettings())"
+      @artifact="switchArtifact"
+      @retry-engine="retryEngine"
       :stale="
         exportsList.find((item) => item.id === reviewingPdf!.exportId)?.stale
       "

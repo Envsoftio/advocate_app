@@ -6,7 +6,7 @@ from app.pdf_ops import ProcessingError
 
 
 def upload(client, auth, matter_id, content):
-    result = client.post(f'/matters/{matter_id}/documents', headers=auth,
+    result = client.post(f'/matters/{matter_id}/documents?included=true', headers=auth,
                          files=[('files', ('organizer-synthetic.pdf', content, 'application/pdf'))])
     assert result.status_code == 201, result.text
     return result.json()[0]

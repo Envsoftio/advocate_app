@@ -126,7 +126,7 @@ def test_annexure_stamp_preview_rotated_page_and_unconfirmed_label_block(
         second.insert_text((80, 90), 'Narrow technical test', fontsize=14)
         raw = source.tobytes()
     base = f'/matters/{matter["id"]}'
-    uploaded = client.post(base + '/documents', headers=auth,
+    uploaded = client.post(base + '/documents?included=true', headers=auth,
         files={'files': ('rotated.pdf', raw, 'application/pdf')})
     assert uploaded.status_code == 201, uploaded.text
     document = uploaded.json()[0]

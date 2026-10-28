@@ -42,7 +42,7 @@ def test_interrupted_build_is_visible_and_can_retry_once(tmp_path):
                 break
             time.sleep(.02)
         assert new['status'] == 'failed'
-        assert 'Import at least one document' in new['error']
+        assert 'Include at least one document' in new['error']
         assert client.get(f'/matters/{matter["id"]}/exports', headers=AUTH).json() == []
 
     with TestClient(create_app(data_dir=root, token='recovery-secret')) as reopened:

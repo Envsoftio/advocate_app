@@ -126,7 +126,7 @@ def test_selective_restore_refuses_reordered_pages(client, auth, matter, make_pd
 
 
 def upload(client, auth, matter, content):
-    result = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    result = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                          files=[('files', ('redaction.pdf', content, 'application/pdf'))])
     assert result.status_code == 201, result.text
     return result.json()[0]

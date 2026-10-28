@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { engineState, autosaveHeld } from './engineConnection'
 import { api, ApiError, exportPdfDocumentSource, pdfDocumentSource } from './api'
 
 afterEach(() => {
+  engineState.value = 'ready'
+  autosaveHeld.value = false
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
@@ -11,7 +14,7 @@ describe('local API failures', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     const source = await exportPdfDocumentSource('synthetic/matter', 'synthetic export', 'volume #1.pdf')
-    expect(source.url).toContain('/matters/synthetic%2Fmatter/exports/synthetic%20export/volume%20%231.pdf')
+    expect(source.url).toContain('/matters/synthetic%2Fmatter/exports/synthetic%20export/inspection/volume%20%231.pdf')
     expect(source.httpHeaders.Authorization).toMatch(/^Bearer .+/)
     expect(source).toMatchObject({ rangeChunkSize: 262144, disableStream: true, disableAutoFetch: true })
     expect(fetchMock).not.toHaveBeenCalled()
@@ -54,4 +57,16 @@ describe('local API failures', () => {
     await expect(api('/documents/synthetic/pages/redact', 'POST', {})).rejects.toThrow(
       'rect_width: Input should be greater than 0; Redaction region must stay within the displayed page')
   })
+})
+
+it('blocks writes after transport loss even when health becomes reachable, without replay', async () => {
+  const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('connection refused'))
+    .mockResolvedValue(new Response(JSON.stringify({status:'ok'}), {status:200}))
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(api('/health')).rejects.toBeInstanceOf(ApiError)
+  await expect(api('/documents/synthetic/pages/rotate','POST',{})).rejects.toThrow('paused')
+  await api('/health')
+  await expect(api('/matters/synthetic/build','POST')).rejects.toThrow('paused')
+  expect(fetchMock).toHaveBeenCalledTimes(2)
+  expect(autosaveHeld.value).toBe(true)
 })

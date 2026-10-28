@@ -1,3 +1,4 @@
+import { closeWorkspaceNavigation } from './navigation'
 import { expect, test, type Locator } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -49,14 +50,15 @@ test('actual-page crop preview maps rotated drag/numeric selections to saved PDF
   } })
   expect(created.ok()).toBeTruthy()
   const matterId = (await created.json()).id as string
-  const uploaded = await request.post(`${backend}/matters/${matterId}/documents`, { headers,
+  const uploaded = await request.post(`${backend}/matters/${matterId}/documents?included=true`, { headers,
     multipart: { files: { name: 'crop-rotations-synthetic.pdf', mimeType: 'application/pdf', buffer: original } },
   })
   expect(uploaded.ok()).toBeTruthy()
   const document = (await uploaded.json())[0]
   const documents = async () => (await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json())[0]
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'E2E Rotated Crop Preview' })).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Rotated Crop Preview'})).toBeVisible()
+  await closeWorkspaceNavigation(page)
   await page.getByRole('tab', { name: 'Pages', exact: true }).click()
   await page.getByRole('button', { name: 'Page tools', exact: true }).click()
   const tools = page.getByRole('dialog', { name: 'Page tools' })

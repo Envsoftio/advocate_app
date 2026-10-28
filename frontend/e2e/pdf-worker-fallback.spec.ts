@@ -1,3 +1,4 @@
+import { openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
@@ -39,7 +40,7 @@ test('production PDF reader renders with the bundled main-thread fallback when W
 
   const matter = await (await request.post(`${backend}/matters`, { headers,
     data: { name: 'E2E Production Worker Fallback', court_profile: 'general-demo' } })).json()
-  const imported = await request.post(`${backend}/matters/${matter.id}/documents`, { headers,
+  const imported = await request.post(`${backend}/matters/${matter.id}/documents?included=true`, { headers,
     multipart: { files: { name: 'worker-fallback-synthetic.pdf', mimeType: 'application/pdf',
       buffer: readFileSync(resolve(frontend, '../samples/01_petition.pdf')) } } })
   expect(imported.ok()).toBeTruthy()
@@ -73,8 +74,10 @@ test('production PDF reader renders with the bundled main-thread fallback when W
     } })
   })
   await page.goto('/')
+  await openDocumentBrowser(page)
   await expect(page.locator('.doc-item').filter({ hasText: 'worker-fallback-synthetic' })).toBeVisible()
     .catch(cause => { throw new Error(`Production app connection: ${JSON.stringify(network)}; ${JSON.stringify(errors)}; ${cause}`) })
+  await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'worker-fallback-synthetic' }).click()
   await expect(page.getByRole('spinbutton', { name: 'Go to page', exact: true })).toBeEnabled()
   const surface = page.locator('.pdf-page-surface[data-page="1"]')

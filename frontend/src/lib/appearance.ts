@@ -23,6 +23,7 @@ export function readAppearance(): { theme: Theme, scale: UiScale } {
 export function applyAppearance(theme: Theme, scale: UiScale) {
   document.documentElement.dataset.theme = theme
   syncEffectiveTheme()
+  document.documentElement.style.setProperty('--ui-scale', String(scale / 100))
   document.documentElement.style.zoom = `${scale}%`
   try { localStorage.setItem(key, JSON.stringify({ theme, scale })) } catch { /* private storage */ }
 }

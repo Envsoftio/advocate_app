@@ -27,7 +27,7 @@ def _package_with_manifest_change(raw: bytes, change):
 def test_portable_matter_round_trip_preserves_originals_and_revisions(client, auth, make_pdf):
     matter = _matter(client, auth)
     original = make_pdf(2)
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('synthetic.pdf', original, 'application/pdf'))])
     assert uploaded.status_code == 201
     doc = uploaded.json()[0]
@@ -68,7 +68,7 @@ def test_portable_matter_round_trip_preserves_originals_and_revisions(client, au
 
 def test_legacy_v1_portable_package_still_restores(client, auth, make_pdf):
     matter = _matter(client, auth)
-    imported = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    imported = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('synthetic.pdf', make_pdf(1), 'application/pdf'))])
     assert imported.status_code == 201
     raw = client.get(f'/matters/{matter["id"]}/portable', headers=auth).content
@@ -134,9 +134,9 @@ def test_startup_cleans_interrupted_portable_files_and_restricts_store(tmp_path)
 
 def test_portable_restore_rejects_unsafe_corrupt_and_future_packages(client, auth, make_pdf):
     matter = _matter(client, auth)
-    client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('synthetic.pdf', make_pdf(1), 'application/pdf'))])
-    client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('synthetic-2.pdf', make_pdf(1), 'application/pdf'))])
     raw = client.get(f'/matters/{matter["id"]}/portable', headers=auth).content
     def duplicate_group_parents(manifest):

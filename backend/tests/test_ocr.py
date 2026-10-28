@@ -26,7 +26,7 @@ def test_ocr_scanned_image(client, auth, matter):
     draw.text((80, 170), 'FILING OCR TEST 2026', font=font, fill='black')
     blob = io.BytesIO()
     image.save(blob, format='PNG')
-    r = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    r = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                     files=[('files', ('scan.png', blob.getvalue(), 'image/png'))])
     assert r.status_code == 201, r.text
     doc_id = r.json()[0]['id']
@@ -55,7 +55,7 @@ def test_ocr_scanned_image(client, auth, matter):
 def test_hindi_mixed_script_ocr_preserves_source_and_page_geometry(
         client, auth, matter, name, expected_pages, expected_rotation):
     source = (SAMPLES / name).read_bytes()
-    imported = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    imported = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', (name, source, 'application/pdf'))])
     assert imported.status_code == 201, imported.text
     doc = imported.json()[0]
@@ -87,7 +87,7 @@ def test_hindi_mixed_script_ocr_preserves_source_and_page_geometry(
 
 
 def test_ocr_rejects_unlisted_language(client, auth, matter, make_pdf):
-    imported = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    imported = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('native.pdf', make_pdf(), 'application/pdf'))]).json()[0]
     response = client.post(f'/documents/{imported["id"]}/ocr', headers=auth,
                            json={'language': 'ara'})
@@ -101,7 +101,7 @@ def test_ocr_provenance_survives_history_restart_and_portable(tmp_path):
     source = (SAMPLES / '04_scanned_annexure.jpg').read_bytes()
     with TestClient(create_app(data_dir=root, token='test-token')) as client:
         matter = client.post('/matters', headers=auth, json={'name': 'OCR provenance fixture'}).json()
-        uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+        uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
             files=[('files', ('scan.jpg', source, 'image/jpeg'))])
         assert uploaded.status_code == 201, uploaded.text
         doc = uploaded.json()[0]

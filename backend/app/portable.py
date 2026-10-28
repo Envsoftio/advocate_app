@@ -23,7 +23,7 @@ from .engine import load_profiles
 from .pdf_ops import ProcessingError, validate_overlay_image
 from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 14
+PACKAGE_VERSION = 15
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -151,6 +151,7 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
     manifest = {'format': 'courtbundle-matter', 'version': PACKAGE_VERSION,
                 'created_at': utcnow(), 'matter': matter, 'documents': documents,
                 'revisions': revisions, 'redactions': redactions,
+                'membership_revision': store.bundle_membership(matter_id)['revision'],
                 'memo_parties': store.get_memo_parties(matter_id),
                 'matter_values': store.get_matter_values(matter_id),
                 'manual_bookmarks': [{key: item[key] for key in ('id', 'title',
@@ -287,6 +288,10 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                 doc.setdefault('signature_status', 'inspection_inconclusive')
             if manifest['version'] < 11:
                 doc.setdefault('ocr_provenance_json', '[]')
+            if manifest['version'] < 15:
+                doc['bundle_included'] = 1
+            if type(doc.get('bundle_included')) is not int or doc['bundle_included'] not in (0, 1):
+                raise PortableMatterError('Invalid bundle membership in package')
             _validate_ocr_provenance(doc['ocr_provenance_json'])
             DocumentPatch.model_validate({key: doc[key] for key in
                 ('title', 'kind', 'part', 'label', 'label_status', 'label_source',
@@ -492,6 +497,11 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
             matter_fields.update(id=matter_id, updated_at=utcnow())
             con.execute('INSERT INTO matters (' + ','.join(matter_fields) + ') VALUES (' +
                         ','.join('?' for _ in matter_fields) + ')', tuple(matter_fields.values()))
+            membership_revision = manifest.get('membership_revision', 1)
+            if type(membership_revision) is not int or membership_revision < 1:
+                raise PortableMatterError('Invalid membership revision in package')
+            con.execute('INSERT INTO bundle_membership_state(matter_id,revision) VALUES (?,?)',
+                        (matter_id, membership_revision))
             for doc in documents:
                 fields = {key: doc[key] for key in (
                     'title', 'kind', 'part', 'label', 'label_status', 'label_source',
@@ -501,7 +511,7 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                     'working_relpath', 'certificate_signature_status',
                     'certificate_signature_count', 'signature_inspection_note',
                     'visible_signature_status', 'signature_status',
-                    'created_at', 'updated_at', 'revision', 'archived_at')}
+                    'created_at', 'updated_at', 'revision', 'archived_at', 'bundle_included')}
                 fields.update(id=id_map[doc['id']], matter_id=matter_id)
                 con.execute('INSERT INTO documents (' + ','.join(fields) + ') VALUES (' +
                             ','.join('?' for _ in fields) + ')', tuple(fields.values()))

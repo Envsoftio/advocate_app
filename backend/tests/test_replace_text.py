@@ -6,7 +6,7 @@ import pytest
 
 def test_replace_selectable_text_preserves_original_and_exports(client, auth, matter, make_pdf):
     original = make_pdf(1, 'OLD WORDS')
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('source.pdf', original, 'application/pdf'))])
     assert uploaded.status_code == 201, uploaded.text
     doc = uploaded.json()[0]
@@ -49,7 +49,7 @@ def test_replace_selectable_text_preserves_original_and_exports(client, auth, ma
 
 
 def test_replace_fits_longer_text_and_wraps_in_clear_space(client, auth, matter, make_pdf):
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('source.pdf', make_pdf(1, 'SHORT'), 'application/pdf'))])
     doc = uploaded.json()[0]
     base = f'/documents/{doc["id"]}'
@@ -73,7 +73,7 @@ def test_explicit_lines_use_their_actual_width_not_a_full_page_column(client, au
         page.insert_text((72, 100), 'OLD', fontsize=12)
         page.insert_text((400, 124), 'UNRELATED RIGHT COLUMN', fontsize=12)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('two-lines.pdf', original, 'application/pdf'))])
     doc = uploaded.json()[0]
     base = f'/documents/{doc["id"]}'
@@ -92,7 +92,7 @@ def test_explicit_lines_use_their_actual_width_not_a_full_page_column(client, au
 
 
 def test_replace_rejects_stale_and_unfittable_text_without_revision(client, auth, matter, make_pdf):
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('source.pdf', make_pdf(1, 'SHORT'), 'application/pdf'))])
     doc = uploaded.json()[0]
     base = f'/documents/{doc["id"]}'
@@ -120,7 +120,7 @@ def test_move_text_vertically_preserves_original_and_checks_clear_space(client, 
         page.insert_text((430, 100) if rotation in (90, 270) else (80, 430), 'LOWER LINE', fontsize=12)
         page.set_rotation(rotation)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('move.pdf', original, 'application/pdf'))])
     assert uploaded.status_code == 201, uploaded.text
     document = uploaded.json()[0]
@@ -163,7 +163,7 @@ def test_move_text_in_two_dimensions(client, auth, matter, rotation, horizontal,
         page.insert_text((360, 500), 'UNCHANGED', fontsize=12)
         page.set_rotation(rotation)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('move-xy.pdf', original, 'application/pdf'))])
     doc = uploaded.json()[0]
     base = f'/documents/{doc["id"]}'
@@ -193,7 +193,7 @@ def test_imported_rotated_page_text_can_be_selected_and_replaced(
     with pymupdf.open(stream=make_pdf(1, 'ROTATED'), filetype='pdf') as source:
         source[0].set_rotation(rotation)
         original = source.tobytes()
-    uploaded = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
                            files=[('files', ('rotated.pdf', original, 'application/pdf'))])
     assert uploaded.status_code == 201, uploaded.text
     doc = uploaded.json()[0]

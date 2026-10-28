@@ -12,7 +12,7 @@ def test_protected_reading_position_survives_restart_and_revision_guard(tmp_path
         return TestClient(create_app(root, token='reader-test', data_key=secret, require_vault=False))
     with open_client() as client:
         matter = client.post('/matters', headers=auth, json={'name': 'Synthetic reader', 'court_profile': 'general-demo'}).json()
-        document = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+        document = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
             files=[('files', ('reader.pdf', make_pdf(4), 'application/pdf'))]).json()[0]
         key = f'{document["id"]}:1'
         state = {'page': 3, 'x': .1, 'y': .42, 'zoom': '125', 'mode': 'continuous'}
@@ -41,7 +41,7 @@ def test_protected_reading_position_survives_restart_and_revision_guard(tmp_path
 @pytest.mark.parametrize('patch', [{'page': 0}, {'page': True}, {'page': 5}, {'x': 1.1}, {'y': -1},
                                   {'zoom': '999'}, {'mode': 'dual'}, {'text': 'not navigation metadata'}])
 def test_invalid_reader_metadata(client, auth, matter, make_pdf, patch):
-    document = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+    document = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
         files=[('files', ('reader.pdf', make_pdf(4), 'application/pdf'))]).json()[0]
     state = {'key': f'{document["id"]}:1', 'page': 2, 'x': 0, 'y': 0, 'zoom': '100', 'mode': 'single', **patch}
     assert client.put('/reader-position', json=state, headers=auth).status_code == 422

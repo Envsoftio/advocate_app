@@ -3,13 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import { pdfRasterSize } from '../lib/pdfSurface'
 
-const props = defineProps<{pdf:PDFDocumentProxy|null,count:number,page:number,title:string,disabled?:boolean,
+const props = defineProps<{pdf:PDFDocumentProxy|null,count:number,page:number,title:string,disabled?:boolean,readOnly?:boolean,
   draggingPage:number|null,dropTargetPage:number|null}>()
 const emit = defineEmits<{select:[number],reorder:[source:number,target:number],
   dragstart:[event:DragEvent,page:number],dragend:[],dragover:[event:DragEvent,page:number],drop:[event:DragEvent,page:number]}>()
 const rail = ref<HTMLDivElement|null>(null)
 const heading = ref<HTMLDivElement|null>(null)
-const rowHeight = 176
+const rowHeight = 190
 const headerHeight = ref(48), railHeight = ref(600), scrollTop = ref(0)
 const focusedPage = ref(props.page)
 const rendered = ref(new Set<number>())
@@ -84,8 +84,11 @@ async function reveal(page:number,focus=false) {
   const wrap=rail.value
   if(!wrap || page<1 || page>props.count)return
   const top=headerHeight.value+(page-1)*rowHeight,bottom=top+rowHeight
-  if(top<wrap.scrollTop+headerHeight.value)wrap.scrollTop=(page-1)*rowHeight
-  else if(bottom>wrap.scrollTop+wrap.clientHeight)wrap.scrollTop=bottom-wrap.clientHeight+8
+  if(top<wrap.scrollTop+headerHeight.value || bottom>wrap.scrollTop+wrap.clientHeight) {
+    // Keep one preceding page as context when jumping through a long document.
+    wrap.scrollTop = focus ? Math.max(0, bottom-wrap.clientHeight+8) : Math.max(0,(page-2)*rowHeight)
+    if(top<wrap.scrollTop+headerHeight.value)wrap.scrollTop=(page-1)*rowHeight
+  }
   scrollTop.value=wrap.scrollTop
   if(focus){await nextTick();wrap.querySelector<HTMLButtonElement>(`[data-thumbnail-page="${page}"]`)?.focus({preventScroll:true})}
 }
@@ -102,6 +105,7 @@ async function keydown(event:KeyboardEvent,number:number) {
   if(props.disabled || event.metaKey || event.ctrlKey)return
   if(event.altKey && ['ArrowUp','ArrowDown'].includes(event.key)) {
     event.preventDefault();event.stopPropagation()
+    if(props.readOnly)return
     const target=number+(event.key==='ArrowUp'?-1:1)
     if(target>=1 && target<=props.count){pendingFocusPage=target;emit('reorder',number,target)}
     return
@@ -165,17 +169,17 @@ onBeforeUnmount(() => {mounted=false;cancelRender();stopDragScroll();observer?.d
 <template>
   <div ref="rail" class="thumbnail-strip thumbnail-rail virtual-thumbnail-rail" role="navigation" aria-label="Page thumbnails"
     @scroll.passive="onScroll" @dragover="trackDrag" @dragleave="leaveDrag">
-    <div ref="heading" class="thumbnail-rail-heading"><span class="thumbnail-hint">{{title}}</span><span>{{count}} pages</span></div>
-    <span class="thumbnail-keyboard-help">Use arrow keys to navigate pages. Alt plus up or down moves a page in the working copy.</span>
+    <div ref="heading" class="thumbnail-rail-heading"><span class="thumbnail-hint" :title="title">Pages</span><span>{{count}}</span></div>
+    <span class="thumbnail-keyboard-help">Use arrow keys to navigate pages. <template v-if="!readOnly">Alt plus up or down moves a page in the working copy.</template></span>
     <div class="thumbnail-rail-window" :style="{height:`${count*rowHeight}px`}">
       <button v-for="number in visiblePages" :key="number" :data-thumbnail-page="number" class="thumbnail-button"
         :class="{selected:number===page,dragging:draggingPage===number,'drop-target':dropTargetPage===number}"
         :style="{top:`${(number-1)*rowHeight}px`}" :aria-label="`Go to page ${number}`" :aria-current="number===page?'page':undefined"
-        :title="`Page ${number} · Drag to reorder. Alt+↑/↓ moves this page.`" :tabindex="number===tabStopPage?0:-1" :draggable="!disabled" :disabled="disabled"
+        :title="readOnly ? `Page ${number} · Read only` : `Page ${number} · Drag to reorder. Alt+↑/↓ moves this page.`" :tabindex="number===tabStopPage?0:-1" :draggable="!disabled && !readOnly" :disabled="disabled"
         @focus="focusedPage=number" @keydown="keydown($event,number)" @click="emit('select',number)"
         @dragstart="emit('dragstart',$event,number)" @dragend="stopDragScroll();emit('dragend')" @dragover="emit('dragover',$event,number)" @drop.prevent="stopDragScroll();emit('drop',$event,number)">
         <span class="thumbnail-image"><canvas :ref="value=>registerCanvas(number,value)" :data-page="number" width="1" height="1" :class="{'is-rendered':rendered.has(number)}"></canvas><span v-if="!rendered.has(number)" class="thumbnail-placeholder">{{failed.has(number)?'Preview unavailable':'Loading preview'}}</span></span>
-        <span class="thumbnail-page-number">{{number}}</span>
+        <span class="thumbnail-page-number">Source {{number}}</span>
       </button>
     </div>
   </div>
@@ -183,10 +187,10 @@ onBeforeUnmount(() => {mounted=false;cancelRender();stopDragScroll();observer?.d
 
 <style scoped>
 .virtual-thumbnail-rail{display:block;position:relative;flex:0 0 148px;width:148px;padding:0 8px;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overflow-anchor:none;scroll-behavior:auto}
-.thumbnail-rail-heading{position:sticky;top:0;z-index:3;display:flex;flex-direction:column;gap:3px;padding:9px 2px;background:var(--panel,#fff);font-size:10px;line-height:1.4;color:var(--muted,#607994)}
+.thumbnail-rail-heading{position:sticky;top:0;z-index:3;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;padding:9px 2px;background:var(--panel,#fff);font-size:12px;line-height:1.4;color:var(--muted,#607994)}
 .virtual-thumbnail-rail .thumbnail-hint{position:static;margin:0;padding:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;white-space:normal;font-weight:700}
 .thumbnail-rail-window{position:relative;width:100%}
-.virtual-thumbnail-rail .thumbnail-button{position:absolute;left:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:5px;width:100%;height:168px;min-width:0;box-sizing:border-box;flex:none}
+.virtual-thumbnail-rail .thumbnail-button{position:absolute;left:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:5px;width:100%;height:180px;min-width:0;box-sizing:border-box;flex:none}
 .virtual-thumbnail-rail .thumbnail-image{position:relative;display:flex;align-items:center;justify-content:center;flex:none;width:100%;height:132px;min-width:0;overflow:hidden}
 .virtual-thumbnail-rail .thumbnail-button canvas{display:none;flex:none;max-width:100%;max-height:100%;object-fit:contain;background:#fff;box-shadow:0 1px 4px #0002}
 .virtual-thumbnail-rail .thumbnail-button canvas.is-rendered{display:block}

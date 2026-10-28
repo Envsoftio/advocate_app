@@ -22,7 +22,7 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   globalTeardown: './e2e/teardown.ts',
-  use: { baseURL: `http://127.0.0.1:${vitePort}`, browserName: 'chromium', channel: 'chrome', acceptDownloads: true, screenshot:'only-on-failure' },
+  use: { actionTimeout: 15_000, baseURL: `http://127.0.0.1:${vitePort}`, browserName: 'chromium', channel: 'chrome', acceptDownloads: true, screenshot:'only-on-failure' },
   webServer: [
     {
       command: `"${python}" launcher.py --port ${backendPort} --data-dir "${dataDir}"`,

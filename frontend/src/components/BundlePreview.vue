@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import {CheckCircle2,TriangleAlert,RefreshCw} from 'lucide-vue-next'
+import type {MatterDocument} from '../lib/types'
 import { api } from '../lib/api'
 import { friendlyError } from '../lib/format'
 
 interface Row {
+  volume: number
   id: string
   part: number
   label: string
   title: string
+  total_pages: number
+  printed_start: string
+  printed_end: string
+  revision: number
   start_page: number
   end_page: number
   combined_start_page: number
@@ -20,6 +27,7 @@ interface Row {
 }
 interface Volume {
   number: number
+  cover_pages: number
   index_pages: number
   page_count: number
   combined_start_page: number
@@ -28,6 +36,8 @@ interface Volume {
   bates_labels: Array<string | null>
 }
 interface Preview {
+  input_snapshot: string
+  settings_snapshot: {max_pages_per_volume:number,keep_groups_intact:boolean}
   volumes: Volume[]
   combined_pages: number
   part_extracts: Array<{part:number;documents:number;pages:number}>
@@ -36,6 +46,9 @@ interface Preview {
   bates_policy: {enabled:boolean;include_index:boolean;include_separator:boolean;restart_per_volume:boolean}
 }
 const props = defineProps<{
+  documents?: MatterDocument[]
+  recalculateKey?: number
+  inputsPending?: boolean
   matterId: string
   maxPages: number
   keepGroups: boolean
@@ -46,9 +59,15 @@ const preview = ref<Preview | null>(null)
 const loading = ref(false)
 const error = ref('')
 let sequence = 0
+const selected=ref('')
+const state=computed(()=>props.inputsPending?'Pending':loading.value?'Recalculating':error.value?'Error':preview.value?'Current':'Pending')
+const rows=computed(()=>preview.value?.volumes.flatMap(v=>v.rows)||props.documents?.filter(d=>d.bundle_included).map(d=>({...d,total_pages:d.page_count,volume:null,printed_start:'',printed_end:'',combined_start_page:null,combined_end_page:null}))||[])
+onBeforeUnmount(()=>{sequence++})
 
 async function refresh() {
   const call = ++sequence
+  preview.value = null
+  if (props.inputsPending) { loading.value=false; error.value=''; return }
   if (!Number.isInteger(props.maxPages) || props.maxPages < 2 || props.maxPages > 2000) {
     preview.value = null
     error.value = 'Enter a volume page cap from 2 to 2000.'
@@ -66,34 +85,20 @@ async function refresh() {
     if (call === sequence) { preview.value = null; error.value = friendlyError(err) }
   } finally { if (call === sequence) loading.value = false }
 }
-watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey],
+watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey, props.inputsPending,props.recalculateKey],
   () => { void refresh() }, {immediate:true})
 </script>
 
 <template>
-  <section class="panel bundle-preview" aria-label="Index and page number preview">
-    <div class="panel-header"><div><h2>Review index & page numbers</h2><span>Current plan before building</span></div>
-      <button class="btn secondary small" :disabled="loading" @click="refresh">Refresh</button></div>
-    <div class="bundle-preview-body">
-      <p class="hint">Volume page numbers are printed on the PDFs and restart at 1. Combined page numbers are physical positions in combined.pdf. Index pages count in both.</p>
-      <p v-if="loading" role="status">Calculating page map…</p>
-      <p v-if="error" role="alert" class="error-msg">{{error}}</p>
-      <div v-if="preview && !loading">
-        <p v-if="!preview.volumes.length" class="hint">Import documents to see index rows and page numbers.</p>
-        <p v-else class="bundle-preview-summary">{{preview.volumes.length}} volume(s) · {{preview.volumes.reduce((sum, volume) => sum + volume.index_pages, 0)}} index page(s) · {{preview.combined_pages}} combined pages</p>
-        <p v-if="preview.part_extracts.length" class="hint">Technical Part PDFs: {{preview.part_extracts.map(item => `Part ${item.part} (${item.documents} documents, ${item.pages} source pages)`).join(' · ')}}. They omit volume index and separator pages.</p>
-        <p v-if="preview.bates_policy.enabled" class="hint">Bates: {{preview.bates_policy.restart_per_volume ? 'restarts per volume' : 'continuous across volumes'}} · index pages {{preview.bates_policy.include_index ? 'included' : 'excluded'}} · separator pages {{preview.bates_policy.include_separator ? 'included' : 'excluded'}}. Physical volume page numbers remain separate.</p>
-        <div v-for="volume in preview.volumes" :key="volume.number" class="bundle-preview-volume">
-          <h3>Volume {{volume.number}} <small>{{volume.page_count}} pages · {{volume.index_pages}} index page(s)</small></h3>
-          <p class="hint">Index: printed volume pages 1–{{volume.index_pages}} · combined starts at page {{volume.combined_start_page}} and ends at page {{volume.combined_end_page}}</p>
-          <div class="bundle-preview-scroll"><table><thead><tr><th scope="col">Index entry / bookmark</th><th scope="col">Printed volume pages</th><th scope="col">Combined PDF pages</th><th v-if="preview.bates_policy.enabled" scope="col">Bates on source</th></tr></thead>
-            <tbody><tr v-for="row in volume.rows" :key="row.id"><td><button class="bundle-preview-doc" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">Part {{row.part}} · {{row.label ? row.label+' · ' : '' }}{{row.title}}</button><button class="bundle-preview-bookmark" :aria-label="'Bookmark '+row.title+' first page'" @click="emit('bookmarkDocument',row.id)"><span>+ Bookmark</span></button><small v-if="row.separator_page">Separator: printed page {{row.separator_page}}<span v-if="row.separator_bates"> · {{row.separator_bates}}</span></small><small v-else-if="row.annexure_mode==='label_stamp'">Confirmed label stamp on source {{row.start_page===row.end_page ? 'page' : 'page(s)'}}</small></td><td>{{row.start_page}}–{{row.end_page}}</td><td>{{row.combined_start_page}}–{{row.combined_end_page}}</td><td v-if="preview.bates_policy.enabled">{{row.bates_first}}<span v-if="row.bates_last!==row.bates_first">–{{row.bates_last}}</span></td></tr></tbody></table></div>
-        </div>
-        <div v-if="preview.manual_bookmarks.length" class="bundle-preview-manual"><h3>Manual bookmark destinations</h3>
-          <ul><li v-for="bookmark in preview.manual_bookmarks" :key="bookmark.id"><strong>{{bookmark.title}}</strong> · {{bookmark.document_title}}, source page {{bookmark.document_page}} — <span v-if="bookmark.resolved">Volume {{bookmark.volume}}, printed page {{bookmark.volume_page}} · combined page {{bookmark.combined_page}}</span><strong v-else>Needs review; omitted from export</strong></li></ul>
-        </div>
-        <p class="hint">{{preview.numbering}} These are physical PDF pages, including index pages. Review the generated PDFs before use; the selected profile does not establish court approval.</p>
-      </div>
-    </div>
-  </section>
+<section class="page-map" aria-label="Index and page number preview">
+ <header><div><h2>Page mapping</h2><p>{{state==='Current'?'Printed references and physical destinations reflect current accepted inputs.':'Source counts are current. Printed and combined positions require recalculation.'}}</p></div><span :class="['map-state',state.toLowerCase()]" role="status"><CheckCircle2 v-if="state==='Current'" :size="14"/><RefreshCw v-else-if="loading" :size="14"/><TriangleAlert v-else :size="14"/>{{state}}</span></header>
+ <p v-if="error" role="alert">{{error}} <button class="text-tool" @click="refresh">Retry map</button></p>
+ <div class="page-map-scroll"><table><thead><tr><th>Document</th><th>Source</th><th>Printed volume</th><th>Combined PDF</th><th>Bookmark target</th><th>Status</th></tr></thead><tbody>
+ <tr v-for="row in rows" :key="row.id" :class="{selected:selected===row.id}" @click="selected=row.id">
+ <td><button class="map-document" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">{{row.label?row.label+' · ':''}}{{row.title}}</button></td><td>1–{{row.total_pages}}</td><td>{{state==='Current'?`${row.printed_start}–${row.printed_end}`:state}}</td><td>{{state==='Current'?`${row.combined_start_page}–${row.combined_end_page}`:state}}</td><td><button class="map-source" :aria-label="'Bookmark '+row.title+' first page'" @click="emit('bookmarkDocument',row.id)">Source 1 <span>＋</span></button></td><td><span :class="['map-state',state.toLowerCase()]"><CheckCircle2 v-if="state==='Current'" :size="13"/><TriangleAlert v-else :size="13"/>{{state}}</span></td>
+ </tr></tbody></table></div>
+ <p v-if="preview?.part_extracts.length" class="placement-note">Technical Part PDFs: {{preview.part_extracts.map(p=>`Part ${p.part} (${p.pages} source pages)`).join(' · ')}}</p>
+ <footer><strong>Page mapping {{state.toLowerCase()}}</strong><p v-if="inputsPending">Save current inputs and finish processing before recalculating.</p><p v-else-if="preview">{{preview.volumes.length}} volume(s) · {{preview.combined_pages}} physical pages. Printed labels are separate from physical destinations.</p><p>Earlier builds retain their frozen maps. Imported originals remain unchanged.</p></footer>
+ <details v-if="preview" class="page-map-details"><summary>Volume, Bates and manual destination details</summary><div v-for="volume in preview.volumes" :key="volume.number" class="bundle-preview-volume"><h3>Volume {{volume.number}}</h3><p>{{volume.cover_pages}} cover + {{volume.index_pages}} index · {{volume.page_count}} physical pages · combined {{volume.combined_start_page}}–{{volume.combined_end_page}}</p><p v-for="row in volume.rows" :key="row.id">{{row.title}} · revision {{row.revision}}<template v-if="row.separator_page"> · separator at physical {{row.separator_page}}</template><template v-if="row.bates_first"> · Bates {{row.bates_first}}–{{row.bates_last}}</template></p></div><p v-for="b in preview.manual_bookmarks" :key="b.id">{{b.title}} · {{b.document_title}}, source {{b.document_page}} — {{b.resolved?`Volume ${b.volume}, physical ${b.volume_page}; combined ${b.combined_page}`:'Needs resolution; omitted from export'}}</p></details>
+</section>
 </template>

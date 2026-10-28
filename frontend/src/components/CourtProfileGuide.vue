@@ -5,6 +5,7 @@ import type { CourtProfile } from '../lib/types'
 import { buildMemoPartiesCsv } from '../lib/delhi'
 import type { MemoPartyRow } from '../lib/delhi'
 import { api } from '../lib/api'
+import { engineBlocked, autosaveHeld } from '../lib/engineConnection'
 
 type FilingGuidance = NonNullable<CourtProfile['filing_guidance']>
 
@@ -21,6 +22,7 @@ let pendingSave: Promise<void> = Promise.resolve()
 
 function saveNow(matterId = props.matterId, rows = parties.value.map(row => ({...row})), version = editVersion) {
   if (!matterId) return
+  if (engineBlocked.value) { saveState.value = 'failed'; return }
   saveState.value = 'saving'
   pendingSave = pendingSave.then(async () => {
     try {
@@ -43,12 +45,12 @@ async function flushPendingSave(): Promise<boolean> {
   return saveState.value === 'saved'
 }
 
-defineExpose({flushPendingSave})
+defineExpose({flushPendingSave, hasPendingDraft: () => ['unsaved','failed','saving'].includes(saveState.value)})
 
 watch(() => props.matterId, async (matterId, oldId) => {
   const current = ++generation
   if (timer) { clearTimeout(timer); timer = null }
-  if (oldId && saveState.value === 'unsaved') await saveNow(oldId)
+  if (oldId && !engineBlocked.value && !autosaveHeld.value && saveState.value === 'unsaved') await saveNow(oldId)
   loading = true
   saveState.value = 'loading'
   try {
@@ -66,11 +68,12 @@ watch(parties, () => {
   editVersion += 1
   saveState.value = 'unsaved'
   if (timer) clearTimeout(timer)
-  timer = setTimeout(() => { timer = null; void saveNow() }, 600)
+  if (engineBlocked.value || autosaveHeld.value) return
+  timer = setTimeout(() => { timer = null; if (!engineBlocked.value && !autosaveHeld.value) void saveNow() }, 600)
 }, {deep: true})
 
 onBeforeUnmount(() => {
-  if (timer) { clearTimeout(timer); timer = null; void saveNow() }
+  if (timer) { clearTimeout(timer); timer = null; if (!engineBlocked.value && !autosaveHeld.value) void saveNow() }
 })
 
 function addParty() { parties.value.push(blankParty()) }
@@ -97,7 +100,7 @@ function downloadReviewCsv() {
     <div class="memo-helper">
       <div class="memo-heading"><div><h3>Memo of Parties data helper</h3><p>Enter party data once, then download a review CSV using the court template's field labels.</p><p v-if="!matterId">Select or create a matter to store party entries.</p><p v-else role="status">{{saveState === 'failed' ? 'Save failed. Retry before leaving this page.' : saveState === 'saved' ? 'Saved to this matter' : saveState === 'saving' ? 'Saving…' : saveState === 'unsaved' ? 'Unsaved changes' : 'Loading…'}}</p></div><div class="memo-history-actions"><button class="btn secondary small" :disabled="!canUndo || saveState === 'loading'" @click="emit('undo')"><Undo2 :size="15"/> Undo matter edit</button><button class="btn secondary small" :disabled="!canRedo || saveState === 'loading'" @click="emit('redo')"><Redo2 :size="15"/> Redo matter edit</button><button class="btn secondary small" :disabled="!matterId || saveState === 'loading'" @click="addParty"><Plus :size="15"/> Add party</button></div></div>
       <div v-for="(party,index) in parties" :key="index" class="party-form"><div class="party-number">Party {{ index + 1 }}</div><label>Role<select v-model="party.role" :disabled="!matterId || loading"><option>Petitioner</option><option>Respondent</option></select></label><label>Party name<input v-model="party.name" :disabled="!matterId || loading"/></label><label>Father/Husband name<input v-model="party.fatherOrHusbandName" :disabled="!matterId || loading"/></label><label class="wide">Address<textarea v-model="party.address" rows="2" :disabled="!matterId || loading"></textarea></label><label>Email<input v-model="party.email" type="email" :disabled="!matterId || loading"/></label><label>Mobile<input v-model="party.mobile" inputmode="tel" :disabled="!matterId || loading"/></label><button class="remove-party" :disabled="!matterId || loading || parties.length === 1" title="Remove party" @click="removeParty(index)"><Trash2 :size="16"/></button></div>
-      <div class="memo-actions"><button class="btn primary" :disabled="!matterId || saveState !== 'saved'" @click="downloadReviewCsv"><FileSpreadsheet :size="16"/> Download review CSV</button><button v-if="saveState === 'failed'" class="btn secondary" @click="saveNow()">Retry save</button><p>This CSV is a transfer/review aid, not the official XLS upload file. Compare it with the current official template before filing.</p></div>
+      <div class="memo-actions"><button class="btn primary" :disabled="!matterId || saveState !== 'saved'" @click="downloadReviewCsv"><FileSpreadsheet :size="16"/> Download review CSV</button><button v-if="saveState === 'failed' || (autosaveHeld && saveState === 'unsaved')" class="btn secondary" :disabled="engineBlocked" @click="saveNow()">Retry save</button><p>This CSV is a transfer/review aid, not the official XLS upload file. Compare it with the current official template before filing.</p></div>
     </div>
   </section>
 </template>

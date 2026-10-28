@@ -18,11 +18,11 @@ function close(){dialog.value?.close();opener.value?.focus()}
       <dt>Home / End</dt><dd>First / last page</dd>
       <template v-if="editingTools">
         <dt>V / E / T / H</dt><dd>Select / Edit text / Add text / Highlight</dd>
-        <dt>Arrow keys</dt><dd>Move between tool tabs or page thumbnails when focused</dd>
+        <dt>Arrow keys</dt><dd>Move between tool tabs, page thumbnails or search results when focused</dd>
         <dt>Alt + ↑ / ↓</dt><dd>Move a focused thumbnail in page order</dd>
         <dt>Delete / Backspace</dt><dd>Remove a selected review mark, image overlay or reviewed link</dd>
         <dt>Drag</dt><dd>Move a selected mark or link; drag its corner handle to resize</dd>
-        <dt>Escape</dt><dd>Close search or cancel the current draft</dd>
+        <dt>Escape</dt><dd>Exit focused reading, close a reader panel, or cancel the current draft</dd>
       </template>
       <dt>Tab / Shift Tab</dt><dd>Next / previous control</dd>
     </dl>

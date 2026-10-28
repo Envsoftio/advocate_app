@@ -11,7 +11,7 @@ def upload_text(client, auth, matter_id, name, text):
         page = pdf.new_page(width=595, height=842)
         page.insert_text((70, 90), text, fontsize=12)
         content = pdf.tobytes()
-    response = client.post(f'/matters/{matter_id}/documents', headers=auth,
+    response = client.post(f'/matters/{matter_id}/documents?included=true', headers=auth,
         files=[('files', (name, content, 'application/pdf'))])
     assert response.status_code == 201, response.text
     return response.json()[0]
@@ -239,7 +239,7 @@ def test_oversized_group_follows_saved_indivisible_or_split_policy(
             pdf.new_page().insert_text((70, 90), 'page one')
             pdf.new_page().insert_text((70, 90), 'page two')
             replacement = pdf.tobytes()
-        extra = client.post(f'/matters/{matter["id"]}/documents', headers=auth,
+        extra = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
             files=[('files', (f'replacement-{doc["id"]}.pdf', replacement, 'application/pdf'))])
         assert extra.status_code == 201
         source = extra.json()[0]

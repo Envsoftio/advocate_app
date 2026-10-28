@@ -19,3 +19,9 @@ frontend/src-tauri/binaries/*
 *.db
 *.sqlite3
 .DS_Store
+CourtBundle_Codex_Phases
+docs/evidence
+docs/ui-evidence
+CourtBundle_JSON_For_Codex
+CourtBundle_Complete_Workflow (2).pen
+CourtBundle_Complete_Workflow.json

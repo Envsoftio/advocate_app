@@ -20,7 +20,7 @@ from starlette.datastructures import UploadFile as ParsedUploadFile
 import pymupdf
 
 from .engine import (load_profiles, preflight, build_bundle, bundle_preview,
-                     compare_bundle_plan,
+                     compare_bundle_plan, front_matter_preview, render_numbering_preview,
                      volume_plan, volume_rows, bates_page_labels, annexure_mode,
                      apply_page_annotations)
 from .jobs import JobManager
@@ -32,8 +32,9 @@ from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reo
                       validate_overlay_image, insert_working_image)
 from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, FilingReview, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
 from .storage import Store, new_id, utcnow
+from . import metadata_review
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
-from .schemas import BatchPageOperation, CompressionRequest, ReaderPosition, READER_KEY_PATTERN
+from .schemas import BundleSettingsUpdate, FrontMatterPreview, NumberingPreview, PresetApplication, BundleMembershipUpdate, BatchPageOperation, CompressionRequest, ReaderPosition, READER_KEY_PATTERN
 from .portable import (create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES,
                        PROTECTED_PACKAGE_MAGIC, protected_package_header,
                        parse_protected_package_stream)
@@ -44,6 +45,7 @@ from .signatures import (combined_signature_status, inspect_source_signature,
                          risk_summary, transformation_risk)
 from .paragraph_trial import replace_paragraph_trial, preview_paragraph_trial, trial_status
 from .pdf_stream import pdf_stream_response
+from . import validation as output_validation
 from .office_export import word_draft, excel_index, powerpoint_draft
 from .print_export import print_copy
 
@@ -406,6 +408,21 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         matter_or_404(matter_id)
         return store.get_documents(matter_id)
 
+    @app.get('/matters/{matter_id}/membership')
+    def get_membership(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        with store.matter_lock(matter_id):
+            return store.bundle_membership(matter_id)
+
+    @app.put('/matters/{matter_id}/membership')
+    def apply_membership(matter_id: str, payload: BundleMembershipUpdate, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        with store.matter_lock(matter_id):
+            try:
+                return store.set_bundle_membership(matter_id, payload.included_ids, payload.expected_snapshot)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.get('/matters/{matter_id}/search')
     def search_matter(matter_id: str, q: str, _: None = Depends(auth)):
         matter_or_404(matter_id)
@@ -511,7 +528,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     async def import_document(matter_id: str, filename: str,
                               file: UploadFile | None = None, request: Request | None = None,
                               source_file_mtime: str = '', password: str | None = None,
-                              acknowledge_signature_risk: bool = False):
+                              acknowledge_signature_risk: bool = False, included: bool = False):
         suffix = Path(filename).suffix.lower()
         if suffix not in SUPPORTED:
             raise HTTPException(status_code=415, detail='Only PDF, PNG and JPEG documents are supported in this POC')
@@ -570,7 +587,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                     raise
             name = Path(filename).name or 'Untitled'
             item = dict(id=doc_id, matter_id=matter_id, title=Path(name).stem[:250],
-                        kind='other', part=1, label='', label_status='unreviewed',
+                        kind='other', part=1, label='', label_status='unreviewed', bundle_included=int(included),
                         label_source='none', group_key='', group_role='member', page_count=pages,
                         document_date='', date_status='unknown', date_source='none', date_note='',
                         source_file_mtime=source_file_mtime,
@@ -590,7 +607,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 await file.close()
 
     @app.post('/matters/{matter_id}/documents/raw', status_code=201)
-    async def upload_raw(matter_id: str, request: Request, _: None = Depends(auth)):
+    async def upload_raw(matter_id: str, request: Request, included: bool = False, _: None = Depends(auth)):
         matter_or_404(matter_id)
         if request.headers.get('content-type', '').split(';', 1)[0] != 'application/octet-stream':
             raise HTTPException(status_code=415, detail='Stream one PDF, PNG or JPEG file')
@@ -615,12 +632,12 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             return [await import_document(matter_id, filename, request=request,
                                           source_file_mtime=source_file_mtime,
                                           password=password,
-                                          acknowledge_signature_risk=acknowledge_signature_risk)]
+                                          acknowledge_signature_risk=acknowledge_signature_risk, included=included)]
         finally:
             lock.release()
 
     @app.post('/matters/{matter_id}/documents', status_code=201)
-    async def upload(matter_id: str, files: list[UploadFile] = File(...), _: None = Depends(auth)):
+    async def upload(matter_id: str, files: list[UploadFile] = File(...), included: bool = False, _: None = Depends(auth)):
         matter_or_404(matter_id)
         if not 1 <= len(files) <= 20:
             raise HTTPException(status_code=422, detail='Import 1-20 files per request')
@@ -632,7 +649,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         try:
             records = []
             for f in files:
-                records.append(await import_document(matter_id, f.filename or '', file=f))
+                records.append(await import_document(matter_id, f.filename or '', file=f, included=included))
             return records
         finally:
             lock.release()
@@ -684,6 +701,60 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 return store.batch_update_documents(matter_id, payload.ids, values)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get('/matters/{matter_id}/metadata-review')
+    def metadata_snapshot(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        with store.matter_lock(matter_id):
+            return {'input_snapshot': metadata_review.snapshot(store, matter_id),
+                    'documents': store.get_documents(matter_id)}
+
+    @app.post('/matters/{matter_id}/metadata-suggestions')
+    def metadata_suggestions(matter_id: str, payload: metadata_review.ReviewScope, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                return metadata_review.proposals(store, matter_id, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/metadata-suggestions/accept')
+    def accept_metadata(matter_id: str, payload: metadata_review.AcceptReview, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                if payload.expected_snapshot != metadata_review.snapshot(store, matter_id):
+                    raise HTTPException(status_code=409, detail='Review is stale: matter or source changed. Drafts are retained; reload and review again.')
+                return metadata_review.accept(store, matter_id, payload)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.put('/matters/{matter_id}/metadata-review')
+    def save_metadata_review(matter_id: str, payload: metadata_review.SaveReview, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                if payload.expected_snapshot != metadata_review.snapshot(store, matter_id):
+                    raise HTTPException(status_code=409, detail='Review is stale: matter changed. Keep your draft or discard and reload.')
+                ids = [row.document_id for row in payload.rows]
+                if len(set(ids)) != len(ids):
+                    raise ValueError('Save each document once')
+                return metadata_review.commit(store, matter_id, {row.document_id: row.changes.model_dump(exclude_none=True) for row in payload.rows})
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get('/documents/{doc_id}/metadata-source')
+    def metadata_source(doc_id: str, revision: int, page: int = 1, _: None = Depends(auth)):
+        try:
+            with store.matter_lock(doc_id):
+                doc = doc_or_404(doc_id)
+                if doc['revision'] != revision:
+                    raise HTTPException(status_code=409, detail='Source revision changed; reload suggestions')
+                return metadata_review.source_preview(store, doc, page)
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=422, detail='Source preview unavailable: ' + str(exc)) from exc
 
     @app.post('/matters/{matter_id}/documents/sort-preview')
     def preview_doc_sort(matter_id: str, payload: DocumentSortPreview,
@@ -796,6 +867,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         matter_or_404(matter_id)
         try:
             with store.matter_lock(matter_id):
+                if payload.expected_snapshot and payload.expected_snapshot != store.build_input_digest(matter_id):
+                    raise HTTPException(status_code=409, detail='Matter changed; discard and reload bookmarks before saving')
                 return store.set_manual_bookmarks(matter_id,
                     [entry.model_dump() for entry in payload.entries])
         except ValueError as exc:
@@ -836,12 +909,14 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         return store.get_applied_output_preset(matter_id)
 
     @app.post('/matters/{matter_id}/output-preset/{preset_id}')
-    def apply_output_preset(matter_id: str, preset_id: str,
+    def apply_output_preset(matter_id: str, preset_id: str, payload: PresetApplication | None = None,
                             _: None = Depends(auth)):
         matter_or_404(matter_id)
         try:
             with store.matter_lock(matter_id):
-                return store.apply_output_preset(matter_id, preset_id)
+                if payload and payload.expected_snapshot and payload.expected_snapshot != store.build_input_digest(matter_id):
+                    raise HTTPException(status_code=409, detail='Matter changed; reload settings before applying a preset')
+                return store.apply_output_preset(matter_id, preset_id, bool(payload and payload.preserve_overrides))
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -1035,6 +1110,40 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=409, detail='Editable PDF marks need review after the working PDF changed; resolve or remove them before saving')
         return [item for item in annotations if item['resolved']]
 
+    def original_artifact(doc_id: str):
+        doc = doc_or_404(doc_id)
+        path = store.original_path(doc)
+        if not path.is_file() or path.is_symlink():
+            raise HTTPException(status_code=404, detail='Imported original is unavailable')
+        if store.sha256(path) != doc['source_sha256']:
+            raise HTTPException(status_code=409, detail='Imported original failed its integrity check')
+        suffix = Path(doc['original_name']).suffix.lower()
+        mime = {'.pdf': 'application/pdf', '.png': 'image/png',
+                '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}.get(suffix)
+        if not mime:
+            raise HTTPException(status_code=415, detail='Original format cannot be previewed')
+        return doc, path, mime
+
+    @app.get('/documents/{doc_id}/original-info')
+    def original_info(doc_id: str, _: None = Depends(auth)):
+        doc, path, mime = original_artifact(doc_id)
+        pages, protected = None, False
+        if mime == 'application/pdf':
+            with open_pdf(path) as pdf:
+                protected = bool(pdf.needs_pass)
+                pages = None if protected else pdf.page_count
+        return {'document_id': doc_id, 'artifact': 'original', 'read_only': True,
+                'sha256': doc['source_sha256'], 'filename': doc['original_name'],
+                'media_type': mime, 'page_count': pages, 'password_protected': protected}
+
+    @app.api_route('/documents/{doc_id}/original', methods=['GET', 'HEAD'])
+    def read_original(doc_id: str, request: Request, _: None = Depends(auth)):
+        doc, path, mime = original_artifact(doc_id)
+        if mime == 'application/pdf':
+            return pdf_stream_response(path, request, doc_id + '.pdf', store._data_key)
+        return Response(content=read_bytes(path) if request.method == 'GET' else b'',
+                        media_type=mime, headers={'Cache-Control': 'no-store'})
+
     @app.api_route('/documents/{doc_id}/pdf', methods=['GET', 'HEAD'])
     def document_pdf(doc_id: str, request: Request, revision: int | None = None,
                      editable: bool = False, acknowledge_signature_risk: bool = False,
@@ -1099,6 +1208,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
 
     def reader_position_owner(key: str):
         parts = key.split(':')
+        if parts[0] == 'original':
+            doc, path, mime = original_artifact(parts[1])
+            return doc['matter_id'], None
         if parts[0] == 'export':
             matter_or_404(parts[1])
             return parts[1], None
@@ -1557,8 +1669,10 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         def task(job_id, progress, cancelled):
             with store.matter_lock(doc['matter_id']):
                 current = store.get_document(doc_id)
-                if current is None:
+                if current is None or current.get('archived_at'):
                     raise ProcessingError('Document was removed before OCR started')
+                if current['revision'] != doc['revision']:
+                    raise ProcessingError('Document changed before OCR started; submit OCR again for the current revision')
                 require_signature_acknowledgement([current], acknowledge_signature_risk,
                                                   'running OCR')
                 rel, candidate = store.next_working_path(current)
@@ -1592,7 +1706,10 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     @app.post('/documents/{doc_id}/ocr', status_code=202)
     def start_ocr(doc_id: str, payload: OcrRequest | None = None,
                   _: None = Depends(auth)):
-        return submit_ocr(doc_or_404(doc_id), acknowledge_signature_risk=(
+        doc = doc_or_404(doc_id)
+        if payload and payload.expected_revision is not None and payload.expected_revision != doc['revision']:
+            raise HTTPException(status_code=409, detail='Working revision changed before OCR submission')
+        return submit_ocr(doc, acknowledge_signature_risk=(
             payload.acknowledge_signature_risk if payload else False),
             language=payload.language if payload else 'eng')
 
@@ -1628,7 +1745,56 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     def validate_matter(matter_id: str, _: None = Depends(auth)):
         with store.matter_lock(matter_id):
             matter = matter_or_404(matter_id)
-            return preflight(store, matter_id, profiles[matter['court_profile']])
+            return output_validation.record_preflight(store, matter_id,
+                preflight(store, matter_id, profiles[matter['court_profile']]))
+
+    @app.get('/matters/{matter_id}/bundle-settings')
+    def bundle_settings(matter_id: str, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter = matter_or_404(matter_id)
+            return dict(max_pages_per_volume=matter['max_pages_per_volume'],
+                        keep_groups_intact=bool(matter['keep_groups_intact']),
+                        output_marks=store.get_output_marks(matter_id),
+                        applied=store.get_applied_output_preset(matter_id),
+                        input_snapshot=store.build_input_digest(matter_id))
+
+    @app.put('/matters/{matter_id}/bundle-settings')
+    def save_bundle_settings(matter_id: str, payload: BundleSettingsUpdate, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            if payload.expected_snapshot != store.build_input_digest(matter_id):
+                raise HTTPException(status_code=409, detail='Matter changed; reload settings and review your changes')
+            try:
+                store.save_bundle_settings(matter_id, payload.model_dump(exclude={'expected_snapshot'}))
+                matter = store.get_matter(matter_id)
+                return dict(max_pages_per_volume=matter['max_pages_per_volume'],
+                    keep_groups_intact=bool(matter['keep_groups_intact']),
+                    output_marks=store.get_output_marks(matter_id),
+                    applied=store.get_applied_output_preset(matter_id),
+                    input_snapshot=store.build_input_digest(matter_id))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/front-matter-preview')
+    def preview_front_matter(matter_id: str, payload: FrontMatterPreview, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return front_matter_preview(store, matter_id, payload.max_pages_per_volume,
+                    payload.keep_groups_intact, payload.output_marks.model_dump(), payload.volume, payload.index_page)
+            except (ProcessingError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/numbering-preview')
+    def preview_numbering(matter_id: str, payload: NumberingPreview, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return render_numbering_preview(store, matter_id, payload.max_pages_per_volume,
+                    payload.keep_groups_intact, payload.output_marks.model_dump(), payload.document_id,
+                    payload.page, payload.expected_revision)
+            except (ProcessingError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post('/matters/{matter_id}/bundle-preview')
     def preview_bundle(matter_id: str, payload: BundlePreviewRequest,
@@ -1636,18 +1802,35 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         with store.matter_lock(matter_id):
             matter_or_404(matter_id)
             try:
-                return bundle_preview(store, matter_id, payload.max_pages_per_volume,
-                                      payload.keep_groups_intact)
+                result = bundle_preview(store, matter_id, payload.max_pages_per_volume,
+                                        payload.keep_groups_intact)
+                result['input_snapshot'] = store.build_input_digest(matter_id)
+                result['settings_snapshot'] = payload.model_dump()
+                return result
             except ProcessingError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     def submit_build(matter_id: str, job_id: str | None = None,
                      acknowledge_signature_risk: bool = False):
-        require_signature_acknowledgement(store.get_documents(matter_id),
-                                          acknowledge_signature_risk,
-                                          'building transformed bundle PDFs')
+        with store.matter_lock(matter_id):
+            require_signature_acknowledgement(store.get_bundle_documents(matter_id),
+                                              acknowledge_signature_risk,
+                                              'building transformed bundle PDFs')
+            submission_error = None
+            try:
+                submitted_digest = store.build_input_digest(matter_id)
+            except (OSError, ValueError):
+                submitted_digest = None
+                matter = matter_or_404(matter_id)
+                problems = preflight(store, matter_id, profiles[matter['court_profile']])
+                submission_error = 'Preflight failed: ' + '; '.join(
+                    issue['message'] for issue in problems if issue['severity'] == 'error')
         def task(job_id, progress, cancelled):
             with store.matter_lock(matter_id):
+                if submission_error:
+                    raise ProcessingError(submission_error)
+                if submitted_digest is not None and store.build_input_digest(matter_id) != submitted_digest:
+                    raise ProcessingError('Build inputs changed while queued; submit a new build')
                 return build_bundle(store, matter_id, job_id, progress, cancelled,
                                     signature_acknowledged=acknowledge_signature_risk)
         return jobs.submit(matter_id, 'build', task, job_id=job_id)
@@ -1695,7 +1878,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         if prior['kind'] == 'ocr':
             require_signature_acknowledgement([doc], acknowledged, 'retrying OCR')
         else:
-            require_signature_acknowledgement(store.get_documents(prior['matter_id']),
+            require_signature_acknowledgement(store.get_bundle_documents(prior['matter_id']),
                                               acknowledged, 'retrying bundle generation')
         new_job_id = new_id()
         if not jobs.claim_retry(job_id, new_job_id):
@@ -1725,12 +1908,90 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             except ProcessingError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    @app.get('/matters/{matter_id}/validation/findings/{run_id}/{finding_id}')
+    def get_finding(matter_id: str, run_id: str, finding_id: str, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return output_validation.finding_record(store, matter_id, run_id, finding_id)[0]
+            except ValueError as exc:
+                raise HTTPException(404, str(exc)) from exc
+
+    @app.put('/matters/{matter_id}/validation/findings/{run_id}/{finding_id}')
+    def review_finding(matter_id: str, run_id: str, finding_id: str, payload: dict, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                record, path = output_validation.finding_record(store, matter_id, run_id, finding_id)
+                if not record['applicable']:
+                    raise ValueError('Finding target changed; run checks again')
+                if not isinstance(payload.get('note'), str) or len(payload['note']) > 2000 or type(payload.get('acknowledged')) is not bool:
+                    raise ValueError('Provide a review note up to 2000 characters and an acknowledgement')
+                note = {**payload, 'updated_at': output_validation.utcnow()}
+                output_validation._write(path, note)
+                return {**record, 'review': note}
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @app.get('/matters/{matter_id}/preflight/history')
+    def preflight_history(matter_id: str, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            return output_validation.history(store, matter_id, 'preflight')
+
+    @app.get('/matters/{matter_id}/exports/{export_id}/validation/state')
+    def output_check_state(matter_id: str, export_id: str, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return output_validation.status(store, matter_id, export_id)
+            except ValueError as exc:
+                raise HTTPException(404, str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/exports/{export_id}/validation/run')
+    def run_output_checks(matter_id: str, export_id: str, payload: dict, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                output_validation.validate_output(store, matter_id, export_id, payload.get('files'))
+                return output_validation.status(store, matter_id, export_id)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+
+    @app.put('/matters/{matter_id}/exports/{export_id}/validation/review')
+    def save_output_review(matter_id: str, export_id: str, payload: dict, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                output_validation.save_review(store, matter_id, export_id, payload)
+                return output_validation.status(store, matter_id, export_id)
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    def enforce_output_gate(matter_id, export_id, release=False):
+        with store.matter_lock(matter_id):
+            try:
+                output_validation.require_download(store, matter_id, export_id, release)
+            except ValueError as exc:
+                raise HTTPException(409, 'Output gate: ' + str(exc)) from exc
+
+    @app.api_route('/matters/{matter_id}/exports/{export_id}/inspection/{filename}', methods=['GET', 'HEAD'])
+    def inspect_output(matter_id: str, export_id: str, filename: str, request: Request, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        path = store.get_export_file(matter_id, export_id, filename)
+        if not path or not filename.endswith('.pdf'):
+            raise HTTPException(404, 'Saved PDF not found')
+        response = pdf_stream_response(path, request, filename, store._data_key)
+        response.headers['X-CourtBundle-Purpose'] = 'inspection-only; not released'
+        return response
+
     @app.api_route('/matters/{matter_id}/exports/{export_id}/{filename}', methods=['GET', 'HEAD'])
-    def export_file(matter_id: str, export_id: str, filename: str, request: Request, _: None = Depends(auth)):
+    def export_file(matter_id: str, export_id: str, filename: str, request: Request, release: bool = False, _: None = Depends(auth)):
         matter_or_404(matter_id)
         path = store.get_export_file(matter_id, export_id, filename)
         if not path:
             raise HTTPException(status_code=404, detail='Export file not found')
+        enforce_output_gate(matter_id, export_id, release)
         if filename.endswith('.pdf'):
             return pdf_stream_response(path, request, filename, store._data_key)
         media = 'application/pdf' if filename.endswith('.pdf') else ('application/zip' if filename.endswith('.zip') else 'application/octet-stream')
@@ -1749,6 +2010,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         path = store.get_export_file(matter_id, export_id, filename)
         if not path:
             raise HTTPException(status_code=404, detail='Completed export file not found')
+        enforce_output_gate(matter_id, export_id)
         try:
             if kind == 'xlsx':
                 content = excel_index(read_bytes(path))
@@ -1778,6 +2040,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         path = store.get_export_file(matter_id, export_id, filename)
         if not path:
             raise HTTPException(status_code=404, detail='Completed PDF not found')
+        enforce_output_gate(matter_id, export_id)
         try:
             printable = print_copy(path, payload.get('pages', 'all'),
                                    payload.get('orientation', 'source'),
@@ -1804,6 +2067,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         path = store.get_export_file(matter_id, export_id, filename)
         if not path:
             raise HTTPException(status_code=404, detail='Export PDF not found')
+        enforce_output_gate(matter_id, export_id)
         try:
             with open_pdf(path) as document:
                 encrypted = document.tobytes(

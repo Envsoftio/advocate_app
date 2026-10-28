@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { disconnectEngine, requireEngine } from './engineConnection'
 import type { Matter } from './types'
 
 type BackendConnection = { base_url: string, token: string }
@@ -39,6 +40,7 @@ export class ApiError extends Error {
 }
 
 async function request(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+  if (!['GET', 'HEAD'].includes(init?.method || 'GET') && !path.startsWith('/vault/')) requireEngine()
   const conn = await getConnection()
   const headers = new Headers(init?.headers)
   headers.set('Authorization', 'Bearer ' + conn.token)
@@ -52,6 +54,7 @@ async function request(path: string, init?: RequestInit, timeoutMs = REQUEST_TIM
   try {
     res = await fetch(conn.base_url + path, { ...init, headers, signal: controller.signal })
   } catch (err) {
+    if (!init?.signal?.aborted) disconnectEngine()
     if (controller.signal.aborted) throw new ApiError(0, 'Local Python service timed out. Check the engine and retry.')
     throw new ApiError(0, 'Local Python service unavailable. Check it is running and retry. ' + String(err))
   } finally {
@@ -115,6 +118,7 @@ export async function restoreMatter(file: File, credential?: string, recovery = 
 }
 
 export async function downloadMatter(matterId: string): Promise<boolean> {
+  requireEngine()
   if (inTauri()) return invoke<boolean>('save_matter', { matterId })
   const response = await request(`/matters/${matterId}/portable`, undefined, 5 * 60_000)
   const url = URL.createObjectURL(await response.blob())
@@ -131,6 +135,7 @@ export async function downloadMatter(matterId: string): Promise<boolean> {
 export async function downloadPageOutput(documentId: string, operation: 'extract' | 'split', indexes: number[],
                                          acknowledgeSignatureRisk = false): Promise<boolean> {
   const selection = indexes.join(',')
+  requireEngine()
   if (inTauri()) return invoke<boolean>('save_page_output', {
     documentId, operation, selection, acknowledgeSignatureRisk,
   })
@@ -160,6 +165,7 @@ export async function downloadWorkingPdf(documentId: string, revision: number, t
   const stem = title.replace(/\.pdf$/i, '').replace(/[^a-zA-Z0-9_-]+/g, '-')
     .replace(/^-+|-+$/g, '').slice(0, 80) || 'document'
   const filename = `${stem}-working-r${revision}.pdf`
+  requireEngine()
   if (inTauri()) return invoke<boolean>('save_working_pdf', { documentId, expectedRevision: revision, filename,
     acknowledgeSignatureRisk })
   const response = await request(`/documents/${encodeURIComponent(documentId)}/pdf?revision=${revision}&editable=true&acknowledge_signature_risk=${acknowledgeSignatureRisk}`,
@@ -222,10 +228,20 @@ export async function pageAnnotationAsset(annotationId: string): Promise<Blob> {
   return response.blob()
 }
 
+export async function originalDocumentSource(documentId: string) {
+  const connection = await getConnection()
+  return {url: `${connection.base_url}/documents/${encodeURIComponent(documentId)}/original`,
+    httpHeaders: {Authorization: `Bearer ${connection.token}`}, rangeChunkSize: 256 * 1024,
+    disableStream: true, disableAutoFetch: true}
+}
+export async function originalImage(documentId: string) {
+  return (await request(`/documents/${encodeURIComponent(documentId)}/original`, {cache:'no-store'})).blob()
+}
+
 export async function exportPdfDocumentSource(matterId: string, exportId: string, filename: string) {
   const connection = await getConnection()
   return {
-    url: `${connection.base_url}/matters/${encodeURIComponent(matterId)}/exports/${encodeURIComponent(exportId)}/${encodeURIComponent(filename)}`,
+    url: `${connection.base_url}/matters/${encodeURIComponent(matterId)}/exports/${encodeURIComponent(exportId)}/inspection/${encodeURIComponent(filename)}`,
     httpHeaders: { Authorization: `Bearer ${connection.token}` },
     rangeChunkSize: 256 * 1024,
     // PDF.js requests only the byte ranges needed for reading. Disabling
@@ -235,11 +251,12 @@ export async function exportPdfDocumentSource(matterId: string, exportId: string
   }
 }
 
-export async function downloadExport(matterId: string, exportId: string, filename: string, saveAs = false): Promise<boolean> {
+export async function downloadExport(matterId: string, exportId: string, filename: string, saveAs = false, release = false): Promise<boolean> {
+  requireEngine()
   if (inTauri()) {
-    return invoke<boolean>('save_export', { matterId, exportId, filename, saveAs })
+    return invoke<boolean>('save_export', { matterId, exportId, filename, saveAs, release })
   }
-  const url = `/matters/${matterId}/exports/${exportId}/${encodeURIComponent(filename)}`
+  const url = `/matters/${matterId}/exports/${exportId}/${encodeURIComponent(filename)}${release ? '?release=true' : ''}`
   const response = await request(url)
   const blob = await response.blob()
   const fileUrl = URL.createObjectURL(blob)
@@ -255,6 +272,7 @@ export async function downloadExport(matterId: string, exportId: string, filenam
 
 export async function downloadOfficeReview(matterId: string, exportId: string,
     filename: string, kind: 'docx' | 'xlsx' | 'pptx'): Promise<boolean> {
+  requireEngine()
   if (inTauri()) return invoke<boolean>('save_office_export', { matterId, exportId, filename, kind })
   const response = await request(`/matters/${encodeURIComponent(matterId)}/exports/${encodeURIComponent(exportId)}/${encodeURIComponent(filename)}/office/${kind}`,
     { cache: 'no-store' }, 5 * 60_000)
@@ -288,6 +306,7 @@ export async function printableWorkingPdf(documentId: string, revision: number,
 
 export async function downloadProtectedPdf(matterId: string, exportId: string,
                                            filename: string, password: string): Promise<boolean> {
+  requireEngine()
   if (inTauri()) {
     return invoke<boolean>('save_protected_export', {matterId, exportId, filename, password})
   }

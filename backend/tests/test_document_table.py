@@ -5,7 +5,7 @@ def upload(client, auth, matter_id, name):
     with pymupdf.open() as pdf:
         pdf.new_page().insert_text((72, 90), name)
         content = pdf.tobytes()
-    response = client.post(f'/matters/{matter_id}/documents', headers=auth,
+    response = client.post(f'/matters/{matter_id}/documents?included=true', headers=auth,
         files=[('files', (name, content, 'application/pdf'))])
     assert response.status_code == 201, response.text
     return response.json()[0]
@@ -112,7 +112,7 @@ def test_sort_preview_is_stable_preserves_date_review_and_groups(client, auth, m
 
 def test_raw_upload_records_source_timestamp_without_using_it_as_document_date(
         client, auth, matter, make_pdf):
-    response = client.post(f'/matters/{matter["id"]}/documents/raw', headers={
+    response = client.post(f'/matters/{matter["id"]}/documents/raw?included=true', headers={
         **auth, 'Content-Type': 'application/octet-stream',
         'X-CourtBundle-Filename': 'timestamped.pdf',
         'X-CourtBundle-File-Mtime': '2026-10-15T08:30:00.000Z'}, content=make_pdf(1))

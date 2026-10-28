@@ -31,7 +31,7 @@ def _pdf_with_signature_dictionary(tmp_path, complete: bool) -> bytes:
 
 
 def _upload(client, auth, matter_id, name, content):
-    response = client.post(f'/matters/{matter_id}/documents', headers=auth,
+    response = client.post(f'/matters/{matter_id}/documents?included=true', headers=auth,
         files=[('files', (name, content, 'application/pdf'))])
     assert response.status_code == 201, response.text
     return response.json()[0]

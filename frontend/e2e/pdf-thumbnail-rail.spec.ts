@@ -1,3 +1,4 @@
+import { openDocumentActions, openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -22,16 +23,18 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
   const matter=(await created.json()).id
   const documents=new Map<number,string>()
   for(const count of [10,100,1000]) {
-    const uploaded=await request.post(`${base}/matters/${matter}/documents`,{headers,multipart:{files:{name:`rail-${count}.pdf`,mimeType:'application/pdf',buffer:fixture(count)}}})
+    const uploaded=await request.post(`${base}/matters/${matter}/documents?included=true`,{headers,multipart:{files:{name:`rail-${count}.pdf`,mimeType:'application/pdf',buffer:fixture(count)}}})
     expect(uploaded.ok()).toBeTruthy();documents.set(count,(await uploaded.json())[0].id)
   }
   await page.setViewportSize({width:1440,height:1000})
   await page.goto('/')
-  await expect(page.getByRole('heading',{name:'E2E Virtual Thumbnail Rail'})).toBeVisible()
+  await expect(page.locator('.application-matter').filter({hasText:'E2E Virtual Thumbnail Rail'})).toBeVisible()
+  await openDocumentBrowser(page)
   await page.locator(`.doc-item[data-document-id="${documents.get(1000)}"]`).click()
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
+  await openDocumentActions(page)
   await page.getByRole('button',{name:'Full screen',exact:true}).click()
-  await page.getByRole('button',{name:'Show document list',exact:true}).click()
+  await openDocumentBrowser(page)
   const rail=page.locator('.virtual-thumbnail-rail'),jump=page.getByRole('spinbutton',{name:'Go to page',exact:true})
   async function sharpPage() {
     await expect(page.locator('.pdf-page-surface')).toHaveAttribute('aria-busy','false')
@@ -41,6 +44,7 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
   const cdp=await page.context().newCDPSession(page)
   for(const count of [10,100,1000]) {
     const firstStart=performance.now()
+    await openDocumentBrowser(page)
     await page.locator(`.doc-item[data-document-id="${documents.get(count)}"]`).click()
     await expect(page.locator('.page-counter')).toContainText(`/ ${count}`)
     await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
@@ -69,7 +73,7 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
     await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
     await sharpPage()
     const zoomMs=Math.round(performance.now()-zoomStart)
-    await page.getByRole('button',{name:'Find in this PDF',exact:true}).click()
+    await page.getByRole('button',{name:'Search',exact:true}).click()
     const searchStart=performance.now()
     await page.getByRole('searchbox',{name:'Find text in this PDF'}).fill(`Rail page ${count}`)
     await expect(page.locator('.pdf-findbar')).toContainText('1 match · 1/1')
