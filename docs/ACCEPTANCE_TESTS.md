@@ -867,3 +867,16 @@ Verification:
 - `git diff --check` passed.
 
 Native WebView/save-dialog runtime, other platforms and clean-device qualification were not repeated for this wording change. Existing release and scoped legal-review gates remain open.
+
+
+## BY. Selected MatterDraft logo — 29 October 2026
+
+The owner's `MatterDraft_Selected_512_Navy.svg` is now the application header/workspace-menu logo and browser favicon. The canonical file, `frontend/src/assets/matterdraft-logo.svg`, is byte-identical to the supplied SVG (SHA-256 `3a3abe2eceda9bd284cdd7132e51856a5235b7df2e98d50bcbff6de45f4d8649`). The navy artwork, transparent corners, gradients and sparkle are preserved. Existing brand wrappers no longer add a background or recolor the artwork; functional document/build/lock icons keep their meanings.
+
+Tauri generated the desktop PNG, ICNS and ICO assets from that source, including 256px high-density PNG support. [Icon provenance and regeneration](../frontend/src-tauri/icons/README.md) records the process. PNG sizes/alpha and ICO representations (16, 24, 32, 48, 64 and 256px) were inspected.
+
+- Frontend production/type build and **44 unit tests passed**. Existing bundle-size warning remains.
+- Existing synthetic Chrome suites `json-design-workspace.spec.ts` and `workspace-spacing.spec.ts`: **3 passed**, 47.1s. Reference geometry, light/dark themes, supported scales, document/reader flow and narrow layouts remain intact.
+- Additional visual capture verified loaded SVGs at 20×20px in the header and 36×36px in the reference-width workspace menu, plus a successful SVG favicon response. Inspected the 1440×900 Documents screen against the supplied 05A layout, retaining the 40px application bar and panel geometry; the owner-selected logo supersedes the reference's former brand mark. [Documents](ui-evidence/matterdraft-logo/05A-documents-1440-light.png), [light menu](ui-evidence/matterdraft-logo/drawer-light.png), [dark menu](ui-evidence/matterdraft-logo/drawer-dark.png).
+- Apple Silicon **70.10 MiB `MatterDraft Studio.app` built**. The actual packaged ICNS exactly matches the new icon asset. Windows icon generation was verified; Windows runtime and native Dock/Finder cache refresh were not exercised.
+- `git diff --check` passed. Backend and source-document processing were unchanged, so backend tests and sidecar regeneration were not repeated. The existing matching sidecar was reused; no installed application or user matter was modified.

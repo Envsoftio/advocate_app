@@ -40,6 +40,8 @@ References:
   - **Acceptance:** Consistent UI/window/About labels, package/crate names and newly generated PDF wording; updated README, handoff, development instructions, acceptance-log filename and links; existing data remains accessible. Preserve independent release and legal-review gates.
   - **Status:** DONE · 29 October 2026. Brand rename and terminology cleanup verified in [acceptance sections BW–BX](ACCEPTANCE_TESTS.md#bx-matterdraft-studio-product-terminology--29-october-2026): backend 308, frontend 44, two focused browser cases, Apple Silicon package and protected-sidecar checks passed. Legacy data/installation identifiers remain stable; platform qualification and scoped legal-review tasks retain their existing statuses.
 
+  - **Selected artwork · 29 October 2026:** Owner-supplied navy SVG adopted unchanged for UI/favicon and used to generate desktop icons. Frontend 44, browser 3 and Apple Silicon package checks passed; see [logo verification](ACCEPTANCE_TESTS.md#by-selected-matterdraft-logo--29-october-2026).
+
 - [x] **DEC-01 — Confirm stack and supported platforms** · P0
   - Record client acceptance of Tauri/Vue replacing Electron/React and Tauri packaging replacing Electron Builder.
   - Specify Windows/macOS versions and architectures; explicitly accept or defer Linux from the original build scope.

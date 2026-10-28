@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import matterDraftLogo from "./assets/matterdraft-logo.svg";
 import {
   computed,
   nextTick,
@@ -2744,7 +2745,7 @@ watch(sidebarCollapsed, (collapsed) => {
       >Skip to main content</a
     >
     <header class="application-bar">
-      <button class="application-brand" aria-label="Workspace navigation" :aria-expanded="workspaceMenuOpen" @click="workspaceMenuOpen=!workspaceMenuOpen"><span><FileStack :size="14"/></span><strong>MatterDraft</strong></button>
+      <button class="application-brand" aria-label="Workspace navigation" :aria-expanded="workspaceMenuOpen" @click="workspaceMenuOpen=!workspaceMenuOpen"><img class="brand-logo" :src="matterDraftLogo" alt="" width="20" height="20" draggable="false" /><span class="application-brand-copy"><strong>MatterDraft</strong><small>Legal Documents, Simplified.</small></span></button>
       <button class="application-matter" aria-label="Open workspaces" :aria-expanded="tabsMenuOpen" @click="tabsMenuOpen=!tabsMenuOpen">{{currentMatter?.name || 'Your matters'}}<ChevronDown :size="13"/></button>
       <span class="application-local"><ShieldCheck :size="16"/> Local workspace</span>
       <button class="icon-btn small" aria-label="Workspace settings" title="Workspace settings" @click="workspaceMenuOpen=!workspaceMenuOpen"><Settings2 :size="16"/></button>
@@ -2773,12 +2774,12 @@ watch(sidebarCollapsed, (collapsed) => {
       @keydown.esc="workspaceMenuOpen=false"
     >
       <div class="brand-area">
-        <div class="brand-mark"><Layers3 :size="22" :stroke-width="2.3" /></div>
+        <div class="brand-mark"><img :src="matterDraftLogo" alt="" width="42" height="42" draggable="false" /></div>
         <div class="brand-copy">
           <div class="brand-name">
             MatterDraft<span class="brand-plus">.</span>
           </div>
-          <div class="brand-sub">LEGAL WORKSPACE</div>
+          <div class="brand-sub">Legal Documents, Simplified.</div>
         </div>
         <button class="sidebar-toggle" aria-label="Close workspace navigation" title="Close workspace navigation" @click="workspaceMenuOpen=false">
           <X :size="19" />

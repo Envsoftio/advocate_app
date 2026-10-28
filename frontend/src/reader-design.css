@@ -11,7 +11,9 @@
 .application-bar {grid-column:1/-1;display:flex;align-items:center;gap:24px;padding:0 14px;background:var(--cb-surface2);border-bottom:1px solid var(--cb-border);min-width:0;z-index:25;font-size:13px}
 .application-brand,.application-matter {display:flex;align-items:center;gap:10px;border:0;background:none;color:inherit;height:36px;padding:0;text-align:left;min-width:0}
 .application-brand {flex:0 0 152px;font-size:12px}
-.application-brand>span {display:grid;place-items:center;width:20px;height:20px;border-radius:6px;background:var(--cb-brand);color:white}
+.application-brand>.brand-logo {display:block;flex:none;width:20px;height:20px;object-fit:contain}
+.application-brand-copy {display:flex;flex-direction:column;min-width:0;line-height:14px}
+.application-brand-copy small {font-size:8px;line-height:10px;font-weight:400;color:var(--cb-text-onCanvas)}
 .application-matter {flex:1;justify-content:space-between;max-width:600px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}
 .application-local {display:flex;align-items:center;gap:9px;margin-left:auto;white-space:nowrap;color:var(--cb-text-onCanvas)}
 .matter-rail {grid-column:1;grid-row:2;display:flex;align-items:center;flex-direction:column;gap:10px;padding:38px 10px 12px;background:var(--cb-nav-bg);min-height:0;overflow-y:auto}
@@ -23,7 +25,7 @@
 .design-shell .workspace-drawer.sidebar {position:fixed;inset:40px auto 28px 64px;z-index:45;display:flex;transform:none;width:270px;height:calc(var(--shell-height) - 68px);min-height:0;box-shadow:12px 0 30px #0003;overflow-y:auto}
 .navigation-scrim {position:fixed;inset:40px 0 28px 64px;z-index:44;border:0;background:var(--cb-overlay-scrim)}
 .design-shell .workspace-drawer .brand-area {padding:12px;min-height:58px}
-.design-shell .workspace-drawer .brand-sub {display:none}
+.design-shell .workspace-drawer .brand-sub {display:block;font-size:10px;line-height:1.35;font-weight:400;letter-spacing:0;white-space:normal}
 .design-shell .open-workspace-tabs {position:fixed;left:190px;top:40px;width:min(600px,calc(100vw / var(--documents-interface-scale) - 205px));max-height:360px;overflow:auto;z-index:46;display:flex;flex-direction:column;align-items:stretch;gap:3px;padding:8px;background:var(--cb-surface);border:1px solid var(--cb-control-border);border-radius:0 0 8px 8px;box-shadow:0 12px 30px #0002;min-height:0}
 .design-shell .open-workspace-tab {width:100%;flex-shrink:0;max-width:none}
 .design-shell .open-workspace-tab-select {flex:1;max-width:none}
