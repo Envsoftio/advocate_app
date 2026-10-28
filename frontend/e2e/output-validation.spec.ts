@@ -3,7 +3,7 @@ import {readFile,mkdir,writeFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
 import {execFileSync} from 'node:child_process'
 import {createHash} from 'node:crypto'
-const base=`http://127.0.0.1:${process.env.COURTBUNDLE_E2E_BACKEND_PORT||8768}`
+const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT||8768}`
 const headers={Authorization:'Bearer e2e-isolated-token'}
 async function fixture(request:any){
  const matter=await(await request.post(`${base}/matters`,{headers,data:{name:'B01C synthetic output review',court_profile:'delhi-hc-illustrative',case_number:'DEMO / 2026'}})).json()
@@ -122,7 +122,7 @@ sys.path.insert(0,str(Path('..','backend').resolve()))
 from app.file_io import read_bytes,write_bytes
 p=Path(sys.argv[1])/'matters'/sys.argv[2]/'exports'/sys.argv[3]/'export_manifest.json'
 m=json.loads(read_bytes(p));c=m['validation_contract']['combined.pdf'];i=int(next(iter(c['sources'])))
-c['labels'][i]='UNEXPECTED';write_bytes(p,json.dumps(m).encode())`,process.env.COURTBUNDLE_E2E_DATA_DIR!,matter.id,build.id])
+c['labels'][i]='UNEXPECTED';write_bytes(p,json.dumps(m).encode())`,process.env.MATTERDRAFT_E2E_DATA_DIR!,matter.id,build.id])
  const url=`${base}/matters/${matter.id}/exports/${build.id}/validation`
  const state=await(await request.post(url+'/run',{headers,data:{}})).json()
  const originalRun=state.history[0],finding=originalRun.checks.find((c:any)=>c.id==='labels').findings[0]

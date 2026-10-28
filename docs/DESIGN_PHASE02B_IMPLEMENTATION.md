@@ -33,7 +33,7 @@ ED30 contributes failed-save/context-retention requirements here. Broader compac
 - `frontend/src/lib/api.ts`, `pdfReader.ts`, `types.ts`: authenticated original service, scoped position keys and finding metadata.
 - `frontend/src/styles.css`: semantic artifact/context styling only.
 - `frontend/e2e/document-state.spec.ts`: new synthetic state/permission/navigation/derived-result regressions.
-- This handoff, `docs/POC_ACCEPTANCE_TESTS.md` and the ignored local kit's Phase 02 task record.
+- This handoff, `docs/ACCEPTANCE_TESTS.md` and the ignored local kit's Phase 02 task record.
 
 Existing `.gitignore`, Phase 00/01/02A source, design files, fonts/tokens and unrelated local work are preserved. No commit, deployment or sidecar rebuild.
 

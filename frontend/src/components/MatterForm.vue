@@ -38,7 +38,7 @@ function submit() {
         <label class="field">Respondent<input v-model="form.respondent" placeholder="Respondent name" /></label>
         <label class="field">Advocate<input v-model="form.advocate" placeholder="Advocate name" /></label>
         <label class="field">Case no. (optional)<input v-model="form.case_number" placeholder="If already assigned" /></label>
-        <div class="notice subtle full"><ShieldAlert :size="16" /> Court profiles are illustrative. This POC does not certify court compliance or submit filings.</div>
+        <div class="notice subtle full"><ShieldAlert :size="16" /> Court profiles are illustrative. MatterDraft does not certify court compliance or submit filings.</div>
         <div class="modal-actions full">
           <button class="btn secondary" type="button" @click="emit('close')">Cancel</button>
           <button class="btn primary" type="submit" :disabled="props.working"><Plus :size="16" /> {{ props.working ? 'Creating…' : 'Create matter' }}</button>

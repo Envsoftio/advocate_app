@@ -1,17 +1,17 @@
-# CourtBundle project context and handoff
+# MatterDraft project context and handoff
 
-The maintained document is [CourtBundle_Project_Context_and_Handoff.md](../CourtBundle_Project_Context_and_Handoff.md) at the repository root. Read that document for project context, architecture and requirements before changing architecture.
+The maintained document is [MatterDraft_Project_Context_and_Handoff.md](../MatterDraft_Project_Context_and_Handoff.md) at the repository root. Read that document for project context, architecture and requirements before changing architecture.
 
 At the product owner's request on 15 October 2026, the full handoff was moved to that location and the retained improvements were merged into its related workflow, data-model, bundling, processing, QA and roadmap sections.
 
-- [Single matter workspace](../CourtBundle_Project_Context_and_Handoff.md#41-single-matter-workspace)
-- [Document table and chronology](../CourtBundle_Project_Context_and_Handoff.md#61-data-model)
-- [Presets and rebuild review](../CourtBundle_Project_Context_and_Handoff.md#62-deterministic-page-map-strategy-critical)
-- [Reviewed import cleanup](../CourtBundle_Project_Context_and_Handoff.md#631-reviewed-import-cleanup-queue-imp-01)
-- [Approved priorities and roadmap](../CourtBundle_Project_Context_and_Handoff.md#10-recommended-backlog-after-developer-machine-brings-up-the-ui)
-- [Language and script support](../CourtBundle_Project_Context_and_Handoff.md#37-language-and-script-support-plan)
+- [Single matter workspace](../MatterDraft_Project_Context_and_Handoff.md#41-single-matter-workspace)
+- [Document table and chronology](../MatterDraft_Project_Context_and_Handoff.md#61-data-model)
+- [Presets and rebuild review](../MatterDraft_Project_Context_and_Handoff.md#62-deterministic-page-map-strategy-critical)
+- [Reviewed import cleanup](../MatterDraft_Project_Context_and_Handoff.md#631-reviewed-import-cleanup-queue-imp-01)
+- [Approved priorities and roadmap](../MatterDraft_Project_Context_and_Handoff.md#10-recommended-backlog-after-developer-machine-brings-up-the-ui)
+- [Language and script support](../MatterDraft_Project_Context_and_Handoff.md#37-language-and-script-support-plan)
 
-Use the [implementation backlog](IMPLEMENTATION_TASKS.md) for task status and the [acceptance log](POC_ACCEPTANCE_TESTS.md) for executed checks. This file remains a compatibility pointer, not a second copy of the requirements.
+Use the [implementation backlog](IMPLEMENTATION_TASKS.md) for task status and the [acceptance log](ACCEPTANCE_TESTS.md) for executed checks. This file remains a compatibility pointer, not a second copy of the requirements.
 
 Current UI direction: [new design shell and reader correction](DESIGN_PHASE02D_UI_CORRECTION.md). Supplied screen designs define the layout for completed and future UI tasks; legacy layout is not a preservation requirement.
 
@@ -39,3 +39,13 @@ B02A preset/settings and cover/index: [new BU01/BU02 implementation and evidence
 ### B03A — new output-options implementation, 29 October 2026
 
 [Certain] The supplied BU04 design now defines Output options, with persistent original/lossless/balanced/smaller processing, scoped PDF metadata cleanup and selected DOCX/XLSX/PPTX drafts. Actual generated sizes, staged processing and post-processing verification preserve original/prior bytes and existing page maps. Unsupported duplex and fixed omission policies are explicit. Backend **306**, frontend unit **44**, production build and matching Apple Silicon sidecar/release pass. Sixteen viewport/theme/scale renders were inspected; native generation, review, Save cancellation/retry, exact bytes/hashes and restart persistence were verified. Final full browser suite **110 passed, 1 skipped** (opt-in vault). **B03A is complete for the available target.** See [B03A implementation, comparisons, measured evidence and platform limits](DESIGN_PHASEB03A_IMPLEMENTATION.md). No migration or new page-map rule. **B03B is next; not started.**
+
+
+### Product name — 29 October 2026
+
+The application is now **MatterDraft Studio**, shortened to **MatterDraft**. See [rename verification and compatibility decisions](ACCEPTANCE_TESTS.md#bw-matterdraft-studio-product-rename--29-october-2026). Existing persistence, encrypted-backup and wire-format identifiers remain stable; use `MATTERDRAFT_*` for new developer configuration.
+
+
+### Product terminology — 29 October 2026
+
+MatterDraft Studio is an application in active development. Current titles, About text, PDF draft footers and package/crate names use product terminology. The acceptance log has moved to `docs/ACCEPTANCE_TESTS.md`; current source/docs and local phase-kit links are updated. See [verification and compatibility scope](ACCEPTANCE_TESTS.md#bx-matterdraft-studio-product-terminology--29-october-2026) and DEC-05 in the backlog. Existing release gates remain independent of the name.

@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
-const base=`http://127.0.0.1:${process.env.COURTBUNDLE_E2E_BACKEND_PORT||8768}`,headers={Authorization:'Bearer e2e-isolated-token'}
+const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT||8768}`,headers={Authorization:'Bearer e2e-isolated-token'}
 async function seed(request:any){const matter=await(await request.post(`${base}/matters`,{headers,data:{name:'Synthetic metadata review',court_profile:'general-demo'}})).json();
  const buffer=await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'));
  const docs=[];for(const name of ['Order_12_Jan_2026.pdf','Annexure_A_Agreement.pdf','Written_Submissions_03-04-2026.pdf']){const r=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name,mimeType:'application/pdf',buffer}}});

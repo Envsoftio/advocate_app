@@ -24,7 +24,7 @@ async function getConnection(): Promise<BackendConnection> {
     return await Promise.race([
       sessionPromise,
       new Promise<BackendConnection>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new ApiError(0, 'Cannot obtain the local engine session. Quit and reopen CourtBundle.')), 3_000)
+        timer = setTimeout(() => reject(new ApiError(0, 'Cannot obtain the local engine session. Quit and reopen MatterDraft.')), 3_000)
       }),
     ])
   } catch (err) {

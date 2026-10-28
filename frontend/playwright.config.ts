@@ -3,16 +3,23 @@ import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 
+// Keep existing local QA commands usable after the product rename.
+for (const [name, value] of Object.entries(process.env)) {
+  if (name.startsWith('COURTBUNDLE_')) {
+    process.env[name.replace('COURTBUNDLE_', 'MATTERDRAFT_')] ??= value
+  }
+}
+
 const root = resolve(import.meta.dirname, '..')
-const python = process.env.COURTBUNDLE_TEST_PYTHON || [
+const python = process.env.MATTERDRAFT_TEST_PYTHON || [
   resolve(root, 'backend/.venv312/bin/python'),
   resolve(root, 'backend/.venv/bin/python'),
 ].find(existsSync) || 'python3'
 // Workers re-evaluate this config. Share the server's disposable fixture root.
-const dataDir = process.env.COURTBUNDLE_E2E_DATA_DIR || mkdtempSync(resolve(tmpdir(), 'courtbundle-e2e-'))
-const vitePort = Number(process.env.COURTBUNDLE_E2E_VITE_PORT || 1420)
-const backendPort = Number(process.env.COURTBUNDLE_E2E_BACKEND_PORT || 8768)
-process.env.COURTBUNDLE_E2E_DATA_DIR = dataDir
+const dataDir = process.env.MATTERDRAFT_E2E_DATA_DIR || mkdtempSync(resolve(tmpdir(), 'matterdraft-e2e-'))
+const vitePort = Number(process.env.MATTERDRAFT_E2E_VITE_PORT || 1420)
+const backendPort = Number(process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768)
+process.env.MATTERDRAFT_E2E_DATA_DIR = dataDir
 
 export default defineConfig({
   testDir: './e2e',
@@ -30,8 +37,8 @@ export default defineConfig({
       url: `http://127.0.0.1:${backendPort}/health`,
       reuseExistingServer: false,
       timeout: 30_000,
-      env: { COURTBUNDLE_API_TOKEN: 'e2e-isolated-token', COURTBUNDLE_E2E_VITE_PORT: String(vitePort),
-        COURTBUNDLE_REQUIRE_VAULT: process.env.COURTBUNDLE_E2E_REQUIRE_VAULT === '1' ? '1' : '0' },
+      env: { MATTERDRAFT_API_TOKEN: 'e2e-isolated-token', MATTERDRAFT_E2E_VITE_PORT: String(vitePort),
+        MATTERDRAFT_REQUIRE_VAULT: process.env.MATTERDRAFT_E2E_REQUIRE_VAULT === '1' ? '1' : '0' },
       // Authenticated health returns 401 until the test supplies its token.
       ignoreHTTPSErrors: false,
     },

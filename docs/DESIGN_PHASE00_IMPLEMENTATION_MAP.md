@@ -1,10 +1,10 @@
-# CourtBundle design Phase 00 — implementation map
+# MatterDraft design Phase 00 — implementation map
 
 Date: 27 October 2026. Status: **DONE — audit only**. Source baseline: `004cb593d7b433be51e2d1d902810ac352ccbd9b`.
 
 [Certain] The existing app is the implementation base. Reader, editing, OCR, storage and bundle services already exist; replacing them would discard tested behavior. The new design also requires behavior that is absent today, especially artifact selection, page identity, consistent dirty navigation and exact Preflight return context.
 
-Evidence: [capability matrix](DESIGN_PHASE00_CAPABILITY_MATRIX.md), [baseline verification](POC_ACCEPTANCE_TESTS.md#bg-design-phase-00-baseline--27-october-2026), [runtime captures](evidence/phase00-20261027/README.md). “Working” below means the scoped behavior passed the recorded checks, not release acceptance.
+Evidence: [capability matrix](DESIGN_PHASE00_CAPABILITY_MATRIX.md), [baseline verification](ACCEPTANCE_TESTS.md#bg-design-phase-00-baseline--27-october-2026), [runtime captures](evidence/phase00-20261027/README.md). “Working” below means the scoped behavior passed the recorded checks, not release acceptance.
 
 ## Scope and design access
 

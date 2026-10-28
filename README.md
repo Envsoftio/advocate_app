@@ -1,12 +1,16 @@
-# CourtBundle POC — Indian Court Filing Preparation
+# MatterDraft Studio — Indian Court Filing Preparation
 
-**Status:** working PDF/bundling POC. The Vue browser journey, an unsigned Apple Silicon package, native OCR and native Save were exercised locally on 13 October 2026; an isolated native Hindi OCR run followed on 18 October. Desktop foundation features added on 24 October have browser and package checks recorded in `docs/POC_ACCEPTANCE_TESTS.md`; native print and new Office Save dialogs still need target-device verification. Clean-device installation, macOS 12 minimum, macOS Intel and Windows x64 remain unverified. Do not use this POC to submit real confidential case files or represent it as court-approved.
+**MatterDraft** is the short product name. Commands below run from the existing repository root; the checkout folder name does not define the product name.
 
-This is a local-first desktop application prototype using **Tauri 2 + Vue 3 + TypeScript + Python FastAPI + PyMuPDF + integrated Tesseract OCR**.
+Branding, package names and developer settings now use MatterDraft. `MATTERDRAFT_*` environment variables take precedence, with legacy `COURTBUNDLE_*` settings accepted for existing deployments. Persisted storage/encryption formats, the desktop application identifier, browser preference keys, `.cbmatter` backups and API header names remain stable so existing matters and clients continue to work. Supplied design-source filenames and historical test artifacts retain their original names; past evidence does not certify the renamed build.
 
-The [project context and requirements](CourtBundle_Project_Context_and_Handoff.md) define five approved improvements: batch document review, output presets, reviewed import cleanup, rebuild/export review and a source-linked chronology. The editable batch-review table is engineering-implemented with native acceptance still deferred; status remains authoritative in the [backlog](docs/IMPLEMENTATION_TASKS.md).
+**Status:** MatterDraft Studio is a desktop application in active development. The Vue browser journey, an unsigned Apple Silicon package, native OCR and native Save were exercised locally on 13 October 2026; an isolated native Hindi OCR run followed on 18 October. Desktop foundation features added on 24 October have browser and package checks recorded in `docs/ACCEPTANCE_TESTS.md`; native print and new Office Save dialogs still need target-device verification. Clean-device installation, macOS 12 minimum, macOS Intel and Windows x64 remain unverified. Do not use this application to submit real confidential case files or represent it as court-approved.
 
-The proof-of-concept workflow is:
+This is a local-first desktop application using **Tauri 2 + Vue 3 + TypeScript + Python FastAPI + PyMuPDF + integrated Tesseract OCR**.
+
+The [project context and requirements](MatterDraft_Project_Context_and_Handoff.md) define five approved improvements: batch document review, output presets, reviewed import cleanup, rebuild/export review and a source-linked chronology. The editable batch-review table is engineering-implemented with native acceptance still deferred; status remains authoritative in the [backlog](docs/IMPLEMENTATION_TASKS.md).
+
+The application workflow is:
 
 `Create matter -> Import PDF/images -> Inspect/edit working copies -> OCR -> Classify/group/drag to order -> Configure volumes -> Generate index/bookmarks -> Validate -> Export combined PDF + volumes + CSV + ZIP`
 
@@ -32,7 +36,7 @@ For a court-neutral matter, choose the **Court-neutral preparation** profile. In
 
 In the PDF viewer, **Select** permits native PDF text selection. Tools are grouped under **Edit**, **Annotate**, **Stamps**, **Pages** and **Output**. **Add text** creates an editable text object at the clicked position. **Annotate** has independent Highlight, Comment, Draw, Box, Ellipse, Line and Arrow controls; **Stamps** has image, Check, Cross and Date controls. Each object can be selected, dragged, resized and deleted with Delete/Backspace. Draw, shapes, added text, image and visual stamps are flattened into Save copy and new bundle exports. Highlight and Comment remain private review content and are omitted. **Redact** creates an editable black mark; drag or resize it after adding it. Save copy and new bundles permanently remove covered PDF content in those generated files. The underlying working revision and imported original still contain that content, so never share the raw working PDF as a redacted copy. Existing destructive redaction records remain restorable through the legacy workflow. **Links** are separate revision-anchored objects. In **Edit text**, moving or replacing an existing PDF text run remains a working-copy revision edit; it is not an independently movable object afterward. See [trial scope and limits](docs/PDFIUM_PARAGRAPH_TRIAL.md).
 
-On the matter's **Documents** page, use **Bookmark page** in the PDF viewer to mark the page you are reading. Drag document rows or use their arrow buttons to set index order; open thumbnails to drag pages within a working copy. The adjacent **Index & bookmarks** tab repeats document ordering beside the page map, offers a bookmark shortcut on every index row, and lets you rename, nest, reorder or resolve manual bookmarks. Drag bookmarks among siblings or use their arrow buttons. The preview distinguishes printed volume pages from physical combined PDF pages and shows each bookmark's source page. Build opens its read-only page plan through **Preview** on the settings card. After building, **Review bundle** or a PDF file row opens a generated PDF inside the app using authenticated range loading and the same reader, with continuous/single-page modes, occurrence search, selectable text, bookmarks and index-link navigation. The review identifies its build and flags older output when matter inputs have changed. **Shortcuts** lists keyboard controls in both readers. The two index densities and per-volume printed numbering are technical POC choices, not reviewed filing rules. Devanagari index titles use shaped fallback fonts but require visual review in saved PDFs; Hindi text extraction is not qualified. Other scripts block generated output until qualified.
+On the matter's **Documents** page, use **Bookmark page** in the PDF viewer to mark the page you are reading. Drag document rows or use their arrow buttons to set index order; open thumbnails to drag pages within a working copy. The adjacent **Index & bookmarks** tab repeats document ordering beside the page map, offers a bookmark shortcut on every index row, and lets you rename, nest, reorder or resolve manual bookmarks. Drag bookmarks among siblings or use their arrow buttons. The preview distinguishes printed volume pages from physical combined PDF pages and shows each bookmark's source page. Build opens its read-only page plan through **Preview** on the settings card. After building, **Review bundle** or a PDF file row opens a generated PDF inside the app using authenticated range loading and the same reader, with continuous/single-page modes, occurrence search, selectable text, bookmarks and index-link navigation. The review identifies its build and flags older output when matter inputs have changed. **Shortcuts** lists keyboard controls in both readers. The two index densities and per-volume printed numbering are technical implementation choices, not reviewed filing rules. Devanagari index titles use shaped fallback fonts but require visual review in saved PDFs; Hindi text extraction is not qualified. Other scripts block generated output until qualified.
 
 In the PDF viewer, **Pages → Add pages** opens the insertion task directly; choose pages from another document in the matter or duplicate pages from the current one. **Delete page** removes the current page after confirmation, while **Organize pages** selects, moves or deletes several pages. Drag page thumbnails to reorder, or use the organizer's arrow buttons and **Apply page order**. These actions change the editable working copy; the imported original remains unchanged. **Page tools** presents the remaining tasks one at a time: combine PDFs, replace selected pages or the whole working PDF, crop margins, save selected pages, split into PDFs, or reduce file size. Each task explains its purpose and shows a live outcome summary before the primary action. Add/combine/replace show actual source pages and destination neighbors or replacement mappings; source and target revision checks prevent applying an outdated preview. Page ranges refer to source-document pages, not printed bundle numbers. Extract/split save separate files; other tasks update the working copy. Crop margins previews the keep area on the actual working page, including rotation; drag a rectangle or adjust the unrotated-edge percentages. Crop is not secure redaction. **Pages → Organize pages** opens a thumbnail grid with explicit selection, Shift ranges, keyboard/drag ordering and confirmed batch rotation/deletion; each applied operation is one undoable working-copy revision.
 
@@ -52,7 +56,7 @@ the court's official XLS template or an advocate's case-specific review.
 ## Repository layout
 
 ```text
-CourtBundle_POC/
+MatterDraft/
   backend/
     app/
       main.py         # FastAPI endpoints, local bearer token
@@ -74,7 +78,7 @@ CourtBundle_POC/
   samples/             # synthetic PDF/JPEG sources and verified output package
   docs/
     PROJECT_CONTEXT_AND_HANDOFF.md # pointer to the root handoff
-    POC_ACCEPTANCE_TESTS.md
+    ACCEPTANCE_TESTS.md
 ```
 
 ## Requirements
@@ -105,7 +109,7 @@ cd backend
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.txt
-$env:COURTBUNDLE_API_TOKEN = 'development-token-change-me'
+$env:MATTERDRAFT_API_TOKEN = 'development-token-change-me'
 python launcher.py --port 8765
 ```
 
@@ -139,7 +143,7 @@ cd frontend
 npm run test:e2e
 ```
 
-Set `COURTBUNDLE_TEST_PYTHON` to a Python with backend requirements if neither `backend/.venv312` nor `backend/.venv` exists. The test uses installed Google Chrome and starts local servers on ports 8768 and 1420. It does not verify Tauri native behavior.
+Set `MATTERDRAFT_TEST_PYTHON` to a Python with backend requirements if neither `backend/.venv312` nor `backend/.venv` exists. The test uses installed Google Chrome and starts local servers on ports 8768 and 1420. It does not verify Tauri native behavior.
 
 To rebuild the demo export from purely synthetic files:
 
@@ -221,13 +225,13 @@ All routes require `Authorization: Bearer <local-token>`.
 - `GET /jobs/{id}`; `POST /jobs/{id}/cancel`
 - `GET /matters/{id}/exports`; `GET /matters/{id}/exports/{exportId}/{filename}`
 
-Full request/response examples and architecture notes are in `CourtBundle_Project_Context_and_Handoff.md`.
+Full request/response examples and architecture notes are in `MatterDraft_Project_Context_and_Handoff.md`.
 
-## POC boundaries — important
+## Product boundaries — important
 
 - Delhi High Court is represented by an **illustrative technical subset**, not a comprehensive court profile. The configurable page cap is **not** a national court rule. The 2026 Delhi High Court rule concerns **300 MB file size**, not a 300-page maximum.
 - This tool prepares PDFs; it does not e-file documents with courts or establish legal validity, admissibility, certification, signing, translation accuracy, limitation or filing acceptance.
-- Imported originals are preserved. PDF imports are inspected conservatively for certificate-signature dictionary indicators before the initial working copy is created byte-for-byte. The UI distinguishes detected indicators, reviewed unsigned inputs, reviewer-marked visible/scanned signatures and inconclusive inspection, and requires acknowledgment before risky transformations. This is not cryptographic validation: working-copy changes, OCR, extraction, compression and bundle generation can invalidate or omit signature protections or alter context. Do not use this POC as an evidence-preservation tool without review.
+- Imported originals are preserved. PDF imports are inspected conservatively for certificate-signature dictionary indicators before the initial working copy is created byte-for-byte. The UI distinguishes detected indicators, reviewed unsigned inputs, reviewer-marked visible/scanned signatures and inconclusive inspection, and requires acknowledgment before risky transformations. This is not cryptographic validation: working-copy changes, OCR, extraction, compression and bundle generation can invalidate or omit signature protections or alter context. Do not use this application as an evidence-preservation tool without review.
 - OCR uses English and Hindi traineddata and adds an invisible layer to image-only and mixed native/scanned pages while retaining visible source content, geometry and navigation. Pages with an existing GlyphLessFont OCR layer are skipped; OCR rendering is bounded to 40 megapixels per page. OCR is fallible, particularly for handwriting and seals. Non-Latin index titles are not yet properly rendered.
 - PDF and JPG/PNG import only; Word, Excel and PowerPoint conversion remain future development. On working-copy pages, including pages rotated by 90°, 180° or 270°, the preview can add visible ASCII text. It can replace one selectable horizontal text run even when the PDF page has a 90°, 180° or 270° rotation setting. Replacement can use clear space to the right and wrap into clear space below, reducing font size by at most 25% if needed; it does not move surrounding page content, preserve arbitrary fonts or correct scanned pixels. Edit text mode can also move one selectable ASCII text run horizontally and vertically into clear space by dragging its outline and applying the preview. Whole-paragraph reflow is separately available only for PDFs supported by the PDFium trial. Neither mode moves scanned pixels or silently shifts other text. Unfittable or genuinely overlapping edits are rejected. Review the result and use matter Undo to revert it. This is not a confidential redaction tool.
 - Browser export uses authenticated fetch and browser-style download. Tauri export uses a native Save dialog and streams to a temporary file before replacing the destination. Apple Silicon native Save has local device evidence; validate save and failure behaviour on every target system.
@@ -240,7 +244,7 @@ Full request/response examples and architecture notes are in `CourtBundle_Projec
 - Vue build, Vitest, Apple Silicon Rust compile and local package tests passed on 13 October 2026; see the acceptance log for exact runs. Other target builds and clean-device tests are still required.
 - **PyMuPDF licensing:** Determine AGPL/commercial licensing requirements before distributing any proprietary build. Review other dependencies' licenses too.
 
-See [Project Context and Handoff](CourtBundle_Project_Context_and_Handoff.md) and [Acceptance Tests](docs/POC_ACCEPTANCE_TESTS.md).
+See [Project Context and Handoff](MatterDraft_Project_Context_and_Handoff.md) and [Acceptance Tests](docs/ACCEPTANCE_TESTS.md).
 
 ### PDF reliability hardening — 14 October 2026
 

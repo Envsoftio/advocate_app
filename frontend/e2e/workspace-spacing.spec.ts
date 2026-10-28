@@ -4,15 +4,18 @@ import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-test('top-level pages fit narrow windows', async ({ page }) => {
+test('top-level pages fit narrow windows', async ({ page }, info) => {
   await page.goto('/')
   for (const width of [1440, 620, 390]) {
     await page.setViewportSize({width,height:900})
-    for (const name of ['Court rules', 'About POC', 'Matters']) {
+    for (const name of ['Court rules', 'About MatterDraft', 'Matters']) {
       await openWorkspaceNavigation(page)
       await page.locator('.sidebar').getByRole('button', {name,exact:true}).click()
-      await expect(page.getByRole('heading', {name:name === 'Court rules' ? 'Court rules & technical profiles' : name === 'About POC' ? 'Built for structured legal filing preparation.' : 'Your matters'})).toBeVisible()
+      await expect(page.getByRole('heading', {name:name === 'Court rules' ? 'Court rules & technical profiles' : name === 'About MatterDraft' ? 'Built for structured legal filing preparation.' : 'Your matters'})).toBeVisible()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      if (name === 'About MatterDraft') {
+        await page.screenshot({path:info.outputPath(`about-matterdraft-${width}.png`),animations:'disabled'})
+      }
     }
   }
 })

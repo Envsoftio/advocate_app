@@ -9,7 +9,7 @@ import { resolve } from 'node:path'
 const backend = 'http://127.0.0.1:8768'
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 const backendRoot = resolve(import.meta.dirname, '../../backend')
-const python = process.env.COURTBUNDLE_TEST_PYTHON || [
+const python = process.env.MATTERDRAFT_TEST_PYTHON || [
   resolve(backendRoot, '.venv312/bin/python'), resolve(backendRoot, '.venv/bin/python'),
 ].find(existsSync) || 'python3'
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
@@ -118,7 +118,7 @@ test('actual-page crop preview maps rotated drag/numeric selections to saved PDF
     { rotation: 270, crop: [75,140,425,560], width: 420, height: 350 },
   ])
   expect((await documents()).source_sha256).toBe(hash(original))
-  const sourcePath = resolve(process.env.COURTBUNDLE_E2E_DATA_DIR!, 'matters', matterId, 'originals', `${document.id}.pdf`)
+  const sourcePath = resolve(process.env.MATTERDRAFT_E2E_DATA_DIR!, 'matters', matterId, 'originals', `${document.id}.pdf`)
   expect(hash(await readFile(sourcePath))).toBe(hash(original))
 
   await tools.getByRole('button', { name: 'Save selected pages', exact: true }).click()

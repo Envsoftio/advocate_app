@@ -2,7 +2,7 @@ import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation'
 import {test,expect} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
-const base=`http://127.0.0.1:${process.env.COURTBUNDLE_E2E_BACKEND_PORT||8768}`
+const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT||8768}`
 const headers={Authorization:'Bearer e2e-isolated-token'}
 async function fixture(request:any,count=10){
  const matter=await(await request.post(`${base}/matters`,{headers,data:{name:'Synthetic membership review',case_number:'DEMO 2481/2026',court_profile:'general-demo'}})).json()

@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 
 const base='http://127.0.0.1:8768',headers={Authorization:'Bearer e2e-isolated-token'}
 const backend=resolve(import.meta.dirname,'../../backend')
-const python=process.env.COURTBUNDLE_TEST_PYTHON || [resolve(backend,'.venv312/bin/python'),resolve(backend,'.venv/bin/python')].find(existsSync)||'python3'
+const python=process.env.MATTERDRAFT_TEST_PYTHON || [resolve(backend,'.venv312/bin/python'),resolve(backend,'.venv/bin/python')].find(existsSync)||'python3'
 function fixture(count:number){return execFileSync(python,['-c',`import pymupdf,sys
 pdf=pymupdf.open()
 for i in range(${count}):

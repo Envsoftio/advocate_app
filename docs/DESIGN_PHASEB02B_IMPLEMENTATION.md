@@ -63,7 +63,7 @@ Windows, Intel Mac, minimum-version/clean-device installation, packaged-vault st
 | `COURTBUNDLE_E2E_VITE_PORT=1436 npm run test:e2e -- --output=/private/tmp/courtbundle-b02b-complete` | **101 passed, 1 skipped** (opt-in vault), 6.3 minutes. Includes B01/B02A, editor/navigation/archive/history/export regressions and four new B02B browser cases. |
 | `backend/.venv312/bin/python backend/scripts/build_sidecar.py` | Matching `filing-api-aarch64-apple-darwin` built successfully. |
 | `npm run tauri:build -- --debug --bundles app --config /private/tmp/courtbundle-b02b-native-config.json` | Final isolated QA app built successfully, 36.68 MiB. |
-| `npm run tauri:build -- --bundles app` | Apple Silicon release `CourtBundle POC.app` built successfully, 69.77 MiB. |
+| `npm run tauri:build -- --bundles app` | Apple Silicon release application bundle built successfully, 69.77 MiB. |
 | `backend/.venv312/bin/python /private/tmp/courtbundle-b02b-reconcile.py` | Native saved bytes, labels, outlines, links, printed regions, preview raster/text, CSV and preservation assertions passed. Script retained in evidence directory. |
 | `git diff --check` | Passed. |
 

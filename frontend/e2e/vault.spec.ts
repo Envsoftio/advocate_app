@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test.skip(process.env.COURTBUNDLE_E2E_REQUIRE_VAULT !== '1', 'Run with COURTBUNDLE_E2E_REQUIRE_VAULT=1')
+test.skip(process.env.MATTERDRAFT_E2E_REQUIRE_VAULT !== '1', 'Run with MATTERDRAFT_E2E_REQUIRE_VAULT=1')
 
 test('sets up and unlocks the protected synthetic workspace', async ({ page, request }) => {
   await page.addInitScript(() => localStorage.setItem('courtbundle.appearance.v1', JSON.stringify({theme:'dark',scale:100})))

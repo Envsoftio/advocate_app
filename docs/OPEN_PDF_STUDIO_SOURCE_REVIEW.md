@@ -1,4 +1,4 @@
-# Open PDF Studio source review for CourtBundle PDF editing
+# Open PDF Studio source review for MatterDraft PDF editing
 
 For the comparison with Folio, PDF.js, `pdf-lib`, PDF Forge, MuPDF.js and `pdfium-render`, and the requirements-to-engine plan, see [PDF editor engine and UX feasibility](PDF_EDITOR_ENGINE_AND_UX_FEASIBILITY.md).
 
@@ -8,11 +8,11 @@ For the comparison with Folio, PDF.js, `pdf-lib`, PDF Forge, MuPDF.js and `pdfiu
 
 Improve the Vue/PDF.js editor and current PyMuPDF working-copy engine first. Borrow **design techniques** from Open PDF Studio, then compare rendered performance on our own synthetic A4 text, scan, mixed-script, rotated and long-bundle fixtures. Add PDFium only if a measured, user-visible rendering benefit exceeds the packaging, licensing, memory and second-engine costs. Reuse upstream source only after a file-level license review and an isolated prototype.
 
-The current repository has separate evidence for backend throughput and browser UI behavior. Its [1,000-page baseline](POC_ACCEPTANCE_TESTS.md#repeatable-scale-baseline) measures import, build and search, not time to first visible PDF page, sharp zoom, edit latency or native save. The latter metrics are currently unknown. Existing editor paths are [PdfViewer.vue](../frontend/src/components/PdfViewer.vue), [api.ts](../frontend/src/lib/api.ts), [pdf_ops.py](../backend/app/pdf_ops.py), and [native_save.rs](../frontend/src-tauri/src/native_save.rs).
+The current repository has separate evidence for backend throughput and browser UI behavior. Its [1,000-page baseline](ACCEPTANCE_TESTS.md#repeatable-scale-baseline) measures import, build and search, not time to first visible PDF page, sharp zoom, edit latency or native save. The latter metrics are currently unknown. Existing editor paths are [PdfViewer.vue](../frontend/src/components/PdfViewer.vue), [api.ts](../frontend/src/lib/api.ts), [pdf_ops.py](../backend/app/pdf_ops.py), and [native_save.rs](../frontend/src-tauri/src/native_save.rs).
 
 ## What the upstream code actually does
 
-| Area | Source evidence | CourtBundle decision |
+| Area | Source evidence | MatterDraft decision |
 | --- | --- | --- |
 | Rendering | [`engine-router.js`](https://github.com/OpenAEC-Foundation/open-pdf-studio/blob/a22ba7a5d332aad806ae0bf658551cb846a6f849/open-pdf-studio/js/pdf/engine-router.js) routes whole-page renders to PDFium by default; [`pdfium-worker/src/main.rs`](https://github.com/OpenAEC-Foundation/open-pdf-studio/blob/a22ba7a5d332aad806ae0bf658551cb846a6f849/pdfium-worker/src/main.rs) accepts whole-page/region requests and writes RGBA to shared memory. [`worker_pool/mod.rs`](https://github.com/OpenAEC-Foundation/open-pdf-studio/blob/a22ba7a5d332aad806ae0bf658551cb846a6f849/open-pdf-studio/src-tauri/src/worker_pool/mod.rs) pins page work to warm workers and retries on another worker after failure. | Investigate only if PDF.js has a measured bottleneck on our legal-document corpus. CAD-scale tiles are a different workload from normal filing pages. |
 | Display scheduling | [`bitmap-orchestrator.js`](https://github.com/OpenAEC-Foundation/open-pdf-studio/blob/a22ba7a5d332aad806ae0bf658551cb846a6f849/open-pdf-studio/js/pdf/bitmap-orchestrator.js) shows a cached image while a sharper render arrives and rejects stale generations. [`frame-planner.js`](https://github.com/OpenAEC-Foundation/open-pdf-studio/blob/a22ba7a5d332aad806ae0bf658551cb846a6f849/open-pdf-studio/js/pdf/frame-planner.js) schedules animation frames only when dirty. [`voorvertoning-sleutel.js`](https://github.com/OpenAEC-Foundation/open-pdf-studio/blob/a22ba7a5d332aad806ae0bf658551cb846a6f849/open-pdf-studio/js/pdf/voorvertoning-sleutel.js) ties background previews to the originating document. | Adapt these ideas in Vue: preserve the previous page while rendering, key work by document ID + revision + page + rotation + scale, discard stale completions, prioritize the visible page, and load thumbnails separately. |
@@ -24,7 +24,7 @@ The current repository has separate evidence for backend throughput and browser 
 
 Upstream's own [performance investigation](https://github.com/OpenAEC-Foundation/open-pdf-studio/blob/a22ba7a5d332aad806ae0bf658551cb846a6f849/docs/snelheidsonderzoek-2026-09-30.md) reports duplicate bucket/exact zoom renders, possible pixel-cap overshoot, fixed-count FIFO caches and duplicate parsers on open. These are specific findings in its code, not evidence that our app is faster. They make a direct transplant unjustified. The upstream [`pdfjs-vs-rust-render.mjs`](https://github.com/OpenAEC-Foundation/open-pdf-studio/blob/a22ba7a5d332aad806ae0bf658551cb846a6f849/mcp-server/pdfjs-vs-rust-render.mjs) is a useful probe design, but includes machine-specific paths and times a warmed Rust render, so it is not a portable comparison result.
 
-## Highest-value CourtBundle work
+## Highest-value MatterDraft work
 
 ### Borrowing the editing interaction
 

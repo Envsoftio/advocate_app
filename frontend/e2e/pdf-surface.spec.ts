@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 
 function syntheticPdf() {
   const backend = resolve(import.meta.dirname, '../../backend')
-  const python = process.env.COURTBUNDLE_TEST_PYTHON || [
+  const python = process.env.MATTERDRAFT_TEST_PYTHON || [
     resolve(backend, '.venv312/bin/python'), resolve(backend, '.venv/bin/python'),
   ].find(existsSync) || 'python3'
   return execFileSync(python, ['-c', `import pymupdf,base64

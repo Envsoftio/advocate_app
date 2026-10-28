@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 const backend = 'http://127.0.0.1:8768'
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 const backendRoot = resolve(import.meta.dirname, '../../backend')
-const python = process.env.COURTBUNDLE_TEST_PYTHON || [
+const python = process.env.MATTERDRAFT_TEST_PYTHON || [
   resolve(backendRoot, '.venv312/bin/python'), resolve(backendRoot, '.venv/bin/python'),
 ].find(existsSync) || 'python3'
 

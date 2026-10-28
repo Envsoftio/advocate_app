@@ -1,6 +1,6 @@
-# CourtBundle design Phase 00 — capability matrix
+# MatterDraft design Phase 00 — capability matrix
 
-27 October 2026. [Certain] Classifications come from source inspection and the [baseline checks](POC_ACCEPTANCE_TESTS.md#bg-design-phase-00-baseline--27-october-2026), not design appearance. Frame IDs are navigation references from the supplied frame index, not inspected MCP canvas contents. Detailed frame-only controls remain unknown until design access is available.
+27 October 2026. [Certain] Classifications come from source inspection and the [baseline checks](ACCEPTANCE_TESTS.md#bg-design-phase-00-baseline--27-october-2026), not design appearance. Frame IDs are navigation references from the supplied frame index, not inspected MCP canvas contents. Detailed frame-only controls remain unknown until design access is available.
 
 **W** = scoped working behavior with executed checks; can reuse for presentation changes. **P** = real implementation with a material design/acceptance gap. **M** = missing integration/behavior. **U** = unsupported by the current exposed engine contract. W does not mean all platforms or every design state passed. Paths below are relative to `frontend/src/` and `backend/app/` unless prefixed otherwise. Tests are under `frontend/e2e/` or `backend/tests/`.
 

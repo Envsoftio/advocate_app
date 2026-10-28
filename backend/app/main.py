@@ -1,10 +1,11 @@
-"""Local FastAPI service for the desktop POC. Always bind to loopback."""
+"""Local FastAPI service for the desktop application. Always bind to loopback."""
 from __future__ import annotations
 import asyncio
 import errno
 from contextlib import asynccontextmanager
 import json
 import os
+from .environment import setting
 from pathlib import Path
 import secrets
 import shutil
@@ -56,12 +57,12 @@ SUPPORTED = {'.pdf', '.png', '.jpg', '.jpeg'}
 
 def create_app(data_dir: str | Path | None = None, token: str | None = None,
                data_key: bytes | None = None, require_vault: bool | None = None) -> FastAPI:
-    token = token if token is not None else os.getenv('COURTBUNDLE_API_TOKEN')
+    token = token if token is not None else setting('API_TOKEN')
     if not token:
-        raise RuntimeError('COURTBUNDLE_API_TOKEN is required. Set a session secret or use backend/dev.sh.')
+        raise RuntimeError('MATTERDRAFT_API_TOKEN is required. Set a session secret or use backend/dev.sh.')
     profiles = load_profiles()
-    root = Path(data_dir or os.getenv('COURTBUNDLE_DATA_DIR') or Path.home() / '.courtbundle-poc')
-    protected_mode = (os.getenv('COURTBUNDLE_REQUIRE_VAULT') == '1') if require_vault is None else require_vault
+    root = Path(data_dir or setting('DATA_DIR') or Path.home() / '.courtbundle-poc')
+    protected_mode = (setting('REQUIRE_VAULT') == '1') if require_vault is None else require_vault
     vault = VaultStore(root) if protected_mode else None
     store = None if protected_mode and data_key is None else Store(root, data_key=data_key)
     try:
@@ -80,7 +81,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             if store is not None:
                 store.close()
 
-    app = FastAPI(title='CourtBundle Local API', version='0.1.0', docs_url=None,
+    app = FastAPI(title='MatterDraft Local API', version='0.1.0', docs_url=None,
                   redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.store = store
     app.state.jobs = jobs
@@ -131,8 +132,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     allowed_origins = ['http://localhost:1420', 'http://127.0.0.1:1420',
                        'http://localhost:5173', 'http://127.0.0.1:5173',
                        'tauri://localhost', 'http://tauri.localhost', 'https://tauri.localhost']
-    if os.environ.get('COURTBUNDLE_E2E_VITE_PORT'):
-        port = int(os.environ['COURTBUNDLE_E2E_VITE_PORT'])
+    if setting('E2E_VITE_PORT'):
+        port = int(setting('E2E_VITE_PORT'))
         allowed_origins.append(f'http://127.0.0.1:{port}')
     app.add_middleware(CORSMiddleware,
                        allow_origins=allowed_origins,
@@ -191,7 +192,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     @app.get('/health')
     def health(_: None = Depends(auth)):
         return {'status': 'locked' if store is None else 'ok', 'version': '0.1.0', 'ocr_engine': 'PyMuPDF+Tesseract',
-                'app': 'CourtBundle POC'}
+                'app': 'MatterDraft Studio'}
 
     @app.get('/vault/status')
     def vault_status(_: None = Depends(auth)):
@@ -531,7 +532,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                               acknowledge_signature_risk: bool = False, included: bool = False):
         suffix = Path(filename).suffix.lower()
         if suffix not in SUPPORTED:
-            raise HTTPException(status_code=415, detail='Only PDF, PNG and JPEG documents are supported in this POC')
+            raise HTTPException(status_code=415, detail='Only PDF, PNG and JPEG documents are supported in this application')
         doc_id = new_id()
         folder = store.matter_dir(matter_id)
         originals = folder / 'originals'
@@ -550,21 +551,21 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                         async for chunk in request.stream():
                             size += len(chunk)
                             if size > FILE_LIMIT_BYTES:
-                                raise HTTPException(status_code=413, detail='POC import limit is 80 MB per file')
+                                raise HTTPException(status_code=413, detail='Import limit is 80 MB per file')
                             output.write(chunk)
                 else:
                     with source.open('wb') as output:
                         async for chunk in request.stream():
                             size += len(chunk)
                             if size > FILE_LIMIT_BYTES:
-                                raise HTTPException(status_code=413, detail='POC import limit is 80 MB per file')
+                                raise HTTPException(status_code=413, detail='Import limit is 80 MB per file')
                             output.write(chunk)
             else:
                 chunks = []
                 while chunk := await file.read(1024 * 1024):
                     size += len(chunk)
                     if size > FILE_LIMIT_BYTES:
-                        raise HTTPException(status_code=413, detail='POC import limit is 80 MB per file')
+                        raise HTTPException(status_code=413, detail='Import limit is 80 MB per file')
                     chunks.append(chunk)
                 write_bytes(source, b''.join(chunks))
             protected_pdf = await asyncio.to_thread(check_pdf_password, source, password)

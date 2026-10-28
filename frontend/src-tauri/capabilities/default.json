@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimum capability surface for CourtBundle desktop POC",
+  "description": "Minimum capability surface for MatterDraft desktop application",
   "windows": ["main"],
   "permissions": [
     "core:default",

@@ -13,7 +13,7 @@ let bundle = ''
 test.beforeAll(() => {
   // Build separately so this regression cannot accidentally exercise Vite's
   // unbundled development worker, or replace a concurrent native build's dist.
-  bundle = mkdtempSync(resolve(tmpdir(), 'courtbundle-worker-build-'))
+  bundle = mkdtempSync(resolve(tmpdir(), 'matterdraft-worker-build-'))
   execFileSync(process.execPath, [resolve(frontend, 'node_modules/vite/bin/vite.js'),
     'build', '--outDir', bundle], {
     cwd: frontend,

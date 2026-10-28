@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto'
 const base = 'http://127.0.0.1:8768'
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 const backend = resolve(import.meta.dirname, '../../backend')
-const python = process.env.COURTBUNDLE_TEST_PYTHON || [resolve(backend, '.venv312/bin/python'), resolve(backend, '.venv/bin/python')].find(existsSync) || 'python3'
+const python = process.env.MATTERDRAFT_TEST_PYTHON || [resolve(backend, '.venv312/bin/python'), resolve(backend, '.venv/bin/python')].find(existsSync) || 'python3'
 async function openFixture(page: Page, request: APIRequestContext) {
   page.setDefaultTimeout(15_000)
   const matter = await (await request.post(`${base}/matters`, { headers, data: { name: '02A Synthetic Reader', court_profile: 'general-demo' } })).json()

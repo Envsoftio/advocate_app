@@ -33,7 +33,7 @@ The hierarchy is adapted to the existing Documents shell and separate generated-
 | `frontend/e2e/read-workspace.spec.ts` | Synthetic occurrence/bookmark navigation, information, state/focus/scroll preservation, draft guard, failure/stale destination regressions |
 | `frontend/e2e/documents-layout.spec.ts` | Extend existing 16-combination usable-paper/overflow checks to information, search and focused reading |
 | `frontend/e2e/journey.spec.ts`, `pdf-document-switch.spec.ts`, `pdf-reader.spec.ts`, `pdf-reader-finish.spec.ts`, `workspace-design.spec.ts` | Enter Edit explicitly where required by the new Read default; retain behavior assertions |
-| This handoff, `docs/POC_ACCEPTANCE_TESTS.md`, local kit Phase 02 `TASK.md` | Actual scope, results, limitations and split status |
+| This handoff, `docs/ACCEPTANCE_TESTS.md`, local kit Phase 02 `TASK.md` | Actual scope, results, limitations and split status |
 
 Existing `.gitignore`, `App.vue`, Phase 00/01 records, fonts/tokens and unrelated local changes are preserved. The design kit remains ignored under the user's existing policy. No commit or deployment.
 

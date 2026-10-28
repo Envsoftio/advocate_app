@@ -11,6 +11,7 @@ import ctypes
 import io
 import math
 import os
+from .environment import setting
 from pathlib import Path
 import re
 import statistics
@@ -33,7 +34,7 @@ def _pdfium():
 
 
 def trial_status() -> dict:
-    if os.getenv('COURTBUNDLE_ENABLE_PDFIUM_TRIAL', '1') == '0':
+    if setting('ENABLE_PDFIUM_TRIAL', '1') == '0':
         return {'available': False, 'engine': 'pdfium-object-edit', 'reason': 'Trial disabled locally'}
     try:
         _pdfium()

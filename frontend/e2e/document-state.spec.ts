@@ -5,7 +5,7 @@ import {resolve} from 'node:path'
 import {existsSync} from 'node:fs'
 const base='http://127.0.0.1:8768', headers={Authorization:'Bearer e2e-isolated-token'}
 const backendRoot=resolve(import.meta.dirname,'../../backend')
-const python=process.env.COURTBUNDLE_TEST_PYTHON || [resolve(backendRoot,'.venv312/bin/python'),resolve(backendRoot,'.venv/bin/python')].find(existsSync) || 'python3'
+const python=process.env.MATTERDRAFT_TEST_PYTHON || [resolve(backendRoot,'.venv312/bin/python'),resolve(backendRoot,'.venv/bin/python')].find(existsSync) || 'python3'
 async function fixture(page:Page,request:APIRequestContext,blank=false){
   page.setDefaultTimeout(15_000)
   const matter=await (await request.post(`${base}/matters`,{headers,data:{name:`02B synthetic ${Date.now()}`,court_profile:blank?'delhi-hc-illustrative':'general-demo'}})).json()

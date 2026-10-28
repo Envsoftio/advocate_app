@@ -49,7 +49,7 @@ class Store:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             self._lock_file.close()
-            raise RuntimeError('Matter data is already open in another CourtBundle engine') from exc
+            raise RuntimeError('Matter data is already open in another MatterDraft engine') from exc
         self.dbpath = self.root / 'court_bundle.sqlite3'
         if self._data_key is not None:
             from .file_io import register

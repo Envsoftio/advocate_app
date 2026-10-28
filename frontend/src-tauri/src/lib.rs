@@ -75,9 +75,11 @@ pub fn run() {
             app.manage(native_save::SaveState::default());
             #[cfg(debug_assertions)]
             {
-                let base_url = std::env::var("COURTBUNDLE_DEV_BACKEND_URL")
+                let base_url = std::env::var("MATTERDRAFT_DEV_BACKEND_URL")
+                    .or_else(|_| std::env::var("COURTBUNDLE_DEV_BACKEND_URL"))
                     .unwrap_or_else(|_| "http://127.0.0.1:8765".to_owned());
-                let token = std::env::var("COURTBUNDLE_API_TOKEN")
+                let token = std::env::var("MATTERDRAFT_API_TOKEN")
+                    .or_else(|_| std::env::var("COURTBUNDLE_API_TOKEN"))
                     .unwrap_or_else(|_| "development-token-change-me".to_owned());
 
                 app.manage(BackendState {
@@ -104,8 +106,8 @@ pub fn run() {
                 let command = app
                     .shell()
                     .sidecar("filing-api")?
-                    .env("COURTBUNDLE_API_TOKEN", &token)
-                    .env("COURTBUNDLE_REQUIRE_VAULT", "1")
+                    .env("MATTERDRAFT_API_TOKEN", &token)
+                    .env("MATTERDRAFT_REQUIRE_VAULT", "1")
                     .args([
                         "--port",
                         port_str.as_str(),
@@ -152,7 +154,7 @@ pub fn run() {
             native_save::save_page_output
         ])
         .build(tauri::generate_context!())
-        .expect("Failed to initialize CourtBundle")
+        .expect("Failed to initialize MatterDraft")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<BackendState>() {

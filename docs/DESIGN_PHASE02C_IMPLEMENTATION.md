@@ -30,7 +30,7 @@ The existing working reader, original/generated artifact dialog, responsive Docu
 - `frontend/src/lib/appearance.ts`, `frontend/src/styles.css`: reuse persisted interface scale for dialogs and scoped semantic reader/recovery styling.
 - `frontend/src/lib/api.test.ts`, `frontend/e2e/engine-reader.spec.ts`: transport/write-gate, draft/revision/recovery, uncached data, Preflight context, focus, read-only and layout regressions.
 - `frontend/e2e/journey.spec.ts`: update unavailable-engine status copy, explicitly open generated bookmarks and reconnect before retrying a failed Memo save. Preserve existing assertions and add retention of further Memo edits during disconnection.
-- This handoff, `docs/POC_ACCEPTANCE_TESTS.md`, and the ignored kit's Phase 02 task record.
+- This handoff, `docs/ACCEPTANCE_TESTS.md`, and the ignored kit's Phase 02 task record.
 
 Pre-existing `.gitignore`, backend/02B changes, fonts/tokens, design files and unrelated local changes are preserved. No commit or deployment.
 

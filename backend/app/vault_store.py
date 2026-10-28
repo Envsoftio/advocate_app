@@ -114,7 +114,7 @@ class VaultStore:
                     import fcntl
                     fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError as exc:
-                raise VaultError('Matter data is open in another CourtBundle engine') from exc
+                raise VaultError('Matter data is open in another MatterDraft engine') from exc
             try:
                 yield
             finally:

@@ -1,6 +1,7 @@
 """Executable entrypoint for uvicorn and PyInstaller sidecar."""
 import argparse
 import os
+from app.environment import setting
 from pathlib import Path
 import sys
 import threading
@@ -41,15 +42,15 @@ def stop_when_parent_exits(server, parent_pid: int) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='CourtBundle local processing service')
+    parser = argparse.ArgumentParser(description='MatterDraft local processing service')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--data-dir', type=str, default=None)
     parser.add_argument('--parent-pid', type=int, default=None)
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error('Port must be between 1024 and 65535')
-    if not os.getenv('COURTBUNDLE_API_TOKEN'):
-        print('COURTBUNDLE_API_TOKEN environment variable is required.', file=sys.stderr)
+    if not setting('API_TOKEN'):
+        print('MATTERDRAFT_API_TOKEN environment variable is required.', file=sys.stderr)
         sys.exit(2)
     if args.parent_pid is not None and args.parent_pid <= 0:
         parser.error('Parent PID must be positive')

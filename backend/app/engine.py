@@ -215,7 +215,7 @@ def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
                                     'into newly generated source-document pages.'), document_id=None))
     if private_count:
         issues.append(dict(severity='info', code='PRIVATE_REVIEW_ANNOTATIONS_OMITTED',
-                           message=(f'{private_count} CourtBundle private review mark(s) '
+                           message=(f'{private_count} MatterDraft private review mark(s) '
                                     'will be omitted from filing-preparation PDFs. Image overlays use a '
                                     'separate explicit flattened-content policy.'), document_id=None))
     if unresolved_images:
@@ -688,7 +688,7 @@ def volume_plan(docs: list[dict], max_pages: int, keep_groups: bool,
 
 
 def clean_title(text: str, limit=64) -> str:
-    """Base-14 fonts only support a limited character repertoire in this POC."""
+    """Base-14 fonts only support a limited character repertoire in this application."""
     value = ''.join(c if 32 <= ord(c) <= 126 else '?' for c in str(text or ''))
     return value[:limit - 3] + '...' if len(value) > limit else value
 
@@ -828,8 +828,8 @@ def render_part_extracts(combined_file: Path, rows: list[dict],
                 output.set_toc(toc)
                 set_output_page_labels(output, label_rules)
                 output.set_metadata({'title': f'Technical Part {part_number} extract',
-                                     'subject': 'DRAFT CourtBundle POC - not court certified',
-                                     'creator': 'CourtBundle POC'})
+                                     'subject': 'DRAFT MatterDraft Studio - not court certified',
+                                     'creator': 'MatterDraft Studio'})
                 save_pdf(output, staging / filename, garbage=4, deflate=True)
             validate_navigation(staging / filename,
                                 sum(row['total_pages'] for row in selected), toc, {})
@@ -897,7 +897,7 @@ def render_front_matter(output: pymupdf.Document, rows: list[dict], matter: dict
         centred(output_marks.get('cover_title') or 'DOCUMENT BUNDLE', 590, 665, 32, True)
         centred(f'Volume {volume_no} of {matter.get("_volume_total", volume_no)}', 690, 730, 20, True)
         centred(f"Physical pages 1–{rows[-1]['end_page'] if rows else index_count+1}", 738, 765, 16)
-        centred('DRAFT / POC — NOT COURT CERTIFIED', 779, 802, 8)
+        centred('DRAFT — NOT COURT CERTIFIED', 779, 802, 8)
     for i in (range(index_count) if index_page is None else [index_page - 1]):
         page = output.new_page(width=A4_W, height=A4_H)
         if output_marks.get('index_style') == 'review':
@@ -919,10 +919,10 @@ def render_front_matter(output: pymupdf.Document, rows: list[dict], matter: dict
                 page.insert_htmlbox(pymupdf.Rect(475,y-18,560,y+36), html_escape(printed_range(row)), css='* {font-family:sans-serif;font-size:14px;color:#2865BE;}')
                 page.draw_line((36,y+40),(A4_W-36,y+40),color=(.82,.86,.90),width=.6)
             page.insert_textbox(pymupdf.Rect(36,750,A4_W-36,782),f'Index {i+1} of {index_count}',fontsize=15,align=pymupdf.TEXT_ALIGN_CENTER,color=ink)
-            page.insert_text((36,796),'DRAFT / POC - NOT COURT CERTIFIED',fontsize=8,color=(.45,.48,.52))
+            page.insert_text((36,796),'DRAFT - NOT COURT CERTIFIED',fontsize=8,color=(.45,.48,.52))
             continue
         page.draw_rect(pymupdf.Rect(0, 0, A4_W, 10), color=(0.10, .25, .46), fill=(0.10, .25, .46))
-        page.insert_text((50, 50), 'COURTBUNDLE / INDEX', fontsize=10, fontname='hebo', color=(.12,.32,.58))
+        page.insert_text((50, 50), 'MATTERDRAFT / INDEX', fontsize=10, fontname='hebo', color=(.12,.32,.58))
         page.insert_text((50, 82), f'Volume {volume_no} - Document Index', fontsize=19, fontname='hebo', color=(.08,.16,.29))
         if any(ord(char) > 126 for char in matter['name']):
             page.insert_htmlbox(pymupdf.Rect(50, 94, 555, 135),
@@ -954,7 +954,7 @@ def render_front_matter(output: pymupdf.Document, rows: list[dict], matter: dict
                 line_y = ypos + (16 if row_step == 35 else 8)
                 page.draw_line((50, line_y), (545, line_y), color=(.92,.93,.95), width=.5)
         page.insert_text((50, 774), 'Index entries open their source pages. Verify legal completeness separately.', fontsize=8, color=(.45,.48,.52))
-        page.insert_text((50, 796), 'DRAFT / POC - NOT COURT CERTIFIED', fontsize=8, color=(.55,.32,.24))
+        page.insert_text((50, 796), 'DRAFT - NOT COURT CERTIFIED', fontsize=8, color=(.55,.32,.24))
 
 
 def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: int,
@@ -982,7 +982,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                 raise ProcessingError('Operation cancelled')
             if row['separator_page'] is not None:
                 separator = output.new_page(width=A4_W, height=A4_H)
-                separator.insert_text((50, 52), 'COURTBUNDLE / TECHNICAL SEPARATOR',
+                separator.insert_text((50, 52), 'MATTERDRAFT / TECHNICAL SEPARATOR',
                                       fontsize=10, fontname='hebo', color=(.12, .32, .58))
                 separator.insert_textbox(pymupdf.Rect(60, 170, 535, 275),
                                          clean_title(d['label'], 60), fontsize=28,
@@ -1066,8 +1066,8 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
             set_output_page_labels(output, pdf_label_rules(numbering_map['pages']))
         label_regions = [list(number_stamp_rect(page, output_marks)) for page in output]
         output.set_metadata({'title': f'{matter["name"]} - Volume {volume_no}',
-                             'subject': 'DRAFT CourtBundle POC - not court certified',
-                             'creator': 'CourtBundle POC'})
+                             'subject': 'DRAFT MatterDraft Studio - not court certified',
+                             'creator': 'MatterDraft Studio'})
         save_pdf(output, path, garbage=4, deflate=True)
 
     expected_links = {}
@@ -1265,8 +1265,8 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
             global_toc.extend(manual_toc(bookmarks, combined_destinations))
             combined.set_toc(global_toc)
             combined.set_metadata({'title': f'{matter["name"]} - Combined Filing Bundle',
-                                   'subject': 'DRAFT CourtBundle POC - not court certified',
-                                   'creator': 'CourtBundle POC'})
+                                   'subject': 'DRAFT MatterDraft Studio - not court certified',
+                                   'creator': 'MatterDraft Studio'})
             save_pdf(combined, combined_file, garbage=4, deflate=True)
 
         validate_navigation(combined_file, offset, global_toc, global_links)
@@ -1378,14 +1378,14 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'combined_pages': combined_pages, 'combined_bytes': file_bytes,
                   'checks': problems, 'volumes': [{'name':v['filename'],'items':len(v['rows'])} for v in volume_rows]}
         write_bytes(staging / 'validation-report.json', json.dumps(report, indent=2).encode('utf-8'))
-        readme = ('CourtBundle POC - DRAFT EXPORT\n\n'
+        readme = ('MatterDraft Studio - DRAFT EXPORT\n\n'
                   'This package is NOT court-certified and is NOT proof of filing.\n'
                   'The selected rules are illustrative technical checks only.\n'
                   'Original evidence and signed files must be reviewed independently.\n'
                   'Working-copy PDF annotation objects and link actions are omitted from volume and combined PDFs.\n'
                   'Flattened marks already in page content remain visible.\n'
                   'Resolved PDF-scope marks and image overlays are flattened into new source-document pages; staged redactions remove content in the exported PDFs. Private review notes are omitted.\n'
-                  'Generated index links, bookmarks and explicitly reviewed CourtBundle links are retained when their revision-anchored targets resolve.\n'
+                  'Generated index links, bookmarks and explicitly reviewed MatterDraft links are retained when their revision-anchored targets resolve.\n'
                   'Cross-volume reviewed links are available only in combined.pdf; configured output marks apply to source document pages, not index pages.\n'
                   'See validation-report.json for omissions, mark settings and detectable overlap warnings.\n'
                   'Every PDF page number in an index is the 1-based page position WITHIN that volume.\n'

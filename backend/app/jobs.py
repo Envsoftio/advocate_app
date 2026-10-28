@@ -5,7 +5,7 @@ from .storage import Store, new_id, utcnow
 
 
 class JobManager:
-    """Sequential worker avoids concurrent PyMuPDF processing in the POC.
+    """Sequential worker avoids concurrent PyMuPDF processing in MatterDraft.
     Durable states identify interrupted work after restart; retries begin new jobs.
     """
     def __init__(self, store: Store | None = None):

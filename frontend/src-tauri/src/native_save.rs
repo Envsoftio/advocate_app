@@ -78,7 +78,7 @@ fn check_working_destination(destination: &Path, app_data: &Path) -> Result<(), 
             .canonicalize()
             .is_ok_and(|path| path.starts_with(&internal))
     {
-        return Err("Choose a file outside CourtBundle's internal data folder".into());
+        return Err("Choose a file outside MatterDraft's internal data folder".into());
     }
     Ok(())
 }
@@ -91,7 +91,7 @@ fn temp_file(destination: &Path) -> Result<(PendingFile, std::fs::File), String>
         let mut random = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut random);
         let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
-        let path = directory.join(format!(".courtbundle-{suffix}.partial"));
+        let path = directory.join(format!(".matterdraft-{suffix}.partial"));
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(file) => return Ok((PendingFile(path), file)),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -287,7 +287,7 @@ pub(crate) async fn save_export(
             let mut dialog = app
                 .dialog()
                 .file()
-                .set_title("Save CourtBundle export")
+                .set_title("Save MatterDraft export")
                 .set_file_name(&filename);
             if let Some(directory) = saves
                 .last_directory
@@ -311,7 +311,7 @@ pub(crate) async fn save_export(
     }
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     if destination.starts_with(&app_data) {
-        return Err("Choose a location outside CourtBundle's internal data folder".into());
+        return Err("Choose a location outside MatterDraft's internal data folder".into());
     }
     transfer(
         &backend.connection,
@@ -354,7 +354,7 @@ pub(crate) async fn save_protected_export(
     let mut dialog = app
         .dialog()
         .file()
-        .set_title("Save password-protected CourtBundle PDF")
+        .set_title("Save password-protected MatterDraft PDF")
         .set_file_name(&output_name)
         .add_filter("PDF", &["pdf"]);
     if let Some(directory) = saves
@@ -373,7 +373,7 @@ pub(crate) async fn save_protected_export(
         .map_err(|e| format!("Unsupported save location: {e}"))?;
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     if destination.is_dir() || destination.starts_with(&app_data) {
-        return Err("Choose a file outside CourtBundle's internal data folder".into());
+        return Err("Choose a file outside MatterDraft's internal data folder".into());
     }
     transfer(
         &backend.connection,
@@ -400,9 +400,9 @@ pub(crate) async fn save_matter(
     let mut dialog = app
         .dialog()
         .file()
-        .set_title("Back up CourtBundle matter")
+        .set_title("Back up MatterDraft matter")
         .set_file_name("court-matter.cbmatter")
-        .add_filter("CourtBundle matter", &["cbmatter"]);
+        .add_filter("MatterDraft matter", &["cbmatter"]);
     if let Some(directory) = saves
         .last_directory
         .lock()
@@ -419,7 +419,7 @@ pub(crate) async fn save_matter(
         .map_err(|e| format!("Unsupported save location: {e}"))?;
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     if destination.is_dir() || destination.starts_with(&app_data) {
-        return Err("Choose a file outside CourtBundle's internal data folder".into());
+        return Err("Choose a file outside MatterDraft's internal data folder".into());
     }
     transfer(
         &backend.connection,
@@ -523,7 +523,7 @@ pub(crate) async fn save_page_output(
         .map_err(|e| format!("Unsupported save location: {e}"))?;
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     if destination.is_dir() || destination.starts_with(&app_data) {
-        return Err("Choose a file outside CourtBundle's internal data folder".into());
+        return Err("Choose a file outside MatterDraft's internal data folder".into());
     }
     let query = if operation == "extract" {
         "selection"
@@ -571,7 +571,7 @@ mod tests {
     #[test]
     fn working_save_rejects_internal_destination_and_directory_alias() {
         let directory =
-            std::env::temp_dir().join(format!("courtbundle-save-paths-{}", rand::random::<u64>()));
+            std::env::temp_dir().join(format!("matterdraft-save-paths-{}", rand::random::<u64>()));
         let internal = directory.join("app-data");
         let outside = directory.join("chosen");
         fs::create_dir_all(internal.join("originals")).unwrap();
@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn working_save_accepts_external_destination_before_app_data_exists() {
         let directory = std::env::temp_dir().join(format!(
-            "courtbundle-save-new-data-{}",
+            "matterdraft-save-new-data-{}",
             rand::random::<u64>()
         ));
         let internal = directory.join("missing/app-data");
@@ -611,7 +611,7 @@ mod tests {
         let id = "0123456789abcdef0123456789abcdef";
         let path = working_pdf_path(id, 7, false).unwrap();
         let directory = std::env::temp_dir().join(format!(
-            "courtbundle-working-save-{}",
+            "matterdraft-working-save-{}",
             rand::random::<u64>()
         ));
         fs::create_dir(&directory).unwrap();
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn transfer_replaces_only_after_complete_download() {
         let directory =
-            std::env::temp_dir().join(format!("courtbundle-save-test-{}", rand::random::<u64>()));
+            std::env::temp_dir().join(format!("matterdraft-save-test-{}", rand::random::<u64>()));
         fs::create_dir(&directory).unwrap();
         let destination = directory.join("combined.pdf");
         fs::write(&destination, b"previous export").unwrap();
@@ -739,7 +739,7 @@ mod tests {
             stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 14\r\nConnection: close\r\n\r\n%PDF-encrypted").unwrap();
         });
         let directory = std::env::temp_dir().join(format!(
-            "courtbundle-protected-test-{}",
+            "matterdraft-protected-test-{}",
             rand::random::<u64>()
         ));
         fs::create_dir(&directory).unwrap();

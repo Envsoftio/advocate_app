@@ -1,6 +1,6 @@
-# CourtBundle POC — Acceptance and Test Matrix
+# MatterDraft Studio — Acceptance and Test Matrix
 
-**Intended status:** technical prototype; synthetic documents only; not a compliance or legal-accuracy certification.
+**Verification scope:** MatterDraft Studio application development; checks use synthetic documents and do not certify compliance or legal accuracy. Production qualification is determined by the recorded release checks, not the product name.
 
 ## A. Automated tests already executed
 
@@ -74,7 +74,7 @@ Environment: macOS Apple Silicon arm64, isolated FastAPI on `127.0.0.1:8766`, Vi
 | Build and downloads | UI built two volumes and a 10-page combined PDF with a 6-page cap. Browser ZIP download matched the stored export SHA-256 `c0859233fd053172d964215b98d29d82a62b200a33e76da63e1c3423f8393ba8`. ZIP contained combined and volume PDFs, CSV index, JSON report and warning note. PDF links/bookmarks resolved to volume pages 2/5 and 2/4; combined links resolved to pages 2/5/8/10. Report said `NOT_LEGALLY_APPROVED`. **PASS in browser and artifact inspection** |
 | Error and retained export | Setting the cap to 2 produced a visible oversized-document failure without splitting a document. The prior successful export remained available; cap was restored to 6. **PASS** |
 | Automated checks | `backend/.venv312/bin/python -m pytest -q`: **9 passed**. `npm run build`: **PASS**. `npm run test`: **4 passed**. |
-| Apple Silicon native development | `tauri dev` compiled the Rust debug binary and started `target/debug/courtbundle-poc` against the isolated servers. Tauri reported version mismatches (`tauri` 2.9.3 versus JS API 2.12.3; opener 2.5.3 versus JS plugin 2.7.1). The native window was unavailable to the UI automation surface, so native create/import/preview/export/CSP checks are **UNVERIFIED**. |
+| Apple Silicon native development | `tauri dev` compiled the Rust debug binary and started the compiled application from `target/debug/` against the isolated servers. Tauri reported version mismatches (`tauri` 2.9.3 versus JS API 2.12.3; opener 2.5.3 versus JS plugin 2.7.1). The native window was unavailable to the UI automation surface, so native create/import/preview/export/CSP checks are **UNVERIFIED**. |
 | Other target devices and packaged lifecycle | Windows 10/11 x64, macOS 12+ Intel, clean installs, sidecar startup/shutdown and native downloads have **NO DEVICE EVIDENCE**. These remain NAT-01/NAT-02 blockers. Progress/cancellation and large-file behaviour also remain unverified. |
 
 The browser run found two preview defects and fixed them: rotation now updates the document timestamp used by the viewer, and the page counter tracks the loaded PDF reactively. The rotation API test asserts the timestamp changes and the first page rotates to 90°. NAT-01 remains open until native runtime and target-platform evidence are recorded.
@@ -85,7 +85,7 @@ Environment: macOS Apple Silicon arm64. This is a local build and synthetic side
 
 | Check | Evidence and result |
 | --- | --- |
-| Release compile and package | `npm run tauri:build -- --bundles app --no-sign` completed. The resulting unsigned `CourtBundle POC.app` is 57.64 MiB. The app executable and embedded `filing-api` are arm64 Mach-O binaries. **PASS for local Apple Silicon build only**. |
+| Release compile and package | `npm run tauri:build -- --bundles app --no-sign` completed. The resulting unsigned application bundle is 57.64 MiB. The app executable and embedded `filing-api` are arm64 Mach-O binaries. **PASS for local Apple Silicon build only**. |
 | Tauri integration blockers fixed | The release build initially failed because `set_process_group` is absent from the locked `tauri-plugin-shell` API. That unsupported call was removed; child shutdown still needs app lifecycle verification. JavaScript API/opener versions were pinned to the locked Rust minor versions (`2.9.0` and `2.5.3`), so the ordinary build no longer needs a mismatch override. |
 | Sidecar identity | The app's `Contents/MacOS/filing-api` SHA-256 matched `frontend/src-tauri/binaries/filing-api-aarch64-apple-darwin`: `74b64f492db4dc61cd601e38c9e06227b974268f00cd4f94207aedcd6caa0c97`. **PASS**. |
 | Frozen sidecar and OCR | The frozen arm64 sidecar started on an isolated loopback port with a temporary data directory and test token. Authenticated `/health` returned `ok`; unauthenticated health returned 401. Importing `samples/04_scanned_annexure.jpg` and starting OCR completed with one page checked and one page OCR applied. The test removed `tesseract` from `PATH` and cleared `TESSDATA_PREFIX` before launch. **PASS in this development environment**; an actual clean device may expose missing runtime libraries. |
@@ -102,7 +102,7 @@ Environment: macOS 26.6.2 arm64, unsigned local package, synthetic `samples/04_s
 | Shutdown defect and fix | Before the fix, quitting the app killed PyInstaller's bootstrap but left its worker serving HTTP 401 on the old loopback port. The exact orphan was stopped. The desktop now passes its PID to the launcher; the worker requests Uvicorn shutdown when that PID exits. After rebuild, quitting removed both PyInstaller processes and closed the port. **PASS on macOS arm64**; Windows behavior remains untested. |
 | Reopen and relocated copy | Relaunch restored the synthetic matter, imported document and `processed` OCR status. A byte-identical app copy under `/private/tmp` also launched, connected, reopened that matter and quit with no remaining sidecar or listener. **PASS on this machine**. This does not simulate a clean OS or a different macOS version. |
 | Frozen sidecar rebuild | PyInstaller now keeps its cache under `.build-sidecar/config`, avoiding a sandbox failure while cleaning a user-global cache. The rebuilt sidecar completed one-page synthetic OCR with `tesseract` absent from `PATH`, returned 401 without the bearer token, and left no process after its desktop parent exited. **PASS on this machine**. |
-| DMG | The unsigned `CourtBundle POC_0.1.0_aarch64.dmg` built with macOS disk-image tooling outside the workspace sandbox. `hdiutil verify` reported a valid checksum. Read-only mount contained the app and Applications link; embedded sidecar SHA-256 matched the final build input (`93e7f2bb90fb1c897e87c1d1529ec1b0dab24e1d88a8d2e3bb5b4bd6e0354120`) and was arm64 Mach-O. **PASS for local package structure**. |
+| DMG | The unsigned version `0.1.0` arm64 disk image built with macOS disk-image tooling outside the workspace sandbox. `hdiutil verify` reported a valid checksum. Read-only mount contained the app and Applications link; embedded sidecar SHA-256 matched the final build input (`93e7f2bb90fb1c897e87c1d1529ec1b0dab24e1d88a8d2e3bb5b4bd6e0354120`) and was arm64 Mach-O. **PASS for local package structure**. |
 | Automated checks | Backend `pytest`: **11 passed**. Frontend Vitest: **4 passed**. Vue production build and Rust release compile passed during packaging. |
 | Remaining release gate | On clean macOS 12+ Intel, macOS 12+ Apple Silicon, and Windows 10/11 x64 devices: install the native package without Python/Tesseract, test offline OCR, quit/restart, reinstall with data retained, and capture process/port evidence. Windows parent liveness uses a Win32 process handle and has not been device-tested. The unsigned DMG is not signed or notarized. See `docs/NAT02_DEVICE_VERIFICATION.md`. |
 
@@ -146,7 +146,7 @@ Synthetic API tests removed one original, changed another, and separately change
 
 ## M. FIX-04 annotation and link export policy — 13 October 2026
 
-The selected POC policy omits working-copy PDF annotation objects and source link actions from volume and combined PDFs. It preserves imported originals and recreates generated index links and bookmarks from the page map. Flattened marks already in page content remain visible. This is an output policy, not signature or legal verification.
+The selected output policy omits working-copy PDF annotation objects and source link actions from volume and combined PDFs. It preserves imported originals and recreates generated index links and bookmarks from the page map. Flattened marks already in page content remain visible. This is an output policy, not signature or legal verification.
 
 A synthetic two-page PDF contained one text annotation, one internal page link and one URI link. Explicit validation and the stored export report warned about one annotation and two links for that document. Inspection of both output PDFs found no annotations or source-page links; each index page had its generated link to output page 2 (1-based). The original bytes matched the import fixture. The ZIP README described the policy. `backend/.venv312/bin/python -m pytest -q`: **15 passed**; Vue production build and **4 Vitest tests** passed. Native UI inspection remains under NAT-01.
 
@@ -427,7 +427,7 @@ A reported `/pages/redact` 422 showed raw JSON in the interface, but its exact `
 
 ## AO. DAT-07 partial device verification — 17 October 2026
 
-Environment: development Mac, macOS 26.6.2 arm64, existing unsigned local `CourtBundle POC.app` and an existing synthetic matter. App executable SHA-256: `0470b6ecf7f78bd5e7faa0f92d60e99e9f0b62bd39959a3dc62ed05f0f09b800`; bundled `filing-api` SHA-256: `b4242424ff6a035bf784348041e2f904e7aa1218d2c50ddca0b0cd0bbb22dc6e`, matching `frontend/src-tauri/binaries/filing-api-aarch64-apple-darwin`. This was not a clean-device or minimum-macOS run.
+Environment: development Mac, macOS 26.6.2 arm64, existing unsigned local application bundle and an existing synthetic matter. App executable SHA-256: `0470b6ecf7f78bd5e7faa0f92d60e99e9f0b62bd39959a3dc62ed05f0f09b800`; bundled `filing-api` SHA-256: `b4242424ff6a035bf784348041e2f904e7aa1218d2c50ddca0b0cd0bbb22dc6e`, matching `frontend/src-tauri/binaries/filing-api-aarch64-apple-darwin`. This was not a clean-device or minimum-macOS run.
 
 | Check | Result |
 | --- | --- |
@@ -827,3 +827,43 @@ No remaining failed scoped acceptance check. Windows, Intel Mac, clean/minimum-v
 - Native combined PDF **40,648 bytes**, volume **40,642**, DOCX **1,388**, XLSX **1,976**, PPTX **30,999**, ZIP **101,192**. Native PDF review, bookmark to physical/printed page2 and Save cancel/retry/success passed. Saved PDF SHA-256 matches manifest; eight original/prior files unchanged. Page map/CSV 2–4, four physical pages and cleared metadata reconciled.
 
 Windows/Intel Mac/clean-device/minimum-macOS/production vault startup and native Office rendering/print remain unverified. Duplex document starts are unavailable; image reduction has no target-size guarantee. No legal/signature/OCR approval, cloud dependency, schema migration or new volume/index rule. **B03B is next; not started.**
+
+
+## BW. MatterDraft Studio product rename — 29 October 2026
+
+The full product name is **MatterDraft Studio**, with **MatterDraft** in compact navigation and messages. Updated browser/native window titles, vault and recovery messages, save dialogs, new PDF/index/export branding, backend health/API names, npm/Cargo packages and lockfiles, developer commands, and current documentation. The maintained handoff is now `MatterDraft_Project_Context_and_Handoff.md`; links were updated.
+
+Compatibility is deliberate: existing desktop identity/data paths, SQLite filename, encryption authenticated data and format markers, portable backup formats/extensions, HTTP headers, manifest keys and browser preference keys retain their established values. New `MATTERDRAFT_*` settings take precedence over legacy `COURTBUNDLE_*` values; an explicitly empty new token does not fall back to an old credential. The checkout folder, supplied design sources, original PDFs, previous generated artifacts and literal historical verification evidence were not renamed or rewritten. No schema/page-map rule change.
+
+Verification for this rename:
+
+- Backend: **308 passed**, six existing dependency warnings. New upgrade checks cover reopening existing matters, new-token precedence/rejection of the old token, explicitly empty token rejection, and legacy vault-required settings.
+- Frontend: production/type build and **44 unit tests passed**. Existing Vite bundle-size warning remains.
+- Focused synthetic Chrome run: **2 passed** (`json-design-workspace.spec.ts` and `desktop-foundation.spec.ts`), exercising reference geometry, both viewport sizes/themes and supported scales, document editing/navigation, storage, autosave, Office downloads and print-copy generation. The initial sandboxed server start timed out; rerunning with local server/browser access passed.
+- Visually inspected the renamed brand against the supplied 05A reference at 1440×900 and the compact dark screen at 1024×768. Evidence: [reference-size Documents](ui-evidence/matterdraft-rename/05A-documents-1440-light.png), [compact dark Documents](ui-evidence/matterdraft-rename/documents-1024-dark.png). Brand fits without changing the layout.
+- Fresh Apple Silicon sidecar and **69.80 MiB `MatterDraft Studio.app` release bundle built**. Bundle display/name/executable metadata verified, and the packaged sidecar hash matches the newly built input.
+
+- Packaged protected-sidecar smoke **passed**: authenticated MatterDraft identity, English/Hindi OCR, compression, bookmarked PDF export, original integrity, encrypted backup/restore and password rotation. Final startup: **5.32 seconds**. The first attempt timed out during startup; the next reached the engine but exposed an outdated smoke fixture that did not explicitly include its document in the bundle. The fixture now requests inclusion, reports startup diagnostics on failure and checks the product identity; the final complete run passed. Logs are retained under `docs/ui-evidence/matterdraft-rename/`.
+- `git diff --check` passed.
+
+This pass does not establish native WebView/save-dialog runtime, Windows/Intel Mac or clean-device acceptance. No installed app was replaced and no real matter data was used.
+
+
+## BX. MatterDraft Studio product terminology — 29 October 2026
+
+The product owner confirmed **MatterDraft Studio** (**MatterDraft**) as an application in active development. Current titles, sidebar/About copy, matter creation, API errors, generated draft footers, package descriptions and npm/Rust identifiers now use that terminology. Packages are `matterdraft-desktop` and `matterdraft`; the Rust library is `matterdraft_lib`. Generated PDFs still identify drafts and retain the court-certification disclaimer. No page-map rule, schema, imported source or prior export changed.
+
+The acceptance log is now `docs/ACCEPTANCE_TESTS.md`. README, root handoff, development instructions, backlog, implementation/device records and local phase-kit links use the new path; **17 Markdown links resolve**. Historical application artifacts are described neutrally without claiming they were rebuilt or renamed. Original artifacts, logs and screenshots retain their bytes. Existing native application identity, development data location and checkout directory stay unchanged to preserve local data and tooling. These compatibility values are not displayed as product branding.
+
+Verification:
+
+- Backend: **308 passed**, six dependency/deprecation warnings, 58.97s.
+- Frontend: production/type build and **44 unit tests passed**; existing bundle-size warning remains.
+- Focused Chrome: **2 passed** (`workspace-spacing.spec.ts`), 9.8s. About/rules/matter pages fit 1440, 620 and 390px widths; workspace and export controls also checked at 900px.
+- Inspected the About page at 1440×900 and 390×900: new copy wraps within the existing layout, the established 40px application bar and 64px rail remain intact, and narrow content scrolls without horizontal overflow. No new About-specific supplied reference was found; this is a wording change to the existing screen. [Desktop](ui-evidence/matterdraft-product/about-matterdraft-1440.png) · [Narrow](ui-evidence/matterdraft-product/about-matterdraft-390.png).
+- Fresh Apple Silicon sidecar and **69.80 MiB `MatterDraft Studio.app`** built. Bundle metadata identifies executable `matterdraft`; the packaged sidecar hash matches its new input.
+
+- Packaged protected-sidecar check **passed**: MatterDraft identity, English/Hindi OCR, compression, bookmarked PDF export, original integrity, encrypted backup/restore and password rotation.
+- `git diff --check` passed.
+
+Native WebView/save-dialog runtime, other platforms and clean-device qualification were not repeated for this wording change. Existing release and scoped legal-review gates remain open.

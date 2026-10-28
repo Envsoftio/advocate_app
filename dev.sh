@@ -35,12 +35,12 @@ trap cleanup EXIT INT TERM HUP
 
 (
   cd "$BACKEND_DIR"
-  COURTBUNDLE_API_TOKEN="$DEV_TOKEN" exec "$PYTHON" -m uvicorn app.main:create_app \
+  MATTERDRAFT_API_TOKEN="$DEV_TOKEN" exec "$PYTHON" -m uvicorn app.main:create_app \
     --factory --reload --host 127.0.0.1 --port "$DEV_PORT"
 ) &
 BACKEND_PID=$!
 
 cd "$FRONTEND_DIR"
-COURTBUNDLE_API_TOKEN="$DEV_TOKEN" \
-COURTBUNDLE_DEV_BACKEND_URL="http://127.0.0.1:$DEV_PORT" \
+MATTERDRAFT_API_TOKEN="$DEV_TOKEN" \
+MATTERDRAFT_DEV_BACKEND_URL="http://127.0.0.1:$DEV_PORT" \
 npm run tauri:dev:hot

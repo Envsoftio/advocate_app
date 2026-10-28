@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-const backend = `http://127.0.0.1:${process.env.COURTBUNDLE_E2E_BACKEND_PORT || 8768}`
+const backend = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 const source = resolve(import.meta.dirname, '../../samples/01_petition.pdf')
 

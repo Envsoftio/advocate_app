@@ -1,13 +1,13 @@
 [package]
-name = "courtbundle-poc"
+name = "matterdraft"
 version = "0.1.0"
-description = "Local-first legal filing bundle preparation POC"
-authors = ["POC Development Team"]
+description = "Local-first legal filing bundle preparation application"
+authors = ["MatterDraft Development Team"]
 edition = "2021"
 build = "build.rs"
 
 [lib]
-name = "courtbundle_poc_lib"
+name = "matterdraft_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

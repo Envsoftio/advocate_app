@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const samples = resolve(import.meta.dirname, '../../samples')
-const backend = `http://127.0.0.1:${process.env.COURTBUNDLE_E2E_BACKEND_PORT || 8768}`
+const backend = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`
 const headers = { Authorization: 'Bearer e2e-isolated-token' }
 
 test('court-neutral checklist and reviewed CSV index import persist', async ({page, request}) => {

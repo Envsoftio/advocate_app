@@ -2,11 +2,11 @@
 
 ## Independent annotation controls — 22 October 2026 follow-up
 
-The screenshot and Folio's current feature list show separate Annotate controls for Highlight, Comment, Draw, Box, Ellipse, Line and Arrow, plus visual check/cross/date stamps. CourtBundle groups viewer controls under Edit, Annotate, Stamps, Pages and Output. Added text, drawing, shapes, image/stamp and redaction marks now remain separate revision-anchored objects after addition: select, drag, resize or Delete/Backspace each one. Undo/Redo and portable matter restore retain them. Existing reviewed links use the same direct selection controls.
+The screenshot and Folio's current feature list show separate Annotate controls for Highlight, Comment, Draw, Box, Ellipse, Line and Arrow, plus visual check/cross/date stamps. MatterDraft groups viewer controls under Edit, Annotate, Stamps, Pages and Output. Added text, drawing, shapes, image/stamp and redaction marks now remain separate revision-anchored objects after addition: select, drag, resize or Delete/Backspace each one. Undo/Redo and portable matter restore retain them. Existing reviewed links use the same direct selection controls.
 
 The layer has an explicit output scope. Highlights and comments remain private; added text, drawing, shapes, visual stamps, images and redaction marks are flattened into Save copy and new filing bundles. Redaction marks remove content in those generated PDFs, while the raw working revision and imported originals still contain it; the UI says this at the point of use. Stamps do not claim form filling or verified signatures. There is no Whiteout control. Native Mac/Windows interaction and an actual signing workflow remain open. This follows Folio's interaction pattern without copying its runtime or PDF writer.
 
-Reviewed 22 October 2026 against Folio [v0.7.0 source at b366581f](https://github.com/doktorigi/folio/tree/b366581f27953a18b057a15d7c3fb028011e8eb6), its [live web demo](https://doktorigi.github.io/folio/), and CourtBundle's current source. This expands the existing [engine and UX review](PDF_EDITOR_ENGINE_AND_UX_FEASIBILITY.md). Existing-text editing is excluded from the comparison, as requested. The comparison below records the pre-implementation baseline; the authorized implementation follow-up is recorded below and in the acceptance log.
+Reviewed 22 October 2026 against Folio [v0.7.0 source at b366581f](https://github.com/doktorigi/folio/tree/b366581f27953a18b057a15d7c3fb028011e8eb6), its [live web demo](https://doktorigi.github.io/folio/), and MatterDraft's current source. This expands the existing [engine and UX review](PDF_EDITOR_ENGINE_AND_UX_FEASIBILITY.md). Existing-text editing is excluded from the comparison, as requested. The comparison below records the pre-implementation baseline; the authorized implementation follow-up is recorded below and in the acceptance log.
 
 **[Likely] Adopt Folio's document-first layout and navigation patterns within our existing editor. Keep Vue, PDF.js and the local Python revision/build pipeline.** Its visual simplicity is a useful target; its source does not establish production perfection. Continuous reading, precise search and consistent output review offer more value than another round of changes to Add text.
 
@@ -16,7 +16,7 @@ Reviewed 22 October 2026 against Folio [v0.7.0 source at b366581f](https://githu
 
 Implemented the coherent reader slice: shared working/output rendering, virtual page surfaces, continuous/single-page modes, explicit magnification, session positions, Back, occurrence search, source outline and safe native links. Added a document-scoped private comment list, keyboard tab navigation, atomic batch page organization and actual-page crop. Existing text-edit cards and backend engines are retained; no Folio source code or PDF writer was copied.
 
-The completion follow-up implements the remaining recommended reader/page-management features: protected-store reading-position persistence, actual insertion/replacement previews, a virtual full-screen thumbnail rail, shared keyboard help, exact-revision Save copy, named matter-wide Undo/Redo descriptions and authenticated range loading for working/generated PDFs above the former 25 MiB UI cap. The organizer mounts at most 24 thumbnails per grid; continuous reading mounts a viewport-sized window (including very small pages), with a 32-million-pixel aggregate displayed raster target. Rendering and old/new bitmap swaps temporarily add staging buffers. The full-screen rail renders only nearby rows and releases departed thumbnail bitmaps. These limits bound application-owned canvases, not every allocation in PDF.js or a native WebView. Native Mac navigation/restart/Save checks and synthetic performance measurements are now recorded in [acceptance section AX](POC_ACCEPTANCE_TESTS.md#ax-folio-completion-follow-up--22-october-2026). Existing PDF/native acceptance tickets remain open until their complete device criteria are met.
+The completion follow-up implements the remaining recommended reader/page-management features: protected-store reading-position persistence, actual insertion/replacement previews, a virtual full-screen thumbnail rail, shared keyboard help, exact-revision Save copy, named matter-wide Undo/Redo descriptions and authenticated range loading for working/generated PDFs above the former 25 MiB UI cap. The organizer mounts at most 24 thumbnails per grid; continuous reading mounts a viewport-sized window (including very small pages), with a 32-million-pixel aggregate displayed raster target. Rendering and old/new bitmap swaps temporarily add staging buffers. The full-screen rail renders only nearby rows and releases departed thumbnail bitmaps. These limits bound application-owned canvases, not every allocation in PDF.js or a native WebView. Native Mac navigation/restart/Save checks and synthetic performance measurements are now recorded in [acceptance section AX](ACCEPTANCE_TESTS.md#ax-folio-completion-follow-up--22-october-2026). Existing PDF/native acceptance tickets remain open until their complete device criteria are met.
 
 After feedback from a running dev build, the edit-tool presentation was clarified without adopting Folio's text editor: Add text has clearer placement and shortcut guidance, image placement names its destination in plain language, and Redact shows an explicit mark/review/apply sequence with a redraw action. Redaction checks the current working revision and uses the same signature-review challenge as text edits; a stale revision still returns 409 and asks the user to redraw rather than silently applying to another revision. A later editing follow-up made the PDFium capability an explicit **Edit whole paragraph** action on supported text, rather than a choice of engine names. Single-run replacement now checks the actual footprint of each line instead of treating a distant right-column object as a full-width blocker. Text drag supports both page axes and applies only to a clear destination; actual collisions remain rejected. The source dev server was observed serving the updated labels, and the running Python backend used Uvicorn reload mode. Synthetic verification before the later editing follow-up: 205 backend tests, 41 frontend unit tests, and focused Chrome journeys for Add text, paragraph editing, redaction (including the signature-status race), rotated redaction, and image/review annotations. The existing browser/dev session may need a window reload to display newly mounted tool panels; packaged native builds require a separate rebuild.
 
@@ -36,7 +36,7 @@ The live check used a separate Chrome tab and `samples/example_output/combined.p
 | Extraction | Observed the native browser range prompt, prefilled `1-10`. Requested `2-3`; download observation timed out and browser control subsequently disconnected. Output bytes and page order remain unverified. This is not evidence of a Folio extraction defect. |
 | Other functionality | Reviewed source for page operations, undo, comments/forms, printing, compression, persistence, shortcuts, rendering, tests and native wrapper. These are source findings, not successful live workflow tests. |
 
-No Folio test suite, local CourtBundle suite, native WebView comparison, large-file benchmark, or accessibility qualification was run for this research task. Earlier CourtBundle test results remain historical evidence in the [acceptance log](POC_ACCEPTANCE_TESTS.md) and [implementation backlog](IMPLEMENTATION_TASKS.md).
+No Folio test suite, local MatterDraft suite, native WebView comparison, large-file benchmark, or accessibility qualification was run for this research task. Earlier MatterDraft test results remain historical evidence in the [acceptance log](ACCEPTANCE_TESTS.md) and [implementation backlog](IMPLEMENTATION_TASKS.md).
 
 ## What creates Folio's visual polish
 
@@ -44,7 +44,7 @@ No Folio test suite, local CourtBundle suite, native WebView comparison, large-f
 
 **[Likely] The transferable lesson is placement and restraint.** Keep common actions in stable positions, expose only relevant properties, use one visual language for active tools and selection, and reserve most of the window for paper. Folio itself still shows font/color/stroke controls on its Pages tab; we can make that row more contextual.
 
-Recommended CourtBundle arrangement:
+Recommended MatterDraft arrangement:
 
 | Region | Contents and behavior |
 | --- | --- |
@@ -59,9 +59,9 @@ This is a proposed refinement of the existing workspace, not a second editor or 
 
 ## Detailed capability comparison
 
-Current CourtBundle behavior in this table is source-confirmed. Adoption priorities are engineering recommendations.
+Current MatterDraft behavior in this table is source-confirmed. Adoption priorities are engineering recommendations.
 
-| Capability | Folio | CourtBundle today | Recommended action |
+| Capability | Folio | MatterDraft today | Recommended action |
 | --- | --- | --- | --- |
 | Continuous reading | A scrollable stack of pages with near-viewport rendering. | One page canvas; previous/next and direct page navigation. | **Highest priority:** add continuous reading while retaining single-page mode. Keep editing attached to a clearly focused page. |
 | Zoom | Multiplicative zoom, 30–500% bounds, Fit width; current page restored after rerender. | Six levels expressed as a multiplier of a changing fit-width calculation. `125%` does not mean a stable document scale across pane sizes. | Separate Fit width, Fit page and numeric magnification; preserve the visible location during zoom/resize. Define Actual size in CSS/PDF units, without promising a physically calibrated ruler. |
@@ -81,7 +81,7 @@ Current CourtBundle behavior in this table is source-confirmed. Adoption priorit
 
 Folio implementation sources: [reader and thumbnails](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L90), [zoom](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L161), [page/history operations](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L192), [search](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L854), [comments](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L940), [print](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L405), [compression](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/compress.js#L26).
 
-CourtBundle source locations:
+MatterDraft source locations:
 
 - [PdfViewer.vue](../frontend/src/components/PdfViewer.vue): shortcuts at line 239; search at 275; thumbnails at 351; text/rendering at 430; document switching at 501; toolbar/reader at 1320.
 - [PageTools.vue](../frontend/src/components/PageTools.vue): task definitions at line 11; commit flow at 88; outcome summaries and validation at 157; crop diagram at 234.
@@ -91,19 +91,19 @@ CourtBundle source locations:
 
 ## What should not be copied
 
-**[Certain] Folio's rendering is lazy, but its page list is not virtualized.** It creates a DOM container and thumbnail for every page, rebuilds the list on zoom, and finds the current page through a linear geometry scan. Its refresh path creates another PDF.js document without destroying the previous one; painting lacks the cancellation/generation guards already present in CourtBundle. The source shows these mechanisms; it does not establish a measured memory leak or performance failure. See [refresh/render](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L80).
+**[Certain] Folio's rendering is lazy, but its page list is not virtualized.** It creates a DOM container and thumbnail for every page, rebuilds the list on zoom, and finds the current page through a linear geometry scan. Its refresh path creates another PDF.js document without destroying the previous one; painting lacks the cancellation/generation guards already present in MatterDraft. The source shows these mechanisms; it does not establish a measured memory leak or performance failure. See [refresh/render](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L80).
 
 **[Likely] Three source patterns deserve regression tests before any adaptation:** search hits appear to survive page mutations or opening another file; switching ribbons hides controls without clearing the active tool; a file drop on a thumbnail can also enter the page-reorder handler. These are unconfirmed runtime risks, not reproduced defects. See [search navigation](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L884), [ribbon switching](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L797), and [thumbnail drop](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src/main.js#L147).
 
-**[Certain] The audited repository has 15 Node PDF-helper tests, without browser/native UI test files in the inspected tree.** Its source includes a Windows release workflow, not evidence of CourtBundle's macOS/Windows acceptance matrix. Its Tauri shell does not supply our native save/sidecar/storage workflow. See [tests](https://github.com/doktorigi/folio/tree/b366581f27953a18b057a15d7c3fb028011e8eb6/test) and [native entry point](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src-tauri/src/main.rs).
+**[Certain] The audited repository has 15 Node PDF-helper tests, without browser/native UI test files in the inspected tree.** Its source includes a Windows release workflow, not evidence of MatterDraft's macOS/Windows acceptance matrix. Its Tauri shell does not supply our native save/sidecar/storage workflow. See [tests](https://github.com/doktorigi/folio/tree/b366581f27953a18b057a15d7c3fb028011e8eb6/test) and [native entry point](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/src-tauri/src/main.rs).
 
-Do not copy Folio's in-memory page-index authority, PDF writer, raster printing, fixed lossy compression, or signing assumptions into the viewer-polish work. Its editing tools are outside this review. Core processing remains offline; imported originals and CourtBundle's deterministic page map remain authoritative.
+Do not copy Folio's in-memory page-index authority, PDF writer, raster printing, fixed lossy compression, or signing assumptions into the viewer-polish work. Its editing tools are outside this review. Core processing remains offline; imported originals and MatterDraft's deterministic page map remain authoritative.
 
 The [audited LICENSE](https://github.com/doktorigi/folio/blob/b366581f27953a18b057a15d7c3fb028011e8eb6/LICENSE) is MIT and requires retention of its notice for copied substantial code. Record exact files and dependency notices if code is reused. Reimplementing the interaction patterns within Vue avoids importing the whole vanilla-JavaScript application.
 
 ## Implementation sequence
 
-This was the proposed sequence. The implementation follow-up above identifies delivered scope; the acceptance log identifies tested scope. The complete acceptance gates below are not all closed. They refine the reader/workspace direction already in the [project handoff](../CourtBundle_Project_Context_and_Handoff.md).
+This was the proposed sequence. The implementation follow-up above identifies delivered scope; the acceptance log identifies tested scope. The complete acceptance gates below are not all closed. They refine the reader/workspace direction already in the [project handoff](../MatterDraft_Project_Context_and_Handoff.md).
 
 | Order | Concrete scope | Acceptance gate |
 | --- | --- | --- |

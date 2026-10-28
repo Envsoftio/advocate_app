@@ -3,7 +3,7 @@ import {openWorkspaceNavigation} from './navigation'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
 import {createHash} from 'node:crypto'
-const base=`http://127.0.0.1:${process.env.COURTBUNDLE_E2E_BACKEND_PORT||8768}`
+const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT||8768}`
 const headers={Authorization:'Bearer e2e-isolated-token'}
 const hash=(b:Buffer)=>createHash('sha256').update(b).digest('hex')
 async function fixture(request:any){

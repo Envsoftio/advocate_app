@@ -1,6 +1,6 @@
 # DAT-07 target-device security verification
 
-DAT-07 remains open until the checks below pass on the supported target matrix. Use only synthetic files in `samples/` and a disposable app data directory or test account. Record each result in `POC_ACCEPTANCE_TESTS.md`; a build, browser test, or frozen-sidecar API check does not replace the packaged native UI run. PDF-09 engineering was subsequently authorized before DAT-07 acceptance; neither ticket may be marked accepted from this engineering evidence alone.
+DAT-07 remains open until the checks below pass on the supported target matrix. Use only synthetic files in `samples/` and a disposable app data directory or test account. Record each result in `ACCEPTANCE_TESTS.md`; a build, browser test, or frozen-sidecar API check does not replace the packaged native UI run. PDF-09 engineering was subsequently authorized before DAT-07 acceptance; neither ticket may be marked accepted from this engineering evidence alone.
 
 ## Target matrix and evidence
 
@@ -32,4 +32,4 @@ For each run record: date, device identifier, OS/build, CPU architecture, app an
 
 ## Acceptance decision
 
-Mark each row pass, fail or blocked per device, link the evidence, and resolve every failure before checking off DAT-07 in `IMPLEMENTATION_TASKS.md`. The Apple Silicon development-host checks in sections AO–AQ of `POC_ACCEPTANCE_TESTS.md` are partial evidence only. Keep PDF-09 acceptance open until DAT-07 and its own native password/save checks pass.
+Mark each row pass, fail or blocked per device, link the evidence, and resolve every failure before checking off DAT-07 in `IMPLEMENTATION_TASKS.md`. The Apple Silicon development-host checks in sections AO–AQ of `ACCEPTANCE_TESTS.md` are partial evidence only. Keep PDF-09 acceptance open until DAT-07 and its own native password/save checks pass.

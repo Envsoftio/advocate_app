@@ -1441,7 +1441,7 @@ async function init() {
     if (!connected)
       throw new Error(
         inTauri()
-          ? "Local engine did not start. Quit and reopen CourtBundle. If this continues, check the packaged sidecar and local port."
+          ? "Local engine did not start. Quit and reopen MatterDraft. If this continues, check the packaged sidecar and local port."
           : "Local engine did not start. Run backend/dev.sh and retry.",
       );
     const vault = await api<{
@@ -1552,7 +1552,7 @@ async function checkHealth() {
       apiStatus.value = "offline";
       notify(
         inTauri()
-          ? "Local engine stopped. Quit and reopen CourtBundle to start a new session."
+          ? "Local engine stopped. Quit and reopen MatterDraft to start a new session."
           : "Local engine stopped. Restart backend/dev.sh and retry.",
         "error",
       );
@@ -2617,7 +2617,7 @@ watch(sidebarCollapsed, (collapsed) => {
             vaultState === "setup"
               ? "Protect local matters"
               : vaultState === "locked"
-                ? "Unlock CourtBundle"
+                ? "Unlock MatterDraft"
                 : vaultState === "show_recovery"
                   ? "Save your recovery key"
                   : vaultState === "change_password"
@@ -2627,7 +2627,7 @@ watch(sidebarCollapsed, (collapsed) => {
         </h1>
       </div>
       <p v-if="vaultState === 'checking'">
-        Opening the encrypted local workspace. CourtBundle stays on this
+        Opening the encrypted local workspace. MatterDraft stays on this
         computer and does not upload matter files.
       </p>
       <p v-if="vaultState === 'setup'">
@@ -2744,7 +2744,7 @@ watch(sidebarCollapsed, (collapsed) => {
       >Skip to main content</a
     >
     <header class="application-bar">
-      <button class="application-brand" aria-label="Workspace navigation" :aria-expanded="workspaceMenuOpen" @click="workspaceMenuOpen=!workspaceMenuOpen"><span><FileStack :size="14"/></span><strong>CourtBundle</strong></button>
+      <button class="application-brand" aria-label="Workspace navigation" :aria-expanded="workspaceMenuOpen" @click="workspaceMenuOpen=!workspaceMenuOpen"><span><FileStack :size="14"/></span><strong>MatterDraft</strong></button>
       <button class="application-matter" aria-label="Open workspaces" :aria-expanded="tabsMenuOpen" @click="tabsMenuOpen=!tabsMenuOpen">{{currentMatter?.name || 'Your matters'}}<ChevronDown :size="13"/></button>
       <span class="application-local"><ShieldCheck :size="16"/> Local workspace</span>
       <button class="icon-btn small" aria-label="Workspace settings" title="Workspace settings" @click="workspaceMenuOpen=!workspaceMenuOpen"><Settings2 :size="16"/></button>
@@ -2776,9 +2776,9 @@ watch(sidebarCollapsed, (collapsed) => {
         <div class="brand-mark"><Layers3 :size="22" :stroke-width="2.3" /></div>
         <div class="brand-copy">
           <div class="brand-name">
-            CourtBundle<span class="brand-plus">.</span>
+            MatterDraft<span class="brand-plus">.</span>
           </div>
-          <div class="brand-sub">LEGAL WORKSPACE / POC</div>
+          <div class="brand-sub">LEGAL WORKSPACE</div>
         </div>
         <button class="sidebar-toggle" aria-label="Close workspace navigation" title="Close workspace navigation" @click="workspaceMenuOpen=false">
           <X :size="19" />
@@ -2807,12 +2807,12 @@ watch(sidebarCollapsed, (collapsed) => {
         </button>
         <button
           class="side-link"
-          aria-label="About POC"
-          title="About POC"
+          aria-label="About MatterDraft"
+          title="About MatterDraft"
           :class="{ active: activeView === 'about' }"
           @click="showView('about')"
         >
-          <CircleHelp :size="18" /><span class="nav-label">About POC</span>
+          <CircleHelp :size="18" /><span class="nav-label">About MatterDraft</span>
         </button>
       </nav>
       <input
@@ -2972,7 +2972,7 @@ watch(sidebarCollapsed, (collapsed) => {
           activeView === "rules"
             ? "Court rules"
             : activeView === "about"
-              ? "About POC"
+              ? "About MatterDraft"
               : "Matters"
         }}</span>
         <div
@@ -3149,7 +3149,7 @@ watch(sidebarCollapsed, (collapsed) => {
           <div class="notice amber">
             <ShieldAlert :size="19" /> These rules are only a selected technical
             subset. Case-type documents, notarisation, signatures, fees,
-            limitation and court acceptance are outside the POC's validation
+            limitation and court acceptance are outside MatterDraft's validation
             scope.
           </div>
         </main>
@@ -3160,11 +3160,11 @@ watch(sidebarCollapsed, (collapsed) => {
           tabindex="-1"
           class="page-content about-page"
         >
-          <div class="page-eyebrow">PRODUCT DEMONSTRATION</div>
+          <div class="page-eyebrow">ABOUT MATTERDRAFT STUDIO</div>
           <h1>Built for structured legal filing preparation.</h1>
           <p class="page-description">
-            A local-first proof of concept connecting Tauri, Vue and Python to
-            convert source documents into indexed legal bundles.
+            A local-first desktop application for preparing source documents,
+            reviewing working copies and building indexed legal bundles.
           </p>
           <div class="feature-strip">
             <div>

@@ -54,7 +54,7 @@ At compact widths the source becomes a keyboard-accessible drawer, with Escape/f
 | Scoped Playwright: `npm run test:e2e -- metadata-suggestions.spec.ts journey.spec.ts --grep 'B02C|document table preserves|label proposal preview' --output=/private/tmp/courtbundle-b02c-sixth` (isolated backend 8779) | **5 passed** at that checkpoint (three B02C and two table regression cases). Two additional B02C regression cases were then added and passed in the final full run below. |
 | `COURTBUNDLE_E2E_VITE_PORT=1441 npm run test:e2e -- --output=/private/tmp/courtbundle-b02c-final` | **107 passed, 1 skipped**, 6.5 minutes. All five final B02C cases passed. Skip is the opt-in protected-vault scenario. |
 | `backend/.venv312/bin/python backend/scripts/build_sidecar.py` | Final matching **aarch64-apple-darwin** sidecar built successfully. |
-| `npm run tauri:build -- --bundles app` | Final Apple Silicon `CourtBundle POC.app` built, **69.79 MiB**. |
+| `npm run tauri:build -- --bundles app` | Final Apple Silicon application bundle built, **69.79 MiB**. |
 | `npm run tauri:build -- --debug --bundles app --config /private/tmp/courtbundle-b02c-native-config.json` | Final isolated `CourtBundle B02C QA.app` built, **36.73 MiB**. |
 | `git diff --check` | Passed. |
 

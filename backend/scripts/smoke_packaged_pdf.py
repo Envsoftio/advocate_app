@@ -21,21 +21,21 @@ import pymupdf
 def main():
     executable = str(Path(sys.argv[1]).resolve())
     protected = '--protected' in sys.argv[2:]
-    with tempfile.TemporaryDirectory(prefix='courtbundle-packaged-qa-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='matterdraft-packaged-qa-') as temporary:
         root = Path(temporary)
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             port = listener.getsockname()[1]
-        environment = dict(os.environ, COURTBUNDLE_API_TOKEN=secrets.token_hex(24), PATH='/usr/bin:/bin')
+        environment = dict(os.environ, MATTERDRAFT_API_TOKEN=secrets.token_hex(24), PATH='/usr/bin:/bin')
         if protected:
-            environment['COURTBUNDLE_REQUIRE_VAULT'] = '1'
+            environment['MATTERDRAFT_REQUIRE_VAULT'] = '1'
         environment.pop('TESSDATA_PREFIX', None)
         with (root / 'engine.log').open('wb') as log:
             process = subprocess.Popen([executable, '--port', str(port), '--data-dir', str(root / 'data')],
                                        env=environment, stdout=log, stderr=log)
             try:
                 with httpx.Client(base_url=f'http://127.0.0.1:{port}', timeout=60,
-                                  headers={'Authorization': 'Bearer ' + environment['COURTBUNDLE_API_TOKEN']},
+                                  headers={'Authorization': 'Bearer ' + environment['MATTERDRAFT_API_TOKEN']},
                                   trust_env=False) as client:
                     start = time.monotonic()
                     while True:
@@ -44,9 +44,12 @@ def main():
                             break
                         except httpx.HTTPError:
                             if process.poll() is not None or time.monotonic() - start > 60:
-                                raise RuntimeError('Packaged engine failed to become ready; inspect local build')
+                                diagnostic = (root / 'engine.log').read_text(errors='replace')[-8000:]
+                                raise RuntimeError(f'Packaged engine failed to become ready '
+                                                   f'(exit={process.poll()}): {diagnostic}')
                             time.sleep(.2)
                     startup = time.monotonic() - start
+                    assert client.get('/health').json()['app'] == 'MatterDraft Studio'
                     if protected:
                         assert client.get('/health').json()['status'] == 'locked'
                         assert client.get('/matters').status_code == 423
@@ -66,9 +69,9 @@ def main():
                         page.insert_text((60, 60), 'Native header')
                         page.insert_image(pymupdf.Rect(40, 150, 540, 290), pixmap=pix)
                         original = pdf.tobytes()
-                    response = (client.post(base + '/documents/raw', content=original,
+                    response = (client.post(base + '/documents/raw?included=true', content=original,
                         headers={'Content-Type': 'application/octet-stream', 'X-CourtBundle-Filename': 'mixed.pdf'})
-                        if protected else client.post(base + '/documents',
+                        if protected else client.post(base + '/documents?included=true',
                             files=[('files', ('mixed.pdf', original, 'application/pdf'))]))
                     response.raise_for_status()
                     doc = response.json()[0]

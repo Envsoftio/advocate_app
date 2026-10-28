@@ -28,7 +28,7 @@ The PNG hierarchy is adapted to real existing capabilities. Retained thumbnails,
 | `frontend/e2e/journey.spec.ts` | Replace obsolete always-three-column expectation with compact visibility/non-overlap/reader-size checks; retain the search-style check before the list is hidden |
 | `frontend/e2e/documents-layout.spec.ts` | Real import, visible/uncovered PDF geometry, overflow, header action reachability, keyboard Details open/close and page navigation across 16 viewport/theme/scale combinations |
 | `docs/evidence/phase01b-20261027/` | Reproducible synthetic capture script, before/after PNGs, metrics and actual logs |
-| This handoff; `docs/POC_ACCEPTANCE_TESTS.md`; kit Phase 01 `TASK.md` | Scope, verification and status |
+| This handoff; `docs/ACCEPTANCE_TESTS.md`; kit Phase 01 `TASK.md` | Scope, verification and status |
 
 Existing `.gitignore`, Phase 00/01A application changes, tests, tokens, fonts and evidence are preserved. Workspace CSS formatting changed during the session outside this task's editing commands and was retained; a final production rebuild produced byte-identical CSS to the previously verified build (`091453ff9db5c24a3806123357af3b10b1124c234a7077a767055769aa792515`). The local kit remains ignored under the existing ignore policy. No commit or deployment.
 

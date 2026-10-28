@@ -24,7 +24,7 @@
 | `frontend/src/assets/fonts/InterVariable.woff2`, `README.md` | Local variable UI font and provenance |
 | `frontend/public/licenses/Inter-OFL.txt` | Full font license shipped in production assets |
 | `frontend/e2e/journey.spec.ts` | Update obsolete Manrope expectation; replace affected old-palette assertions with contrast/hover checks, polling through the existing theme transition |
-| This handoff; `docs/POC_ACCEPTANCE_TESTS.md`; `docs/evidence/phase01a-20261027/` | Scope, execution results, reproducible capture script, metrics, logs and PNGs |
+| This handoff; `docs/ACCEPTANCE_TESTS.md`; `docs/evidence/phase01a-20261027/` | Scope, execution results, reproducible capture script, metrics, logs and PNGs |
 | `CourtBundle_Codex_Phases/phases/01_visual_foundation/TASK.md` | Local kit status: only 01A complete; overall Phase 01 in progress |
 
 Unrelated pre-existing `.gitignore` changes, Phase 00 documents/evidence and untracked master `.pen` were preserved. The kit is ignored by the existing local `.gitignore`; this tracked-location handoff records its status without altering ignore policy. No commit, deployment or native package rebuild was performed.

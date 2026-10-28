@@ -70,7 +70,7 @@ Synthetic matter `24851374289a40889e88b2de23c8cb57`, generated build `065c13fbaf
 
 Native generated review rendered actual synthetic content and followed the petition bookmark to physical/printed page 2. The four-page PDF comprises one generated index and three source pages; CSV source range and combined offsets are 2–4. Metadata is cleared. Native Save was cancelled, then retried successfully; the saved PDF hash is `9ce3c9d561c2916c0b83722da1583e1d8479290dc2cd7ec330e907d29597a9ae`, exactly matching the artifact. Eight original/prior files remained hash-identical. Both app and packaged sidecar were restarted; saved choices and generated artifacts were then verified in the final rebuilt native app.
 
-No remaining failed scoped acceptance check. Final browser log: [`ui-evidence/b03a/courtbundle-b03a-browser-accepted.log`](ui-evidence/b03a/courtbundle-b03a-browser-accepted.log).
+No remaining failed scoped acceptance check. Final browser log: [`ui-evidence/b03a/courtbundle-b03a-browser-accepted.log`](ui-evidence/b03a/matterdraft-b03a-browser-accepted.log).
 
 ## Limits and next task
 

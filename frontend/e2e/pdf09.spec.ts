@@ -7,10 +7,10 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 
 test('protected PDF import handles wrong password and cancellation, then exports an encrypted PDF', async ({ page }) => {
-  const folder = mkdtempSync(resolve(tmpdir(), 'courtbundle-pdf09-'))
+  const folder = mkdtempSync(resolve(tmpdir(), 'matterdraft-pdf09-'))
   const locked = resolve(folder, 'synthetic-protected.pdf')
   const root = resolve(import.meta.dirname, '../../backend')
-  const python = process.env.COURTBUNDLE_TEST_PYTHON || [
+  const python = process.env.MATTERDRAFT_TEST_PYTHON || [
     resolve(root, '.venv312/bin/python'), resolve(root, '.venv/bin/python'),
   ].find(existsSync) || 'python3'
   try {

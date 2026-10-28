@@ -33,7 +33,7 @@ HEADERS = {'Authorization': 'Bearer ' + TOKEN}
 def main():
     from generate_demo_docs import main as generate
     generate()
-    with tempfile.TemporaryDirectory(prefix='courtbundle-sample-') as temp:
+    with tempfile.TemporaryDirectory(prefix='matterdraft-sample-') as temp:
         with TestClient(create_app(data_dir=temp, token=TOKEN)) as client:
             matter = client.post('/matters', headers=HEADERS, json={
                 'name':'Fictional Filing - Demonstration Only',

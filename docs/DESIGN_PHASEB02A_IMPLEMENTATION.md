@@ -50,7 +50,7 @@ Runtime adaptations are explicit: local preset names/counts and real matter tota
 | Scoped B02A browser verification | Both new B02A cases passed; final focused run with two affected existing regressions: **4 passed**. |
 | `COURTBUNDLE_E2E_VITE_PORT=1436 npm run test:e2e -- --output=/private/tmp/courtbundle-b02a-final` | **97 passed, 1 opt-in vault skipped**, 6.1m. No application source changes after this run. |
 | `backend/.venv312/bin/python backend/scripts/build_sidecar.py` | Matching Apple Silicon PyInstaller sidecar built. |
-| `cd frontend && npm run tauri:build -- --bundles app` | **69.74 MiB** release app built at `frontend/src-tauri/target/release/bundle/macos/CourtBundle POC.app`. |
+| `cd frontend && npm run tauri:build -- --bundles app` | **69.74 MiB** release app built under `frontend/src-tauri/target/release/bundle/macos/`. |
 | Isolated debug Tauri QA app | Built using a separate application ID and local synthetic backend, then exercised through native UI. |
 | `git diff --check` | Passed; pre-existing staged work preserved. No commit/reset/deployment. |
 

@@ -25,7 +25,7 @@ def main():
                     'python': platform.python_version(), 'pymupdf': pymupdf.VersionBind,
                     'input_pages': 1000, 'input_documents': 100,
                     'fixture': '100 native-text documents, 10 A4 pages each; no scanned pages'}
-    with tempfile.TemporaryDirectory(prefix='courtbundle-benchmark-') as root:
+    with tempfile.TemporaryDirectory(prefix='matterdraft-benchmark-') as root:
         with TestClient(create_app(root, 'synthetic-benchmark')) as client:
             response = client.post('/matters', headers=headers, json={
                 'name': 'Synthetic 1000-page benchmark', 'court_profile': 'general-demo',
