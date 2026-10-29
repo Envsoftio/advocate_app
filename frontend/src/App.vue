@@ -169,6 +169,7 @@ const membershipCollapsed = ref(false);
 const membershipPanel = ref<InstanceType<typeof BundleMembership>|null>(null);
 let membershipInvoker: HTMLElement|null = null;
 async function openMembership() {
+  if(buildWorkspace.value?.openSupplementMembership())return;
   if (!(await guardArtifactTransition('Bundle membership'))) return;
   membershipInvoker = document.activeElement as HTMLElement;
   membershipOpen.value = true;
@@ -192,6 +193,8 @@ async function openMembershipDocument(id:string) {
 }
 const includedDocuments = computed(()=>docs.value.filter(d=>d.bundle_included));
 const inclusionSummary = computed(()=>`${includedDocuments.value.length} included / ${includedDocuments.value.reduce((sum,d)=>sum+d.page_count,0)} source pages · ${docs.value.length-includedDocuments.value.length} reference-only`);
+const supplementDirty = ref(false);
+const supplementContext = ref('');
 const navigationSaving = ref(false);
 const navigationError = ref("");
 function askTabDiscard(message: string, discardAll = false, canSave = true): Promise<boolean> {
@@ -232,6 +235,7 @@ async function saveBeforeNavigation() {
   navigationSaving.value = true;
   navigationError.value = '';
   try {
+    if (supplementDirty.value && !(await buildWorkspace.value?.saveDraft())) throw new Error('Supplemental plan could not be saved. Review its selected pages.');
     if (tableDirty.value && !(await documentTablePanel.value?.save())) throw new Error('Review changes could not be saved. Check the selected fields and source context.');
     if (membershipDirty.value && !(await membershipPanel.value?.apply(false))) throw new Error('Membership could not be applied.');
     if (documentDirty.value && !(await saveDocument(true))) throw new Error('Document details could not be saved.');
@@ -247,8 +251,10 @@ async function saveBeforeNavigation() {
   finally { navigationSaving.value = false; }
 }
 async function guardArtifactTransition(destination: string) {
-  if (!tableDirty.value && !documentDirty.value && !settingsDirty.value && !formattingDirty.value && !pdfViewer.value?.hasPendingDraft()) return true;
+  if (!supplementDirty.value && !tableDirty.value && !documentDirty.value && !settingsDirty.value && !formattingDirty.value && !pdfViewer.value?.hasPendingDraft()) return true;
   if (!(await askTabDiscard(`Save changes before opening ${destination}?`, true))) return false;
+  buildWorkspace.value?.discard();
+  supplementDirty.value = false;
   pdfViewer.value?.discardPendingDraft();
   outputPresetsPanel.value?.discard();
   formattingDirty.value = false;
@@ -673,6 +679,7 @@ watch(buildWorkspace, panel => { if (panel && pendingBuildTool.value) { const na
 const buildStructureOrigin = ref("");
 let restoreBuildSettings = "";
 async function openBuildStructure(name:string) {
+  if(buildWorkspace.value?.openSupplementTool(name))return;
   if (!(await guardArtifactTransition(name))) return;
   buildStructureOrigin.value = name;
   await openStructure(name);
@@ -982,7 +989,7 @@ function tabHasDraft(tab: WorkspaceTab) {
 }
 let tabActivationSequence = 0;
 async function activateTab(tab: WorkspaceTab) {
-  if (tableDirty.value && !(await guardArtifactTransition("the selected tab"))) return;
+  if ((tableDirty.value || supplementDirty.value) && !(await guardArtifactTransition("the selected tab"))) return;
   if (!(await leaveMembership())) return;
   if (
     activeTabId.value === tab.id &&
@@ -1025,7 +1032,7 @@ async function activateTab(tab: WorkspaceTab) {
   restoreTabDraft(tab);
 }
 async function openMatterTab(matterId: string, view: View = "overview") {
-  if (tableDirty.value && !(await guardArtifactTransition(view))) return;
+  if ((tableDirty.value || supplementDirty.value) && !(await guardArtifactTransition(view))) return;
   if (view!=="documents") {documentTableOpen.value=false;tableDirty.value=false;}
   if (!(await leaveMembership())) return;
   const id = `matter:${matterId}`;
@@ -1096,7 +1103,7 @@ async function openDocumentTab(documentId: string, page?: number, revision?: num
     };
 }
 async function closeWorkspaceTab(tab: WorkspaceTab) {
-  if (tableDirty.value && !(await guardArtifactTransition("closing this tab"))) return;
+  if ((tableDirty.value || supplementDirty.value) && !(await guardArtifactTransition("closing this tab"))) return;
   if (!(await leaveMembership())) return;
   const closing = tab.documentId
     ? [tab]
@@ -4122,7 +4129,7 @@ watch(sidebarCollapsed, (collapsed) => {
               :checks-text="checksLoading ? 'Preflight loading' : checksError || `${errorChecks.length} preflight blockers · ${warningChecks.length} warnings to review`"
               @build="startBuild" @cancel="cancelJob" @retry="retryInterrupted" @review="reviewGeneratedPdf"
               @finding="openFinding" @export="exportDialogArtifact=$event" @documents="showPreparation" @checks="showView('validation')"
-              @configure="openBuildStructure" @membership="openMembership" @storage="showView('storage')" @backup="backupCurrentMatter">
+              @supplement-context="supplementContext=$event" @dirty-changed="supplementDirty=$event" @configure="openBuildStructure" @membership="openMembership" @storage="showView('storage')" @backup="backupCurrentMatter">
               <template #processing="{close}"><OutputOptions ref="outputPresetsPanel" :matter-id="currentMatterId!" :disabled="engineBlocked || busy || isJobActive" :inputs-dirty="settingsDirty" @dirty-changed="formattingDirty=$event" @modified="loadMatterResources" @close="close" /></template>
               <template #settings>                <OutputPresets
                   :key="currentMatterId!"
@@ -4425,7 +4432,7 @@ watch(sidebarCollapsed, (collapsed) => {
         </main>
       </Transition>
     </div>
-    <footer class="application-status"><button v-if="currentMatter && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="inclusionSummary">Bundle membership</button><span v-if="membershipOpen || activeView==='index'" class="membership-status-step">03 / 06 &nbsp; Prepare index</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="currentMatter" class="text-tool" @click="membershipOpen ? leaveMembership() : showPreparation()">{{membershipOpen ? 'Return to caller' : 'Back to preparation'}}</button></footer>
+    <footer class="application-status"><button v-if="currentMatter && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="supplementContext||inclusionSummary">{{supplementContext?'Supplement membership':'Bundle membership'}}</button><span v-if="supplementContext">{{supplementContext}}</span><span v-if="membershipOpen || activeView==='index'" class="membership-status-step">03 / 06 &nbsp; Prepare index</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="currentMatter" class="text-tool" @click="membershipOpen ? leaveMembership() : showPreparation()">{{membershipOpen ? 'Return to caller' : 'Back to preparation'}}</button></footer>
     <dialog
       v-if="selectedDoc && pageToolsOpen"
       ref="pageToolsDialog"

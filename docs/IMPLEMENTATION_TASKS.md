@@ -37,7 +37,9 @@ References:
 
 - [x] **B03B — New 13A volume planning and BU06 size recovery** · DONE for the available Mac target, 29 October 2026. Final browser 113 passed / 1 opt-in vault skip; native recovery/review/Save and restart checks passed. Explicit source-page splits and optional volume-byte policy use the deterministic map and existing atomic history. See [implementation and evidence checklist](DESIGN_PHASEB03B_IMPLEMENTATION.md). Backend 317 and frontend 44 pass; original/prior hashes preserved. Broader release/platform gates below remain independent.
 - [x] **B03C — New 15A desktop, 22C compact and BU10 dark Build settings** · DONE for the available Mac target, 29 October 2026. Backend 317, frontend 44 and full browser 116 passed / 1 opt-in vault skip. Sixteen appearance renders, reference comparisons, native compact/dark controls, real generation/review, Save cancellation/retry, hashes and app/sidecar restart passed. See [requirement checklist and evidence](DESIGN_PHASEB03C_IMPLEMENTATION.md).
-- [ ] **B04A — Supplemental build plan and prior-build revision comparison** · Next bounded task. B04 kit inspected; implementation not started.
+- [x] **B04A — Supplemental build plan and prior-build revision comparison** · DONE for the available Mac target, 29 October 2026. Persistent exact-page plans, immutable baseline and actual revision comparison verified; 48 visual renders and native planning/restart/comparison/primary review/Save pass. Backend 323, frontend 44, full browser 120 passed / 1 opt-in vault skip. See [requirement checklist and evidence](DESIGN_PHASEB04A_IMPLEMENTATION.md).
+
+- [ ] **B04B — Supported supplemental generation and insertion/label policies** · Next separately authorized bounded task. B04C audience variants remain separate; whole B04 is not complete.
 
 ## 0. Product decisions
 

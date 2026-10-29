@@ -10,6 +10,8 @@ import './build-design.css'
 import './validation-design.css'
 import './structure-design.css'
 
+import './supplement-design.css'
+
 createApp(App).use(createPinia()).mount('#app')
 
 import "./metadata-design.css"

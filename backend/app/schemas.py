@@ -741,3 +741,13 @@ class Check(BaseModel):
 class BundleMembershipUpdate(BaseModel):
     included_ids: list[str] = Field(max_length=10000)
     expected_snapshot: str = Field(min_length=64, max_length=64)
+
+
+class SupplementalPlanRequest(BundlePreviewRequest):
+    model_config = ConfigDict(extra='forbid')
+    baseline_build_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    title: str = Field(min_length=1, max_length=200)
+    selected_page_ids: list[str] = Field(default_factory=list, max_length=100000)
+    output_marks: OutputMarks
+    expected_snapshot: str = Field(min_length=64, max_length=64)
+    expected_version: int | None = Field(default=None, ge=1)

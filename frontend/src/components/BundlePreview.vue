@@ -48,6 +48,8 @@ interface Preview {
   bates_policy: {enabled:boolean;include_index:boolean;include_separator:boolean;restart_per_volume:boolean}
 }
 const props = defineProps<{
+  suppliedPlan?: Preview | null
+  externalPlan?: boolean
   documents?: MatterDocument[]
   recalculateKey?: number
   inputsPending?: boolean
@@ -68,6 +70,7 @@ onBeforeUnmount(()=>{sequence++})
 
 async function refresh() {
   const call = ++sequence
+  if (props.externalPlan) { preview.value=props.suppliedPlan||null; loading.value=false; error.value=''; return }
   preview.value = null
   if (props.inputsPending) { loading.value=false; error.value=''; return }
   if (!Number.isInteger(props.maxPages) || props.maxPages < 2 || props.maxPages > 2000) {
@@ -87,7 +90,7 @@ async function refresh() {
     if (call === sequence) { preview.value = null; error.value = friendlyError(err) }
   } finally { if (call === sequence) loading.value = false }
 }
-watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey, props.inputsPending,props.recalculateKey],
+watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey, props.inputsPending,props.recalculateKey,props.suppliedPlan],
   () => { void refresh() }, {immediate:true})
 </script>
 
@@ -97,7 +100,7 @@ watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey,
  <p v-if="error" role="alert">{{error}} <button class="text-tool" @click="refresh">Retry map</button></p>
  <div class="page-map-scroll"><table><thead><tr><th>Document</th><th>Source</th><th>Printed volume</th><th>Combined PDF</th><th>Bookmark target</th><th>Status</th></tr></thead><tbody>
  <tr v-for="row in rows" :key="`${row.id}:${row.source_start}`" :class="{selected:selected===row.id}" @click="selected=row.id">
- <td><button class="map-document" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">{{row.label?row.label+' · ':''}}{{row.title}}</button></td><td>{{row.source_start+1}}–{{row.source_end}}</td><td>{{state==='Current'?`${row.printed_start}–${row.printed_end}`:state}}</td><td>{{state==='Current'?`${row.combined_start_page}–${row.combined_end_page}`:state}}</td><td><button class="map-source" :aria-label="'Bookmark '+row.title+' first page'" @click="emit('bookmarkDocument',row.id)">Source 1 <span>＋</span></button></td><td><span :class="['map-state',state.toLowerCase()]"><CheckCircle2 v-if="state==='Current'" :size="13"/><TriangleAlert v-else :size="13"/>{{state}}</span></td>
+ <td><span v-if="externalPlan">{{row.title}}</span><button v-else class="map-document" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">{{row.label?row.label+' · ':''}}{{row.title}}</button></td><td>{{row.source_start+1}}–{{row.source_end}}</td><td>{{state==='Current'?`${row.printed_start}–${row.printed_end}`:state}}</td><td>{{state==='Current'?`${row.combined_start_page}–${row.combined_end_page}`:state}}</td><td><span v-if="externalPlan">Source {{row.source_start+1}}</span><button v-else class="map-source" :aria-label="'Bookmark '+row.title+' first page'" @click="emit('bookmarkDocument',row.id)">Source 1 <span>＋</span></button></td><td><span :class="['map-state',state.toLowerCase()]"><CheckCircle2 v-if="state==='Current'" :size="13"/><TriangleAlert v-else :size="13"/>{{state}}</span></td>
  </tr></tbody></table></div>
  <p v-if="preview?.part_extracts.length" class="placement-note">Technical Part PDFs: {{preview.part_extracts.map(p=>`Part ${p.part} (${p.pages} source pages)`).join(' · ')}}</p>
  <footer><strong>Page mapping {{state.toLowerCase()}}</strong><p v-if="inputsPending">Save current inputs and finish processing before recalculating.</p><p v-else-if="preview">{{preview.volumes.length}} volume(s) · {{preview.combined_pages}} physical pages. Printed labels are separate from physical destinations.</p><p>Earlier builds retain their frozen maps. Imported originals remain unchanged.</p></footer>

@@ -33,7 +33,9 @@ from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reo
                       validate_overlay_image, insert_working_image)
 from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, FilingReview, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
 from .storage import Store, new_id, utcnow
-from . import metadata_review
+from . import metadata_review, supplements
+from .schemas import SupplementalPlanRequest
+from .engine import supplemental_preview
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes, size as file_size
 from .schemas import BundleSettingsUpdate, FrontMatterPreview, NumberingPreview, PresetApplication, BundleMembershipUpdate, BatchPageOperation, CompressionRequest, ReaderPosition, READER_KEY_PATTERN
 from .portable import (create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES,
@@ -1915,6 +1917,55 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     def exports(matter_id: str, _: None = Depends(auth)):
         matter_or_404(matter_id)
         return store.list_exports(matter_id)
+
+    @app.get('/matters/{matter_id}/supplements')
+    def supplemental_catalog(matter_id: str, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return dict(plans=supplements.plans(store, matter_id),
+                    documents=supplements.catalog(store, matter_id),
+                    input_snapshot=supplements.snapshot(store, matter_id),
+                    defaults=supplements.draft_defaults(store, matter_id))
+            except (ValueError, OSError) as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/supplements')
+    def create_supplement(matter_id: str, payload: SupplementalPlanRequest, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return supplements.save(store, matter_id, payload)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @app.put('/matters/{matter_id}/supplements/{plan_id}')
+    def save_supplement(matter_id: str, plan_id: str, payload: SupplementalPlanRequest, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return supplements.save(store, matter_id, payload, plan_id)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/supplement-preview')
+    def preview_supplement(matter_id: str, payload: SupplementalPlanRequest, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                if payload.expected_snapshot != supplements.snapshot(store, matter_id):
+                    raise ValueError('Matter inputs changed. Reload material before recalculating this supplement.')
+                prior = supplements.baseline(store, matter_id, payload.baseline_build_id)
+                if payload.output_marks.volume_splits:
+                    raise ValueError('Supplemental internal split policies are not available in B04A.')
+                result = supplemental_preview(store, matter_id, payload.selected_page_ids,
+                    dict(max_pages_per_volume=payload.max_pages_per_volume,
+                         keep_groups_intact=payload.keep_groups_intact, output_marks=payload.output_marks.model_dump()))
+                result.update(input_snapshot=payload.expected_snapshot, baseline_build_id=prior['id'],
+                              settings_snapshot=payload.model_dump(), generation_available=False)
+                return result
+            except (ProcessingError, ValueError, OSError) as exc:
+                raise HTTPException(409, str(exc)) from exc
 
     @app.post('/matters/{matter_id}/exports/{export_id}/compare')
     def compare_export(matter_id: str, export_id: str, payload: BundlePreviewRequest,

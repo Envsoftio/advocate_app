@@ -21,6 +21,7 @@ import type {
 import OutputChecksDialog from "./OutputChecksDialog.vue";
 import { useOutputValidation } from "../lib/outputValidation";
 import { differences, type SavedLayout } from "../lib/bundleSettings";
+import SupplementWorkspace from "./SupplementWorkspace.vue";
 import BuildComparison from "./BuildComparison.vue";
 const props = defineProps<{
   matterId: string;
@@ -40,6 +41,8 @@ const props = defineProps<{
   storage?: boolean;
 }>();
 const emit = defineEmits<{
+  dirtyChanged: [boolean];
+  supplementContext: [string];
   build: [];
   cancel: [];
   retry: [job: Job];
@@ -53,6 +56,19 @@ const emit = defineEmits<{
   finding: [finding: any, buildId: string];
   configure: [name: string];
 }>();
+const supplementOpen=ref(false), supplementPlanId=ref('');
+const supplementPanel=ref<InstanceType<typeof SupplementWorkspace>|null>(null);
+const savedSupplements=ref<Array<{id:string;title:string;baseline_build_id:string}>>([]);
+const supplementBaselineId=ref('');
+const supplementBaseline=computed(()=>supplementBaselineId.value?props.artifacts.find(a=>a.id===supplementBaselineId.value)||null:artifact.value);
+let supplementTrigger:HTMLElement|null=null;
+let supplementRestored=false;
+const activeSupplementKey=()=>`matterdraft.activeSupplement.${props.matterId}`;
+function supplementalSaved(id:string){supplementPlanId.value=id;localStorage.setItem(activeSupplementKey(),id);void loadSupplements();}
+async function loadSupplements(){try{const data=await api<{plans:typeof savedSupplements.value}>(`/matters/${props.matterId}/supplements`);savedSupplements.value=data.plans;if(!supplementRestored){supplementRestored=true;const id=localStorage.getItem(activeSupplementKey());if(id&&data.plans.some(p=>p.id===id))openSupplement(id)}}catch{/* Opening the planner exposes a retryable service error. */}}
+function openSupplement(id=''){supplementTrigger=document.activeElement as HTMLElement;supplementPlanId.value=id;supplementBaselineId.value=savedSupplements.value.find(p=>p.id===id)?.baseline_build_id||artifact.value?.id||'';supplementOpen.value=true;}
+async function closeSupplement(){supplementOpen.value=false;localStorage.removeItem(activeSupplementKey());emit('supplementContext','');emit('dirtyChanged',false);await loadSupplements();await nextTick();supplementTrigger?.isConnected&&supplementTrigger.focus();}
+watch(()=>[props.matterId,props.refreshKey],()=>void loadSupplements(),{immediate:true});
 const selectedId = ref(""),
   screen = ref<"settings" | "result" | "stale" | "changes" | "job">("settings");
 const artifact = computed(
@@ -235,6 +251,8 @@ function closeTool() {
   toolDialog.value?.close();
   void nextTick(() => returnFocus?.isConnected && returnFocus.focus());
 }
+async function showChanges(){screen.value='changes';await nextTick();document.querySelector<HTMLElement>('.build-heading h1')?.focus();}
+async function showChoices(){screen.value='stale';await nextTick();document.querySelector<HTMLButtonElement>('.build-heading .review-changes')?.focus();}
 function selectBuild() {
   screen.value = artifact.value?.stale ? "stale" : "result";
 }
@@ -253,6 +271,10 @@ async function showOutputTools() {
   }
 }
 defineExpose({
+  openSupplementMembership: () => {if(!supplementOpen.value)return false;supplementPanel.value?.openPicker();return true;},
+  openSupplementTool: (name:string) => {if(!supplementOpen.value)return false;if(name==='Preview')void supplementPanel.value?.prepare();else supplementPanel.value?.openNumbering();return true;},
+  saveDraft: () => supplementPanel.value?.saveDraft(),
+  discard: () => supplementPanel.value?.discard(),
   openTool,
   focusSettings: async (name: string) => {
     screen.value = "settings";
@@ -269,12 +291,15 @@ defineExpose({
 });
 onBeforeUnmount(() => {
   sequence++;
+  emit('supplementContext','');
   toolDialog.value?.close();
 });
 </script>
 <template>
  <div class="build-route">
-  <slot v-if="volumesOpen" name="volumes" :recovery="sizeRecovery" :close="closeVolumes" />
+  <section v-if="supplementOpen&&!supplementBaseline" class="supplement-workspace"><h1>Baseline unavailable</h1><p role="alert">Saved baseline {{supplementBaselineId}} is unavailable. This supplement cannot be rebound to another build.</p><button class="membership-button secondary" @click="closeSupplement">Return to builds</button></section>
+  <SupplementWorkspace v-else-if="supplementOpen && supplementBaseline" ref="supplementPanel" :matter-id="matterId" :baseline="supplementBaseline" :initial-plan-id="supplementPlanId" :blocked="blocked||busy" :refresh-key="refreshKey" @close="closeSupplement" @dirty-changed="emit('dirtyChanged',$event)" @saved="supplementalSaved" @context="emit('supplementContext',$event)"/>
+  <slot v-else-if="volumesOpen" name="volumes" :recovery="sizeRecovery" :close="closeVolumes" />
   <section v-else
     class="build-workspace"
     :data-screen="view"
@@ -297,6 +322,8 @@ onBeforeUnmount(() => {
         </p>
         <p v-else>Local matter files · No generated bundles yet</p>
       </div>
+      <button v-if="view==='stale'" class="membership-button secondary review-changes" @click="showChanges">Review changes</button>
+      <button v-if="view==='changes'" class="membership-button primary" @click="emit('checks')">Run checks</button>
       <button
         v-if="artifact && view === 'result'"
         class="membership-button primary"
@@ -311,6 +338,10 @@ onBeforeUnmount(() => {
         Create backup
       </button>
     </header>
+    <div v-if="artifact && ['settings','result','stale'].includes(view)" class="supplement-entry" :class="{'has-plans':savedSupplements.length>0}">
+      <button v-if="view!=='stale'" class="text-tool" :disabled="blocked||busy" @click="openSupplement()">Create supplement from build {{artifact.id.slice(0,8)}}</button>
+      <button v-for="p in savedSupplements" :key="p.id" class="text-tool" :disabled="blocked||busy" @click="openSupplement(p.id)">Resume {{p.title}}</button>
+    </div>
     <template v-if="view === 'settings'">
       <div class="build-strip build-preflight" :class="statusKind" role="status">
         <CircleCheck v-if="statusKind === 'success'" :size="16" /><AlertCircle v-else :size="16" />
@@ -517,9 +548,7 @@ onBeforeUnmount(() => {
     <template v-else-if="view === 'stale' && artifact">
       <div class="build-strip warning">
         Effective inputs have changed · Earlier output files remain unchanged
-        <button class="text-tool" @click="screen = 'changes'">
-          Review changes
-        </button>
+
       </div>
       <section class="build-card stale-summary">
         <div>
@@ -557,17 +586,16 @@ onBeforeUnmount(() => {
           <FileText />
           <h2>Supplementary bundle</h2>
           <p>
-            A separate supplement with selected new material is not available
-            yet.
+            Create a separate plan for selected source pages, linked to this real baseline. Keep the earlier bundle intact.
           </p>
-          <button disabled class="membership-button secondary">
-            Create supplement · unavailable
+          <button :disabled="blocked||busy" class="membership-button secondary" @click="openSupplement()">
+            Create supplement
           </button>
         </section>
         <section class="build-card">
           <FileText />
           <h2>Preserve existing references</h2>
-          <p>Insertion labels and preservation policies are planned for B04.</p>
+          <p>Insertion labels and preservation policies are unavailable until B04B.</p>
           <button disabled class="membership-button secondary">
             Preview inserts · unavailable
           </button>
@@ -600,11 +628,9 @@ onBeforeUnmount(() => {
           @click="emit('review', artifact.id, 'combined.pdf')"
         >
           Open earlier bundle</button
-        ><button class="membership-button quiet" @click="screen = 'stale'">
+        ><button class="membership-button quiet" @click="showChoices">
           Choose update policy</button
-        ><button class="membership-button primary" @click="emit('checks')">
-          Run checks
-        </button>
+        >
       </footer>
       <p class="build-secondary">
         Side-by-side PDF comparison is not available yet.

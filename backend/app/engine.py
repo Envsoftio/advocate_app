@@ -458,9 +458,9 @@ def render_numbering_preview(store: Store, matter_id: str, max_pages: int, keep_
 
 
 def bundle_preview(store: Store, matter_id: str, max_pages: int,
-                   keep_groups: bool, settings: dict | None = None) -> dict:
+                   keep_groups: bool, settings: dict | None = None, *, documents_override: list[dict] | None = None) -> dict:
     """Read-only view of the exact current volume/index/page-number plan."""
-    documents = store.get_bundle_documents(matter_id)
+    documents = documents_override if documents_override is not None else store.get_bundle_documents(matter_id)
     settings = settings if settings is not None else store.get_output_marks(matter_id)
     bookmarks = store.list_manual_bookmarks(matter_id)
     document_titles = {document['id']: document['title'] for document in store.get_documents(matter_id)}
@@ -514,6 +514,38 @@ def bundle_preview(store: Store, matter_id: str, max_pages: int,
                     'include_separator': settings.get('bates_include_separator', False),
                     'restart_per_volume': settings.get('bates_restart_per_volume', False)},
                 numbering='Printed labels and PDF labels are distinct from physical volume and combined positions; all destinations use this engine map.')
+
+
+def supplemental_preview(store: Store, matter_id: str, selected_ids: list[str], settings: dict) -> dict:
+    """Resolve exact selected identities into contiguous source runs, then the shared map.
+
+    Selection order is explicit. Source positions, printed labels and physical positions
+    remain distinct. Each noncontiguous run has a separate index entry.
+    """
+    from .supplements import selection
+    if len(selected_ids) != len(set(selected_ids)):
+        raise ProcessingError('Selected page identities must be unique')
+    resolved, issues = selection(store, matter_id, selected_ids)
+    if issues:
+        raise ProcessingError(issues[0]['reason'])
+    docs = {d['id']: d for d in store.get_documents(matter_id)}
+    runs = []
+    for page in resolved:
+        doc = docs[page['document_id']]
+        if runs and runs[-1]['id'] == doc['id'] and runs[-1]['_source_start'] + runs[-1]['page_count'] == page['page_index']:
+            runs[-1]['page_count'] += 1
+        else:
+            runs.append({**doc, 'page_count': 1, '_source_start': page['page_index'],
+                         '_source_total': doc['page_count'], 'group_key': ''})
+    result = bundle_preview(store, matter_id, settings['max_pages_per_volume'],
+                            settings['keep_groups_intact'], settings['output_marks'], documents_override=runs)
+    identity = {(p['document_id'], p['page_index']): p['id'] for p in resolved}
+    for volume in result['volumes']:
+        for page in volume['pages']:
+            page['stable_page_id'] = identity.get((page['document_id'], page['page_index']))
+    result['included_documents'] = len({p['document_id'] for p in resolved})
+    result['selected_page_ids'] = selected_ids
+    return result
 
 
 def front_matter_preview(store: Store, matter_id: str, max_pages: int, keep_groups: bool,
@@ -573,7 +605,11 @@ def compare_bundle_plan(store: Store, matter_id: str, prior: dict,
     new_shared_order = [row_key(row) for row in new_rows if row_key(row) in shared_ids]
     old_positions = {doc_id: index for index, doc_id in enumerate(old_shared_order)}
     new_positions = {doc_id: index for index, doc_id in enumerate(new_shared_order)}
+    if any(not isinstance(item, dict) or not item.get('document_id') or not isinstance(item.get('revision'), int) for item in prior['input_revisions']):
+        return {'available': False, 'reason': 'Stored revision evidence is incomplete.'}
     old_revisions = {item['document_id']: item for item in prior['input_revisions']}
+    if any(row['id'] not in old_revisions for row in old_rows):
+        return {'available': False, 'reason': 'Stored document revision evidence is missing.'}
     current_docs = {item['id']: item for item in store.get_documents(matter_id)}
     changes = []
     for doc_id in list(dict.fromkeys([*old_by_id, *new_by_id])):
@@ -623,8 +659,25 @@ def compare_bundle_plan(store: Store, matter_id: str, prior: dict,
     matches_inputs = (prior.get('effective_input_digest') == store.build_input_digest(matter_id, effective=True)
                       if prior.get('effective_input_digest') else
                       prior.get('build_input_digest') == store.build_input_digest(matter_id))
+    document_changes = []
+    old_ids = list(dict.fromkeys(r['id'] for r in old_rows))
+    new_ids = list(dict.fromkeys(r['id'] for r in new_rows))
+    for doc_id in dict.fromkeys([*old_ids, *new_ids]):
+        before = old_revisions.get(doc_id)
+        after = current_docs.get(doc_id) if doc_id in new_ids else None
+        reasons = list(dict.fromkeys(reason for change in changes if change['document_id'] == doc_id for reason in change['reasons']))
+        status = 'added' if doc_id not in old_ids else 'omitted' if doc_id not in new_ids else 'changed' if reasons else 'unchanged'
+        old = [r for r in old_rows if r['id'] == doc_id]
+        new = [r for r in new_rows if r['id'] == doc_id]
+        document_changes.append(dict(document_id=doc_id, title=(new or old)[0]['title'], status=status, reasons=reasons,
+            before_revision=before['revision'] if before else None, after_revision=after['revision'] if after else None,
+            before_sha256=before.get('working_sha256') if before else None,
+            after_sha256=store.sha256(store.working_path(after)) if after else None,
+            before_source_pages=sum(r['end_page']-r['start_page']+1 for r in old),
+            after_source_pages=sum(r['end_page']-r['start_page']+1 for r in new)))
     return {'available': True, 'prior_build_id': prior['id'], 'prior_created_at': prior['created_at'],
             'prior_pages': prior['pages'], 'current_pages': current['combined_pages'],
+            'documents': document_changes, 'input_snapshot': store.build_input_digest(matter_id),
             'changes': changes, 'setting_changes': setting_changes,
             'bookmark_changes': bookmark_changes,
             'unresolved_bookmarks': [item['title'] for item in current['manual_bookmarks'] if not item['resolved']],
@@ -1214,7 +1267,11 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                             if item['kind'] == 'image' and item.get('_asset_path')
                             and Path(item['_asset_path']).is_file() else None)}
         for item in page_annotations]
+    from .supplements import catalog
+    page_catalog = {d['id']: d for d in catalog(store, matter_id, {doc['id'] for doc in documents})}
     input_revisions = [{'document_id': d['id'], 'revision': d['revision'],
+                        'page_ids': [p['id'] for p in page_catalog[d['id']]['pages']],
+                        'source_page_count': d['page_count'],
                         'working_sha256': store.sha256(store.working_path(d))}
                        for d in documents]
     label_inputs = [{'document_id': d['id'], 'position': d['position'],

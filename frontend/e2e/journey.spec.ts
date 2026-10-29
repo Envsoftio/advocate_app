@@ -97,9 +97,10 @@ test('build workspace explains a late addition against a named prior build', asy
   await page.getByRole('combobox', {name:'Saved build'}).selectOption(priorId)
   await page.locator('.build-workspace').getByRole('button',{name:'Review changes',exact:true}).click()
   const comparison = page.getByRole('region', {name:'What changed since the selected build'})
-  await expect(comparison.getByText('03_affidavit', {exact:false})).toBeVisible()
+  await expect(comparison.getByRole('button', {name:'03_affidavit',exact:true})).toBeVisible()
   await expect(comparison.getByText('added', {exact:true})).toBeVisible()
-  await expect(comparison.getByText('Page shifts can affect references outside this package.', {exact:false})).toBeVisible()
+  await comparison.getByText('Recorded hashes, page ranges and settings',{exact:true}).click()
+  await expect(comparison.getByText('Page shifts may affect citations outside this package.', {exact:false})).toBeVisible()
   await expect(page.locator('.build-workspace')).toContainText(priorId.slice(0, 8))
 })
 

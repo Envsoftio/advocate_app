@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 19:
+            if version > 20:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -323,6 +323,21 @@ class Store:
                 if 'bundle_included' not in {row['name'] for row in con.execute('PRAGMA table_info(documents)')}:
                     con.execute('ALTER TABLE documents ADD COLUMN bundle_included INTEGER NOT NULL DEFAULT 1 CHECK(bundle_included IN (0,1))')
                 con.execute('PRAGMA user_version=19')
+            if version < 20:
+                con.executescript('''
+                    CREATE TABLE IF NOT EXISTS source_page_identities (
+                        id TEXT PRIMARY KEY, matter_id TEXT NOT NULL REFERENCES matters(id),
+                        document_id TEXT NOT NULL REFERENCES documents(id),
+                        working_relpath TEXT NOT NULL, revision INTEGER NOT NULL,
+                        page_index INTEGER NOT NULL, working_sha256 TEXT NOT NULL,
+                        UNIQUE(document_id,working_relpath,page_index)
+                    );
+                    CREATE TABLE IF NOT EXISTS supplemental_plans (
+                        id TEXT PRIMARY KEY, matter_id TEXT NOT NULL REFERENCES matters(id),
+                        payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
+                    );
+                ''')
+                con.execute('PRAGMA user_version=20')
             con.execute('''CREATE TABLE IF NOT EXISTS bundle_membership_state (
                 matter_id TEXT PRIMARY KEY REFERENCES matters(id) ON DELETE CASCADE,
                 revision INTEGER NOT NULL DEFAULT 1
