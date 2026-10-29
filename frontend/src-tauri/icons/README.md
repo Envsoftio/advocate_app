@@ -13,3 +13,7 @@ npx tauri icon src/assets/matterdraft-logo.svg --output /tmp/matterdraft-icons
 ```
 
 Copy `32x32.png`, `128x128.png`, `128x128@2x.png`, `icon.png`, `icon.icns` and `icon.ico` from that temporary directory into this directory. Other generated platform assets are not currently used. Rebuild the desktop application to package the updated icons.
+
+The tagline is **Legal Documents, Simplified.** It appears below the product name in the application bar and workspace menu.
+
+Both launch modes use this artwork: production bundles package `icon.icns`/`icon.ico`, and Tauri embeds the macOS development Dock icon from the same ICNS in its generated context. `build.rs` watches the icon directory to refresh compiled artwork after changes. Restart `./dev.sh` after an icon update; frontend hot reload alone cannot replace a running native executable's icon. The installed production app is `/Applications/MatterDraft Studio.app`.

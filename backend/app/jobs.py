@@ -57,7 +57,7 @@ class JobManager:
             except Exception as exc:
                 with self._lock:
                     job.update(status='cancelled' if cancelled.is_set() else 'failed',
-                               error=str(exc), message='Cancelled' if cancelled.is_set() else 'Failed')
+                               error=str(exc), result=getattr(exc, 'recovery', None), message='Cancelled' if cancelled.is_set() else 'Failed')
                     if self._store:
                         self._store.save_job(job)
 

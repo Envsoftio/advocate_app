@@ -74,6 +74,7 @@ import { engineState, engineBlocked, engineReviewReason, autosaveHeld, disconnec
 import FindingReviewPanel from './components/FindingReviewPanel.vue';
 import PreflightWorkspace from './components/PreflightWorkspace.vue';
 import OutputChecksDialog from './components/OutputChecksDialog.vue';
+import VolumePlanning from "./components/VolumePlanning.vue";
 import OutputOptions from "./components/OutputOptions.vue";
 import BuildWorkspace from "./components/BuildWorkspace.vue";
 import BundleExportDialog from "./components/BundleExportDialog.vue";
@@ -664,10 +665,40 @@ const settingsAutosaveState = ref<"idle" | "saving" | "failed">("idle");
 let documentAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
 let settingsAutosaveTimer: ReturnType<typeof setTimeout> | null = null;
 const formattingDirty = ref(false);
-const outputPresetsPanel = ref<InstanceType<typeof OutputPresets> | InstanceType<typeof BundleStructure> | InstanceType<typeof OutputOptions> | null>(null);
+const outputPresetsPanel = ref<InstanceType<typeof OutputPresets> | InstanceType<typeof BundleStructure> | InstanceType<typeof OutputOptions> | InstanceType<typeof VolumePlanning> | null>(null);
 const structureMode = ref("map");
+const volumeReturnMode = ref("");
+const pendingBuildTool = ref("");
+watch(buildWorkspace, panel => { if (panel && pendingBuildTool.value) { const name=pendingBuildTool.value; pendingBuildTool.value=""; void panel.openTool(name); } }, {flush:"post"});
+const buildStructureOrigin = ref("");
+let restoreBuildSettings = "";
+async function openBuildStructure(name:string) {
+  if (!(await guardArtifactTransition(name))) return;
+  buildStructureOrigin.value = name;
+  await openStructure(name);
+}
+async function returnToBuildSettings() {
+  const name = buildStructureOrigin.value;
+  if (!(await guardArtifactTransition("Build settings"))) return;
+  restoreBuildSettings = name;
+  buildStructureOrigin.value = "";
+  await showView("build");
+  if (buildWorkspace.value && restoreBuildSettings) {
+    restoreBuildSettings = "";
+    void buildWorkspace.value.focusSettings(name);
+  }
+}
+watch(buildWorkspace, panel => {
+  if (panel && restoreBuildSettings) {
+    const name = restoreBuildSettings; restoreBuildSettings = "";
+    void panel.focusSettings(name);
+  }
+}, {flush:"post"});
 async function openStructure(name:string) { structureMode.value=name; await showView("index"); }
-async function openStructurePolicy(name:string) { if (!(await guardArtifactTransition(name))) return; await showView("build"); await nextTick(); buildWorkspace.value?.openTool(name); }
+async function openStructurePolicy(name:string,returnMode="map") { if (!(await guardArtifactTransition(name))) return; volumeReturnMode.value=name==='Plan volumes'?returnMode:""; pendingBuildTool.value=name; await showView("build"); await nextTick(); if(buildWorkspace.value&&pendingBuildTool.value){pendingBuildTool.value="";void buildWorkspace.value.openTool(name);} }
+async function closeVolumePlanning(close:()=>void) { const mode=volumeReturnMode.value;volumeReturnMode.value="";close();if(mode)await openStructure(mode==='bookmarks'?'Bookmarks':mode); }
+async function navigateVolumePlanning(name:string) { volumeReturnMode.value="";if(name==='Preflight') await showView('validation'); else await openStructure(name); }
+async function rebuildVolumePlanning() { await structureModified(); await startBuild(); }
 async function structureModified() { await refreshMatters(); resetDrafts(); await loadMatterResources(); }
 let jobTimer: ReturnType<typeof setInterval> | null = null;
 let jobPollSequence=0;
@@ -4001,7 +4032,7 @@ watch(sidebarCollapsed, (collapsed) => {
             </div>
 
             <BundleStructure v-else-if="activeView === 'index'" :key="currentMatterId!" ref="outputPresetsPanel"
-              :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :initial-mode="structureMode" :bookmark-preset="bookmarkPreset"
+              :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :initial-mode="structureMode" :build-origin="!!buildStructureOrigin" @return-build="returnToBuildSettings" :bookmark-preset="bookmarkPreset"
               :disabled="engineBlocked || busy || isJobActive || documentDirty || settingsDirty"
               @dirty-changed="formattingDirty=$event" @modified="structureModified" @membership="openMembership"
               @build="showView('build')" @policy="openStructurePolicy">
@@ -4087,10 +4118,11 @@ watch(sidebarCollapsed, (collapsed) => {
               :busy="isJobActive" :blocked="engineBlocked || busy || buildSubmitting" :cancel-pending="cancelPending"
               :max-pages="matterEditor.max_pages_per_volume" :keep-groups="matterEditor.keep_groups_intact"
               :refresh-key="previewRefreshKey" :dirty="settingsDirty || formattingDirty" :profile="selectedProfile"
+              :checks-state="checksLoading ? 'loading' : checksError ? 'error' : documentDirty || settingsDirty || formattingDirty ? 'pending' : errorChecks.length ? 'danger' : warningChecks.length ? 'warning' : 'success'"
               :checks-text="checksLoading ? 'Preflight loading' : checksError || `${errorChecks.length} preflight blockers · ${warningChecks.length} warnings to review`"
               @build="startBuild" @cancel="cancelJob" @retry="retryInterrupted" @review="reviewGeneratedPdf"
               @finding="openFinding" @export="exportDialogArtifact=$event" @documents="showPreparation" @checks="showView('validation')"
-              @configure="openStructure" @membership="openMembership" @storage="showView('storage')" @backup="backupCurrentMatter">
+              @configure="openBuildStructure" @membership="openMembership" @storage="showView('storage')" @backup="backupCurrentMatter">
               <template #processing="{close}"><OutputOptions ref="outputPresetsPanel" :matter-id="currentMatterId!" :disabled="engineBlocked || busy || isJobActive" :inputs-dirty="settingsDirty" @dirty-changed="formattingDirty=$event" @modified="loadMatterResources" @close="close" /></template>
               <template #settings>                <OutputPresets
                   :key="currentMatterId!"
@@ -4117,15 +4149,7 @@ watch(sidebarCollapsed, (collapsed) => {
                   @open-document="openPreviewDocument"
                 />
 </template>
-              <template #volumes><div class="build-volume-controls"><label class="field">Maximum pages per volume<input v-model.number="matterEditor.max_pages_per_volume" type="number" min="2" max="2000" :disabled="isJobActive"/></label><label class="check-row"><input v-model="matterEditor.keep_groups_intact" type="checkbox" :disabled="isJobActive"/>Keep document groups together</label><button class="btn primary" :disabled="engineBlocked || isJobActive || !settingsDirty" @click="savePolicy()">Save bundle settings</button><p role="status">{{settingsAutosaveState==='failed'?'Settings save failed — retry Save':settingsDirty?'Unsaved bundle settings':'Bundle settings saved'}}</p></div>                <BundlePreview
-                  :inputs-pending="engineBlocked || busy || isJobActive || checksLoading || documentDirty || settingsDirty || formattingDirty"
-                  :matter-id="currentMatterId!"
-                  :max-pages="matterEditor.max_pages_per_volume"
-                  :keep-groups="matterEditor.keep_groups_intact"
-                  :refresh-key="previewRefreshKey"
-                  @open-document="openPreviewDocument"
-                />
-</template>
+              <template #volumes="{close,recovery}"><VolumePlanning :return-to-index="!!volumeReturnMode" :initial-recovery="recovery" ref="outputPresetsPanel" :matter-id="currentMatterId!" :disabled="engineBlocked || busy || isJobActive" :inputs-dirty="settingsDirty" :refresh-key="previewRefreshKey" :job="activeJob" @dirty-changed="formattingDirty=$event" @modified="structureModified" @close="closeVolumePlanning(close)" @navigate="navigateVolumePlanning" @build="rebuildVolumePlanning" @cancel="cancelJob"/></template>
               <template #output-tools="{artifact}">                    <div
                       v-for="file in artifact.files"
                       :key="file.name"

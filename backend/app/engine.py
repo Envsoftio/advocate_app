@@ -296,7 +296,7 @@ def volume_rows(documents: list[dict], volume_no: int,
         end = position + doc['page_count']
         rows.append(dict(id=doc['id'], part=doc['part'], kind=doc['kind'],
                          label=doc['label'], title=doc['title'], document_date=doc.get('document_date'),
-                         revision=doc.get('revision'), start_page=start,
+                         revision=doc.get('revision'), source_start=doc.get('_source_start', 0), source_end=doc.get('_source_start', 0)+doc['page_count'], start_page=start,
                          end_page=end, volume=volume_no, total_pages=doc['page_count'],
                          annexure_mode=mode, separator_page=separator_page))
         position = end
@@ -372,7 +372,7 @@ def numbering_maps(plans: list[list[dict]], settings: dict) -> list[dict]:
                 prefix = settings.get('numbering_prefix', '').replace('{volume}', str(vno)).replace('{section}', str(section or ''))
                 printed = label = prefix + number
                 next_number += 1
-            source_index = physical-row['start_page'] if row and physical >= row['start_page'] else None
+            source_index = physical-row['start_page']+row['source_start'] if row and physical >= row['start_page'] else None
             pages.append(dict(physical_page=physical, combined_page=combined_offset+physical,
                 printed_label=printed, pdf_label=label if settings.get('numbering_pdf_labels', True) else str(physical),
                 document_id=row['id'] if source_index is not None else None, page_index=source_index,
@@ -435,7 +435,7 @@ def render_numbering_preview(store: Store, matter_id: str, max_pages: int, keep_
     doc = next((d for d in store.get_bundle_documents(matter_id) if d['id'] == document_id), None)
     if not doc or doc['revision'] != revision or page_number > doc['page_count']:
         raise ProcessingError('Select a page in a current included working document. The target is missing, excluded or changed.')
-    volume = next(v for v in plan['volumes'] if any(r['id']==document_id for r in v['rows']))
+    volume = next(v for v in plan['volumes'] if any(p['document_id']==document_id and p['page_index']==page_number-1 for p in v['pages']))
     record = next(p for p in volume['pages'] if p['document_id']==document_id and p['page_index']==page_number-1)
     with open_pdf(store.working_path(doc)) as source, pymupdf.open() as output:
         output.insert_pdf(source, from_page=page_number-1, to_page=page_number-1, links=False, annots=False)
@@ -475,29 +475,31 @@ def bundle_preview(store: Store, matter_id: str, max_pages: int,
         index_count = index_pages_for(len(group), settings)
         page_count = rows[-1]['end_page'] if rows else index_count
         for row in rows:
-            destinations[row['id']] = (number, row['start_page'], combined_offset)
+            for i in range(row['total_pages']):
+                destinations[(row['id'], row['source_start']+i)] = (number, row['start_page']+i, combined_offset)
             row['combined_start_page'] = combined_offset + row['start_page']
             row['combined_end_page'] = combined_offset + row['end_page']
             row['bates_first'] = bates_labels[number - 1][row['start_page'] - 1]
             row['bates_last'] = bates_labels[number - 1][row['end_page'] - 1]
             row['separator_bates'] = (bates_labels[number - 1][row['separator_page'] - 1]
                                       if row['separator_page'] is not None else None)
-        volumes.append(dict(number=number, index_pages=index_count, cover_pages=cover_pages(settings),
+        estimated_bytes = sum(round(file_size(store.working_path(d))*d['page_count']/d.get('_source_total', d['page_count'])) for d in group) + (page_count-sum(d['page_count'] for d in group))*2048
+        volumes.append(dict(estimated_bytes=estimated_bytes, number=number, index_pages=index_count, cover_pages=cover_pages(settings),
                             page_count=page_count, combined_start_page=combined_offset + 1,
                             combined_end_page=combined_offset + page_count,
                             rows=rows, pages=numbered[number-1]['pages'], bates_labels=bates_labels[number - 1]))
         combined_offset += page_count
     manual = []
     for item in bookmarks:
-        destination = destinations.get(item['document_id'])
+        destination = destinations.get((item['document_id'], item['page_index']))
         resolved = bool(item['resolved'] and destination)
         manual.append(dict(id=item['id'], title=item['title'], resolved=resolved,
                            document_title=document_titles.get(item['document_id'], 'Archived document'),
                            document_page=item['page_index'] + 1,
                            volume=destination[0] if resolved else None,
-                           printed_label=volumes[destination[0]-1]['pages'][destination[1]+item['page_index']-1]['printed_label'] if resolved else None,
-                           volume_page=destination[1] + item['page_index'] if resolved else None,
-                           combined_page=destination[2] + destination[1] + item['page_index'] if resolved else None))
+                           printed_label=volumes[destination[0]-1]['pages'][destination[1]-1]['printed_label'] if resolved else None,
+                           volume_page=destination[1] if resolved else None,
+                           combined_page=destination[2] + destination[1] if resolved else None))
     return dict(volumes=volumes, combined_pages=combined_offset,
                 source_pages=sum(d['page_count'] for d in documents),
                 generated_pages=combined_offset-sum(d['page_count'] for d in documents),
@@ -546,6 +548,7 @@ def page_map_entries(preview: dict) -> list[dict]:
     """Small, immutable comparison snapshot from the same map used for output."""
     return [{**{key: row[key] for key in ('id', 'part', 'label', 'title', 'volume',
             'start_page', 'end_page', 'combined_start_page', 'combined_end_page', 'printed_start', 'printed_end')},
+             'source_start': row.get('source_start', 0), 'source_end': row.get('source_end', row['end_page']-row['start_page']+1),
              'printed_labels': [page['printed_label'] for page in volume['pages'][row['start_page']-1:row['end_page']]]}
             for volume in preview['volumes'] for row in volume['rows']]
 
@@ -562,11 +565,12 @@ def compare_bundle_plan(store: Store, matter_id: str, prior: dict,
            ('id', 'part', 'label', 'title', 'volume', 'start_page', 'end_page',
             'combined_start_page', 'combined_end_page')) for row in old_rows):
         return {'available': False, 'reason': 'The stored page-map snapshot is incomplete.'}
-    old_by_id = {row['id']: row for row in old_rows}
-    new_by_id = {row['id']: row for row in new_rows}
+    row_key = lambda row: (row['id'], row.get('source_start', 0))
+    old_by_id = {row_key(row): row for row in old_rows}
+    new_by_id = {row_key(row): row for row in new_rows}
     shared_ids = set(old_by_id) & set(new_by_id)
-    old_shared_order = [row['id'] for row in old_rows if row['id'] in shared_ids]
-    new_shared_order = [row['id'] for row in new_rows if row['id'] in shared_ids]
+    old_shared_order = [row_key(row) for row in old_rows if row_key(row) in shared_ids]
+    new_shared_order = [row_key(row) for row in new_rows if row_key(row) in shared_ids]
     old_positions = {doc_id: index for index, doc_id in enumerate(old_shared_order)}
     new_positions = {doc_id: index for index, doc_id in enumerate(new_shared_order)}
     old_revisions = {item['document_id']: item for item in prior['input_revisions']}
@@ -574,8 +578,8 @@ def compare_bundle_plan(store: Store, matter_id: str, prior: dict,
     changes = []
     for doc_id in list(dict.fromkeys([*old_by_id, *new_by_id])):
         old, new = old_by_id.get(doc_id), new_by_id.get(doc_id)
-        before = old_revisions.get(doc_id, {})
-        after = current_docs.get(doc_id, {})
+        before = old_revisions.get(doc_id[0], {})
+        after = current_docs.get(doc_id[0], {})
         reasons = []
         if old is None:
             reasons.append('added')
@@ -597,7 +601,7 @@ def compare_bundle_plan(store: Store, matter_id: str, prior: dict,
                     'combined_start_page', 'combined_end_page')):
                 reasons.append('page range shifted')
         if reasons:
-            changes.append({'document_id': doc_id, 'title': (new or old)['title'],
+            changes.append({'document_id': doc_id[0], 'title': (new or old)['title'],
                             'reasons': reasons, 'before': old, 'after': new})
     settings = prior.get('build_settings') or {}
     setting_changes = []
@@ -659,13 +663,57 @@ def make_units(docs: list[dict], keep_groups: bool) -> list[list[dict]]:
     return units
 
 
+def split_units(docs: list[dict], keep_groups: bool, settings: dict) -> list[list[dict]]:
+    """Only reviewed, revision-bound boundaries may break an imported document."""
+    splits = settings.get('volume_splits', {})
+    units = []
+    for group in make_units(docs, keep_groups):
+        pending = []
+        for doc in group:
+            split = splits.get(doc['id'])
+            if not split:
+                pending.append(doc)
+                continue
+            if split['revision'] != doc['revision']:
+                raise ProcessingError(f'Split review is stale for {doc["title"]}; review its current revision')
+            cuts = split['after_pages']
+            if not cuts or cuts != sorted(set(cuts)) or cuts[0] < 1 or cuts[-1] >= doc['page_count']:
+                raise ProcessingError(f'Invalid internal split boundary for {doc["title"]}')
+            if pending:
+                units.append(pending)
+                pending = []
+            start = 0
+            for end in [*cuts, doc['page_count']]:
+                units.append([{**doc, '_source_start': start, '_source_total': doc['page_count'],
+                    'page_count': end-start, '_force_break': start > 0}])
+                start = end
+        if pending:
+            units.append(pending)
+    return units
+
+
+def source_destinations(rows: list[dict], offset: int = 0) -> dict:
+    return {(row['id'], row.get('source_start', 0)+i): offset+row['start_page']-1+i
+            for row in rows for i in range(row['total_pages'])}
+
+
+def mapped_page(destinations: dict, document_id: str, page_index: int):
+    if any(isinstance(key, tuple) for key in destinations):
+        return destinations.get((document_id, page_index))
+    start = destinations.get(document_id)
+    return None if start is None else start+page_index
+
+
 def volume_plan(docs: list[dict], max_pages: int, keep_groups: bool,
                 settings: dict | None = None) -> list[list[dict]]:
     settings = settings or {}
     volumes = []
     current = []
     page_count = 0
-    for unit in make_units(docs, keep_groups):
+    for unit in split_units(docs, keep_groups, settings):
+        if current and unit[0].get('_force_break'):
+            volumes.append(current)
+            current, page_count = [], 0
         unit_pages = sum(d['page_count'] + int(annexure_mode(d, settings) == 'separator')
                          for d in unit)
         next_index_pages = index_pages_for(len(current) + len(unit), settings) + cover_pages(settings)
@@ -713,14 +761,14 @@ def manual_toc(bookmarks: list[dict], destinations: dict[str, int]) -> list[list
     resolved_levels: dict[str, int] = {}
     entries = []
     for bookmark in bookmarks:
-        start = destinations.get(bookmark['document_id'])
+        start = mapped_page(destinations, bookmark['document_id'], bookmark['page_index'])
         if not bookmark['resolved'] or start is None:
             continue
         parent_level = resolved_levels.get(bookmark['parent_id'], 1)
         level = parent_level + 1
         resolved_levels[bookmark['id']] = level
         entries.append([level, bookmark['title'],
-                        start + bookmark['page_index']])
+                        start])
     return [[1, 'Manual bookmarks', entries[0][2]], *entries] if entries else []
 
 
@@ -753,13 +801,13 @@ def insert_reviewed_links(output: pymupdf.Document, reviewed_links: list[dict],
     expected_uri: dict[int, list[str]] = {}
     retained = omitted_cross_output = unresolved = 0
     for link in reviewed_links:
-        source_start = document_starts.get(link['source_document_id'])
+        source_start = mapped_page(document_starts, link['source_document_id'], link['source_page_index'])
         if not link.get('resolved'):
             unresolved += 1
             continue
         if source_start is None:
             continue
-        source_page_index = source_start + link['source_page_index']
+        source_page_index = source_start
         if not 0 <= source_page_index < output.page_count:
             raise ProcessingError('Reviewed link source differs from the deterministic page map')
         page = output[source_page_index]
@@ -768,11 +816,11 @@ def insert_reviewed_links(output: pymupdf.Document, reviewed_links: list[dict],
             action.update(kind=pymupdf.LINK_URI, uri=link['uri'])
             expected_uri.setdefault(source_page_index, []).append(link['uri'])
         else:
-            target_start = document_starts.get(link['target_document_id'])
+            target_start = mapped_page(document_starts, link['target_document_id'], link['target_page_index'])
             if target_start is None:
                 omitted_cross_output += 1
                 continue
-            destination = target_start + link['target_page_index']
+            destination = target_start
             action.update(kind=pymupdf.LINK_GOTO, page=destination,
                           to=pymupdf.Point(0, 0))
             expected_goto.setdefault(source_page_index, []).append(destination)
@@ -810,7 +858,7 @@ def render_part_extracts(combined_file: Path, rows: list[dict],
                 for row in selected:
                     if cancelled():
                         raise ProcessingError('Operation cancelled')
-                    start = document_starts[row['id']]
+                    start = mapped_page(document_starts, row['id'], row.get('source_start', 0))
                     end = start + row['total_pages'] - 1
                     if end >= combined.page_count:
                         raise ProcessingError('Part extract differs from the deterministic page map')
@@ -843,6 +891,11 @@ def render_part_extracts(combined_file: Path, rows: list[dict],
 def apply_page_annotations(output: pymupdf.Document, annotations: list[dict],
                            document_starts: dict[str, int], cancelled=None) -> dict:
     """Flatten explicitly printable marks; private review annotations stay out."""
+    if any(isinstance(key, tuple) for key in document_starts):
+        annotations = [{**a, 'document_id': '__output__', 'page_index': destination}
+                       for a in annotations
+                       if (destination := mapped_page(document_starts, a['document_id'], a['page_index'])) is not None]
+        document_starts = {'__output__': 0}
     inserted = unresolved_images = private_omitted = 0
     for item in annotations:
         if cancelled and cancelled():
@@ -993,15 +1046,15 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                 separator.insert_text((60, 770),
                                       'DRAFT technical separator - review before filing', fontsize=8)
             with open_pdf(d['_working_path']) as source:
-                if source.page_count != d['page_count']:
+                if source.page_count != d.get('_source_total', d['page_count']):
                     raise ProcessingError(f'Page count changed for {d["title"]} while building. Retry.')
                 # Source annotations/links are omitted by policy; generated index links
                 # are inserted from the deterministic page map after document insertion.
-                for first in range(0, source.page_count, 10):
+                for first in range(d.get('_source_start', 0), d.get('_source_start', 0)+d['page_count'], 10):
                     if cancelled and cancelled():
                         raise ProcessingError('Operation cancelled')
                     output.insert_pdf(source, from_page=first,
-                                      to_page=min(first + 9, source.page_count - 1),
+                                      to_page=min(first + 9, d.get('_source_start', 0)+d['page_count'] - 1),
                                       annots=False, links=False)
             if row['part'] != current_part:
                 current_part = row['part']
@@ -1011,7 +1064,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
             title = (row['label'] + ' - ' if row['label'] else '') + row['title']
             toc.append([2, title, row['start_page']])
 
-        document_starts = {row['id']: row['start_page'] - 1 for row in rows}
+        document_starts = source_destinations(rows)
         annotation_summary = apply_page_annotations(
             output, page_annotations or [], document_starts, cancelled)
 
@@ -1040,7 +1093,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                 if cancelled and cancelled():
                     raise ProcessingError('Operation cancelled')
                 label_text = (document['label'] if row['annexure_mode'] == 'label_stamp' and
-                              (source_page == 0 or output_marks.get('annexure_stamp_scope') == 'all')
+                              (source_page+row['source_start'] == 0 or output_marks.get('annexure_stamp_scope') == 'all')
                               else None)
                 results = apply_output_marks(
                     output[row['start_page'] - 1 + source_page], output_marks, mark_at,
@@ -1060,7 +1113,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                                   'page': row['start_page'] - 1, 'to': pymupdf.Point(0, 0)})
         reviewed_summary = insert_reviewed_links(
             output, reviewed_links or [], document_starts)
-        toc.extend(manual_toc(bookmarks or [], {row['id']: row['start_page'] for row in rows}))
+        toc.extend(manual_toc(bookmarks or [], {key: value+1 for key, value in document_starts.items()}))
         output.set_toc(toc)
         if output_marks.get('numbering_pdf_labels', True):
             set_output_page_labels(output, pdf_label_rules(numbering_map['pages']))
@@ -1093,7 +1146,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
             'labels': [p['pdf_label'] for p in numbering_map['pages']],
             'printed_labels': [p['printed_label'] for p in numbering_map['pages']], 'label_regions': label_regions,
             'sources': {str(row['start_page'] - 1 + i): {'document_id': d['id'],
-                'target_revision': d['revision'], 'page_index': i}
+                'target_revision': d['revision'], 'page_index': row['source_start']+i}
                 for row, d in zip(rows, documents) for i in range(d['page_count'])}},
         'reviewed_links': {key: reviewed_summary[key] for key in
                            ('retained', 'omitted_cross_output', 'unresolved')},
@@ -1227,8 +1280,8 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                 current_part = None
                 for rno, row in enumerate(volume['rows']):
                     destination = offset + row['start_page'] - 1
-                    combined_destinations[row['id']] = destination + 1
-                    combined_document_starts[row['id']] = destination
+                    combined_document_starts.update(source_destinations([row], offset))
+                    combined_destinations.update({key: value+1 for key, value in source_destinations([row], offset).items()})
                     if current_part != row['part']:
                         current_part = row['part']
                         global_toc.append([2, f'Part {current_part}', destination + 1])
@@ -1285,7 +1338,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
 
         csvpath = staging / 'index.csv'
         csv_stream = io.StringIO(newline='')
-        writer = csv.DictWriter(csv_stream, fieldnames=['volume','part','kind','label','title',
+        writer = csv.DictWriter(csv_stream, fieldnames=['volume','part','kind','label','title','source_start','source_end',
             'separator_page','start_page','end_page','total_pages','printed_start','printed_end','combined_start_page','combined_end_page'])
         writer.writeheader()
         writer.writerows({key:r[key] for key in writer.fieldnames} for r in all_rows)
@@ -1294,6 +1347,14 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         processing = [process_generated_pdf(staging / filename, output_marks, cancelled)
                       for filename in ['combined.pdf', *[v['filename'] for v in volume_rows],
                                        *[p['filename'] for p in part_extracts]]]
+        volume_limit = output_marks.get('volume_max_bytes')
+        exceptions = [dict(filename=v['filename'], bytes=file_size(staging/v['filename']), limit_bytes=volume_limit,
+                           scope='individual_volume', document_ids=[r['id'] for r in v['rows']])
+                      for v in volume_rows if volume_limit and file_size(staging/v['filename']) > volume_limit]
+        if exceptions:
+            error = ProcessingError('Generated volume PDF exceeds the selected workflow byte limit. Review size recovery; no export was published.')
+            error.recovery = {'input_snapshot': build_input_digest, 'size_exceptions': exceptions}
+            raise error
         office_files = []
         for kind, source, writer in [('docx', combined_file, word_draft),
                                      ('xlsx', csvpath, lambda p: excel_index(read_bytes(p))),

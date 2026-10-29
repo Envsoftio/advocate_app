@@ -99,6 +99,8 @@ export interface PageAnnotation {
 export type MarkPosition = 'top_left' | 'top_center' | 'top_right' | 'center' |
   'bottom_left' | 'bottom_center' | 'bottom_right'
 export interface OutputMarks {
+  volume_max_bytes?: number | null
+  volume_splits?: Record<string,{revision:number;after_pages:number[]}>
   processing_quality?: 'original' | 'lossless' | 'balanced' | 'small'
   cleanup_metadata?: boolean
   print_layout?: 'screen'

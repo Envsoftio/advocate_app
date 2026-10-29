@@ -1,0 +1,80 @@
+# B03C — Desktop, compact and dark Build settings
+
+29 October 2026. **Complete for the available Apple Silicon Mac target.** Scope is **15A / 22C / BU10**, not the later B04 supplement/insertion/variant designs.
+
+## Source and implementation
+
+Parsed `CourtBundle_JSON_For_Codex/implementation/phases/B03_bundle_processing_size/build_adaptations.json`, resolving included reusable components, descendant overrides and light/dark values from the shared 139 semantic tokens. Read the phase reference index, task, working rules and source decisions. The supplied **15A.png / BU10.png** are visual references. **No 22C PNG exists in the supplied preview directory; its resolved JSON is the reference.** [Resolved source and SHA-256](ui-evidence/b03c/resolved-design.json).
+
+The desktop settings hierarchy now reports actual saved values; compact settings use the distinct 22C composition, with a 64px icon rail, two panels, condensed structure summary and adjacent Numbering / Output options controls. BU10 uses semantic surfaces and pale-status ink, including the Preflight action. There is no separate compact state, preset or persistence path.
+
+## Requirement-to-evidence checklist
+
+| Requirement | Implementation and evidence |
+|---|---|
+| Desktop 15A and dark BU10 | Panels at (208,272), 882×518 and (1106,272), 310×518 at 1440×900/100%; 42px status strip, 28px heading, source-defined spacing, borders and actions. Geometry assertions and direct reference comparisons. |
+| Compact 22C | Panels at (88,272), 652×386 and (756,272), 244×386 at 1024×768/100%. Condensed navigation summary, grouped actions, quality/Office note and footer. Further narrow widths wrap/stack intentionally; no horizontal overflow. |
+| Membership and source context | Included/reference-only counts from actual documents; source pages from included working documents. Existing membership editor and source selection retained. |
+| Preflight | Loading/error/pending/blocker/warning/success surfaces derive from current app state. Counts never claim warnings were reviewed. Direct Preflight action uses existing finding workflow. Dirty/disconnected/busy contexts do not display a green completion claim. |
+| Presets and overrides | Saved preset name/version or Custom bundle settings; field differences from the existing `differences()` adapter, exposed in an expandable override list. Presets uses BU01 through the existing guarded structure workspace. |
+| Outputs and processing | Four core artifacts reflect the engine's fixed output contract. Optional Part PDFs and actual selected Office formats are shown separately. Quality, metadata cleanup, screen layout and numbering come from persisted settings. BU04 remains the editing workflow. |
+| Navigation/numbering | Actual cover/index choice, linked-index toggle, generated document bookmarks and viewer-label setting. Style, prefix, starting value and reset scope replace the prior generic page-map prose. BU03 and cover/index preview are connected. |
+| Counts and policies | Front matter is the sum of engine-provided cover/index pages; generated pages include all generated overhead; physical pages and volumes use the engine plan. Physical-page cap, optional individual-volume byte cap and profile file limit are separate. |
+| Freshness | Preview and saved-settings snapshots must match before their summaries are published. Refresh clears stale summaries; sequence and unmount guards reject late responses. Explicit error/retry state replaces stale numeric values. |
+| Build/recovery/output | Existing snapshot-bound queued build, duplicate-submit guard, progress/cancel/retry, BU06 recovery, retained results, generated review, validation/release and export remain connected. Dirty Build action is disabled with a visible explanation. Full browser suite covers actual build and failure/recovery paths. |
+| Caller/focus/drafts | Added explicit Back to build settings from preset/cover/numbering workspace, restoring the originating control after component transitions. Existing Save/Discard/Keep editing and failed drafts remain authoritative. BU04 Escape and volume-return focus are verified across the appearance matrix. |
+| Keyboard | Tab/Shift-Tab, Enter and Space tested through compact Output options → Plan volumes → Build. Focused primary controls scroll into view; hidden desktop summaries create no extra keyboard targets. Native compact Numbering return and keyboard build submission verified. |
+| Persistence and preservation | Same settings across all 16 appearance combinations; reload persistence; native app restart and sidecar restart checked. Original/prior hashes and native saved PDF reconciled below. |
+
+## Necessary adaptations
+
+- MatterDraft branding and real matter/file counts replace illustrative names and preparation r14. There is no preparation-revision concept in the current model; the sixth metric reports **Generated pages**, not an invented revision.
+- Core combined/volume PDF, CSV and ZIP outputs are always generated by the existing engine. Their checkmarks are **read-only summaries**, not disconnected checkbox controls. Document bookmarks and generated indexes are also fixed capabilities. Supported choices are edited through the existing preview/numbering/output tools; no new engine rule or output-selection schema was invented.
+- 22C omits a Plan volumes button. The implementation retains it in the summary panel, condensing the page/profile policy text to preserve its 386px reference height and keyboard access. Detailed policy remains in the new 13A workspace. Generated totals distinguish separators from cover/index pages.
+- Compact quality and selected Office formats replace the illustrative availability sentence. Preset overrides, membership, technical marks/Part extracts and prior-output retrieval remain in a secondary row below the primary footer.
+- Long real preset/settings text and increased interface scales may extend the scrolling workspace. At very narrow widths controls stack. The native window adds macOS chrome and uses Retina screenshots; the exact reference-viewport geometry is asserted in browser tests.
+- Existing profile/legal, Office-fidelity, vault and platform qualification limits remain unchanged. No court approval, verified OCR/signature claim, cloud dependency, source mutation, silent compression or new page-map rule was introduced.
+
+## Visual and keyboard evidence
+
+All images are local, synthetic and retained in git-ignored [ui-evidence/b03c](ui-evidence/b03c/).
+
+- [15A reference/runtime](ui-evidence/b03c/15A-comparison.png), [BU10 reference/runtime](ui-evidence/b03c/BU10-comparison.png).
+- [22C runtime at 1024×768](ui-evidence/b03c/build-1024-light-100.png); compare with the resolved JSON, not a nonexistent preview.
+- [1440 matrix](ui-evidence/b03c/matrix-1440.png), [1024 matrix](ui-evidence/b03c/matrix-1024.png), [matrix record](ui-evidence/b03c/matrix.json): light/dark × 90/100/110/125%, using the actual Theme and Interface size controls. Navigation retains appearance and persisted settings.
+- [Compact dark keyboard focus](ui-evidence/b03c/keyboard-dark.png), [compact light keyboard focus](ui-evidence/b03c/keyboard-light.png).
+- [Native compact dark settings](ui-evidence/b03c/native-compact-dark.png), [saved native choices](ui-evidence/b03c/native-options-saved.png), [generated index](ui-evidence/b03c/native-generated-index.png), [generated source](ui-evidence/b03c/native-generated-source.png), [Save cancellation](ui-evidence/b03c/native-save-cancel.png), [Save success](ui-evidence/b03c/native-save-success.png).
+
+The reference comparisons, full-size reference renders, both contact sheets and native index/source pixels were visually inspected. The final pale-status link correction restores semantic contrast in dark mode. The compact policy retains all three independent limits without forcing the desktop form into the compact viewport.
+
+## Native reconciliation
+
+QA uses a separate bundle identifier `io.courtbundle.desktop.b03cqa`, packaged sidecar on loopback port 8787 and `/private/tmp/matterdraft-b03c-native-store`. It never opens the active user matter store. Debug QA connects to the freshly built frozen sidecar; this is not production encrypted-vault startup acceptance.
+
+Synthetic matter `ec26b9d74d4342f9a165dafc1f3bc7a4`. Native saved lossless processing and XLSX selection survived app restart. Compact keyboard submission created build **268cc5589992481daa7ccd98974860e5**: 3 source pages + 1 index = 4 physical pages / 1 volume. All six manifest file sizes and SHA-256 values match actual bytes. Eight original/prior files remain hash-identical. Combined PDF labels 1–4, index link → physical page 2, bookmark → page 2, CSV range 2–4 and combined offset agree with the current engine page map. Native Save cancellation left output intact; retry saved the exact combined PDF bytes.
+
+Saved SHA-256: `02e4a313ba787d8affed3cb4ad1bcfbeaf12aec8eb106bd01b65fe2d4f62fc62`. [Reconciliation JSON](ui-evidence/b03c/native-reconciliation.json), [manifest](ui-evidence/b03c/native-manifest.json), [saved PDF](ui-evidence/b03c/native-saved-combined.pdf).
+
+Generated index and source pixels/text rendered immediately in the known single QA app instance with a ready sidecar. The B03B paint-delay observation did not recur in this run. Native select menus required separate selection/confirmation actions in automation; modal AX content was sometimes absent, so keyboard actions and screenshots were used to verify actual state.
+
+## Changed paths and checks
+
+B03C changes `frontend/src/components/BuildWorkspace.vue`, `frontend/src/build-design.css`, `frontend/src/App.vue`, and the build-caller return in `BundleStructure.vue`. Adds `frontend/e2e/build-adaptations.spec.ts`. The production-worker regression now matches `/src/main.ts` by URL pathname so a Vite timestamp query cannot bypass its production-entry interception; raster, text, worker refusal and emitted-worker assertions remain intact. Existing uncommitted branding and B03B backend/component/test changes were preserved. No backend B03C mutation or migration.
+
+- `cd backend && .venv312/bin/python -m pytest -q`: **317 passed**, 6 dependency deprecation warnings, 58.05s. [Log](ui-evidence/b03c/backend.log).
+- `cd frontend && npm run build && npm run test`: production/type build and **44 unit tests** passed. Final release build reruns the production build; unit tests were rerun afterward. Existing large-JS-chunk advisory remains.
+- Scoped B03C browser tests: **3 passed** (12.8s), including reference geometry, actual appearance matrix, focus returns, persisted summaries, API failure and mixed-snapshot rejection.
+- First full browser run: **114 passed, 2 failed, 1 skipped** (7.2m). Narrow-width spacing and the production-entry URL test matcher failed. Corrected 16px spacing and sub-560px action wrapping; corrected pathname matcher without weakening rendering assertions. The focused recheck passed production fallback and B03C; exposed the remaining 390px action overflow, which was then fixed.
+- `backend/.venv312/bin/python backend/scripts/build_sidecar.py`: matching Apple Silicon sidecar built. [Log](ui-evidence/b03c/sidecar-build.log).
+- `cd frontend && npm run tauri:build -- --bundles app`: final release **70.12 MiB** app built. [Log](ui-evidence/b03c/native-build-final.log).
+- `npm run tauri:build -- --debug --bundles app --config /private/tmp/matterdraft-b03c-native-config.json`: **37.04 MiB** isolated QA bundle built; final config starts at 1024×768. [Log](ui-evidence/b03c/native-qa-final.log).
+- `git diff --check`: passed.
+
+- Final complete browser: `cd frontend && MATTERDRAFT_E2E_VITE_PORT=1446 npm run test:e2e -- --output=/private/tmp/matterdraft-b03c-final`: **116 passed, 1 skipped** (opt-in vault), **7.2m**, no retries. [Final log](ui-evidence/b03c/browser-final.log). This includes all three B03C cases and existing B03A/B03B processing/recovery, workflow, cancellation, stale output, dirty drafts, keyboard/save and generated-review regressions.
+- Final app **and** packaged-sidecar restart: saved build 268cc558, six actual output files, lossless processing, XLSX selection and compact dark appearance remained present. Reconciliation reran successfully after restart. [Restart screenshot](ui-evidence/b03c/native-restart.png).
+
+B03C is complete for this available target. Windows, Intel Mac, clean-device/minimum-macOS qualification, production encrypted-vault startup, native Office rendering and printing remain unverified. No installed application was replaced by this phase; the rebuilt release app is under `frontend/src-tauri/target/release/bundle/macos/MatterDraft Studio.app`.
+
+## Next bounded task
+
+Read the B04 task kit only. **B04A** is next: a supplemental build plan tied to a real prior-build baseline, with added/changed/omitted/unchanged revision comparison and stable selected-page identity. B04B insertion policies and B04C audience variants are separate. No B04 implementation was started.

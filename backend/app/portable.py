@@ -427,6 +427,13 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
             raise PortableMatterError('Invalid annexure override document reference')
         validated_marks['annexure_overrides'] = {
             id_map[document_id]: mode for document_id, mode in overrides.items()}
+        splits = validated_marks['volume_splits']
+        for document_id, split in splits.items():
+            pages = revision_pages.get((document_id, split['revision']), 0)
+            if document_id not in old_ids or any(page >= pages for page in split['after_pages']):
+                raise PortableMatterError('Invalid volume split document or boundary')
+        validated_marks['volume_splits'] = {
+            id_map[document_id]: split for document_id, split in splits.items()}
         link_id_map = {old: new_id() for old in link_ids}
         annotations = manifest.get('page_annotations', [])
         if manifest['version'] >= 10 and 'page_annotations' not in manifest:

@@ -142,3 +142,108 @@
  .generated-version {left:12px;width:140px}
  .generated-header:has(.generated-version) p {padding-left:148px}
 }
+
+/* B03C: resolved 15A / 22C / BU10, pre-interface-zoom dimensions. */
+.build-workspace[data-screen=settings] {padding:24px;font-weight:440}
+.build-workspace[data-screen=settings] .build-heading h1 {font-weight:680;font-size:28px}
+.build-workspace[data-screen=settings] .build-heading p {padding-top:0}
+.build-preflight {padding:10px 14px}
+.build-preflight>svg {flex-shrink:0}
+.build-preflight>span {flex:1}
+.build-preflight.success {background:var(--cb-successBg);color:var(--cb-status-success-text)}
+.build-preflight.warning {background:var(--cb-warningBg);color:var(--cb-status-warning-text)}
+.build-preflight:is(.danger,.error) {background:var(--cb-dangerBg);color:var(--cb-status-danger-text)}
+.build-preflight .text-tool {color:inherit;font-size:12px;text-decoration:underline}
+.build-load-error {padding:12px 16px;border:1px solid var(--cb-danger);border-radius:8px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.build-workspace[data-screen=settings] .build-settings-grid {grid-template-columns:minmax(0,1fr) 310px}
+.build-workspace[data-screen=settings] .build-settings-card {height:auto;min-height:518px}
+.build-workspace[data-screen=settings] h2 {font-weight:650}
+.build-workspace[data-screen=settings] .build-features {gap:6px 8px}
+.build-workspace[data-screen=settings] .build-features>span {min-height:28px;line-height:20px}
+.build-features .feature-off svg {background:var(--cb-surface2);color:var(--cb-muted);border:1px solid var(--cb-control-border)}
+.build-features .feature-off small {margin-left:0}
+.build-workspace[data-screen=settings] .build-setting-row p {white-space:normal;overflow:visible;line-height:20px}
+.build-workspace[data-screen=settings] .build-setting-row>div {min-width:0}
+.build-workspace[data-screen=settings] .build-processing-row h3 {font-weight:440}
+.build-workspace[data-screen=settings] .build-processing-row p {font-size:12px}
+.build-workspace[data-screen=settings] .build-summary {height:auto;min-height:518px}
+.build-workspace[data-screen=settings] .build-summary dl {display:block;margin:4px 0 18px}
+.build-workspace[data-screen=settings] .build-summary .build-limit p {margin:10px 0 12px}
+.build-workspace[data-screen=settings] .build-summary>.membership-button {margin-top:auto}
+.build-compact-label,.build-compact-structure,.build-compact-note {display:none}
+.build-overrides summary {cursor:pointer;color:var(--cb-link)}
+.build-overrides ul {margin:8px 0;padding-left:18px}
+.build-workspace[data-screen=settings] button:focus-visible,.build-overrides summary:focus-visible {outline:2px solid var(--cb-focus);outline-offset:3px}
+.build-workspace[data-screen=settings] .membership-button:hover:not(:disabled) {filter:brightness(.96)}
+.build-workspace[data-screen=settings] .membership-button:disabled {opacity:.55;cursor:not-allowed}
+@media(max-width:1199px) {
+ .app-shell.design-shell[data-build=true] {grid-template-columns:64px minmax(0,1fr)}
+ .design-shell[data-build=true] .membership-matter {display:none}
+ .design-shell[data-build=true] .matter-rail {padding:108px 12px 20px}
+ .design-shell[data-build=true] .matter-rail>button,.design-shell[data-build=true] .membership-rail-bottom button {width:40px;padding:0 12px}
+ .design-shell[data-build=true] .matter-rail button span {display:none}
+}
+@container bundle (max-width:1000px) {
+ .build-workspace[data-screen=settings] .build-settings-grid {grid-template-columns:minmax(0,1fr) 244px}
+ .build-workspace[data-screen=settings] .build-settings-card {min-height:386px;display:grid;grid-template-columns:134px minmax(0,1fr);grid-template-rows:67px 124px 67px 50px auto;padding:14px 18px 8px;align-content:start}
+ .build-workspace[data-screen=settings] .build-settings-card>header {grid-column:1 / -1}
+ .build-workspace[data-screen=settings] .build-output-section {grid-column:1 / -1;height:124px}
+ .build-workspace[data-screen=settings] .build-structure-section {grid-column:1 / -1;height:67px;border:0;padding-top:10px}
+ .build-desktop-structure,.build-desktop-label {display:none}
+ .build-compact-structure,.build-compact-label {display:block}
+ .build-compact-structure h3 {margin:0}
+ .build-compact-structure p {margin:2px 0 0;color:var(--cb-muted);line-height:20px}
+ .build-workspace[data-screen=settings] .build-settings-card>.build-setting-row {height:50px;border:0;display:flex;align-items:center}
+ .build-workspace[data-screen=settings] .build-setting-row>div {display:none}
+ .build-workspace[data-screen=settings] .build-numbering-row>.membership-button {width:126px}
+ .build-workspace[data-screen=settings] .build-processing-row>.membership-button {width:142px}
+ .build-compact-note {display:block;grid-column:1 / -1;font-size:12px;color:var(--cb-muted);margin:8px 0 0!important;line-height:18px!important}
+ .build-workspace[data-screen=settings] .build-summary {min-height:386px;padding-bottom:12px}
+ .build-workspace[data-screen=settings] .build-summary dl {margin:4px 0 11px}
+ .build-workspace[data-screen=settings] .build-summary dl>div {height:32px}
+ .build-workspace[data-screen=settings] .build-summary dt {font-size:12px}
+ .build-workspace[data-screen=settings] .build-summary .build-limit {padding-top:10px}
+ .build-workspace[data-screen=settings] .build-summary .build-limit strong {margin-top:4px}
+ .build-workspace[data-screen=settings] .build-summary .build-limit p {margin:4px 0 8px;font-size:11px;line-height:15px}
+ .build-workspace[data-screen=settings] .build-summary>.membership-button {min-height:28px;height:28px}
+ .build-workspace[data-screen=settings] .build-footer {flex-wrap:nowrap}
+}
+@container bundle (max-width:760px) {
+ .build-workspace[data-screen=settings] .build-settings-grid {grid-template-columns:minmax(0,1fr) 220px;gap:16px}
+ .build-workspace[data-screen=settings] .build-settings-card {grid-template-rows:auto auto auto 50px auto}
+ .build-workspace[data-screen=settings] .build-settings-card>header {height:auto;min-height:90px;flex-wrap:wrap;padding-bottom:12px}
+ .build-workspace[data-screen=settings] .build-settings-card>header>div {flex-basis:100%}
+ .build-workspace[data-screen=settings] .build-output-section {height:auto;min-height:124px;padding-bottom:12px}
+ .build-workspace[data-screen=settings] .build-features {grid-template-columns:1fr;gap:2px}
+ .build-workspace[data-screen=settings] .build-structure-section {height:auto;min-height:80px;padding-bottom:8px}
+ .build-workspace[data-screen=settings] .build-footer {flex-wrap:wrap}
+ .build-workspace[data-screen=settings] .build-summary {min-height:386px}
+}
+@container bundle (max-width:560px) {
+ .build-workspace[data-screen=settings] .build-settings-grid {grid-template-columns:1fr}
+ .build-workspace[data-screen=settings] .build-settings-card {grid-template-columns:134px minmax(0,1fr)}
+ .build-workspace[data-screen=settings] .build-summary {min-height:380px}
+}
+.build-preflight .text-tool {min-height:22px;height:22px;padding:0 6px;line-height:22px}
+.build-workspace[data-screen=settings] .build-summary h2 {margin-bottom:0}
+.build-workspace[data-screen=settings] .build-summary dl {margin-top:12px}
+.build-workspace[data-screen=settings] .build-processing-row {border-bottom:0}
+.build-policy-compact {display:none}
+@container bundle (max-width:1000px) {
+ .build-policy-desktop {display:none}
+ .build-policy-compact {display:block}
+ .build-workspace[data-screen=settings] .build-summary {padding-bottom:8px}
+ .build-workspace[data-screen=settings] .build-summary .build-limit {padding-top:8px}
+ .build-workspace[data-screen=settings] .build-summary .build-limit p {font-size:12px;line-height:16px;margin:4px 0}
+ .build-workspace[data-screen=settings] .build-summary .build-limit small {line-height:18px;display:block}
+}
+/* Pale status surfaces keep their semantic ink even under global dark links. */
+.build-workspace .build-preflight.success .text-tool {color:var(--cb-status-success-text)}
+.build-workspace .build-preflight.warning .text-tool {color:var(--cb-status-warning-text)}
+.build-workspace .build-preflight:is(.danger,.error) .text-tool {color:var(--cb-status-danger-text)}
+@container bundle (max-width:560px) {
+ .build-workspace[data-screen=settings] .build-settings-card {grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto auto auto auto}
+ .build-workspace[data-screen=settings] .build-settings-card>.build-setting-row {min-height:46px;height:auto;padding:6px 0}
+ .build-workspace[data-screen=settings] .build-setting-row>.membership-button {max-width:100%;width:100%}
+ .build-workspace[data-screen=settings] .build-features>span {overflow-wrap:anywhere}
+}

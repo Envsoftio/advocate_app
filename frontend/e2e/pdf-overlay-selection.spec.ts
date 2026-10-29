@@ -6,6 +6,18 @@ import {resolve} from 'node:path'
 const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`
 const headers={Authorization:'Bearer e2e-isolated-token'}
 
+async function settledSurface(page:import('@playwright/test').Page) {
+  // Opening a tool changes the available reader width. Wait for its actual
+  // raster and geometry before sending coordinates; stale=false alone can
+  // still describe the previous painted size before ResizeObserver runs.
+  await expect.poll(()=>page.locator('.pdf-page-surface').evaluate(async el=>{
+    const bounds=()=>JSON.stringify(el.getBoundingClientRect().toJSON())
+    const before=bounds()
+    for(let i=0;i<3;i++)await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()))
+    return el.getAttribute('aria-busy')==='false' && before===bounds()
+  })).toBe(true)
+}
+
 test('select, drag, and Delete affect only authored overlays',async({page,request})=>{
   await page.setViewportSize({width:1440,height:1000})
   const matter=await (await request.post(`${base}/matters`,{headers,data:{
@@ -36,6 +48,7 @@ test('select, drag, and Delete affect only authored overlays',async({page,reques
   await highlight.click()
   await expect(highlight).toHaveClass(/selected/)
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
+  await settledSurface(page)
   const before=await highlight.boundingBox()
   expect(before).toBeTruthy()
   await page.mouse.move(before!.x+before!.width/2,before!.y+before!.height/2)
@@ -49,6 +62,7 @@ test('select, drag, and Delete affect only authored overlays',async({page,reques
   await reviewedLink.click()
   await expect(reviewedLink).toHaveClass(/selected/)
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
+  await settledSurface(page)
   const linkBefore=await reviewedLink.boundingBox()
   expect(linkBefore).toBeTruthy()
   await page.mouse.move(linkBefore!.x+linkBefore!.width/2,linkBefore!.y+linkBefore!.height/2)
@@ -101,6 +115,7 @@ test('Annotate and Stamps retain independent editable marks',async({page,request
   await page.getByRole('button',{name:'Box',exact:true}).click()
   await expect(page.getByText('This editable mark is included in Save copy and new bundle exports.')).toBeVisible()
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
+  await settledSurface(page)
   const paper=await page.locator('.pdf-paper').boundingBox()
   expect(paper).toBeTruthy()
   await page.mouse.move(paper!.x+80,paper!.y+60)
@@ -112,6 +127,7 @@ test('Annotate and Stamps retain independent editable marks',async({page,request
   await expect(box).toBeVisible()
   const boxWidth=(await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json())[0].rect_width as number
   await box.click()
+  await settledSurface(page)
   const boxHandle=page.getByRole('button',{name:'Resize selected Box'})
   const boxCorner=await boxHandle.boundingBox()
   expect(boxCorner).toBeTruthy()
@@ -121,6 +137,7 @@ test('Annotate and Stamps retain independent editable marks',async({page,request
   await page.mouse.up()
   await expect.poll(async()=> (await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json())[0].rect_width as number).toBeGreaterThan(boxWidth)
   await page.getByRole('button',{name:'Draw',exact:true}).click()
+  await settledSurface(page)
   const drawPaper=await page.locator('.pdf-paper').boundingBox()
   expect(drawPaper).toBeTruthy()
   await page.mouse.move(drawPaper!.x+100,drawPaper!.y+160)

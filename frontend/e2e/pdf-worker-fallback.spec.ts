@@ -61,7 +61,7 @@ test('production PDF reader renders with the bundled main-thread fallback when W
   // synthetically makes Chrome classify its address space as public and reject
   // the local API. Replace only the app entry with the complete production JS
   // and CSS; the PDF worker is likewise the emitted production asset above.
-  await page.route(`${origin}/src/main.ts`, route => route.fulfill({
+  await page.route(url => url.origin === origin && url.pathname === '/src/main.ts', route => route.fulfill({
     contentType: 'text/javascript',
     body: `const productionCss=document.createElement('link');productionCss.rel='stylesheet';productionCss.href='/assets/${cssName}';document.head.append(productionCss);\n${appSource}`,
   }))
@@ -88,7 +88,7 @@ test('production PDF reader renders with the bundled main-thread fallback when W
   // main-thread fallback rendered without pinning a layout-specific width.
   expect(await surface.locator('canvas').evaluate(canvas => (canvas as HTMLCanvasElement).width)).toBeGreaterThan(50)
   expect(await page.evaluate(() => (window as any).__blockedWorkerAttempts)).toBeGreaterThan(0)
-  expect(served.has(`/assets/${workerName}`)).toBe(true)
+  expect([...served], `Production assets served: ${JSON.stringify([...served])}; worker: ${workerName}`).toContain(`/assets/${workerName}`)
 
   // Fallback stays usable for the next document lifecycle too.
   await page.reload()

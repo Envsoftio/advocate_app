@@ -56,6 +56,16 @@ export async function includeAllDocuments(page:Page) {
 }
 
 export async function openBuildTool(page:Page,name='Plan volumes') {
+  const volumes=page.locator('.volume-workspace')
+  if(await volumes.isVisible()) {
+    if(name==='Plan volumes')return
+    if(await volumes.getByRole('button',{name:'Save choices',exact:true}).isVisible()) {
+      await volumes.getByRole('button',{name:'Preview changes',exact:true}).click()
+      await volumes.getByRole('button',{name:'Save choices',exact:true}).click()
+      await expect(volumes.getByRole('button',{name:'Save choices',exact:true})).toBeHidden()
+    }
+    await volumes.getByRole('button',{name:'Back to build',exact:true}).click()
+  }
   const preset=page.getByRole('dialog',{name:'Bundle presets'});if(await preset.isVisible())await preset.getByRole('button',{name:'Cancel',exact:true}).click();
   if(await page.locator('.bundle-structure').isVisible())await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();
   await expect(page.locator('.build-workspace')).toBeVisible()
@@ -72,6 +82,19 @@ export async function openBuildTool(page:Page,name='Plan volumes') {
   await settings.getByRole('button',{name,exact:true}).click()
 }
 export async function submitBundleBuild(page:Page){
+ const volumes=page.locator('.volume-workspace')
+ if(await volumes.isVisible()) {
+   await volumes.getByRole('button',{name:'Preview changes',exact:true}).click()
+   const save=volumes.getByRole('button',{name:'Save choices',exact:true})
+   if(await save.isVisible()) {await save.click();await expect(save).toBeHidden()}
+   await volumes.getByRole('button',{name:'Back to build',exact:true}).click()
+ }
+ if(await page.locator('.bundle-structure').isVisible())await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();
+ await expect(page.locator('.build-workspace')).toBeVisible()
+ await expect(page.locator('.section-enter-active')).toHaveCount(0)
+ const rebuild=page.locator('.build-workspace').getByRole('button',{name:'Rebuild',exact:true})
+ if(await rebuild.isVisible())await rebuild.click()
+
  if(await page.locator('.bundle-structure').isVisible())await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();
  const tool=page.locator('.build-tool-dialog[open]')
  if(await tool.count())await tool.getByRole('button',{name:'Close build tool'}).click()

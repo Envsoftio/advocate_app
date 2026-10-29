@@ -11,6 +11,8 @@ interface Row {
   part: number
   label: string
   title: string
+  source_start: number
+  source_end: number
   total_pages: number
   printed_start: string
   printed_end: string
@@ -61,7 +63,7 @@ const error = ref('')
 let sequence = 0
 const selected=ref('')
 const state=computed(()=>props.inputsPending?'Pending':loading.value?'Recalculating':error.value?'Error':preview.value?'Current':'Pending')
-const rows=computed(()=>preview.value?.volumes.flatMap(v=>v.rows)||props.documents?.filter(d=>d.bundle_included).map(d=>({...d,total_pages:d.page_count,volume:null,printed_start:'',printed_end:'',combined_start_page:null,combined_end_page:null}))||[])
+const rows=computed(()=>preview.value?.volumes.flatMap(v=>v.rows)||props.documents?.filter(d=>d.bundle_included).map(d=>({...d,source_start:0,source_end:d.page_count,total_pages:d.page_count,volume:null,printed_start:'',printed_end:'',combined_start_page:null,combined_end_page:null}))||[])
 onBeforeUnmount(()=>{sequence++})
 
 async function refresh() {
@@ -94,8 +96,8 @@ watch(() => [props.matterId, props.maxPages, props.keepGroups, props.refreshKey,
  <header><div><h2>Page mapping</h2><p>{{state==='Current'?'Printed references and physical destinations reflect current accepted inputs.':'Source counts are current. Printed and combined positions require recalculation.'}}</p></div><span :class="['map-state',state.toLowerCase()]" role="status"><CheckCircle2 v-if="state==='Current'" :size="14"/><RefreshCw v-else-if="loading" :size="14"/><TriangleAlert v-else :size="14"/>{{state}}</span></header>
  <p v-if="error" role="alert">{{error}} <button class="text-tool" @click="refresh">Retry map</button></p>
  <div class="page-map-scroll"><table><thead><tr><th>Document</th><th>Source</th><th>Printed volume</th><th>Combined PDF</th><th>Bookmark target</th><th>Status</th></tr></thead><tbody>
- <tr v-for="row in rows" :key="row.id" :class="{selected:selected===row.id}" @click="selected=row.id">
- <td><button class="map-document" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">{{row.label?row.label+' · ':''}}{{row.title}}</button></td><td>1–{{row.total_pages}}</td><td>{{state==='Current'?`${row.printed_start}–${row.printed_end}`:state}}</td><td>{{state==='Current'?`${row.combined_start_page}–${row.combined_end_page}`:state}}</td><td><button class="map-source" :aria-label="'Bookmark '+row.title+' first page'" @click="emit('bookmarkDocument',row.id)">Source 1 <span>＋</span></button></td><td><span :class="['map-state',state.toLowerCase()]"><CheckCircle2 v-if="state==='Current'" :size="13"/><TriangleAlert v-else :size="13"/>{{state}}</span></td>
+ <tr v-for="row in rows" :key="`${row.id}:${row.source_start}`" :class="{selected:selected===row.id}" @click="selected=row.id">
+ <td><button class="map-document" :aria-label="'Open '+row.title+' working copy'" @click="emit('openDocument',row.id)">{{row.label?row.label+' · ':''}}{{row.title}}</button></td><td>{{row.source_start+1}}–{{row.source_end}}</td><td>{{state==='Current'?`${row.printed_start}–${row.printed_end}`:state}}</td><td>{{state==='Current'?`${row.combined_start_page}–${row.combined_end_page}`:state}}</td><td><button class="map-source" :aria-label="'Bookmark '+row.title+' first page'" @click="emit('bookmarkDocument',row.id)">Source 1 <span>＋</span></button></td><td><span :class="['map-state',state.toLowerCase()]"><CheckCircle2 v-if="state==='Current'" :size="13"/><TriangleAlert v-else :size="13"/>{{state}}</span></td>
  </tr></tbody></table></div>
  <p v-if="preview?.part_extracts.length" class="placement-note">Technical Part PDFs: {{preview.part_extracts.map(p=>`Part ${p.part} (${p.pages} source pages)`).join(' · ')}}</p>
  <footer><strong>Page mapping {{state.toLowerCase()}}</strong><p v-if="inputsPending">Save current inputs and finish processing before recalculating.</p><p v-else-if="preview">{{preview.volumes.length}} volume(s) · {{preview.combined_pages}} physical pages. Printed labels are separate from physical destinations.</p><p>Earlier builds retain their frozen maps. Imported originals remain unchanged.</p></footer>

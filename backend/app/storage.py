@@ -759,7 +759,7 @@ class Store:
 
     @staticmethod
     def default_output_marks() -> dict:
-        return {'processing_quality': 'original', 'cleanup_metadata': False, 'print_layout': 'screen',
+        return {'volume_max_bytes': None, 'volume_splits': {}, 'processing_quality': 'original', 'cleanup_metadata': False, 'print_layout': 'screen',
                 'office_docx': False, 'office_xlsx': False, 'office_pptx': False,
                 'index_style': 'compact', 'numbering_style': 'arabic',
                 'numbering_restart': 'volume', 'numbering_start': 1, 'numbering_prefix': '',
@@ -847,7 +847,7 @@ class Store:
                      'keep_groups_intact': settings['keep_groups_intact'],
                      'output_marks': applied_marks, 'preset': snapshot}
             # Cover identity and document exceptions always belong to this matter.
-            for key in ('cover_heading', 'cover_reference', 'cover_title'):
+            for key in ('volume_splits', 'cover_heading', 'cover_reference', 'cover_title'):
                 applied_marks[key] = current_marks[key]
             if preserve_overrides and before['preset']:
                 baseline = before['preset']['settings']
@@ -885,6 +885,8 @@ class Store:
         after = {**settings, 'preset': before['preset']}
         with self.connect() as con:
             valid_ids = {r[0] for r in con.execute('SELECT id FROM documents WHERE matter_id=?', (matter_id,))}
+        if set(settings['output_marks'].get('volume_splits', {})) - valid_ids:
+            raise ValueError('Split exceptions must target documents in this matter')
         if set(settings['output_marks']['annexure_overrides']) - valid_ids:
             raise ValueError('Annexure exceptions must target documents in this matter')
         if before == after:
@@ -1740,7 +1742,7 @@ class Store:
                    'output_preset': self.get_applied_output_preset(matter_id)}
         # New opt-in processing defaults do not stale historical B01/B02 outputs.
         # Nondefault choices remain part of the same deterministic settings digest.
-        for key in ('processing_quality', 'cleanup_metadata', 'print_layout',
+        for key in ('volume_max_bytes', 'volume_splits', 'processing_quality', 'cleanup_metadata', 'print_layout',
                     'office_docx', 'office_xlsx', 'office_pptx'):
             if payload['output_marks'].get(key) == self.default_output_marks()[key]:
                 payload['output_marks'].pop(key, None)

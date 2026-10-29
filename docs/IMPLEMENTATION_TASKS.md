@@ -33,6 +33,12 @@ References:
 - Use synthetic fixtures. Preserve imported originals. Never equate OCR text, scanned signatures or technical checks with legal verification.
 - Keep core processing offline and independent of the UI. Do not replace Tauri/Vue as part of this backlog.
 
+## Current scoped design delivery
+
+- [x] **B03B — New 13A volume planning and BU06 size recovery** · DONE for the available Mac target, 29 October 2026. Final browser 113 passed / 1 opt-in vault skip; native recovery/review/Save and restart checks passed. Explicit source-page splits and optional volume-byte policy use the deterministic map and existing atomic history. See [implementation and evidence checklist](DESIGN_PHASEB03B_IMPLEMENTATION.md). Backend 317 and frontend 44 pass; original/prior hashes preserved. Broader release/platform gates below remain independent.
+- [x] **B03C — New 15A desktop, 22C compact and BU10 dark Build settings** · DONE for the available Mac target, 29 October 2026. Backend 317, frontend 44 and full browser 116 passed / 1 opt-in vault skip. Sixteen appearance renders, reference comparisons, native compact/dark controls, real generation/review, Save cancellation/retry, hashes and app/sidecar restart passed. See [requirement checklist and evidence](DESIGN_PHASEB03C_IMPLEMENTATION.md).
+- [ ] **B04A — Supplemental build plan and prior-build revision comparison** · Next bounded task. B04 kit inspected; implementation not started.
+
 ## 0. Product decisions
 
 - [x] **DEC-05 — Establish MatterDraft Studio product identity** · P1
@@ -41,6 +47,8 @@ References:
   - **Status:** DONE · 29 October 2026. Brand rename and terminology cleanup verified in [acceptance sections BW–BX](ACCEPTANCE_TESTS.md#bx-matterdraft-studio-product-terminology--29-october-2026): backend 308, frontend 44, two focused browser cases, Apple Silicon package and protected-sidecar checks passed. Legacy data/installation identifiers remain stable; platform qualification and scoped legal-review tasks retain their existing statuses.
 
   - **Selected artwork · 29 October 2026:** Owner-supplied navy SVG adopted unchanged for UI/favicon and used to generate desktop icons. Frontend 44, browser 3 and Apple Silicon package checks passed; see [logo verification](ACCEPTANCE_TESTS.md#by-selected-matterdraft-logo--29-october-2026).
+
+  - **Tagline and launchers · 29 October 2026:** Applied “Legal Documents, Simplified.” beneath the brand; refreshed development icon compilation and updated the installed production app with a retained backup. See [verification and native limits](ACCEPTANCE_TESTS.md#bz-tagline-and-installed-launcher-icons--29-october-2026).
 
 - [x] **DEC-01 — Confirm stack and supported platforms** · P0
   - Record client acceptance of Tauri/Vue replacing Electron/React and Tauri packaging replacing Electron Builder.

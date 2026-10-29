@@ -526,7 +526,7 @@ const marksError = ref('')
 const marksNotice = ref('')
 const markPreview = ref<OutputMarkPreview[]>([])
 const defaultMarks: OutputMarks = {
-  processing_quality:'original',cleanup_metadata:false,print_layout:'screen',office_docx:false,office_xlsx:false,office_pptx:false,
+  volume_max_bytes:null,volume_splits:{},processing_quality:'original',cleanup_metadata:false,print_layout:'screen',office_docx:false,office_xlsx:false,office_pptx:false,
   numbering_style:'arabic',numbering_restart:'volume',numbering_start:1,numbering_prefix:'',numbering_position:'bottom_center',numbering_front_matter:'physical',numbering_pdf_labels:true,numbering_linked_index:true,numbering_back_link:false,
   index_style:'compact',part_extracts_enabled:false,front_matter:'index_only',index_date:false,cover_heading:'',cover_reference:'',cover_title:'',
   watermark_enabled:false,watermark_text:'DRAFT',watermark_position:'center',

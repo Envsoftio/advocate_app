@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import {
   Check,
+  CircleCheck,
+  Minus,
   Package,
   FileText,
   AlertCircle,
@@ -15,10 +17,10 @@ import type {
   Job,
   MatterDocument,
   CourtProfile,
-  OutputMarks,
 } from "../lib/types";
 import OutputChecksDialog from "./OutputChecksDialog.vue";
 import { useOutputValidation } from "../lib/outputValidation";
+import { differences, type SavedLayout } from "../lib/bundleSettings";
 import BuildComparison from "./BuildComparison.vue";
 const props = defineProps<{
   matterId: string;
@@ -34,6 +36,7 @@ const props = defineProps<{
   dirty: boolean;
   profile?: CourtProfile;
   checksText: string;
+  checksState?: "loading" | "error" | "pending" | "danger" | "warning" | "success";
   storage?: boolean;
 }>();
 const emit = defineEmits<{
@@ -76,6 +79,7 @@ const sourcePages = computed(() =>
   included.value.reduce((n, d) => n + d.page_count, 0),
 );
 const job = computed(() => (props.job?.kind === "build" ? props.job : null));
+const hasSizeException = computed(() => Array.isArray((job.value?.result as Record<string, unknown> | null)?.size_exceptions));
 const running = computed(
   () => job.value && ["running", "queued"].includes(job.value.status),
 );
@@ -95,19 +99,54 @@ const title = computed(
 );
 type Plan = {
   combined_pages: number;
-  volumes: Array<{ page_count: number; index_pages: number }>;
+  input_snapshot: string;
+  generated_pages: number;
+  volumes: Array<{ page_count: number; index_pages: number; cover_pages: number }>;
   numbering: string;
 };
 const plan = ref<Plan | null>(null),
   planError = ref("");
-const savedOptions = ref<OutputMarks|null>(null);
-const qualityLabel = computed(() => savedOptions.value ? ({original:"Original page quality",lossless:"Lossless optimization",balanced:"Balanced images · 240 dpi",small:"Smaller images · 150 dpi"})[savedOptions.value.processing_quality || "original"] : "Saved output options");
+const savedLayout = ref<SavedLayout | null>(null);
+const savedOptions = computed(() => savedLayout.value?.output_marks || null);
+const loading = ref(false);
+const overrides = computed(() => savedLayout.value ? differences(savedLayout.value, savedLayout.value.applied) : []);
+const presetName = computed(() => savedLayout.value?.applied ? `${savedLayout.value.applied.name} · v${savedLayout.value.applied.version}` : savedLayout.value ? "Custom bundle settings" : "Loading saved settings…");
+const qualityLabel = computed(() => savedOptions.value ? ({original:"Original page quality",lossless:"Lossless optimization",balanced:"Balanced images · 240 dpi",small:"Smaller images · 150 dpi"})[savedOptions.value.processing_quality || "original"] : "Output settings unavailable");
+const officeLabel = computed(() => {
+  const o = savedOptions.value;
+  if (!o) return "Office selection unavailable";
+  const selected = [o.office_docx && "DOCX", o.office_xlsx && "XLSX", o.office_pptx && "PPTX"].filter(Boolean);
+  return selected.length ? `${selected.join(", ")} review drafts selected` : "No Office review drafts selected";
+});
+const outputFiles = computed(() => ["Combined bookmarked PDF", "Individual volume PDFs", "CSV index", "ZIP archive"]);
+const structureFeatures = computed(() => {
+  const o = savedOptions.value;
+  return [
+    {label: o?.front_matter === "cover_index" ? "Cover and index pages" : "Index pages · no cover", on: true},
+    {label: "Linked index entries", on: o?.numbering_linked_index !== false},
+    {label: "Document bookmarks", on: true},
+    {label: "Matching viewer page labels", on: o?.numbering_pdf_labels !== false},
+  ];
+});
+const numberingLabel = computed(() => {
+  const o = savedOptions.value;
+  if (!o) return "Saved numbering unavailable";
+  const style = {arabic:"1, 2, 3",roman_lower:"i, ii, iii",roman_upper:"I, II, III"}[o.numbering_style || "arabic"];
+  const restart = {volume:"restart per volume",continuous:"continuous across volumes",section:"restart per Part"}[o.numbering_restart || "volume"];
+  return `${o.numbering_prefix || ""}${style} · ${restart} · start ${o.numbering_start ?? 1}`;
+});
+const frontMatter = computed(() => plan.value?.volumes.reduce((n, v) => n + v.index_pages + v.cover_pages, 0));
+const statusKind = computed(() => props.blocked ? "pending" : props.dirty ? "pending" : props.checksState || "pending");
+const statusText = computed(() => props.blocked ? "Build controls unavailable while the engine is busy or disconnected" : props.dirty ? "Unsaved settings · preflight and page plan need refreshing" : props.checksText);
 let sequence = 0;
 async function refresh() {
   const call = ++sequence;
   plan.value = null;
   planError.value = "";
+  savedLayout.value = null;
+  loading.value = false;
   if (props.busy || props.blocked || props.dirty) return;
+  loading.value = true;
   try {
     const [p, options] = await Promise.all([api<Plan>(
       `/matters/${props.matterId}/bundle-preview`,
@@ -116,11 +155,14 @@ async function refresh() {
         max_pages_per_volume: props.maxPages,
         keep_groups_intact: props.keepGroups,
       },
-    ), api<OutputMarks>(`/matters/${props.matterId}/output-marks`)]);
-    if (call === sequence) { plan.value = p; savedOptions.value=options; }
+    ), api<SavedLayout>(`/matters/${props.matterId}/bundle-settings`)]);
+    if (call === sequence) {
+      if (p.input_snapshot !== options.input_snapshot) throw new Error("Matter changed while loading. Refresh the build summary.");
+      plan.value = p; savedLayout.value = options;
+    }
   } catch (e) {
     if (call === sequence) planError.value = friendlyError(e);
-  }
+  } finally { if (call === sequence) loading.value = false; }
 }
 watch(
   () => [
@@ -129,6 +171,7 @@ watch(
     props.maxPages,
     props.keepGroups,
     props.busy,
+    props.blocked,
     props.dirty,
   ],
   () => void refresh(),
@@ -166,7 +209,12 @@ watch(
   },
   { immediate: true },
 );
-const optionsOpen = ref(false);
+const optionsOpen = ref(false), volumesOpen = ref(false), sizeRecovery = ref(false);
+const volumeTrigger = ref<HTMLButtonElement | null>(null);
+function closeVolumes() {
+  volumesOpen.value = false;
+  void nextTick(() => volumeTrigger.value?.focus());
+}
 const tool = ref(""),
   toolDialog = ref<HTMLDialogElement | null>(null);
 let returnFocus: HTMLElement | null = null;
@@ -176,6 +224,7 @@ async function openTool(name: string) {
     return;
   }
   returnFocus = document.activeElement as HTMLElement;
+  if(["Plan volumes","Size recovery"].includes(name)) { sizeRecovery.value=name==="Size recovery"; volumesOpen.value=true; return; }
   tool.value = name;
   if(name === "Output options") { optionsOpen.value = true; return; }
   await nextTick();
@@ -205,6 +254,13 @@ async function showOutputTools() {
 }
 defineExpose({
   openTool,
+  focusSettings: async (name: string) => {
+    screen.value = "settings";
+    await nextTick();
+    const labels: Record<string,string> = {Presets:"Presets",Preview:"Preview","Edit numbering":"Edit numbering"};
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.build-settings-card button'));
+    buttons.find(button => button.textContent?.trim().replace(/\s+/g, ' ').startsWith(labels[name] || name))?.focus();
+  },
   showResult,
   showOutputTools,
   showSettings: () => {
@@ -217,7 +273,9 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <section
+ <div class="build-route">
+  <slot v-if="volumesOpen" name="volumes" :recovery="sizeRecovery" :close="closeVolumes" />
+  <section v-else
     class="build-workspace"
     :data-screen="view"
     aria-label="Bundle build workflow"
@@ -254,161 +312,84 @@ onBeforeUnmount(() => {
       </button>
     </header>
     <template v-if="view === 'settings'">
-      <div class="build-strip">
-        <AlertCircle :size="16" />{{ checksText }} · Output checks run on saved
-        files after building
+      <div class="build-strip build-preflight" :class="statusKind" role="status">
+        <CircleCheck v-if="statusKind === 'success'" :size="16" /><AlertCircle v-else :size="16" />
+        <span>{{ statusText }}</span>
+        <button class="text-tool" @click="emit('checks')">Preflight</button>
       </div>
-      <div class="build-settings-grid">
+      <div v-if="planError" class="build-load-error" role="alert">Build summary unavailable: {{ planError }}
+        <button class="membership-button secondary" :disabled="busy || blocked" @click="refresh">Refresh summary</button>
+      </div>
+      <div class="build-settings-grid" :aria-busy="loading">
         <section class="build-card build-settings-card">
           <header>
-            <div>
-              <small>BUNDLE PRESET</small>
-              <h2>Configured digital bundle</h2>
-            </div>
-            <button
-              class="membership-button quiet"
-              @click="openTool('Presets')"
-            >
-              Presets</button
-            ><button
-              class="membership-button secondary"
-              @click="openTool('Preview')"
-            >
-              Preview
-            </button>
+            <div><small>BUNDLE PRESET</small><h2>{{ presetName }}</h2></div>
+            <button class="membership-button quiet" @click="openTool('Presets')">Presets</button>
+            <button class="membership-button secondary" @click="openTool('Preview')">Preview</button>
           </header>
-          <section>
+          <section class="build-output-section">
             <h3>Output files</h3>
             <div class="build-features">
-              <span
-                v-for="name in [
-                  'Combined bookmarked PDF',
-                  'Individual volume PDFs',
-                  'CSV index',
-                  'ZIP archive',
-                ]"
-                :key="name"
-                ><Check :size="16" />{{ name }}</span
-              >
+              <span v-for="name in outputFiles" :key="name"><Check :size="16" aria-hidden="true" />{{ name }}</span>
             </div>
           </section>
-          <section>
-            <h3>Structure &amp; navigation</h3>
-            <div class="build-features">
-              <span
-                v-for="name in [
-                  'Generated index pages',
-                  'Linked index entries',
-                  'Document bookmarks',
-                  'Per-volume printed page numbers',
-                ]"
-                :key="name"
-                ><Check :size="16" />{{ name }}</span
-              >
+          <section class="build-structure-section">
+            <div class="build-desktop-structure">
+              <h3>Structure &amp; navigation</h3>
+              <div v-if="savedOptions" class="build-features">
+                <span v-for="feature in structureFeatures" :key="feature.label" :class="{ 'feature-off': !feature.on }">
+                  <component :is="feature.on ? Check : Minus" :size="16" aria-hidden="true" />{{ feature.label }}<small v-if="!feature.on">Off</small>
+                </span>
+              </div>
+              <p v-else>{{ loading ? 'Loading saved navigation…' : 'Saved navigation unavailable' }}</p>
+            </div>
+            <div class="build-compact-structure">
+              <h3>{{ savedOptions?.front_matter === 'cover_index' ? 'Cover, index & bookmarks' : 'Index & bookmarks · no cover' }}</h3>
+              <p>{{ savedOptions ? `${savedOptions.numbering_linked_index === false ? 'Index links off' : 'Linked index'} · ${savedOptions.numbering_pdf_labels === false ? 'Viewer labels off' : 'Viewer labels match printed references'}` : 'Saved navigation unavailable' }}</p>
             </div>
           </section>
-          <section class="build-setting-row">
-            <div>
-              <h3>Numbering</h3>
-              <p>
-                {{
-                  plan?.numbering ||
-                  "Per-volume numbering · configure and preview"
-                }}
-              </p>
-            </div>
-            <button
-              class="membership-button secondary"
-              @click="openTool('Edit numbering')"
-            >
-              Edit numbering
-            </button>
+          <section class="build-setting-row build-numbering-row">
+            <div><h3>Numbering</h3><p :title="numberingLabel">{{ numberingLabel }}</p></div>
+            <button class="membership-button secondary" @click="openTool('Edit numbering')"><span class="build-desktop-label">Edit numbering</span><span class="build-compact-label">Numbering</span></button>
           </section>
-          <section class="build-setting-row">
-            <div>
-              <h3>{{qualityLabel}} · screen output</h3>
-              <p>Cleanup, print layout and Office review drafts</p>
-            </div>
-            <button
-              class="membership-button secondary"
-              @click="openTool('Output options')"
-            >
-              Output options
-            </button>
+          <section class="build-setting-row build-processing-row">
+            <div><h3>{{ qualityLabel }} · screen output</h3><p>{{ savedOptions?.cleanup_metadata ? 'Metadata cleanup on' : 'Metadata retained' }} · {{ officeLabel }}</p></div>
+            <button class="membership-button secondary" @click="openTool('Output options')">Output options</button>
           </section>
+          <p class="build-compact-note">{{ qualityLabel }} · screen output<br>{{ officeLabel }} · Output options</p>
         </section>
         <aside class="build-card build-summary">
           <h2>Bundle summary</h2>
           <dl>
-            <div>
-              <dt>Included documents</dt>
-              <dd>{{ included.length }}</dd>
-            </div>
-            <div>
-              <dt>Source pages</dt>
-              <dd>{{ sourcePages }}</dd>
-            </div>
-            <div>
-              <dt>Generated pages</dt>
-              <dd>{{ plan ? plan.combined_pages - sourcePages : "—" }}</dd>
-            </div>
-            <div>
-              <dt>Planned physical pages</dt>
-              <dd>{{ plan?.combined_pages ?? "—" }}</dd>
-            </div>
-            <div>
-              <dt>Volumes</dt>
-              <dd>{{ plan?.volumes.length ?? "—" }}</dd>
-            </div>
-            <div>
-              <dt>Working revisions</dt>
-              <dd>{{ included.length }} recorded at build</dd>
-            </div>
+            <div><dt>Included documents</dt><dd>{{ included.length }}</dd></div>
+            <div><dt>Source pages</dt><dd>{{ sourcePages }}</dd></div>
+            <div><dt>Front matter</dt><dd>{{ frontMatter ?? '—' }}</dd></div>
+            <div><dt>Physical pages</dt><dd>{{ plan?.combined_pages ?? '—' }}</dd></div>
+            <div><dt>Volumes</dt><dd>{{ plan?.volumes.length ?? '—' }}</dd></div>
+            <div><dt>Generated pages</dt><dd>{{ plan?.generated_pages ?? '—' }}</dd></div>
           </dl>
           <div class="build-limit">
-            <small>OUTPUT SIZE LIMIT</small
-            ><strong>{{
-              profile?.max_file_mb
-                ? `${profile.max_file_mb} MB per PDF`
-                : "No configured byte limit"
-            }}</strong>
-            <p>
-              {{ maxPages }} pages per volume ·
-              {{
-                keepGroups ? "Keep groups together" : "Split between documents"
-              }}
-            </p>
+            <small>VOLUME SIZE POLICY</small>
+            <strong>{{ savedOptions ? savedOptions.volume_max_bytes ? `${bytesLabel(savedOptions.volume_max_bytes)} per volume PDF` : 'No optional volume byte limit' : 'Saved byte policy unavailable' }}</strong>
+            <p class="build-policy-desktop">{{ maxPages }} physical pages per volume. {{ keepGroups ? 'Keep groups together.' : 'Split between documents.' }}<br>{{ profile?.max_file_mb ? `Profile file limit: ${profile.max_file_mb} MB · separately checked.` : 'No profile file-size limit.' }}</p>
+            <p class="build-policy-compact">{{ maxPages }} pages/volume<br>Profile: {{ profile?.max_file_mb ? `${profile.max_file_mb} MB/file` : 'no file-size limit' }}</p>
           </div>
-          <button
-            class="membership-button quiet"
-            @click="openTool('Plan volumes')"
-          >
-            Plan volumes
-          </button>
+          <button ref="volumeTrigger" class="membership-button quiet" @click="openTool('Plan volumes')">Plan volumes</button>
         </aside>
       </div>
       <footer class="build-footer">
-        <span
-          >This build keeps a fixed copy of the selected revisions and
-          settings.</span
-        ><button
-          class="membership-button primary"
-          :disabled="blocked || busy || !included.length"
-          @click="emit('build')"
-        >
-          <Package :size="16" />Build bundle
-        </button>
+        <span>This build keeps a fixed copy of the selected revisions and settings.</span>
+        <button class="membership-button primary" :disabled="blocked || busy || dirty || !included.length" :aria-busy="busy" @click="emit('build')"><Package :size="16" />Build bundle</button>
       </footer>
       <div class="build-secondary">
-        <button class="text-tool" @click="emit('membership')">
-          Bundle membership</button
-        ><button class="text-tool" @click="openTool('Technical output tools')">Technical marks &amp; Part extracts</button
-        ><button v-if="artifact" class="text-tool" @click="showResult">
-          Previous generated output</button
-        ><span v-if="dirty">Unsaved settings — saved before build</span
-        ><span v-if="planError" role="status"
-          >Page plan unavailable: {{ planError }}</span
-        >
+        <button class="text-tool" @click="emit('membership')">Bundle membership</button>
+        <button class="text-tool" @click="openTool('Technical output tools')">Technical marks &amp; Part extracts</button>
+        <button v-if="artifact" class="text-tool" @click="showResult">Previous generated output</button>
+        <span v-if="loading" role="status">Loading current page plan…</span>
+        <span v-else-if="dirty">Save or discard settings before building.</span>
+        <span v-else-if="!included.length">Select documents in Bundle membership to build.</span>
+        <details v-if="overrides.length" class="build-overrides"><summary>{{ overrides.length }} preset override(s)</summary><ul><li v-for="item in overrides" :key="item.field">{{ item.label }}: {{ item.current }}</li></ul></details>
+        <span v-if="savedOptions?.part_extracts_enabled">Part PDFs selected</span>
       </div>
     </template>
     <template v-else-if="view === 'job'">
@@ -529,6 +510,8 @@ onBeforeUnmount(() => {
         >
           Build settings
         </button>
+        <button v-if="!running && hasSizeException" ref="volumeTrigger"
+          class="membership-button primary" @click="openTool('Size recovery')">Size recovery</button>
       </footer>
     </template>
     <template v-else-if="view === 'stale' && artifact">
@@ -813,10 +796,11 @@ onBeforeUnmount(() => {
         </button>
       </header>
       <div v-show="tool === 'Preview'"><slot name="preview" /></div>
-      <div v-show="tool === 'Plan volumes'"><slot name="volumes" /></div>
+
       <div v-if="tool === 'Technical output tools'">
         <slot name="settings" />
       </div>
     </dialog>
   </section>
+ </div>
 </template>

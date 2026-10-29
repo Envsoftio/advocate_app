@@ -34,7 +34,7 @@ from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reo
 from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, FilingReview, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
 from .storage import Store, new_id, utcnow
 from . import metadata_review
-from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes
+from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes, size as file_size
 from .schemas import BundleSettingsUpdate, FrontMatterPreview, NumberingPreview, PresetApplication, BundleMembershipUpdate, BatchPageOperation, CompressionRequest, ReaderPosition, READER_KEY_PATTERN
 from .portable import (create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES,
                        PROTECTED_PACKAGE_MAGIC, protected_package_header,
@@ -1766,6 +1766,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             if payload.expected_snapshot != store.build_input_digest(matter_id):
                 raise HTTPException(status_code=409, detail='Matter changed; reload settings and review your changes')
             try:
+                from .engine import split_units
+                split_units(store.get_bundle_documents(matter_id), payload.keep_groups_intact, payload.output_marks.model_dump())
                 store.save_bundle_settings(matter_id, payload.model_dump(exclude={'expected_snapshot'}))
                 matter = store.get_matter(matter_id)
                 return dict(max_pages_per_volume=matter['max_pages_per_volume'],
@@ -1773,8 +1775,29 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                     output_marks=store.get_output_marks(matter_id),
                     applied=store.get_applied_output_preset(matter_id),
                     input_snapshot=store.build_input_digest(matter_id))
-            except ValueError as exc:
+            except (ValueError, ProcessingError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/volume-planning')
+    def preview_volume_planning(matter_id: str, payload: BundleSettingsUpdate, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            snapshot = store.build_input_digest(matter_id)
+            if payload.expected_snapshot != snapshot:
+                raise HTTPException(status_code=409, detail='Matter changed; reload settings and review your changes')
+            documents = store.get_bundle_documents(matter_id)
+            result = {'input_snapshot': snapshot, 'documents': [dict(id=d['id'], title=d['title'],
+                revision=d['revision'], page_count=d['page_count'], bytes=file_size(store.working_path(d))) for d in documents]}
+            try:
+                result['plan'] = bundle_preview(store, matter_id, payload.max_pages_per_volume,
+                    payload.keep_groups_intact, payload.output_marks.model_dump())
+            except ProcessingError as exc:
+                result['plan_error'] = str(exc)
+            result['generated'] = next((dict(build_id=e['id'], files=e['files']) for e in store.list_exports(matter_id)
+                if e.get('build_input_digest') == snapshot), None)
+            result['measured_exception'] = next((dict(job_id=j['id'], **j['result']) for j in store.list_jobs(matter_id)
+                if j.get('result') and j['result'].get('size_exceptions') and j['result'].get('input_snapshot') == snapshot), None)
+            return result
 
     @app.post('/matters/{matter_id}/front-matter-preview')
     def preview_front_matter(matter_id: str, payload: FrontMatterPreview, _: None = Depends(auth)):

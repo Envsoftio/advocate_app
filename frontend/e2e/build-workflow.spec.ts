@@ -43,14 +43,14 @@ test('B01B real failure/retry, persisted output, generated review and matching e
  for(const [selector,x,y,width,height] of [['.build-settings-card',208,272,882,518],['.build-summary',1106,272,310,518]] as const){const box=(await page.locator(selector).boundingBox())!;expect(Math.round(box.x)).toBe(x);expect(Math.round(box.y)).toBe(y);expect(Math.round(box.width)).toBe(width);expect(Math.round(box.height)).toBe(height)}
  await capture(page,info,'15A-settings-1440-light')
  await workspace.getByRole('button',{name:'Plan volumes',exact:true}).click()
- const tool=page.getByRole('dialog',{name:'Plan volumes',exact:true})
+ const tool=page.locator('.volume-workspace')
  await tool.getByLabel('Maximum pages per volume').fill('2')
- await tool.getByRole('button',{name:'Save bundle settings',exact:true}).click();await expect(tool).toContainText('Bundle settings saved')
- await page.keyboard.press('Escape');await expect(workspace.getByRole('button',{name:'Plan volumes',exact:true})).toBeFocused()
+ await tool.getByRole('button',{name:'Preview changes',exact:true}).click();await expect(tool).toContainText('No document was split');await expect(tool.getByRole('button',{name:'Save choices',exact:true})).toBeDisabled();await tool.getByRole('button',{name:'Back to build',exact:true}).click();await page.getByRole('dialog',{name:'Unsaved volume choices'}).getByRole('button',{name:'Discard changes'}).click();await request.patch(`${base}/matters/${matter.id}`,{headers,data:{max_pages_per_volume:2}});await page.reload();await enter(page)
+ await expect(workspace.getByRole('button',{name:'Plan volumes',exact:true})).toBeVisible()
  await workspace.getByRole('button',{name:'Build bundle',exact:true}).click()
  await expect(workspace).toContainText('Build failed');await capture(page,info,'16A-failure')
  await workspace.getByRole('button',{name:'Build settings',exact:true}).click()
- await workspace.getByRole('button',{name:'Plan volumes',exact:true}).click();await tool.getByLabel('Maximum pages per volume').fill('300');await tool.getByRole('button',{name:'Save bundle settings',exact:true}).click();await expect(tool).toContainText('Bundle settings saved');await page.keyboard.press('Escape')
+ await workspace.getByRole('button',{name:'Plan volumes',exact:true}).click();await tool.getByLabel('Maximum pages per volume').fill('300');await tool.getByRole('button',{name:'Preview changes',exact:true}).click();await tool.getByRole('button',{name:'Save choices',exact:true}).click();await expect(tool.getByRole('button',{name:'Save choices',exact:true})).toBeHidden();await page.keyboard.press('Escape')
  // Delay delivery of a real job result so the actual queued/running UI is observable.
  let release!:()=>void;const held=new Promise<void>(r=>release=r)
  await page.route('**/jobs/*',async route=>{if(route.request().method()==='GET'){const response=await route.fetch();await held;await route.fulfill({response})}else await route.continue()})
@@ -87,7 +87,7 @@ test('B01B settings geometry, keyboard, theme and scale matrix',async({page,requ
   await page.evaluate(({theme,scale})=>{document.documentElement.dataset.theme=theme;document.documentElement.dataset.effectiveTheme=theme;document.documentElement.style.setProperty('--ui-scale',String(scale/100));document.documentElement.style.zoom=scale+'%'},{theme,scale})
   await expect(page.locator('.build-settings-card')).toBeVisible()
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
-  await page.locator('.build-summary').getByRole('button',{name:'Plan volumes',exact:true}).click();await expect(page.getByRole('dialog',{name:'Plan volumes',exact:true})).toBeVisible();await page.keyboard.press('Escape');await expect(page.locator('.build-summary').getByRole('button',{name:'Plan volumes',exact:true})).toBeFocused()
+  await page.locator('.build-summary').getByRole('button',{name:'Plan volumes',exact:true}).click();await expect(page.locator('.volume-workspace')).toBeVisible();await page.keyboard.press('Escape');await expect(page.locator('.build-summary').getByRole('button',{name:'Plan volumes',exact:true})).toBeFocused()
   await page.locator('.workspace-page').evaluate((el:HTMLElement)=>el.scrollTop=0)
   await capture(page,info,`15A-${size.width}-${theme}-${scale}`)
  }

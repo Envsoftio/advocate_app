@@ -410,9 +410,24 @@ MarkPosition = Literal['top_left', 'top_center', 'top_right', 'center',
                        'bottom_left', 'bottom_center', 'bottom_right']
 
 
+class VolumeSplit(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    revision: int = Field(ge=1)
+    after_pages: list[int] = Field(min_length=1, max_length=2000)
+
+    @field_validator('after_pages')
+    @classmethod
+    def ordered_boundaries(cls, value):
+        if value != sorted(set(value)) or any(page < 1 for page in value):
+            raise ValueError('Split boundaries must be positive, unique and increasing')
+        return value
+
+
 class OutputMarks(BaseModel):
     """Matter-level technical output marks. This is not a court-rule preset."""
     model_config = ConfigDict(extra='forbid')
+    volume_max_bytes: int | None = Field(default=None, ge=1, le=10_000_000_000)
+    volume_splits: dict[str, VolumeSplit] = Field(default_factory=dict, max_length=1000)
     processing_quality: Literal['original', 'lossless', 'balanced', 'small'] = 'original'
     cleanup_metadata: bool = False
     print_layout: Literal['screen'] = 'screen'
@@ -477,6 +492,13 @@ class OutputMarks(BaseModel):
             raise ValueError('Use Latin-1 text and only {volume} or {section} placeholders')
         return value
 
+    @field_validator('volume_splits')
+    @classmethod
+    def valid_split_ids(cls, values):
+        if any(not re.fullmatch(r'[0-9a-f]{32}', key) for key in values):
+            raise ValueError('Splits require valid document IDs')
+        return values
+
     @field_validator('annexure_overrides')
     @classmethod
     def valid_override_ids(cls, values: dict[str, str]) -> dict[str, str]:
@@ -520,6 +542,8 @@ class OutputPresetCreate(BaseModel):
     def no_matter_specific_documents(self):
         if any((self.output_marks.cover_heading, self.output_marks.cover_reference, self.output_marks.cover_title)):
             raise ValueError('Reusable presets cannot contain matter-specific cover details')
+        if self.output_marks.volume_splits:
+            raise ValueError('Reusable presets cannot contain document split boundaries')
         if self.output_marks.annexure_overrides:
             raise ValueError('Reusable presets cannot contain matter-specific document exceptions')
         return self

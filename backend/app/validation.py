@@ -213,10 +213,13 @@ def validate_output(store, matter_id, build_id, selected_files=None):
         navigation['evidence']['summary'] = 'Recorded destinations match; omitted targets need review'
         navigation['evidence']['omissions'] = omissions
     limit = manifest.get('validation_profile', {}).get('max_file_mb')
-    too_large = [n for n in selected if limit and measured[n].get('bytes', 0) > limit * 1024 * 1024]
-    add('sizes', 'failed' if too_large else 'passed' if limit else 'not-applicable',
-        {'summary': f'{limit} MB limit; {len(too_large)} exceed it' if limit else 'No byte limit configured in saved profile',
-         'limit_mb': limit, 'bytes': {n: measured[n].get('bytes') for n in selected}}, bool(too_large))
+    volume_limit = manifest.get('output_marks', {}).get('volume_max_bytes')
+    too_large = [n for n in selected if (limit and measured[n].get('bytes', 0) > limit * 1024 * 1024)
+                 or (volume_limit and n.startswith('volume-') and n.endswith('.pdf') and measured[n].get('bytes', 0) > volume_limit)]
+    add('sizes', 'failed' if too_large else 'passed' if limit or volume_limit else 'not-applicable',
+        {'summary': f'{len(too_large)} exceed configured limits; volume policy applies only to volume PDFs',
+         'limit_mb': limit, 'volume_limit_bytes': volume_limit,
+         'bytes': {n: measured[n].get('bytes') for n in selected}}, bool(too_large))
     if manifest.get('output_marks', {}).get('cleanup_metadata'):
         failed_cleanup = [n for n in pdf_names if not pdfs.get(n, {}).get('metadata_cleared')]
         add('cleanup', 'failed' if failed_cleanup else 'passed' if pdf_names else 'not-applicable',
