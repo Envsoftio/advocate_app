@@ -751,3 +751,5 @@ class SupplementalPlanRequest(BundlePreviewRequest):
     output_marks: OutputMarks
     expected_snapshot: str = Field(min_length=64, max_length=64)
     expected_version: int | None = Field(default=None, ge=1)
+    insertion_policy: Literal['separate_supplement', 'preserve_printed_labels'] | None = None
+    policy_reviewed: bool = False

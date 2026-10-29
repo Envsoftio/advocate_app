@@ -39,7 +39,7 @@ References:
 - [x] **B03C — New 15A desktop, 22C compact and BU10 dark Build settings** · DONE for the available Mac target, 29 October 2026. Backend 317, frontend 44 and full browser 116 passed / 1 opt-in vault skip. Sixteen appearance renders, reference comparisons, native compact/dark controls, real generation/review, Save cancellation/retry, hashes and app/sidecar restart passed. See [requirement checklist and evidence](DESIGN_PHASEB03C_IMPLEMENTATION.md).
 - [x] **B04A — Supplemental build plan and prior-build revision comparison** · DONE for the available Mac target, 29 October 2026. Persistent exact-page plans, immutable baseline and actual revision comparison verified; 48 visual renders and native planning/restart/comparison/primary review/Save pass. Backend 323, frontend 44, full browser 120 passed / 1 opt-in vault skip. See [requirement checklist and evidence](DESIGN_PHASEB04A_IMPLEMENTATION.md).
 
-- [ ] **B04B — Supported supplemental generation and insertion/label policies** · Next separately authorized bounded task. B04C audience variants remain separate; whole B04 is not complete.
+- [x] **B04B — Supported supplemental generation and insertion/label policies** · DONE for the available Mac target, 29 October 2026. Reviewed separate/preserved policies, conservative insertion reconciliation, deterministic supplemental artifacts, output checks/review/export and BU09 are connected. Backend 325 and frontend 44 pass; browser/native evidence and platform limits are recorded in [the B04B checklist](DESIGN_PHASEB04B_IMPLEMENTATION.md). B04C audience variants remain separate; whole B04 is not complete.
 
 ## 0. Product decisions
 

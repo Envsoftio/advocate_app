@@ -35,7 +35,7 @@ from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPa
 from .storage import Store, new_id, utcnow
 from . import metadata_review, supplements
 from .schemas import SupplementalPlanRequest
-from .engine import supplemental_preview
+from .engine import supplemental_preview, supplemental_policy_preview
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes, size as file_size
 from .schemas import BundleSettingsUpdate, FrontMatterPreview, NumberingPreview, PresetApplication, BundleMembershipUpdate, BatchPageOperation, CompressionRequest, ReaderPosition, READER_KEY_PATTERN
 from .portable import (create_package, restore_package, PortableMatterError, MAX_PACKAGE_BYTES,
@@ -1861,12 +1861,51 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                                     signature_acknowledged=acknowledge_signature_risk)
         return jobs.submit(matter_id, 'build', task, job_id=job_id)
 
+    def submit_supplement_build(matter_id: str, plan_id: str,
+                                job_id: str | None = None,
+                                acknowledge_signature_risk: bool = False):
+        with store.matter_lock(matter_id):
+            plan = supplements.get_plan(store, matter_id, plan_id)
+            if not plan:
+                raise HTTPException(status_code=404, detail='Supplemental plan not found')
+            ready, reason = supplements.build_ready(store, matter_id, plan)
+            if not ready:
+                raise HTTPException(status_code=409, detail=reason)
+            resolved, issues = supplements.selection(store, matter_id, plan['selected_page_ids'])
+            if issues:
+                raise HTTPException(status_code=409, detail=issues[0]['reason'])
+            by_id = {d['id']: d for d in store.get_documents(matter_id)}
+            selected_docs = [by_id[doc_id] for doc_id in dict.fromkeys(p['document_id'] for p in resolved)]
+            require_signature_acknowledgement(selected_docs, acknowledge_signature_risk,
+                                              'building transformed supplemental PDFs')
+            submitted_version = plan['version']
+            submitted_contract = supplements.plan_contract(plan)
+        def task(job_id, progress, cancelled):
+            with store.matter_lock(matter_id):
+                current = supplements.get_plan(store, matter_id, plan_id)
+                ready, reason = supplements.build_ready(store, matter_id, current) if current else (False, 'Supplemental plan is unavailable.')
+                if not ready or current['version'] != submitted_version or supplements.plan_contract(current) != submitted_contract:
+                    raise ProcessingError(reason or 'Supplemental plan changed while queued; review and submit a new build.')
+                return build_bundle(store, matter_id, job_id, progress, cancelled,
+                                    signature_acknowledged=acknowledge_signature_risk,
+                                    supplement_plan=current)
+        return jobs.submit(matter_id, 'supplement-build', task,
+                           target_id=plan_id, job_id=job_id)
+
     @app.post('/matters/{matter_id}/build', status_code=202)
     def start_build(matter_id: str, payload: SignatureRiskAcknowledgement | None = None,
                     _: None = Depends(auth)):
         matter_or_404(matter_id)
         return submit_build(matter_id, acknowledge_signature_risk=(
             payload.acknowledge_signature_risk if payload else False))
+
+    @app.post('/matters/{matter_id}/supplements/{plan_id}/build', status_code=202)
+    def start_supplement_build(matter_id: str, plan_id: str,
+                               payload: SignatureRiskAcknowledgement | None = None,
+                               _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        return submit_supplement_build(matter_id, plan_id,
+            acknowledge_signature_risk=payload.acknowledge_signature_risk if payload else False)
 
     @app.get('/matters/{matter_id}/jobs')
     def matter_jobs(matter_id: str, _: None = Depends(auth)):
@@ -1898,12 +1937,12 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             doc = doc_or_404(prior['target_id'])
             if doc['matter_id'] != prior['matter_id']:
                 raise HTTPException(status_code=409, detail='OCR document no longer belongs to this matter')
-        elif prior['kind'] != 'build':
+        elif prior['kind'] not in ('build', 'supplement-build'):
             raise HTTPException(status_code=409, detail='This job type cannot be retried')
         acknowledged = payload.acknowledge_signature_risk if payload else False
         if prior['kind'] == 'ocr':
             require_signature_acknowledgement([doc], acknowledged, 'retrying OCR')
-        else:
+        elif prior['kind'] == 'build':
             require_signature_acknowledgement(store.get_bundle_documents(prior['matter_id']),
                                               acknowledged, 'retrying bundle generation')
         new_job_id = new_id()
@@ -1911,6 +1950,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=409, detail='Only an interrupted job may be retried once')
         return (submit_ocr(doc, new_job_id, acknowledged,
                            payload.language if payload else 'eng') if prior['kind'] == 'ocr'
+                else submit_supplement_build(prior['matter_id'], prior['target_id'], new_job_id, acknowledged)
+                if prior['kind'] == 'supplement-build'
                 else submit_build(prior['matter_id'], new_job_id, acknowledged))
 
     @app.get('/matters/{matter_id}/exports')
@@ -1927,7 +1968,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                     documents=supplements.catalog(store, matter_id),
                     input_snapshot=supplements.snapshot(store, matter_id),
                     defaults=supplements.draft_defaults(store, matter_id))
-            except (ValueError, OSError) as exc:
+            except (ProcessingError, ValueError, OSError) as exc:
                 raise HTTPException(409, str(exc)) from exc
 
     @app.post('/matters/{matter_id}/supplements')
@@ -1936,7 +1977,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             matter_or_404(matter_id)
             try:
                 return supplements.save(store, matter_id, payload)
-            except (ValueError, OSError) as exc:
+            except (ProcessingError, ValueError, OSError) as exc:
                 raise HTTPException(409, str(exc)) from exc
 
     @app.put('/matters/{matter_id}/supplements/{plan_id}')
@@ -1945,7 +1986,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             matter_or_404(matter_id)
             try:
                 return supplements.save(store, matter_id, payload, plan_id)
-            except (ValueError, OSError) as exc:
+            except (ProcessingError, ValueError, OSError) as exc:
                 raise HTTPException(409, str(exc)) from exc
 
     @app.post('/matters/{matter_id}/supplement-preview')
@@ -1957,13 +1998,32 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                     raise ValueError('Matter inputs changed. Reload material before recalculating this supplement.')
                 prior = supplements.baseline(store, matter_id, payload.baseline_build_id)
                 if payload.output_marks.volume_splits:
-                    raise ValueError('Supplemental internal split policies are not available in B04A.')
+                    raise ValueError('Supplemental internal split policies are not supported.')
                 result = supplemental_preview(store, matter_id, payload.selected_page_ids,
                     dict(max_pages_per_volume=payload.max_pages_per_volume,
                          keep_groups_intact=payload.keep_groups_intact, output_marks=payload.output_marks.model_dump()))
                 result.update(input_snapshot=payload.expected_snapshot, baseline_build_id=prior['id'],
-                              settings_snapshot=payload.model_dump(), generation_available=False)
+                              settings_snapshot=payload.model_dump(), generation_available=True)
                 return result
+            except (ProcessingError, ValueError, OSError) as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/supplement-policy-preview')
+    def preview_supplement_policy(matter_id: str, payload: SupplementalPlanRequest,
+                                  _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                prior = supplements.baseline(store, matter_id, payload.baseline_build_id)
+                draft = dict(id=None, version=payload.expected_version,
+                    matter_id=matter_id, baseline_build_id=prior['id'], title=payload.title.strip(),
+                    selected_page_ids=payload.selected_page_ids,
+                    input_snapshot=payload.expected_snapshot,
+                    insertion_policy=payload.insertion_policy,
+                    settings={'max_pages_per_volume': payload.max_pages_per_volume,
+                              'keep_groups_intact': payload.keep_groups_intact,
+                              'output_marks': payload.output_marks.model_dump()})
+                return supplemental_policy_preview(store, matter_id, draft)
             except (ProcessingError, ValueError, OSError) as exc:
                 raise HTTPException(409, str(exc)) from exc
 

@@ -222,6 +222,11 @@ export interface ExportManifest {
   pages: number
   volumes: number
   stale?: boolean
+  artifact_kind?: 'primary' | 'supplement'
+  supplement_plan_id?: string | null
+  supplement_plan_version?: number | null
+  baseline_build_id?: string | null
+  insertion_policy?: 'separate_supplement' | 'preserve_printed_labels' | null
   files: Array<{ name: string, bytes: number, sha256?: string }>
   input_revisions?: Array<{document_id:string;revision:number}>
   page_map_snapshot?: Array<{printed_labels?:string[];id:string;title:string;volume:number;start_page:number;end_page:number;combined_start_page:number;combined_end_page:number}>
@@ -230,7 +235,7 @@ export interface ExportManifest {
 export interface Job {
   id: string
   matter_id: string
-  kind: 'build' | 'ocr' | 'compress'
+  kind: 'build' | 'supplement-build' | 'ocr' | 'compress'
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
   target_id?: string | null
   retry_job_id?: string | null

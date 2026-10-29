@@ -43,6 +43,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   dirtyChanged: [boolean];
   supplementContext: [string];
+  supplementBuild: [string];
   build: [];
   cancel: [];
   retry: [job: Job];
@@ -56,7 +57,7 @@ const emit = defineEmits<{
   finding: [finding: any, buildId: string];
   configure: [name: string];
 }>();
-const supplementOpen=ref(false), supplementPlanId=ref('');
+const supplementOpen=ref(false), supplementPlanId=ref(''), supplementInitialMode=ref<'plan'|'policy'>('plan');
 const supplementPanel=ref<InstanceType<typeof SupplementWorkspace>|null>(null);
 const savedSupplements=ref<Array<{id:string;title:string;baseline_build_id:string}>>([]);
 const supplementBaselineId=ref('');
@@ -66,7 +67,7 @@ let supplementRestored=false;
 const activeSupplementKey=()=>`matterdraft.activeSupplement.${props.matterId}`;
 function supplementalSaved(id:string){supplementPlanId.value=id;localStorage.setItem(activeSupplementKey(),id);void loadSupplements();}
 async function loadSupplements(){try{const data=await api<{plans:typeof savedSupplements.value}>(`/matters/${props.matterId}/supplements`);savedSupplements.value=data.plans;if(!supplementRestored){supplementRestored=true;const id=localStorage.getItem(activeSupplementKey());if(id&&data.plans.some(p=>p.id===id))openSupplement(id)}}catch{/* Opening the planner exposes a retryable service error. */}}
-function openSupplement(id=''){supplementTrigger=document.activeElement as HTMLElement;supplementPlanId.value=id;supplementBaselineId.value=savedSupplements.value.find(p=>p.id===id)?.baseline_build_id||artifact.value?.id||'';supplementOpen.value=true;}
+function openSupplement(id='',initial:'plan'|'policy'='plan'){supplementTrigger=document.activeElement as HTMLElement;supplementPlanId.value=id;supplementInitialMode.value=initial;supplementBaselineId.value=savedSupplements.value.find(p=>p.id===id)?.baseline_build_id||artifact.value?.id||'';supplementOpen.value=true;}
 async function closeSupplement(){supplementOpen.value=false;localStorage.removeItem(activeSupplementKey());emit('supplementContext','');emit('dirtyChanged',false);await loadSupplements();await nextTick();supplementTrigger?.isConnected&&supplementTrigger.focus();}
 watch(()=>[props.matterId,props.refreshKey],()=>void loadSupplements(),{immediate:true});
 const selectedId = ref(""),
@@ -272,7 +273,7 @@ async function showOutputTools() {
 }
 defineExpose({
   openSupplementMembership: () => {if(!supplementOpen.value)return false;supplementPanel.value?.openPicker();return true;},
-  openSupplementTool: (name:string) => {if(!supplementOpen.value)return false;if(name==='Preview')void supplementPanel.value?.prepare();else supplementPanel.value?.openNumbering();return true;},
+  openSupplementTool: (name:string) => {if(!supplementOpen.value)return false;if(name==='Preview')void supplementPanel.value?.openMap();else supplementPanel.value?.openNumbering();return true;},
   saveDraft: () => supplementPanel.value?.saveDraft(),
   discard: () => supplementPanel.value?.discard(),
   openTool,
@@ -298,7 +299,7 @@ onBeforeUnmount(() => {
 <template>
  <div class="build-route">
   <section v-if="supplementOpen&&!supplementBaseline" class="supplement-workspace"><h1>Baseline unavailable</h1><p role="alert">Saved baseline {{supplementBaselineId}} is unavailable. This supplement cannot be rebound to another build.</p><button class="membership-button secondary" @click="closeSupplement">Return to builds</button></section>
-  <SupplementWorkspace v-else-if="supplementOpen && supplementBaseline" ref="supplementPanel" :matter-id="matterId" :baseline="supplementBaseline" :initial-plan-id="supplementPlanId" :blocked="blocked||busy" :refresh-key="refreshKey" @close="closeSupplement" @dirty-changed="emit('dirtyChanged',$event)" @saved="supplementalSaved" @context="emit('supplementContext',$event)"/>
+  <SupplementWorkspace v-else-if="supplementOpen && supplementBaseline" ref="supplementPanel" :matter-id="matterId" :baseline="supplementBaseline" :initial-plan-id="supplementPlanId" :initial-mode="supplementInitialMode" :blocked="blocked||busy" :refresh-key="refreshKey" :job="props.job" :artifacts="artifacts" @close="closeSupplement" @dirty-changed="emit('dirtyChanged',$event)" @saved="supplementalSaved" @context="emit('supplementContext',$event)" @build="emit('supplementBuild',$event)" @cancel="emit('cancel')" @retry="emit('retry',$event)" @review="(id,name)=>emit('review',id,name)" @export="emit('export',$event)" @finding="(finding,id)=>emit('finding',finding,id)"/>
   <slot v-else-if="volumesOpen" name="volumes" :recovery="sizeRecovery" :close="closeVolumes" />
   <section v-else
     class="build-workspace"
@@ -595,9 +596,9 @@ onBeforeUnmount(() => {
         <section class="build-card">
           <FileText />
           <h2>Preserve existing references</h2>
-          <p>Insertion labels and preservation policies are unavailable until B04B.</p>
-          <button disabled class="membership-button secondary">
-            Preview inserts · unavailable
+          <p>Preview supported insert labels, changed physical positions and rebuilt navigation against a saved supplemental plan.</p>
+          <button :disabled="blocked||busy||!savedSupplements.length" :title="savedSupplements.length?'':'Create and save a supplemental plan first'" class="membership-button secondary" @click="openSupplement(savedSupplements[0].id,'policy')">
+            Preview inserts
           </button>
         </section>
       </div>

@@ -28,6 +28,38 @@
 /* Scoped override of the older global 44px input rule. */
 .supplement-workspace .supplement-title input{height:36px!important;min-height:36px!important}
 .build-workspace[data-screen=stale]>.supplement-entry:not(.has-plans){display:none}
+
+/* B04B / BU09 insertion policy. The 1440px geometry follows the supplied
+   operational composition; content becomes scrollable rather than clipped. */
+.supplement-workspace[data-mode=policy]{position:relative;padding:24px;min-height:756px;box-sizing:border-box}
+.supplement-workspace[data-mode=policy] .policy-heading{min-height:74px}
+.supplement-workspace[data-mode=policy] .policy-heading>div{min-width:0}
+.supplement-policy-strip{height:42px;box-sizing:border-box;border-radius:8px;background:var(--cb-infoBg);color:var(--cb-link);display:flex;align-items:center;gap:10px;padding:0 14px;margin:0 0 22px}
+.supplement-policy-strip.danger{background:var(--cb-dangerBg);color:var(--cb-status-danger-text)}
+.supplement-insertion-card{height:420px;box-sizing:border-box;background:var(--cb-surface);border:1px solid var(--cb-border);border-radius:12px;padding:16px 18px;overflow:hidden}
+.supplement-insertion-card h2{font:650 16px/26px Inter,sans-serif;margin:0 0 16px}
+.supplement-insertion-card>strong{display:block;min-height:42px;font-weight:600}
+.supplement-insertion-scroll{overflow:auto;max-height:220px}
+.supplement-insertion-card table,.supplement-result table{border-collapse:collapse;width:100%;table-layout:fixed}
+.supplement-insertion-card th,.supplement-insertion-card td,.supplement-result th,.supplement-result td{height:46px;box-sizing:border-box;padding:9px 12px;text-align:left;border-bottom:1px solid var(--cb-border);overflow-wrap:anywhere}
+.supplement-insertion-card thead th{height:36px;background:var(--cb-surface2);font-size:12px;color:var(--cb-text-onCanvas);font-weight:600}
+.supplement-insertion-card thead th:nth-child(1){width:26%}.supplement-insertion-card thead th:nth-child(2){width:22%}.supplement-insertion-card thead th:nth-child(3){width:27%}.supplement-insertion-card thead th:nth-child(4){width:25%}
+.supplement-insertion-card tbody th{font-weight:600}.supplement-insertion-card tbody td{color:var(--cb-muted)}
+.supplement-insertion-note{margin:18px 0 0;color:var(--cb-muted)}
+.supplement-policy-actions{display:grid;grid-template-columns:minmax(0,984px) 208px;gap:16px;align-items:center;margin-top:20px}
+.supplement-policy-actions>section{height:112px;box-sizing:border-box;border-radius:8px;background:var(--cb-warningBg);color:var(--cb-text-onPale);display:flex;gap:10px;align-items:flex-start;padding:12px}
+.supplement-policy-actions>section strong{font-weight:600}.supplement-policy-actions>section p{margin:10px 0 0;line-height:20px}
+.supplement-policy-actions>button{width:208px;align-self:center}
+.supplement-policy-blockers{margin-top:20px;min-height:92px;box-sizing:border-box;border-radius:8px;background:var(--cb-dangerBg);color:var(--cb-status-danger-text);padding:14px 16px}
+.supplement-policy-blockers p{margin:8px 0 0}
+.supplement-policy-evidence{margin-top:48px;color:var(--cb-muted)}
+.supplement-policy-evidence code{display:block;overflow-wrap:anywhere;margin:4px 0;font-size:11px}
+.supplement-policy-switch{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;color:var(--cb-muted)}
+.supplement-separate-summary{padding-top:8px}.supplement-separate-summary dl{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:24px}.supplement-separate-summary dt{font-size:12px;color:var(--cb-muted)}.supplement-separate-summary dd{margin:8px 0 0;font-weight:600}
+.supplement-job,.supplement-result{max-width:1208px}.supplement-job h2,.supplement-result h2{display:inline;margin-left:8px}.supplement-job progress{display:block;width:100%;margin:20px 0}.supplement-result>p{color:var(--cb-muted)}
+.supplement-result table{margin-top:20px}.supplement-result thead th{background:var(--cb-surface2);font-size:12px}.supplement-result td:nth-child(2){font-variant-numeric:tabular-nums}
+@media(max-width:1100px){.supplement-policy-actions{grid-template-columns:minmax(0,1fr) 190px}.supplement-policy-actions>button{width:190px}.supplement-insertion-card{height:auto;min-height:420px}.supplement-insertion-scroll{max-height:260px}}
+@media(max-width:820px){.supplement-workspace[data-mode=policy]{padding:16px}.supplement-workspace[data-mode=policy] .policy-heading{min-height:108px}.supplement-policy-actions{grid-template-columns:1fr}.supplement-policy-actions>section,.supplement-policy-actions>button{width:100%;height:auto;min-height:78px}.supplement-insertion-scroll{overflow:auto}.supplement-insertion-card table{min-width:760px}.supplement-separate-summary dl{grid-template-columns:1fr}}
 .build-workspace[data-screen=stale]>.build-footer{margin-top:62px}
 .build-workspace[data-screen=stale] .stale-question{margin:28px 0 18px!important;line-height:30px}
 .build-workspace[data-screen=stale] .stale-options{margin-top:0}

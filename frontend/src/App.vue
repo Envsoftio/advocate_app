@@ -2276,6 +2276,21 @@ async function startBuild(): Promise<boolean> {
     return false;
   } finally { buildSubmitting.value=false; }
 }
+async function startSupplementBuild(planId:string):Promise<boolean>{
+  if(!currentMatterId.value||isJobActive.value||buildSubmitting.value)return false;
+  buildSubmitting.value=true;
+  try{
+    const catalog=await api<any>('/matters/'+currentMatterId.value+'/supplements');
+    const plan=catalog.plans.find((item:any)=>item.id===planId);
+    if(!plan)throw new Error('The saved supplemental plan is unavailable.');
+    const selected=new Set(plan.selected_page_ids);
+    const documentIds=new Set<string>(catalog.documents.filter((document:any)=>document.pages.some((page:any)=>selected.has(page.id))).map((document:any)=>document.id));
+    const signature=confirmSignatureTransformation(docs.value.filter(document=>documentIds.has(document.id)),'Supplement generation');
+    if(!signature.proceed)return false;
+    const job=await api<Job>('/matters/'+currentMatterId.value+'/supplements/'+planId+'/build','POST',{acknowledge_signature_risk:signature.acknowledged});
+    watchJob(job);return true;
+  }catch(err){issue(err);return false}finally{buildSubmitting.value=false}
+}
 function watchJob(job: Job) {
   activeJob.value = job;
   cancelPending.value = false;
@@ -2302,7 +2317,9 @@ function watchJob(job: Job) {
               ? "OCR processing finished."
               : next.kind === "compress"
                 ? "PDF compression finished. Review the size and quality."
-                : "Filing bundle generated successfully.",
+                : next.kind === "supplement-build"
+                  ? "Supplemental artifact generated successfully."
+                  : "Filing bundle generated successfully.",
             "success",
           );
         if (next.status === "cancelled")
@@ -2331,7 +2348,7 @@ async function retryInterrupted(job: Job) {
     const relevant =
       job.kind === "ocr"
         ? docs.value.filter((document) => document.id === job.target_id)
-        : includedDocuments.value;
+        : job.kind === "supplement-build" ? docs.value : includedDocuments.value;
     const signature = confirmSignatureTransformation(
       relevant,
       job.kind === "ocr" ? "Retrying OCR" : "Retrying bundle generation",
@@ -3094,7 +3111,11 @@ watch(sidebarCollapsed, (collapsed) => {
 
       <FindingReviewPanel v-if="preflightContext && activeView === 'documents' && currentMatterId === preflightContext.matterId" :matter-id="currentMatterId" :finding="preflightContext.finding" :changed="preflightContext.finding.target_revision !== undefined && selectedDoc?.revision !== preflightContext.finding.target_revision" @return="returnToPreflight" @tools="pageToolsOpen=true"/>
 
-      <Transition name="view" mode="out-in" @after-enter="fitDocumentsWorkspace">
+      <Transition
+        :name="inTauri() ? undefined : 'view'"
+        :mode="inTauri() ? undefined : 'out-in'"
+        @after-enter="fitDocumentsWorkspace"
+      >
         <main
           v-if="activeView === 'rules'"
           id="main-content"
@@ -4127,7 +4148,7 @@ watch(sidebarCollapsed, (collapsed) => {
               :refresh-key="previewRefreshKey" :dirty="settingsDirty || formattingDirty" :profile="selectedProfile"
               :checks-state="checksLoading ? 'loading' : checksError ? 'error' : documentDirty || settingsDirty || formattingDirty ? 'pending' : errorChecks.length ? 'danger' : warningChecks.length ? 'warning' : 'success'"
               :checks-text="checksLoading ? 'Preflight loading' : checksError || `${errorChecks.length} preflight blockers · ${warningChecks.length} warnings to review`"
-              @build="startBuild" @cancel="cancelJob" @retry="retryInterrupted" @review="reviewGeneratedPdf"
+              @build="startBuild" @supplement-build="startSupplementBuild" @cancel="cancelJob" @retry="retryInterrupted" @review="reviewGeneratedPdf"
               @finding="openFinding" @export="exportDialogArtifact=$event" @documents="showPreparation" @checks="showView('validation')"
               @supplement-context="supplementContext=$event" @dirty-changed="supplementDirty=$event" @configure="openBuildStructure" @membership="openMembership" @storage="showView('storage')" @backup="backupCurrentMatter">
               <template #processing="{close}"><OutputOptions ref="outputPresetsPanel" :matter-id="currentMatterId!" :disabled="engineBlocked || busy || isJobActive" :inputs-dirty="settingsDirty" @dirty-changed="formattingDirty=$event" @modified="loadMatterResources" @close="close" /></template>

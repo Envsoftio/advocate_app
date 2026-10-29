@@ -4,6 +4,7 @@ import {resolve} from 'node:path'
 import {openWorkspaceNavigation,closeWorkspaceNavigation} from './navigation'
 const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT||8768}`,headers={Authorization:'Bearer e2e-isolated-token'}
 const evidence=resolve(import.meta.dirname,'../../docs/ui-evidence/b04a')
+const b04bEvidence=resolve(import.meta.dirname,'../../docs/ui-evidence/b04b')
 async function seed(request:any){
  const m=await(await request.post(`${base}/matters`,{headers,data:{name:'B04A Synthetic supplemental plan',court_profile:'general-demo'}})).json(),root=`${base}/matters/${m.id}`
  const buffer=await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'));const docs=[]
@@ -18,6 +19,20 @@ async function seed(request:any){
 }
 async function enter(page:Page){await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(page.locator('.build-workspace')).toBeVisible();await expect(page.locator('.section-enter-active')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready)}
 async function appearance(page:Page,theme:string,scale:number){await openWorkspaceNavigation(page);await page.getByLabel('Theme',{exact:true}).selectOption(theme);await page.getByLabel('Interface size',{exact:true}).selectOption(String(scale));await closeWorkspaceNavigation(page)}
+async function seedPreservedInsert(request:any){
+ const m=await(await request.post(`${base}/matters`,{headers,data:{name:'B04B Synthetic preserved insert',court_profile:'general-demo'}})).json(),root=`${base}/matters/${m.id}`
+ const buffer=await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))
+ const target=(await(await request.post(root+'/documents',{headers,multipart:{files:{name:'Earlier issued material.pdf',mimeType:'application/pdf',buffer}}})).json())[0]
+ const membership=await(await request.get(root+'/membership',{headers})).json();await request.put(root+'/membership',{headers,data:{included_ids:[target.id],expected_snapshot:membership.input_snapshot}})
+ const primary=await(await request.post(root+'/build',{headers})).json();await expect.poll(async()=> (await(await request.get(`${base}/jobs/${primary.id}`,{headers})).json()).status).toBe('completed')
+ const prior=(await(await request.get(root+'/exports',{headers})).json())[0]
+ const source=(await(await request.post(root+'/documents',{headers,multipart:{files:{name:'Eight inserted pages.pdf',mimeType:'application/pdf',buffer}}})).json())[0]
+ const inserted=await request.post(`${base}/documents/${target.id}/pages/insert`,{headers,data:{source_document_id:source.id,source_pages:[0,1,2,0,1,2,0,1],before_index:2,expected_revision:1,expected_source_revision:1}});expect(inserted.ok()).toBeTruthy()
+ const catalog=await(await request.get(root+'/supplements',{headers})).json(),current=catalog.documents.find((d:any)=>d.id===target.id),exactIds=current.pages.slice(2,10).map((p:any)=>p.id)
+ const payload={...catalog.defaults,baseline_build_id:prior.id,title:'Eight-page preserved insert',selected_page_ids:exactIds,expected_snapshot:catalog.input_snapshot,insertion_policy:'preserve_printed_labels',policy_reviewed:true}
+ const saved=await request.post(root+'/supplements',{headers,data:payload});expect(saved.ok()).toBeTruthy()
+ return {root,prior,exactIds,plan:await saved.json()}
+}
 test('B04A eight stable pages, caller Apply Cancel, saved reopen, real map and appearance matrix',async({page,request})=>{
  await mkdir(evidence,{recursive:true});const {root,catalog}=await seed(request);await enter(page)
  await expect(page.locator('.build-workspace')).toHaveAttribute('data-screen','stale');await page.screenshot({path:resolve(evidence,'19A-1440-light.png')})
@@ -64,4 +79,22 @@ test('B04A stale choices and revision comparison adapt to both themes and all in
 
 test('B04A navigation Save Discard Keep editing uses the supplemental draft',async({page,request})=>{
  const {root}=await seed(request);await enter(page);await page.getByRole('button',{name:'Create supplement',exact:true}).click();const w=page.locator('.supplement-workspace');await w.getByLabel('Supplement title',{exact:true}).fill('Native-style saved plan');await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click();const guard=page.getByRole('alertdialog',{name:'Unsaved work in this tab'});await expect(guard).toBeVisible();await guard.getByRole('button',{name:'Keep editing'}).click();await expect(w).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click();await guard.getByRole('button',{name:'Save changes',exact:true}).click();await expect(w).toBeHidden();expect((await(await request.get(root+'/supplements',{headers})).json()).plans[0].title).toBe('Native-style saved plan');await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(w.getByLabel('Supplement title',{exact:true})).toHaveValue('Native-style saved plan');await w.getByLabel('Supplement title',{exact:true}).fill('Discard this');await w.getByRole('button',{name:'Cancel',exact:true}).click();await page.keyboard.press('Escape');await expect(w.getByRole('dialog')).toBeHidden();await w.getByRole('button',{name:'Cancel',exact:true}).click();await w.getByRole('button',{name:'Discard changes',exact:true}).click();expect((await(await request.get(root+'/supplements',{headers})).json()).plans[0].title).toBe('Native-style saved plan')
+})
+
+test('B04B BU09 preserved-label policy renders from reconciled data and builds a checked artifact',async({page,request})=>{
+ await mkdir(b04bEvidence,{recursive:true});const {root,prior,exactIds}=await seedPreservedInsert(request);await enter(page)
+ const previewButton=page.getByRole('button',{name:'Preview inserts',exact:true});await expect(previewButton).toBeEnabled();await previewButton.click()
+ const w=page.locator('.supplement-workspace');await expect(w).toHaveAttribute('data-mode','policy');await expect(w.getByRole('heading',{name:'Preserve existing references'})).toBeVisible();await expect(w.locator('.supplement-insertion-card')).toContainText('10 planned physical pages');await expect(w.locator('.supplement-insertion-card tbody tr')).toHaveCount(4)
+ const strip=(await w.locator('.supplement-policy-strip').boundingBox())!,card=(await w.locator('.supplement-insertion-card').boundingBox())!,actions=(await w.locator('.supplement-policy-actions').boundingBox())!
+ expect({x:Math.round(strip.x),y:Math.round(strip.y),width:Math.round(strip.width),height:Math.round(strip.height)}).toEqual({x:208,y:214,width:1208,height:42})
+ expect({x:Math.round(card.x),y:Math.round(card.y),width:Math.round(card.width),height:Math.round(card.height)}).toEqual({x:208,y:278,width:1208,height:420})
+ expect({x:Math.round(actions.x),y:Math.round(actions.y),width:Math.round(actions.width)}).toEqual({x:208,y:718,width:1208})
+ await page.screenshot({path:resolve(b04bEvidence,'BU09-1440-light-100.png'),animations:'disabled'})
+ for(const size of [{width:1024,height:768}])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){
+  await page.setViewportSize(size);await appearance(page,theme,scale);await expect(w.locator('.supplement-policy-strip')).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);await page.screenshot({path:resolve(b04bEvidence,`BU09-${size.width}-${theme}-${scale}.png`),animations:'disabled'})
+ }
+ await page.setViewportSize({width:1440,height:900});await appearance(page,'light',100);await w.getByRole('button',{name:'Use insert numbering'}).focus();await page.keyboard.press('Enter');await expect(w).toHaveAttribute('data-mode','plan');await expect(w.getByRole('button',{name:'Build supplement'})).toBeEnabled();await w.getByRole('button',{name:'Build supplement'}).click()
+ await expect(w.getByRole('heading',{name:'Distinct supplemental artifact generated'})).toBeVisible({timeout:60_000});await expect(w).toContainText(`baseline ${prior.id}`);await w.getByRole('button',{name:'Output checks'}).click();const checks=page.getByRole('dialog',{name:/Output checks/});await expect(checks).toBeVisible();await checks.getByRole('button',{name:'Run output checks'}).click();await expect(checks.getByText('Consistent',{exact:true})).toBeVisible();await checks.getByRole('button',{name:'Done'}).click()
+ const artifacts=await(await request.get(root+'/exports',{headers})).json(),supplement=artifacts.find((a:any)=>a.artifact_kind==='supplement');expect(supplement.bundle_membership.selected_page_ids).toEqual(exactIds);expect(supplement.insertion_policy).toBe('preserve_printed_labels');expect(supplement.baseline_build_id).toBe(prior.id)
+ await w.getByRole('button',{name:'Review supplement'}).click();await expect(page.locator('.pdf-paper')).toBeVisible();await expect(page.getByText('original source pages · Generated PDF · Read only')).toBeVisible()
 })

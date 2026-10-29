@@ -1801,7 +1801,14 @@ class Store:
             try:
                 info = json.loads(read_bytes(manifest))
                 recorded_digest = info.get('build_input_digest')
-                if info.get('effective_input_digest'):
+                if info.get('artifact_kind') == 'supplement':
+                    from . import supplements
+                    plan = supplements.get_plan(self, matter_id, info.get('supplement_plan_id'))
+                    ready, _reason = supplements.build_ready(self, matter_id, plan) if plan else (False, '')
+                    info['stale'] = bool(not ready or
+                        plan.get('version') != info.get('supplement_plan_version') or
+                        supplements.plan_contract(plan) != recorded_digest)
+                elif info.get('effective_input_digest'):
                     info['stale'] = info['effective_input_digest'] != effective_digest
                 else:
                     info['stale'] = (not recorded_digest or not matter or
@@ -1892,7 +1899,7 @@ class Store:
             # completed job status reaches SQLite. Recover only fully hashed
             # packages; legacy/partial manifests remain interrupted for review.
             for job in self.list_jobs(matter_id):
-                if job['status'] != 'interrupted' or job['kind'] != 'build':
+                if job['status'] != 'interrupted' or job['kind'] not in ('build', 'supplement-build'):
                     continue
                 if not re.fullmatch(r'[0-9a-f]{32}', job['id']):
                     continue
