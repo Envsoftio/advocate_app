@@ -137,12 +137,17 @@ function rememberPosition(position?:ReaderPosition) {
   if (at) rememberReadingPosition(key,{...at,zoom:zoomChoice.value,mode:readerMode.value})
 }
 function navigateToPage(page:number, record=true) {
-  if (!Number.isInteger(page) || page<1 || page>total.value) return
+  if (!Number.isInteger(page) || page<1 || page>total.value) return false
+  if (page !== current.value && hasPendingDraft()) {
+    if (!window.confirm('Discard the unfinished PDF tool draft and change pages? Choose Cancel to keep editing.')) return false
+    discardPendingDraft()
+  }
   if (record) {
     const at=readerViewport.value?.capture()
     if(at) readingHistory.value=[...readingHistory.value.slice(-49),at]
   }
   current.value=page
+  return true
 }
 async function goBack() {
   const at=readingHistory.value.pop()
@@ -493,6 +498,14 @@ const annotationImageUrls = reactive<Record<string,string>>({})
 const annotationDraft = reactive({kind:'highlight' as PageAnnotation['kind'], body:'', color:'yellow' as PageAnnotation['color']})
 const annotationOutputScope = ref<'private'|'pdf'>('pdf')
 const editingAnnotationId = ref<string | null>(null)
+watch(pageAnnotations, entries => {
+  if (editingAnnotationId.value && !entries.some(item=>item.id===editingAnnotationId.value)) {
+    resetAnnotationDraft()
+    activeTool.value = 'select'
+  }
+  if (selectedOverlay.value?.kind === 'annotation' && !entries.some(item=>item.id===selectedOverlay.value?.id))
+    clearOverlaySelection()
+})
 const currentPageAnnotations = computed(() => pageAnnotations.value.filter(item =>
   item.document_id === props.document?.id && item.page_index === current.value - 1))
 const documentComments = computed(()=>pageAnnotations.value.filter(item=>item.document_id===props.document?.id && item.kind==='comment'))
@@ -506,7 +519,7 @@ const marksPanelOpen = computed(() => activeTool.value === 'marks')
 const inspectorVisible = computed(() => marksPanelOpen.value ||
   (editTextMode.value && (pendingMove.value || !!runsError.value || !!editNotice.value)) ||
   redactionOpen.value ||
-  annotationPanelOpen.value ||
+  (annotationPanelOpen.value && !annotationDrawing.value && (annotationDraft.kind === 'image' || !!annotationRegion.value || !!editingAnnotationId.value || !!annotationError.value)) ||
   (linkPanelOpen.value && !!linkRegion.value))
 const toolHint = computed(() => ({
   'add-text': 'Click where text should appear, type in the box, then choose Apply text.',
@@ -636,8 +649,8 @@ function selectCategory(category: EditorCategory) {
 }
 function showFind(event?: Event) { void openReadPanel('search',event) }
 async function openReviewComment(item:PageAnnotation) {
+  if (!navigateToPage(item.page_index+1)) return
   commentsOpen.value=false
-  navigateToPage(item.page_index+1)
   activeCategory.value='review'
   await nextTick()
   activeTool.value='notes'
@@ -682,6 +695,13 @@ function annotationKindLabel(kind:PageAnnotation['kind']) {
   return ({image:'Image overlay',highlight:'Highlight',comment:'Comment',draw:'Draw',box:'Box',
     ellipse:'Ellipse',line:'Line',arrow:'Arrow',check:'Check',cross:'Cross',date:'Date mark',
     text:'Text',redaction:'Redaction'})[kind]
+}
+function annotationTime(item:PageAnnotation) {
+  const timestamp=item.updated_at || item.created_at
+  if (!timestamp) return 'Time not recorded'
+  const date=new Date(timestamp)
+  return Number.isNaN(date.getTime()) ? 'Time not recorded' :
+    new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(date)
 }
 function drawPolyline(body:string) {
   try {
@@ -872,10 +892,22 @@ watch(() => [props.document?.id, props.document?.revision] as const, async ([doc
     if (props.document?.id === docId) appliedRedactions.value = items
   } catch { /* The viewer can still display legacy PDFs without redaction records. */ }
 }, {immediate:true})
+function hasPendingAnnotationDraft() {
+  if (editingAnnotationId.value) {
+    const saved=pageAnnotations.value.find(item=>item.id===editingAnnotationId.value)
+    const region=annotationRegion.value
+    if (!saved || !region) return true
+    return saved.rect_x!==region.x || saved.rect_y!==region.y ||
+      saved.rect_width!==region.width || saved.rect_height!==region.height ||
+      saved.body!==annotationDraft.body || saved.color!==annotationDraft.color ||
+      saved.output_scope!==annotationOutputScope.value
+  }
+  return !!(annotationRegion.value || annotationImage.value ||
+    ((annotationDraft.kind==='highlight' || annotationDraft.kind==='comment') && annotationDraft.body.trim()))
+}
 function hasPendingDraft() {
   return !!(marksDirty.value || overlayText.value.trim() || placement.value || replacement.value.trim() ||
-    pendingMove.value || redactionRegion.value || annotationRegion.value ||
-    annotationImage.value || (annotationDraft.body.trim() && (annotationRegion.value || editingAnnotationId.value)) ||
+    pendingMove.value || redactionRegion.value || hasPendingAnnotationDraft() ||
     linkRegion.value || (bookmarkOpen.value && bookmarkTitle.value.trim()))
 }
 function discardPendingDraft() {
@@ -894,7 +926,7 @@ async function savePendingDraft() {
   else if (placement.value && overlayText.value.trim()) await placeText()
   else if (selectedRun.value && replacement.value.trim() && !pendingMove.value) await applyReplacement()
   else if (redactionRegion.value) await applyRedaction()
-  else if (annotationRegion.value || editingAnnotationId.value) await savePageAnnotation()
+  else if (hasPendingAnnotationDraft() && (annotationRegion.value || editingAnnotationId.value)) await savePageAnnotation()
   else if (linkRegion.value) await saveReviewedLink()
   else if (bookmarkOpen.value && bookmarkTitle.value.trim()) await addPageBookmark()
   return !hasPendingDraft()
@@ -1737,16 +1769,20 @@ async function applyReplacement() {
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="toggleTool('edit-text')"><Pencil :size="15"/> Edit text</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="redactionOpen" @click="toggleTool('redact')"><Eraser :size="15"/> Redact</button>
         </div><div v-if="activeCategory==='review'" class="editor-tool-group" role="group" aria-label="Review PDF">
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-expanded="bookmarkOpen" @click="bookmarkOpen=!bookmarkOpen;bookmarkTitle=document?.title+' — page '+current;bookmarkError=''"><BookMarked :size="15"/> Bookmark page<span v-if="pageBookmarks.length" class="page-bookmark-count">{{pageBookmarks.length}}</span></button>
-        <button class="text-tool" :disabled="editing || loading || disabled" title="Private review highlight" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='highlight'" @click="openAnnotationTool('highlight')"><Highlighter :size="15"/> Highlight<span v-if="currentPageAnnotations.length" class="page-bookmark-count">{{currentPageAnnotations.length}}</span></button>
+        <button class="text-tool" :disabled="editing || loading || disabled" title="Private review highlight" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='highlight'" @click="openAnnotationTool('highlight')"><Highlighter :size="15"/> Highlight<span v-if="currentPageAnnotations.some(item=>item.kind==='highlight')" class="page-bookmark-count">{{currentPageAnnotations.filter(item=>item.kind==='highlight').length}}</span></button>
+        <button class="text-tool" disabled title="Underline is planned for Phase 03B"><Minus :size="15"/> Underline</button>
+        <button class="text-tool" disabled title="Strikeout is planned for Phase 03B"><Minus :size="15"/> Strikeout</button>
         <button class="text-tool" :disabled="editing || loading || disabled" title="Private review comment" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='comment'" @click="openAnnotationTool('comment')"><MessageSquare :size="15"/> Comment</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='draw'" @click="openAnnotationTool('draw')"><Pencil :size="15"/> Draw</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='box'" @click="openAnnotationTool('box')"><Square :size="15"/> Box</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='ellipse'" @click="openAnnotationTool('ellipse')"><Circle :size="15"/> Ellipse</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='line'" @click="openAnnotationTool('line')"><Minus :size="15"/> Line</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='arrow'" @click="openAnnotationTool('arrow')"><ArrowUpRight :size="15"/> Arrow</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="toggleTool('links')"><Link2 :size="15"/> Links<span v-if="currentPageLinks.length" class="page-bookmark-count">{{currentPageLinks.length}}</span></button>
+        <details class="annotation-more"><summary role="button" class="text-tool" aria-label="More annotation tools"><Ellipsis :size="15"/> More</summary><div class="annotation-more-menu">
+          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
+          <button class="text-tool" :disabled="editing || loading || disabled" :aria-expanded="bookmarkOpen" @click="bookmarkOpen=!bookmarkOpen;bookmarkTitle=document?.title+' — page '+current;bookmarkError=''"><BookMarked :size="15"/> Bookmark page</button>
+          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='ellipse'" @click="openAnnotationTool('ellipse')"><Circle :size="15"/> Ellipse</button>
+          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='line'" @click="openAnnotationTool('line')"><Minus :size="15"/> Line</button>
+          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='arrow'" @click="openAnnotationTool('arrow')"><ArrowUpRight :size="15"/> Arrow</button>
+          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="toggleTool('links')"><Link2 :size="15"/> Links</button>
+        </div></details>
         </div><div v-if="activeCategory==='stamps'" class="editor-tool-group" role="group" aria-label="Visual stamps">
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='image'" @click="openAnnotationTool('image')"><Images :size="15"/> Image / stamp</button>
@@ -1767,7 +1803,7 @@ async function applyReplacement() {
         <button class="text-tool danger" :disabled="editing || loading || disabled || total<=1" :title="total<=1 ? 'A PDF must keep at least one page' : `Delete page ${current} from the editable copy`" @click="deleteCurrent"><Trash2 :size="16"/> Delete page {{current}}</button>
         </div>
       </div>
-      <div v-if="selectedOverlay" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="clearOverlaySelection"><X :size="14"/></button></div>
+      <div v-if="selectedOverlayItem" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="clearOverlaySelection"><X :size="14"/></button></div>
       <p v-if="activeCategory==='pages'" class="page-action-guidance">Changes here affect the editable copy; the imported original stays unchanged. Drag page thumbnails to reorder, or use Organize pages for arrow controls.</p>
       <div v-if="bookmarkOpen" class="page-bookmark-editor" aria-label="Bookmark current page">
         <strong>Bookmark {{document.title}}, page {{current}}</strong>
@@ -1787,7 +1823,7 @@ async function applyReplacement() {
         <button class="icon-btn small" :class="{active:commentsOpen}" :aria-label="`Comments (${documentComments.length})`" title="Comments" @click="openReadPanel('comments',$event)"><MessageSquare :size="16"/></button>
         <button v-if="pageBookmarks.length" class="icon-btn small" :aria-label="`Page ${current} bookmarks${pageBookmarks.some(item=>!item.resolved)?' need review':''}`" @click="openReadPanel('page-bookmarks',$event)"><BookOpen :size="16"/></button>
       </div>
-      <PdfThumbnailRail v-if="!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading && (expanded || activeTool==='select')" :pdf="readerPdf" :count="total" :page="current" :title="document.title"
+      <PdfThumbnailRail v-if="!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading && (expanded || activeTool==='select' || activeCategory==='review')" :pdf="readerPdf" :count="total" :page="current" :title="document.title"
         :disabled="disabled || editing || loading" :dragging-page="draggingPage" :drop-target-page="dropTargetPage" @select="navigateToPage($event)" @reorder="reorderThumbnailPage"
         @dragstart="startPageDrag" @dragover="overPage" @drop="dropPage" @dragend="draggingPage=null;dropTargetPage=null"/>
       <aside v-if="readPanel && !focusedReading" ref="panelElement" id="pdf-read-panel" class="reader-side-panel" :class="{'document-information-panel':readPanel==='information'}" role="region" :aria-label="findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Source PDF outline' : commentsOpen ? 'Private review comments' : `Bookmarks on page ${current}`">
@@ -1824,13 +1860,13 @@ async function applyReplacement() {
             <p v-if="bookmarksLoading" role="status">Loading manual bookmarks…</p><p v-else-if="bookmarksError" role="alert">{{bookmarksError}}</p><p v-else-if="!documentBookmarks.length">No manual bookmarks for this document.</p>
             <button v-for="item in documentBookmarks" :key="item.id" class="text-tool" :disabled="!item.resolved || item.target_revision!==document.revision || item.page_index>=total" @click="navigateToPage(item.page_index+1)">{{item.title}} · Source {{item.page_index+1}}<small v-if="!item.resolved || item.target_revision!==document.revision"> · Needs review</small></button>
           </template>
-          <template v-if="commentsOpen"><p v-if="!documentComments.length">No private comments in this document.</p><p v-else-if="!filteredComments.length">No matching comments.</p><button v-for="item in filteredComments" :key="item.id" class="text-tool reader-comment-entry" :title="item.body" @click="openReviewComment(item)">Page {{item.page_index+1}} · {{item.body}}{{item.resolved?'':' · needs review'}}</button></template>
+          <template v-if="commentsOpen"><p v-if="!documentComments.length">No private comments in this document.</p><p v-else-if="!filteredComments.length">No matching comments.</p><button v-for="item in filteredComments" :key="item.id" class="text-tool reader-comment-entry" :class="{selected:item.page_index===current-1}" :title="item.body" @click="openReviewComment(item)"><span class="reader-comment-entry-head"><MessageSquare :size="14"/> Source {{item.page_index+1}} <small>{{item.resolved?'Current':'Needs review'}}</small></span><span>{{item.body}}</span><small>{{annotationTime(item)}}</small></button></template>
           <template v-if="pageBookmarksOpen"><div v-for="item in pageBookmarks" :key="item.id" class="reader-bookmark-row"><strong>{{item.title}}</strong><span v-if="!item.resolved">Needs review after a source revision or page change</span><span v-else>Destination currently linked</span></div></template>
         </div>
         <button v-if="pageBookmarksOpen || outlineOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
       </aside>
       <aside v-if="inspectorVisible" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen}" aria-label="PDF editing controls">
-        <div class="viewer-tool-inspector-heading"><strong>{{toolTitle}}</strong><button class="icon-btn small" aria-label="Close PDF tool" title="Close tool" @click="toggleTool(activeTool)"><X :size="16"/></button></div>
+        <div class="viewer-tool-inspector-heading"><strong>{{annotationPanelOpen && editingAnnotationId ? 'Highlight & comment' : toolTitle}}</strong><button class="icon-btn small" aria-label="Close PDF tool" title="Close tool" @click="toggleTool(activeTool)"><X :size="16"/></button></div>
       <Transition name="soft"><div v-if="editTextMode" class="text-overlay-panel" aria-label="Edit existing text">
         <strong>Edit selectable text</strong>
         <p>Click text on the page to change its words. Drag highlighted text anywhere in a clear area of this page to move it. Review the position before applying.</p>
@@ -1857,6 +1893,7 @@ async function applyReplacement() {
         <p v-if="redactionError" class="error-msg" role="alert">{{redactionError}}</p><p v-if="redactionNotice" class="review-tool-notice" role="status">{{redactionNotice}}</p>
       </div></Transition>
       <Transition name="soft"><div v-if="annotationPanelOpen" class="page-annotation-panel" aria-label="Private page marks and image overlays">
+        <p v-if="editingAnnotationId && pageAnnotations.find(item=>item.id===editingAnnotationId)" class="annotation-record-time">Saved {{annotationTime(pageAnnotations.find(item=>item.id===editingAnnotationId)!)}} · Author not recorded</p>
         <div class="review-tool-heading"><strong>{{annotationKindLabel(annotationDraft.kind)}}</strong><span>{{annotationDraft.kind==='image'?'Choose a PNG or JPEG, then drag its size and position on the page.':'Drag a region on the page. Each saved mark remains independently selectable, movable and removable.'}}</span></div>
         <p class="annotation-scope-note">{{annotationOutputScope==='private'?'This private review mark is omitted from Save copy and filing bundles.':'This editable mark is included in Save copy and new bundle exports.'}}</p>
         <div class="annotation-form-grid">

@@ -23,7 +23,7 @@ from .engine import load_profiles
 from .pdf_ops import ProcessingError, validate_overlay_image
 from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 15
+PACKAGE_VERSION = 16
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -448,6 +448,9 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
         for index, item in enumerate(annotations):
             if manifest['version'] < 14:
                 item['output_scope'] = 'pdf' if item.get('kind') == 'image' else 'private'
+            if manifest['version'] < 16:
+                item['created_at'] = None
+                item['updated_at'] = None
             required = set(store._annotation_fields())
             if set(item) != required or item['kind'] not in ('image', 'highlight', 'comment', 'draw',
                     'box', 'ellipse', 'line', 'arrow', 'check', 'cross', 'date', 'text', 'redaction'):
@@ -459,6 +462,8 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                     item['page_index'] >= revision_pages.get(
                         (item['document_id'], item['target_revision']), 0) or
                     item['color'] not in allowed_colors or item['output_scope'] not in ('private', 'pdf') or
+                    any(value is not None and (not isinstance(value, str) or len(value) > 64)
+                        for value in (item['created_at'], item['updated_at'])) or
                     not isinstance(item['body'], str) or
                     len(item['body']) > 4000):
                 raise PortableMatterError('Invalid page annotation target or content')
@@ -576,13 +581,15 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
             for item in annotations:
                 con.execute('''INSERT INTO page_annotations
                     (id,matter_id,document_id,page_index,target_revision,kind,rect_x,rect_y,
-                     rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                     rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope,
+                     created_at,updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                     (annotation_id_map[item['id']], matter_id,
                      id_map[item['document_id']], item['page_index'], item['target_revision'],
                      item['kind'], item['rect_x'], item['rect_y'], item['rect_width'],
                      item['rect_height'], item['body'], item['color'], item['asset_relpath'],
-                     item['asset_mime'], item['position'], item['output_scope']))
+                     item['asset_mime'], item['position'], item['output_scope'],
+                     item['created_at'], item['updated_at']))
             store._audit(con, 'matter_restored_from_package', matter_id)
     except (KeyError, TypeError, ValueError, zipfile.BadZipFile, sqlite3.Error, OSError) as exc:
         shutil.rmtree(stage, ignore_errors=True)

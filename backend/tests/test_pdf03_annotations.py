@@ -153,6 +153,8 @@ def test_image_highlight_comment_edit_delete_undo_export_and_portable(
         files={'file': ('synthetic-mark.png', image_bytes(), 'image/png')})
     assert image.status_code == 201, image.text
     image_item = next(item for item in image.json() if item['kind'] == 'image')
+    assert image_item['created_at'] == image_item['updated_at']
+    assert image_item['created_at'].endswith('+00:00')
     assert image_item['resolved'] is True
     assert client.get(f'/annotations/{image_item["id"]}/asset', headers=auth).content.startswith(b'\x89PNG')
 
@@ -169,7 +171,10 @@ def test_image_highlight_comment_edit_delete_undo_export_and_portable(
         'rect_width': .08, 'rect_height': .06,
         'body': 'Reviewed note text', 'color': 'blue'})
     assert edited.status_code == 200, edited.text
-    assert next(item for item in edited.json() if item['id'] == comment_item['id'])['body'] == 'Reviewed note text'
+    edited_item = next(item for item in edited.json() if item['id'] == comment_item['id'])
+    assert edited_item['body'] == 'Reviewed note text'
+    assert edited_item['created_at'] == comment_item['created_at']
+    assert edited_item['updated_at'] >= comment_item['updated_at']
 
     highlight_item = next(item for item in edited.json() if item['kind'] == 'highlight')
     removed = client.delete(f'/annotations/{highlight_item["id"]}', headers=auth)
@@ -212,6 +217,7 @@ def test_image_highlight_comment_edit_delete_undo_export_and_portable(
     restored_base = f'/matters/{restored.json()["id"]}'
     restored_items = client.get(restored_base + '/annotations', headers=auth).json()
     assert sorted(item['kind'] for item in restored_items) == ['comment', 'highlight', 'image']
+    assert next(item for item in restored_items if item['kind'] == 'comment')['created_at'] == comment_item['created_at']
     restored_image = next(item for item in restored_items if item['kind'] == 'image')
     assert client.get(f'/annotations/{restored_image["id"]}/asset', headers=auth).content == image_bytes()
 

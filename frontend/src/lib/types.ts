@@ -95,6 +95,8 @@ export interface PageAnnotation {
   output_scope: 'private' | 'pdf'
   position: number
   resolved: boolean
+  created_at: string | null
+  updated_at: string | null
 }
 export type MarkPosition = 'top_left' | 'top_center' | 'top_right' | 'center' |
   'bottom_left' | 'bottom_center' | 'bottom_right'

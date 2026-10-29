@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 21:
+            if version > 22:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -351,6 +351,13 @@ class Store:
                     CREATE INDEX IF NOT EXISTS idx_audience_variants_matter ON audience_variants(matter_id,updated_at);
                     PRAGMA user_version=21;
                 ''')
+            if version < 22:
+                columns = {row['name'] for row in con.execute('PRAGMA table_info(page_annotations)')}
+                if 'created_at' not in columns:
+                    con.execute('ALTER TABLE page_annotations ADD COLUMN created_at TEXT')
+                if 'updated_at' not in columns:
+                    con.execute('ALTER TABLE page_annotations ADD COLUMN updated_at TEXT')
+                con.execute('PRAGMA user_version=22')
 
     def list_redactions(self, doc_id: str, active_only: bool = True) -> list[dict]:
         with self.connect() as con:
@@ -955,13 +962,14 @@ class Store:
     def _annotation_fields() -> tuple[str, ...]:
         return ('id', 'document_id', 'page_index', 'target_revision', 'kind',
                 'rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color',
-                'asset_relpath', 'asset_mime', 'position', 'output_scope')
+                'asset_relpath', 'asset_mime', 'position', 'output_scope',
+                'created_at', 'updated_at')
 
     @classmethod
     def _raw_page_annotations(cls, con, matter_id: str) -> list[dict]:
         fields = cls._annotation_fields()
         rows = con.execute('''SELECT id,document_id,page_index,target_revision,kind,
-            rect_x,rect_y,rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope
+            rect_x,rect_y,rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope,created_at,updated_at
             FROM page_annotations WHERE matter_id=? ORDER BY position''', (matter_id,)).fetchall()
         return [{key: row[key] for key in fields} for row in rows]
 
@@ -994,9 +1002,9 @@ class Store:
         for entry in entries:
             con.execute('''INSERT INTO page_annotations
                 (id,matter_id,document_id,page_index,target_revision,kind,rect_x,rect_y,
-                 rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (entry['id'], matter_id, *(entry[key] for key in fields[1:])))
+                 rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope,created_at,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (entry['id'], matter_id, *(entry.get(key) for key in fields[1:])))
 
     @staticmethod
     def _validate_annotation_document(con, matter_id: str, entry: dict,
@@ -1015,12 +1023,12 @@ class Store:
             if con.execute('SELECT 1 FROM page_annotations WHERE id=?',
                            (entry['id'],)).fetchone():
                 raise ValueError('Annotation ID already exists')
-            entry = dict(entry, position=len(before))
+            now = utcnow()
+            entry = dict(entry, position=len(before), created_at=now, updated_at=now)
             self._write_page_annotations(con, matter_id, [entry])
             after = before + [entry]
             self._record_edit(con, matter_id, 'page_annotations', {'entries': before},
                               {'entries': after})
-            now = utcnow()
             con.execute('UPDATE matters SET updated_at=? WHERE id=?', (now, matter_id))
             self._audit(con, 'page_annotation_created', matter_id, entry['document_id'])
         return self.list_page_annotations(matter_id)
@@ -1041,8 +1049,9 @@ class Store:
             tracked = ('rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color', 'output_scope')
             if all(current[key] == merged[key] for key in tracked):
                 return self.list_page_annotations(matter_id)
+            now = utcnow()
             con.execute('UPDATE page_annotations SET ' + ','.join(f'{key}=?' for key in tracked) +
-                        ' WHERE id=?', (*(merged[key] for key in tracked), annotation_id))
+                        ',updated_at=? WHERE id=?', (*(merged[key] for key in tracked), now, annotation_id))
             after = self._raw_page_annotations(con, matter_id)
             self._record_edit(con, matter_id, 'page_annotations', {'entries': before},
                               {'entries': after})

@@ -50,6 +50,7 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
   await page.locator('.doc-item').filter({ hasText: 'transfer-target' }).click()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', { name: 'Pages', exact: true }).click()
+  await page.getByRole('tab', { name: 'Pages', exact: true }).click()
   await page.getByRole('button', { name: 'Add pages', exact: true }).click()
   const tools = page.getByRole('dialog', { name: 'Page tools' })
   await expect(tools.getByRole('heading', { name: 'Add pages' })).toBeVisible()
