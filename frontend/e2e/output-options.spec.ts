@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import {test,expect} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -13,7 +14,7 @@ async function seed(request:any){
  expect((await request.put(`${base}/matters/${matter.id}/membership`,{headers,data:{included_ids:[docs[0].id],expected_snapshot:membership.input_snapshot}})).ok()).toBeTruthy()
  return {matter,doc:docs[0],buffer}
 }
-async function enter(page:any){await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(page.locator('.section-enter-active')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready);await page.getByRole('button',{name:'Output options',exact:true}).click();await expect(page.getByLabel('Page quality',{exact:true})).toHaveValue('original')}
+async function enter(page:any){await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(page.locator('.section-enter-active')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready);await page.getByRole('button',{name:'Output options',exact:true}).click();await expect(page.getByLabel('Page quality',{exact:true})).toHaveValue('original')}
 test('B03A BU04 reference geometry, appearance matrix, keyboard and dirty cancellation',async({page,request},info)=>{
  await seed(request);await enter(page)
  const dialog=page.getByRole('dialog',{name:'Output options',exact:true})

@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { closeDocumentActions, closeDocumentBrowser, openDocumentActions } from './navigation'
 import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
@@ -29,10 +30,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
     expect(uploaded.ok()).toBeTruthy();const [document]=await uploaded.json()
     const title='Synthetic petition with a deliberately long document title for narrow reader header verification'
     expect((await request.patch(`${base}/documents/${document.id}`,{headers,data:{title}})).ok()).toBeTruthy()
-    await page.setViewportSize(viewport);await page.goto('/')
+    await page.setViewportSize(viewport);await page.goto('/');await enterLatestMatter(page)
     for(const theme of ['light','dark'])for(const scale of [90,100,110,125]) {
       await test.step(`${theme} ${scale}%`,async()=>{
-        await page.evaluate(({theme,scale})=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme,scale})),{theme,scale});await page.reload()
+        await page.evaluate(({theme,scale})=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme,scale})),{theme,scale});await page.reload();await enterLatestMatter(page)
         await closeDocumentBrowser(page)
         await expect(page.locator('.pdf-paper')).toBeVisible()
         await page.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('fit-width')

@@ -519,7 +519,7 @@ const marksPanelOpen = computed(() => activeTool.value === 'marks')
 const inspectorVisible = computed(() => marksPanelOpen.value ||
   (editTextMode.value && (pendingMove.value || !!runsError.value || !!editNotice.value)) ||
   redactionOpen.value ||
-  (annotationPanelOpen.value && !annotationDrawing.value && (annotationDraft.kind === 'image' || !!annotationRegion.value || !!editingAnnotationId.value || !!annotationError.value)) ||
+  (annotationPanelOpen.value && (annotationDraft.kind === 'image' || (!annotationDrawing.value && (!!annotationRegion.value || !!editingAnnotationId.value || !!annotationError.value)))) ||
   (linkPanelOpen.value && !!linkRegion.value))
 const toolHint = computed(() => ({
   'add-text': 'Click where text should appear, type in the box, then choose Apply text.',
@@ -931,7 +931,8 @@ async function savePendingDraft() {
   else if (bookmarkOpen.value && bookmarkTitle.value.trim()) await addPageBookmark()
   return !hasPendingDraft()
 }
-defineExpose({hasPendingDraft, discardPendingDraft, savePendingDraft, reloadReader: () => loadPdf(props.document,true)})
+const historyBusy = computed(() => editing.value || headerSaving.value || annotationBusy.value || linksBusy.value || redactionBusy.value)
+defineExpose({historyBusy, hasPendingDraft, discardPendingDraft, savePendingDraft, reloadReader: () => loadPdf(props.document,true)})
 onBeforeUnmount(() => { rememberPosition(); void flushReadingPositions(); epoch++; if (bookmarkNoticeTimer) clearTimeout(bookmarkNoticeTimer); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value) })
 
 async function addPageBookmark() {
@@ -1746,8 +1747,8 @@ async function applyReplacement() {
           <button v-for="category in (['read','edit','review','pages','ocr','redact'] as const)" :key="category" role="tab" :aria-selected="activeCategory===category" :class="{active:activeCategory===category}" :data-category="category" :id="`pdf-tab-${category}`" :tabindex="activeCategory===category?0:-1" aria-controls="pdf-tool-panel" @keydown="tabKey($event,category)" @click="selectCategory(category)"><component :is="category==='read'?BookOpen:category==='edit'?Pencil:category==='review'?Highlighter:category==='pages'?LayoutGrid:category==='ocr'?ScanText:Shield" :size="15"/>{{category==='read'?'Read':category==='edit'?'Edit':category==='review'?'Annotate':category==='pages'?'Pages':category==='ocr'?'OCR':'Redact'}}</button>
         </div>
         <div class="reader-mode-actions">
-          <button class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :aria-description="undoDescription" :disabled="!canUndo || disabled || editing" @click="emit('undo')"><Undo2 :size="16"/></button>
-          <button class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :aria-description="redoDescription" :disabled="!canRedo || disabled || editing" @click="emit('redo')"><Redo2 :size="16"/></button>
+          <button v-if="expanded" class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :aria-description="undoDescription" :disabled="!canUndo || disabled || editing" @click="emit('undo')"><Undo2 :size="16"/></button>
+          <button v-if="expanded" class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :aria-description="redoDescription" :disabled="!canRedo || disabled || editing" @click="emit('redo')"><Redo2 :size="16"/></button>
           <button class="icon-btn small" :aria-label="focusedReading ? 'Exit focused reading' : 'Focused reading'" :title="focusedReading ? 'Exit focused reading' : 'Focused reading'" @click="toggleFocusedReading"><Maximize2 :size="16"/></button>
           <button class="btn secondary small index-trigger" aria-label="Open bundle index" @click="emit('openBookmarks')">Index &amp; Bookmarks</button>
           <details ref="actionsMenu" class="reader-more" @keydown.esc.stop="actionsMenu?.removeAttribute('open'); actionsMenu?.querySelector('summary')?.focus()"><summary role="button" class="icon-btn small" aria-label="More document actions" title="More document actions"><Ellipsis :size="17"/></summary><div class="reader-more-menu" @click.capture="closeActionMenu" role="tablist" aria-label="Additional PDF tools">
@@ -2007,6 +2008,6 @@ async function applyReplacement() {
       <PageOrganizer v-if="organizerOpen" :document="document" :disabled="!!disabled || editing" @close="organizerOpen=false" @modified="emit('modified')" @error="emit('error',$event)"/>
 
     </template>
-    <div v-else class="viewer-empty"><FileSearch :size="44"/><strong>Document preview</strong><span>Select a file to review its pages</span><div class="empty-reader-history"><button class="btn secondary small" aria-label="Undo last matter change" :title="undoDescription" :disabled="!canUndo || disabled" @click="emit('undo')"><Undo2 :size="16"/> Undo</button><button class="btn secondary small" aria-label="Redo last matter change" :title="redoDescription" :disabled="!canRedo || disabled" @click="emit('redo')"><Redo2 :size="16"/> Redo</button></div></div>
+    <div v-else class="viewer-empty"><FileSearch :size="44"/><strong>Document preview</strong><span>Select a file to review its pages</span><div v-if="expanded" class="empty-reader-history"><button class="btn secondary small" aria-label="Undo last matter change" :title="undoDescription" :disabled="!canUndo || disabled" @click="emit('undo')"><Undo2 :size="16"/> Undo</button><button class="btn secondary small" aria-label="Redo last matter change" :title="redoDescription" :disabled="!canRedo || disabled" @click="emit('redo')"><Redo2 :size="16"/> Redo</button></div></div>
   </div>
 </template>

@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import {test,expect,type Locator,type Page} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -24,7 +25,7 @@ test('PDF copy pastes into searches and editable text while app chrome cannot be
  const matter=await(await request.post(`${base}/matters`,{headers,data:{name:'Synthetic clipboard test',court_profile:'general-demo'}})).json()
  const source=await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))
  await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'Petition.pdf',mimeType:'application/pdf',buffer:source}}})
- await page.setViewportSize({width:1440,height:900});await page.goto('/')
+ await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page)
  const layer=page.locator('.viewer-root .pdf-text-layer')
  await copyPdfWord(page,layer)
  await page.screenshot({path:info.outputPath('pdf-text-selected.png')})

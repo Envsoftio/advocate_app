@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { disconnectEngine, requireEngine } from './engineConnection'
-import type { Matter } from './types'
+import type { Matter, MatterDocument } from './types'
 
 type BackendConnection = { base_url: string, token: string }
 let sessionPromise: Promise<BackendConnection> | undefined
@@ -94,7 +94,7 @@ export async function saveReaderPosition(key:string, state:import('./pdfReader')
 }
 
 export async function uploadDocument(matterId: string, file: File, password?: string,
-                                     acknowledgeSignatureRisk = false): Promise<void> {
+                                     acknowledgeSignatureRisk = false): Promise<MatterDocument[]> {
   const headers: Record<string,string> = {
     'Content-Type': 'application/octet-stream',
     'X-CourtBundle-Filename': encodeURIComponent(file.name),
@@ -102,7 +102,8 @@ export async function uploadDocument(matterId: string, file: File, password?: st
   }
   if (password) headers['X-CourtBundle-Pdf-Password'] = encodeURIComponent(password)
   if (acknowledgeSignatureRisk) headers['X-CourtBundle-Signature-Acknowledge'] = 'true'
-  await request(`/matters/${matterId}/documents/raw`, { method: 'POST', body: file, headers }, 5 * 60_000)
+  const response = await request(`/matters/${matterId}/documents/raw`, { method: 'POST', body: file, headers }, 5 * 60_000)
+  return response.json() as Promise<MatterDocument[]>
 }
 
 export async function uploadDocuments(matterId: string, files: File[]): Promise<void> {

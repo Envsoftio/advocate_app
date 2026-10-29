@@ -11,6 +11,7 @@ import {
 } from "vue";
 import {
   ChevronDown,
+  Clock3,
   LayoutGrid,
   ListTree,
   ListChecks,
@@ -82,6 +83,9 @@ import BundleExportDialog from "./components/BundleExportDialog.vue";
 import ExportPdfReview from "./components/ExportPdfReview.vue";
 import MatterForm from "./components/MatterForm.vue";
 import MatterHome from "./components/MatterHome.vue";
+import MatterOverview from "./components/MatterOverview.vue";
+import ImportWorkspace from "./components/ImportWorkspace.vue";
+import type { ImportEntry } from "./lib/matterFlow";
 import CourtProfileGuide from "./components/CourtProfileGuide.vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { VueDraggable } from "vue-draggable-plus";
@@ -126,6 +130,7 @@ import type {
 type View =
   | "matters"
   | "overview"
+  | "import"
   | "documents"
   | "index"
   | "variants"
@@ -167,7 +172,7 @@ const tabDiscardRequest = ref<{
 } | null>(null);
 const membershipOpen = ref(false);
 const membershipDirty = ref(false);
-const membershipCollapsed = ref(false);
+const membershipCollapsed = computed(() => sidebarCollapsed.value);
 const membershipPanel = ref<InstanceType<typeof BundleMembership>|null>(null);
 let membershipInvoker: HTMLElement|null = null;
 async function openMembership() {
@@ -176,7 +181,7 @@ async function openMembership() {
   if (!(await guardArtifactTransition('Bundle membership'))) return;
   membershipInvoker = document.activeElement as HTMLElement;
   membershipOpen.value = true;
-  membershipCollapsed.value = window.innerWidth < 1200;
+
 }
 async function leaveMembership() {
   if (!membershipOpen.value) return true;
@@ -230,7 +235,7 @@ function answerTabDiscard(allow: boolean) {
   if (!allow) void nextTick(() => request?.focusReturn?.focus());
 }
 function trapNavigationFocus(event: KeyboardEvent) {
-  const buttons = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+  const buttons = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]')];
   const first = buttons[0], last = buttons[buttons.length - 1];
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -381,8 +386,8 @@ async function showPreparation() {
   await showView('documents');
   if (activeView.value !== 'documents') return;
   await nextTick();
-  fitDocumentsWorkspace();
   preparationMode.value = true;
+  fitDocumentsWorkspace();
   preparationListOpen.value = !compactDocuments.value;
   readerFocus.value = true;
   detailsOpen.value = !compactDocuments.value;
@@ -405,7 +410,7 @@ function openEditor() {
   preparationMode.value = false;
   detailsOpen.value = false;
   readerFocus.value = true;
-  void nextTick(() => documentsWorkspace.value?.querySelector<HTMLElement>(".viewer-root")?.focus({preventScroll:true}));
+  void nextTick(() => { fitDocumentsWorkspace(); documentsWorkspace.value?.querySelector<HTMLElement>(".viewer-root")?.focus({preventScroll:true}); });
 }
 async function openPreparationSearch() {
   if (membershipOpen.value) { if (await leaveMembership()) await openDocumentSearch(); return; }
@@ -480,7 +485,7 @@ async function openDocumentSearch() {
   restoreDocumentSearchFocus();
 }
 watch(documentsWorkspace, restoreDocumentSearchFocus, {flush:'post'});
-const activeView = ref<View>("documents");
+const activeView = ref<View>("matters");
 async function focusMain() {
   await nextTick();
   const regions = document.querySelectorAll<HTMLElement>("#main-content");
@@ -496,6 +501,79 @@ watch([activeView, selectedDocId, documentTableOpen], () => {
     toggleEditorExpanded();
 });
 const sidebarCollapsed = ref(false);
+const matterHome = ref<InstanceType<typeof MatterHome> | null>(null);
+const matterDetailsOpen = ref(false);
+const matterContext = computed(() => !!currentMatter.value && !['matters','rules','about'].includes(activeView.value));
+const importQueues = ref<Record<string, ImportEntry[]>>({});
+const importStarted = ref<Record<string, boolean>>({});
+const importEntries = computed(() => importQueues.value[currentMatterId.value || ''] || []);
+const importChecking = ref(false);
+const importingMatterId = ref<string|null>(null);
+const stopImport = ref(false);
+let importEntryId = 0;
+async function openImport() {
+  await showView('import');
+  if (activeView.value !== 'import') return;
+  if (!importQueues.value[currentMatterId.value!]?.some(e => ['ready','processing'].includes(e.status))) {
+    importQueues.value[currentMatterId.value!] = [];
+    importStarted.value[currentMatterId.value!] = false;
+  }
+}
+async function stageImport(files: FileList | File[]) {
+  if (!currentMatterId.value || busy.value || importChecking.value) return;
+  const id = currentMatterId.value;
+  await showView('import');
+  if (activeView.value !== 'import' || currentMatterId.value !== id) return;
+  if (importStarted.value[id]) { importQueues.value[id] = []; importStarted.value[id] = false; }
+  importQueues.value[id] ||= [];
+  const queue = importQueues.value[id];
+  importChecking.value = true;
+  try {
+    const existingDocuments = await api<MatterDocument[]>(`/matters/${id}/documents`);
+    const existing = new Set(existingDocuments.map(d => d.source_sha256));
+    for (const file of Array.from(files)) {
+      const entry: ImportEntry = { id: ++importEntryId, file, status: 'ready' };
+      if (!/\.(pdf|png|jpe?g)$/i.test(file.name)) entry.status = 'unsupported';
+      else if (file.size > 80 * 1024 * 1024) entry.status = 'oversize';
+      else {
+        const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+        entry.hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,'0')).join('');
+        if (existing.has(entry.hash) || queue.some(e => e.hash === entry.hash)) entry.status = 'duplicate';
+      }
+      queue.push(entry);
+    }
+  } catch (err) { issue(err); }
+  finally { importChecking.value = false; if (fileInput.value) fileInput.value.value = ''; }
+}
+async function startImport() {
+  if (!currentMatterId.value || busy.value || engineBlocked.value) return;
+  const id = currentMatterId.value;
+  const queue = importQueues.value[id] || [];
+  if (!queue.some(e => e.status === 'ready')) return;
+  importStarted.value[id] = true; importingMatterId.value = id; stopImport.value = false; busy.value = true;
+  try {
+    for (const entry of queue) {
+      if (entry.status !== 'ready') continue;
+      if (stopImport.value) { entry.status = 'cancelled'; continue; }
+      entry.status = 'processing';
+      try { const imported = await importOneFile(id, entry.file); entry.status = imported ? 'complete' : 'cancelled'; entry.pages = imported?.page_count; }
+      catch (err) { entry.status = 'failed'; entry.message = friendlyError(err); }
+    }
+    if (currentMatterId.value === id) await loadMatterResources();
+    await refreshMatters();
+  } finally { busy.value = false; importingMatterId.value = null; }
+}
+async function cancelImportView() {
+  if (importEntries.value.some(e => e.status === 'ready') && !window.confirm('Discard the files waiting in this import queue? No originals have been imported from this queue.')) return;
+  importQueues.value[currentMatterId.value!] = []; importStarted.value[currentMatterId.value!] = false;
+  await showView('overview');
+}
+async function searchWorkspace() {
+  if (!matterContext.value) { await showView('matters'); await nextTick(); matterHome.value?.focusSearch(); }
+  else await openDocumentSearch();
+}
+async function showRecentActivity() { await showView('matters'); await nextTick(); matterHome.value?.focusActivity(); }
+
 const smallScreen = ref(window.matchMedia("(max-width: 900px)").matches);
 const mobileNavOpen = ref(false);
 const searching = ref("");
@@ -946,7 +1024,7 @@ function confirmDiscardDrafts() {
 }
 function captureActiveTab() {
   const tab = activeTab.value;
-  if (!tab || tab.matterId !== currentMatterId.value) return;
+  if (!tab || tab.matterId !== currentMatterId.value || ["matters", "rules", "about"].includes(activeView.value)) return;
   tab.view = activeView.value;
   tab.selectedDocumentId = selectedDocId.value;
   tab.detailsOpen = detailsOpen.value;
@@ -996,6 +1074,7 @@ function tabHasDraft(tab: WorkspaceTab) {
   );
 }
 let tabActivationSequence = 0;
+let activatingMatter = false;
 async function activateTab(tab: WorkspaceTab) {
   if ((tableDirty.value || supplementDirty.value || variantDirty.value) && !(await guardArtifactTransition("the selected tab"))) return;
   if (!(await leaveMembership())) return;
@@ -1022,11 +1101,14 @@ async function activateTab(tab: WorkspaceTab) {
   const activation = ++tabActivationSequence;
   if (activeTabId.value !== tab.id) captureActiveTab();
   activeTabId.value = tab.id;
+  if (tab.documentId) preparationMode.value = false;
   pageToolsOpen.value = false;
   documentTableOpen.value = false;
   readerFocus.value = true;
   const matterChanged = currentMatterId.value !== tab.matterId;
+  activatingMatter = true;
   currentMatterId.value = tab.matterId;
+  activatingMatter = false;
   selectedDocId.value =
     tab.documentId ||
     tab.selectedDocumentId ||
@@ -1164,7 +1246,9 @@ async function prepareIndexBookmark(id: string) {
     sequence: bookmarkPreset.value.sequence + 1,
   };
 }
-watch([activeView, currentMatterId], () => { workspaceMenuOpen.value = false; tabsMenuOpen.value = false; });
+watch([activeView, currentMatterId], () => { workspaceMenuOpen.value = false; tabsMenuOpen.value = false; matterDetailsOpen.value = false; });
+watch(matterDetailsOpen, async open => { await nextTick(); document.querySelector<HTMLElement>(open ? '.matter-details-dialog button' : '.matter-overview .flow-heading button')?.focus(); });
+watch(workspaceMenuOpen, async open => { await nextTick(); document.querySelector<HTMLElement>(open ? '.workspace-settings button' : '.application-bar > .icon-btn')?.focus(); });
 watch(selectedDocId, (id) => {
   pageToolsOpen.value = false;
   if (!id) readerFocus.value = false;
@@ -1177,7 +1261,7 @@ function fitDocumentsWorkspace() {
   }
   const scale = uiScale.value / 100;
   // Retain all three panels when there is room for a roughly 500px reader.
-  compactDocuments.value = workspace.getBoundingClientRect().width / scale < 1150;
+  compactDocuments.value = workspace.getBoundingClientRect().width / scale < (preparationVisible.value ? 1150 : 900);
   if (window.innerWidth <= 700 && !editorExpanded.value) {
     documentsWorkspaceHeight.value = null;
     return;
@@ -1190,7 +1274,7 @@ function fitDocumentsWorkspace() {
     ),
   );
 }
-watch([uiScale, activeView, currentMatterId, editorExpanded, documentTableOpen, preflightContext], async () => {
+watch([sidebarCollapsed, uiScale, activeView, currentMatterId, editorExpanded, documentTableOpen, preflightContext], async () => {
   await nextTick();
   onResize();
   window.requestAnimationFrame(fitDocumentsWorkspace);
@@ -1236,6 +1320,9 @@ function onResize() {
 }
 function beforeUnload(event: BeforeUnloadEvent) {
   if (
+    !importingMatterId.value &&
+    !importChecking.value &&
+    !Object.values(importQueues.value).some(queue=>queue.some(entry=>entry.status==='ready')) &&
     !membershipDirty.value &&
     !variantDirty.value &&
     !tableDirty.value &&
@@ -1298,7 +1385,7 @@ function onKeydown(event: KeyboardEvent) {
     ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k")
   ) {
     event.preventDefault();
-    void openDocumentSearch();
+    void searchWorkspace();
   }
   if (
     (event.ctrlKey || event.metaKey) &&
@@ -1366,7 +1453,7 @@ watch(currentMatterId, () => {
   pageQuery.value = "";
   pageSearch.value = null;
   searchSequence++;
-  if (currentMatterId.value) {
+  if (currentMatterId.value && apiStatus.value === "online" && !activatingMatter) {
     void loadMatterResources();
   }
 }, {flush: "sync"});
@@ -1505,9 +1592,10 @@ async function init() {
     vaultState.value = "unlocked";
     profileList.value = await api<CourtProfile[]>("/profiles");
     await refreshMatters();
-    apiStatus.value = "online";
     engineState.value = "ready";
-    if (recoveringStartup) { await loadMatterResources(); await resumeAutosaveWhenClean(); }
+    await loadMatterResources();
+    apiStatus.value = "online";
+    if (recoveringStartup) await resumeAutosaveWhenClean();
   } catch (err) {
     apiStatus.value = "offline";
     disconnectEngine();
@@ -1766,7 +1854,7 @@ async function refreshHistory() {
     );
 }
 async function traverseHistory(direction: "undo" | "redo") {
-  if (membershipOpen.value) return;
+  if (membershipOpen.value || pdfViewer.value?.historyBusy) return;
   if (!currentMatterId.value || busy.value || !confirmDiscardDrafts()) return;
   if (filingGuide.value && !(await filingGuide.value.flushPendingSave())) {
     notify("Save the Memo of Parties before using Undo or Redo.", "error");
@@ -1793,7 +1881,7 @@ async function createMatter(fields: MatterNew) {
   try {
     const value = await api<Matter>("/matters", "POST", fields);
     await refreshMatters();
-    await openMatterTab(value.id, "documents");
+    await openMatterTab(value.id, "import");
     modalOpen.value = false;
     notify("Matter created. Import your first document to begin.", "success");
   } catch (err) {
@@ -1887,31 +1975,18 @@ async function submitProtectedRestore() {
     busy.value = false;
   }
 }
-async function onUpload(files: FileList | File[]) {
-  if (!currentMatterId.value || busy.value) return;
-  const incoming = Array.from(files).filter((f) =>
-    /\.(pdf|png|jpe?g)$/i.test(f.name),
-  );
-  if (!incoming.length) {
-    notify("Choose PDF, JPG or PNG files.", "error");
-    return;
-  }
-  busy.value = true;
-  let imported = 0;
-  try {
-    for (const file of incoming) {
+async function importOneFile(matterId: string, file: File): Promise<MatterDocument | null> {
       let password: string | undefined;
       let acknowledged = false;
       while (true) {
         try {
-          await uploadDocument(
-            currentMatterId.value,
+          const imported = await uploadDocument(
+            matterId,
             file,
             password,
             acknowledged,
           );
-          imported++;
-          break;
+          return imported[0] || null;
         } catch (err) {
           if (
             err instanceof ApiError &&
@@ -1927,7 +2002,7 @@ async function onUpload(files: FileList | File[]) {
             password = supplied === null ? undefined : supplied;
             if (supplied === null) {
               notify(`${file.name} import cancelled.`, "info");
-              break;
+              return null;
             }
             continue;
           }
@@ -1941,28 +2016,14 @@ async function onUpload(files: FileList | File[]) {
             );
             if (!acknowledged) {
               notify(`${file.name} import cancelled.`, "info");
-              break;
+              return null;
             }
             continue;
           }
           throw err;
         }
       }
-      password = undefined;
-    }
-    await loadMatterResources();
-    if (imported)
-      notify(
-        `${imported} document(s) imported as reference-only. Choose Bundle membership to include them. Original files preserved.`,
-        "success",
-      );
-  } catch (err) {
-    issue(err);
-    await loadMatterResources();
-  } finally {
-    busy.value = false;
-    if (fileInput.value) fileInput.value.value = "";
-  }
+
 }
 function askPdfImportPassword(
   name: string,
@@ -1983,7 +2044,7 @@ function finishPdfImportPassword(password: string | null) {
 }
 function onDropUpload(e: DragEvent) {
   hoverUpload.value = false;
-  if (e.dataTransfer?.files) void onUpload(e.dataTransfer.files);
+  if (e.dataTransfer?.files) void stageImport(e.dataTransfer.files);
 }
 async function generateCover() {
   if (!currentMatterId.value) return;
@@ -2828,7 +2889,7 @@ watch(sidebarCollapsed, (collapsed) => {
       </div>
     </section>
   </main>
-  <div v-else class="app-shell design-shell" :data-batch="documentTableOpen" :data-finding="!!preflightContext && activeView==='documents'" :data-preparation="preparationVisible || documentTableOpen || buildShell" :data-build="expandedBuildShell" :data-membership="membershipOpen" :data-membership-collapsed="membershipCollapsed" :data-compact-preparation="compactDocuments" :data-engine-unavailable="engineBlocked" :data-editor-expanded="editorExpanded" :data-documents="activeView === 'documents'" :style="{ '--documents-interface-scale': uiScale / 100 }">
+  <div v-else class="app-shell design-shell" :data-batch="documentTableOpen" :data-finding="!!preflightContext && activeView==='documents'" :data-preparation="preparationVisible || documentTableOpen || buildShell" :data-nav-collapsed="sidebarCollapsed" :data-flow="activeView==='matters'||activeView==='overview'||activeView==='import'" :data-build="expandedBuildShell" :data-membership="membershipOpen" :data-membership-collapsed="membershipCollapsed" :data-compact-preparation="compactDocuments" :data-engine-unavailable="engineBlocked" :data-editor-expanded="editorExpanded" :data-documents="activeView === 'documents'" :style="{ '--documents-interface-scale': uiScale / 100 }">
     <a class="skip-link" href="#main-content" @click.prevent="focusMain"
       >Skip to main content</a
     >
@@ -2838,201 +2899,36 @@ watch(sidebarCollapsed, (collapsed) => {
       <span class="application-local"><ShieldCheck :size="16"/> Local workspace</span>
       <button class="icon-btn small" aria-label="Workspace settings" title="Workspace settings" @click="workspaceMenuOpen=!workspaceMenuOpen"><Settings2 :size="16"/></button>
     </header>
-    <nav class="matter-rail" aria-label="Workspace navigation rail">
-      <div v-if="membershipOpen || expandedBuildShell" class="membership-matter"><strong>{{currentMatter?.name}}</strong><span>{{currentMatter?.case_number || 'Draft matter'}}</span></div>
-      <button aria-label="Matters" title="Matters" @click="showView('matters')"><BriefcaseBusiness :size="18"/></button>
-      <template v-if="currentMatter">
-        <button aria-label="Overview" title="Overview" :aria-current="!membershipOpen && activeView==='overview'?'page':undefined" @click="showView('overview')"><LayoutGrid :size="18"/><span v-if="membershipOpen || expandedBuildShell">Overview</span></button>
-        <button aria-label="Documents" title="Documents" :aria-current="!membershipOpen && activeView==='documents'?'page':undefined" @click="showPreparation"><Files v-if="membershipOpen || expandedBuildShell" :size="18"/><FileStack v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Documents</span></button>
-        <button aria-label="Index & bookmarks" title="Index & bookmarks" :aria-current="membershipOpen || activeView==='index'||activeView==='variants'?'page':undefined" @click="showView('index')"><ListTree v-if="membershipOpen || expandedBuildShell" :size="18"/><BookMarked v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Index & Bookmarks</span></button>
-        <button aria-label="Preflight checks" title="Preflight checks" :aria-current="!membershipOpen && activeView==='validation'?'page':undefined" @click="showView('validation')"><ListChecks v-if="membershipOpen || expandedBuildShell" :size="18"/><FileCheck2 v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Preflight</span></button>
-        <button aria-label="Build bundle" title="Build bundle" :aria-current="!membershipOpen && activeView==='build'?'page':undefined" @click="showView('build')"><Box v-if="membershipOpen || expandedBuildShell" :size="18"/><Layers3 v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Build bundle</span></button>
-        <button aria-label="Storage" title="Storage" :aria-current="!membershipOpen && activeView==='storage'?'page':undefined" @click="showView('storage')"><HardDrive v-if="membershipOpen || expandedBuildShell" :size="18"/><Archive v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Storage</span></button>
+    <nav class="matter-rail" :data-context="matterContext" aria-label="Workspace navigation rail">
+      <div class="rail-context"><strong>{{matterContext ? currentMatter?.name : 'WORKSPACE'}}</strong><span v-if="matterContext">{{currentMatter?.case_number || 'Draft matter'}}</span></div>
+      <template v-if="matterContext">
+        <button aria-label="Overview" title="Overview" :aria-current="!membershipOpen && activeView==='overview'?'page':undefined" @click="showView('overview')"><LayoutGrid/><span>Overview</span></button>
+        <button aria-label="Documents" title="Documents" :aria-current="!membershipOpen && ['documents','import'].includes(activeView)?'page':undefined" @click="showPreparation"><Files/><span>Documents</span></button>
+        <button aria-label="Index & bookmarks" title="Index & bookmarks" :aria-current="membershipOpen || activeView==='index'||activeView==='variants'?'page':undefined" @click="showView('index')"><ListTree/><span>Index &amp; Bookmarks</span></button>
+        <button aria-label="Preflight checks" title="Preflight checks" :aria-current="!membershipOpen && activeView==='validation'?'page':undefined" @click="showView('validation')"><ListChecks/><span>Preflight</span></button>
+        <button aria-label="Build bundle" title="Build bundle" :aria-current="!membershipOpen && activeView==='build'?'page':undefined" @click="showView('build')"><Box/><span>Build bundle</span></button>
+        <button aria-label="Storage" title="Storage" :aria-current="!membershipOpen && activeView==='storage'?'page':undefined" @click="showView('storage')"><HardDrive/><span>Storage</span></button>
       </template>
-      <button v-if="!membershipOpen && !expandedBuildShell" class="rail-settings" aria-label="Navigation and appearance" title="Navigation and appearance" @click="workspaceMenuOpen=!workspaceMenuOpen"><PanelLeftOpen :size="18"/></button>
-    <div v-if="membershipOpen || expandedBuildShell" class="membership-rail-bottom"><button disabled title="Opening a matter folder is not exposed by this local service"><FolderOpen :size="16"/><span>Open matter folder</span></button><button :aria-label="membershipCollapsed?'Expand sidebar':'Collapse sidebar'" @click="membershipCollapsed=!membershipCollapsed"><PanelLeftOpen :size="16"/><span>{{membershipCollapsed?'Expand sidebar':'Collapse sidebar'}}</span></button></div></nav>
+      <template v-else>
+        <button aria-label="Matters" title="Matters" :aria-current="activeView==='matters'?'page':undefined" @click="showView('matters')"><FolderOpen/><span>Matters</span></button>
+        <button aria-label="Recent activity" title="Recent activity" @click="showRecentActivity"><Clock3/><span>Recent activity</span></button>
+        <button aria-label="Local storage" title="Local storage" @click="currentMatter ? showView('storage') : workspaceMenuOpen=true"><HardDrive/><span>Local storage</span></button>
+      </template>
+      <div class="rail-bottom">
+        <button v-if="matterContext" title="All matters" aria-label="All matters" @click="showView('matters')"><FolderOpen/><span>All matters</span></button>
+        <span v-else class="rail-local"><small>ON THIS COMPUTER</small><span><ShieldCheck/>Local processing</span></span>
+        <button :aria-label="sidebarCollapsed?'Expand sidebar':'Collapse sidebar'" :title="sidebarCollapsed?'Expand sidebar':'Collapse sidebar'" :aria-expanded="!sidebarCollapsed" @click="sidebarCollapsed=!sidebarCollapsed"><PanelLeftOpen v-if="sidebarCollapsed"/><PanelLeftClose v-else/><span>{{sidebarCollapsed?'Expand sidebar':'Collapse sidebar'}}</span></button>
+      </div>
+    </nav>
     <button v-if="workspaceMenuOpen" class="navigation-scrim" aria-label="Dismiss navigation backdrop" @click="workspaceMenuOpen=false"></button>
-    <aside
-      v-show="workspaceMenuOpen"
-      class="sidebar workspace-drawer"
-      :class="{
-        collapsed: false,
-        'mobile-open': true,
-      }"
-      @keydown.esc="workspaceMenuOpen=false"
-    >
-      <div class="brand-area">
-        <div class="brand-mark"><img :src="matterDraftLogo" alt="" width="42" height="42" draggable="false" /></div>
-        <div class="brand-copy">
-          <div class="brand-name">
-            MatterDraft<span class="brand-plus">.</span>
-          </div>
-          <div class="brand-sub">Legal Documents, Simplified.</div>
-        </div>
-        <button class="sidebar-toggle" aria-label="Close workspace navigation" title="Close workspace navigation" @click="workspaceMenuOpen=false">
-          <X :size="19" />
-        </button>
-      </div>
-      <div class="side-label">WORKSPACE</div>
-      <nav class="side-nav">
-        <button
-          class="side-link"
-          aria-label="Matters"
-          title="Matters"
-          :class="{ active: activeView !== 'rules' && activeView !== 'about' }"
-          @click="showView('matters')"
-        >
-          <BriefcaseBusiness :size="18" /><span class="nav-label">Matters</span
-          ><span class="side-count">{{ matterList.length }}</span>
-        </button>
-        <button
-          class="side-link"
-          aria-label="Court rules"
-          title="Court rules"
-          :class="{ active: activeView === 'rules' }"
-          @click="showView('rules')"
-        >
-          <BookOpen :size="18" /><span class="nav-label">Court rules</span>
-        </button>
-        <button
-          class="side-link"
-          aria-label="About MatterDraft"
-          title="About MatterDraft"
-          :class="{ active: activeView === 'about' }"
-          @click="showView('about')"
-        >
-          <CircleHelp :size="18" /><span class="nav-label">About MatterDraft</span>
-        </button>
-      </nav>
-      <input
-        ref="matterFileInput"
-        type="file"
-        accept=".cbmatter"
-        hidden
-        @change="
-          (e) => importMatterPackage((e.target as HTMLInputElement).files)
-        "
-      />
-      <button
-        class="side-link"
-        aria-label="Restore matter"
-        title="Restore matter"
-        :disabled="busy"
-        @click="matterFileInput?.click()"
-      >
-        <FolderOpen :size="18" /><span class="nav-label">Restore matter</span>
-      </button>
-      <div class="side-label matter-section-label">
-        <span class="nav-label">YOUR MATTERS</span
-        ><button
-          aria-label="New matter"
-          title="New matter"
-          class="side-plus"
-          @click="modalOpen = true"
-        >
-          <Plus :size="17" />
-        </button>
-      </div>
-      <div class="matter-list">
-        <button
-          v-for="m in matterList"
-          :key="m.id"
-          class="matter-link"
-          :aria-label="m.name"
-          :title="m.name"
-          :class="{
-            active:
-              currentMatterId === m.id &&
-              activeView !== 'rules' &&
-              activeView !== 'about',
-          }"
-          @click="selectMatter(m.id)"
-        >
-          <div class="matter-initial">
-            {{ m.name.slice(0, 1).toUpperCase() }}
-          </div>
-          <div class="matter-link-label">
-            <span>{{ m.name }}</span
-            ><small>{{ m.case_type }}</small>
-          </div>
-        </button>
-        <div v-if="!matterList.length" class="sidebar-empty">
-          No matters yet
-        </div>
-      </div>
-      <div v-if="archivedMatters.length" class="side-label">
-        ARCHIVED MATTERS
-      </div>
-      <div v-if="archivedMatters.length" class="matter-list">
-        <button
-          v-for="m in archivedMatters"
-          :key="m.id"
-          class="matter-link"
-          :aria-label="'Restore ' + m.name"
-          :title="'Restore ' + m.name"
-          @click="restoreArchivedMatter(m.id)"
-        >
-          <Archive :size="17" /><span>{{ m.name }}</span>
-        </button>
-      </div>
-      <div class="sidebar-bottom">
-        <button
-          v-if="vaultEnabled"
-          class="side-link"
-          @click="
-            vaultError = '';
-            vaultState = 'change_password';
-          "
-        >
-          <LockKeyhole :size="17" /><span>Change vault password</span>
-        </button>
-        <div class="appearance-controls">
-          <label
-            >Theme<select v-model="theme" aria-label="Theme">
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select></label
-          >
-          <label
-            >Interface size<select
-              v-model.number="uiScale"
-              aria-label="Interface size"
-            >
-              <option :value="90">90%</option>
-              <option :value="100">100%</option>
-              <option :value="110">110%</option>
-              <option :value="125">125%</option>
-            </select></label
-          >
-          <small>/ search · ⌘/Ctrl+Z undo · Shift+⌘/Ctrl+Z redo</small>
-        </div>
-        <div class="offline-status">
-          <CloudOff :size="17" />
-          <div>
-            <strong>Offline-first</strong
-            ><small>Files stay on this computer</small>
-          </div>
-        </div>
-        <div class="version-chip">
-          <span :class="['status-dot', apiStatus]"></span>
-          {{
-            apiStatus === "online"
-              ? "Local engine connected"
-              : apiStatus === "offline"
-                ? "Engine disconnected"
-                : "Connecting…"
-          }}
-          <span class="version-text">v0.1</span>
-        </div>
-        <div class="sidebar-profile" aria-label="Local workspace profile">
-          <span class="sidebar-profile-avatar"><UserRound :size="18" /></span
-          ><span class="sidebar-profile-copy"
-            ><strong>Local workspace</strong><small>On this device</small></span
-          >
-        </div>
-      </div>
+    <aside v-show="workspaceMenuOpen" class="workspace-drawer workspace-settings" role="dialog" aria-label="Workspace settings" @keydown.tab="trapNavigationFocus" @keydown.esc="workspaceMenuOpen=false">
+      <header><h2>Workspace</h2><button class="icon-btn" aria-label="Close workspace navigation" @click="workspaceMenuOpen=false"><X :size="18"/></button></header>
+      <div class="workspace-actions"><button class="btn secondary" @click="showView('matters')"><FolderOpen :size="16"/>Matters</button><button class="btn secondary" @click="modalOpen=true;workspaceMenuOpen=false"><Plus :size="16"/>New matter</button><button class="btn secondary" :disabled="busy" @click="matterFileInput?.click()"><FolderOpen :size="16"/>Restore matter</button><button class="btn secondary" @click="showView('rules')"><BookOpen :size="16"/>Court rules</button><button class="btn secondary" @click="showView('about')"><CircleHelp :size="16"/>About MatterDraft</button></div>
+      <div class="appearance-controls"><label>Theme<select v-model="theme" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label>Interface size<select v-model.number="uiScale" aria-label="Interface size"><option :value="90">90%</option><option :value="100">100%</option><option :value="110">110%</option><option :value="125">125%</option></select></label></div>
+      <button v-if="vaultEnabled" class="btn secondary" @click="vaultError='';vaultState='change_password';workspaceMenuOpen=false"><LockKeyhole :size="16"/>Change vault password</button>
+      <p class="flow-muted">Files stay on this computer. / search · ⌘/Ctrl+Z undo</p>
     </aside>
+    <input ref="matterFileInput" type="file" accept=".cbmatter" hidden @change="importMatterPackage(($event.target as HTMLInputElement).files)"/>
 
     <div
       class="app-main"
@@ -3042,7 +2938,7 @@ watch(sidebarCollapsed, (collapsed) => {
       }"
     >
       <nav
-        v-show="tabsMenuOpen || preparationVisible || documentTableOpen || membershipOpen || buildShell"
+        v-show="true"
         class="open-workspace-tabs"
         aria-label="Open matter and document tabs"
         @keydown.esc="tabsMenuOpen=false"
@@ -3057,13 +2953,7 @@ watch(sidebarCollapsed, (collapsed) => {
         >
           <Menu :size="19" />
         </button>
-        <span v-if="!workspaceTabs.length" class="tabs-empty-label">{{
-          activeView === "rules"
-            ? "Court rules"
-            : activeView === "about"
-              ? "About MatterDraft"
-              : "Matters"
-        }}</span>
+        <button class="workspace-home-tab" :aria-current="activeView==='matters'?'page':undefined" @click="showView('matters')"><FolderOpen :size="14"/>Matters</button>
         <div
           v-for="tab in workspaceTabs"
           :key="tab.id"
@@ -3103,14 +2993,15 @@ watch(sidebarCollapsed, (collapsed) => {
             <X :size="13" />
           </button>
         </div>
+        <button class="icon-btn workspace-new-tab" aria-label="New matter" @click="modalOpen=true"><Plus :size="16"/></button>
       </nav>
 
-      <div v-if="preparationVisible || documentTableOpen || membershipOpen || buildShell" class="preparation-utility">
-        <button class="preparation-search-trigger" @click="openPreparationSearch"><Search :size="16"/> Search documents and page text <kbd>Ctrl K</kbd></button>
-        <span class="preparation-save-state"><CircleAlert v-if="tableDirty || documentDirty || settingsDirty || formattingDirty || membershipDirty || variantDirty" :size="14"/><CheckCircle2 v-else-if="membershipOpen" class="membership-saved-icon" :size="14"/>{{membershipDirty ? 'Unapplied changes' : (tableDirty || documentDirty || settingsDirty || formattingDirty || variantDirty) ? 'Unsaved changes' : 'Saved locally'}}</span>
-        <button class="icon-btn small" aria-label="Undo last matter change" :disabled="membershipOpen || engineBlocked || busy || !history.can_undo" :title="undoDescription" @click="traverseHistory('undo')"><Undo2 :size="16"/></button>
-        <button class="icon-btn small" aria-label="Redo last matter change" :disabled="membershipOpen || engineBlocked || busy || !history.can_redo" :title="redoDescription" @click="traverseHistory('redo')"><Redo2 :size="16"/></button>
-        <span class="preparation-engine"><CheckCircle2 :size="14"/>{{engineBlocked?'Engine disconnected':'Engine connected'}}</span>
+      <div class="preparation-utility">
+        <button class="preparation-search-trigger" @click="searchWorkspace"><Search :size="16"/> Search matters and documents <kbd>Ctrl K</kbd></button>
+        <span class="preparation-save-state"><CircleAlert v-if="tableDirty || documentDirty || settingsDirty || formattingDirty || membershipDirty || variantDirty" :size="14"/><CheckCircle2 v-else class="membership-saved-icon" :size="14"/>{{membershipDirty ? 'Unapplied changes' : (tableDirty || documentDirty || settingsDirty || formattingDirty || variantDirty) ? 'Unsaved changes' : 'Saved locally'}}</span>
+        <button class="icon-btn small" aria-label="Undo last matter change" :disabled="!matterContext || membershipOpen || engineBlocked || busy || pdfViewer?.historyBusy || !history.can_undo" :title="undoDescription" @click="traverseHistory('undo')"><Undo2 :size="16"/></button>
+        <button class="icon-btn small" aria-label="Redo last matter change" :disabled="!matterContext || membershipOpen || engineBlocked || busy || pdfViewer?.historyBusy || !history.can_redo" :title="redoDescription" @click="traverseHistory('redo')"><Redo2 :size="16"/></button>
+        <span class="preparation-engine"><CheckCircle2 :size="14"/>{{apiStatus==='connecting'?'Connecting…':engineBlocked?'Engine disconnected':'Engine connected'}}</span>
       </div>
 
       <div
@@ -3302,9 +3193,9 @@ watch(sidebarCollapsed, (collapsed) => {
           </div>
         </main>
 
-        <MatterHome
+        <MatterHome ref="matterHome"
           v-else-if="activeView === 'matters'"
-          :matters="matterList"
+          :matters="matterList" :archived="archivedMatters" @restore="restoreArchivedMatter"
           :creating="creating"
           @open="(id) => selectMatter(id, 'overview')"
           @create="modalOpen = true"
@@ -3349,247 +3240,14 @@ watch(sidebarCollapsed, (collapsed) => {
           tabindex="-1"
           class="page-content workspace-page" :inert="membershipOpen" :aria-hidden="membershipOpen || undefined"
         >
-          <div v-if="activeView !== 'documents' && !buildShell" class="matter-heading">
-            <div class="matter-heading-copy">
-              <h1>{{ currentMatter.name }}</h1>
-              <p class="matter-description">
-                <span>{{ currentMatter.case_number || "Draft" }}</span
-                ><span class="dot-sep">·</span>{{ currentMatter.case_type }}
-                <span class="dot-sep">·</span> {{ selectedProfile?.name }}
-              </p>
-            </div>
-            <div class="matter-heading-actions">
-              <button
-                class="btn secondary small matter-icon-action"
-                aria-label="Undo"
-                :title="undoDescription"
-                :aria-description="undoDescription"
-                :disabled="busy || !history.can_undo"
-                @click="traverseHistory('undo')"
-              >
-                <Undo2 :size="16" />
-              </button>
-              <button
-                class="btn secondary small matter-icon-action"
-                aria-label="Redo"
-                :title="redoDescription"
-                :aria-description="redoDescription"
-                :disabled="busy || !history.can_redo"
-                @click="traverseHistory('redo')"
-              >
-                <Redo2 :size="16" />
-              </button>
-              <details ref="matterMore" class="matter-more">
-                <summary
-                  class="btn secondary small matter-icon-action"
-                  aria-label="More actions"
-                  title="More actions"
-                >
-                  <Ellipsis :size="17" />
-                </summary>
-                <div class="matter-more-menu">
-                  <button :disabled="busy" @click="backupCurrentMatter">
-                    <ArrowDownToLine :size="15" /> Back up matter
-                  </button>
-                  <button
-                    @click="
-                      confirmDiscardDrafts() && void loadMatterResources()
-                    "
-                  >
-                    <RefreshCw :size="15" /> Refresh
-                  </button>
-                  <button :disabled="busy" @click="removeMatter">
-                    <Archive :size="15" /> Archive matter
-                  </button>
-                </div>
-              </details>
-              <button class="btn primary" @click="showView('build')">
-                <FileStack :size="17" /> Build filing bundle
-              </button>
-            </div>
-          </div>
-          <div v-if="activeView !== 'documents' && !buildShell" class="matter-summary" aria-label="Matter summary">
-            <span
-              ><strong>{{ docs.length }}</strong> documents</span
-            ><span
-              ><strong>{{ totalPages }}</strong> source pages</span
-            ><span
-              ><strong>{{ warningChecks.length + errorChecks.length }}</strong>
-              review flags</span
-            ><span
-              ><strong>{{ exportsList.length }}</strong> prepared packages</span
-            >
-          </div>
-          <nav v-show="false" class="workspace-tabs" aria-label="Matter preparation">
-            <button
-              :class="{ active: activeView === 'overview' }"
-              @click="showView('overview')"
-            >
-              <BriefcaseBusiness :size="16" /> Overview</button
-            ><button
-              :class="{ active: activeView === 'documents' }"
-              @click="showView('documents')"
-            >
-              <FileStack :size="16" /> Documents</button
-            ><button
-              :class="{ active: activeView === 'index' }"
-              @click="showView('index')"
-            >
-              <BookMarked :size="16" /> Index & bookmarks</button
-            ><button
-              :class="{ active: activeView === 'build' }"
-              @click="showView('build')"
-            >
-              <Layers3 :size="16" /> Build bundle</button
-            ><button
-              :class="{ active: activeView === 'validation' }"
-              @click="showView('validation')"
-            >
-              <ShieldCheck :size="16" /> Preflight checks
-              <span
-                v-if="warningChecks.length + errorChecks.length"
-                class="count-bubble"
-                >{{ warningChecks.length + errorChecks.length }}</span
-              ></button
-            ><button
-              :class="{ active: activeView === 'storage' }"
-              @click="showView('storage')"
-            >
-              <Archive :size="16" /> Storage
-            </button>
-          </nav>
-
           <Transition
             name="section"
             :css="!inTauri()"
             :mode="inTauri() ? undefined : 'out-in'"
             @after-enter="afterWorkspaceSectionEnter"
           >
-            <section
-              v-if="activeView === 'overview'"
-              class="matter-overview"
-              aria-label="Matter overview"
-            >
-              <div class="overview-lead panel">
-                <div>
-                  <div class="eyebrow">PREPARE YOUR BUNDLE</div>
-                  <h2>
-                    {{
-                      docs.length
-                        ? "Continue preparing this matter"
-                        : "Begin with your source documents"
-                    }}
-                  </h2>
-                  <p>
-                    Review working copies, arrange the index, check the result
-                    and build your filing package.
-                  </p>
-                </div>
-                <button class="btn primary" @click="showView('documents')">
-                  <FolderOpen :size="17" />
-                  {{ docs.length ? "Open documents" : "Add documents" }}
-                </button>
-              </div>
-              <section
-                class="panel desktop-tools"
-                aria-label="Desktop file tools"
-              >
-                <div>
-                  <div class="eyebrow">DESKTOP FILE TOOLS</div>
-                  <h3>Open, save, print and export</h3>
-                  <p>
-                    Work on PDF copies, autosave details, manage local storage,
-                    and export review files after building a bundle.
-                  </p>
-                </div>
-                <div class="desktop-tool-actions">
-                  <button class="btn secondary" @click="showView('documents')">
-                    <FileText :size="16" /> PDF tools & print</button
-                  ><button class="btn secondary" @click="showView('storage')">
-                    <Archive :size="16" /> Local storage</button
-                  ><button class="btn secondary" @click="openExports">
-                    <ArrowDownToLine :size="16" /> Office exports
-                  </button>
-                </div>
-              </section>
-              <div class="overview-steps">
-                <button
-                  class="panel overview-step"
-                  @click="showView('documents')"
-                >
-                  <span class="step-number">01</span>
-                  <h3>Documents</h3>
-                  <p>Import, read and edit working copies.</p>
-                  <strong
-                    >{{ docs.length }} documents · {{ totalPages }} pages
-                    <ArrowRight :size="16"
-                  /></strong>
-                </button>
-                <button class="panel overview-step" @click="showView('index')">
-                  <span class="step-number">02</span>
-                  <h3>Index & bookmarks</h3>
-                  <p>Arrange bundle order and review page destinations.</p>
-                  <strong>Review page map <ArrowRight :size="16" /></strong>
-                </button>
-                <button
-                  class="panel overview-step"
-                  @click="showView('validation')"
-                >
-                  <span class="step-number">03</span>
-                  <h3>Preflight checks</h3>
-                  <p>Run technical checks and inspect flagged items.</p>
-                  <strong>Run checks <ArrowRight :size="16" /></strong>
-                </button>
-                <button class="panel overview-step" @click="showView('build')">
-                  <span class="step-number">04</span>
-                  <h3>Build & export</h3>
-                  <p>Generate, review and save the finished PDFs.</p>
-                  <strong
-                    >{{ exportsList.length }} prepared packages
-                    <ArrowRight :size="16"
-                  /></strong>
-                </button>
-              </div>
-              <div class="overview-bottom">
-                <section class="panel overview-context">
-                  <h2>Case details</h2>
-                  <dl>
-                    <dt>Petitioner</dt>
-                    <dd>{{ currentMatter.petitioner || "Not entered" }}</dd>
-                    <dt>Respondent</dt>
-                    <dd>{{ currentMatter.respondent || "Not entered" }}</dd>
-                    <dt>Advocate</dt>
-                    <dd>{{ currentMatter.advocate || "Not entered" }}</dd>
-                    <dt>Court profile</dt>
-                    <dd>{{ selectedProfile?.name }}</dd>
-                  </dl>
-                </section>
-                <section class="panel overview-context">
-                  <h2>Latest package</h2>
-                  <template v-if="activeExport"
-                    ><p>
-                      {{ prettyDate(activeExport.created_at) }} ·
-                      {{ activeExport.volumes }} volume(s) ·
-                      {{ activeExport.pages }} pages
-                    </p>
-                    <p>
-                      {{
-                        activeExport.stale
-                          ? "Inputs changed. Rebuild before using this package."
-                          : "Review the generated PDF before use."
-                      }}
-                    </p>
-                    <button class="btn secondary" @click="openExports">
-                      Review exports
-                    </button></template
-                  >
-                  <p v-else>
-                    No package built yet. Start with documents and review the
-                    page map before building.
-                  </p>
-                </section>
-              </div>
-            </section>
+            <MatterOverview v-if="activeView==='overview'" :matter="currentMatter" :documents="docs" :outputs="exportsList" :bookmarks="manualBookmarks" :profile="selectedProfile?.name || ''" :check-count="warningChecks.length+errorChecks.length" @navigate="view => view==='documents'?showPreparation():showView(view)" @import="openImport" @details="matterDetailsOpen=true"/>
+            <ImportWorkspace v-else-if="activeView==='import'" :matter-name="currentMatter.name" :entries="importEntries" :processing="importingMatterId===currentMatterId" :started="!!importStarted[currentMatterId!]" :checking="importChecking" :blocked="engineBlocked||busy" :cancel-pending="stopImport" @add="stageImport" @remove="id => importQueues[currentMatterId!]=importEntries.filter(e=>e.id!==id)" @include="id => { const entry=importEntries.find(e=>e.id===id); if(entry)entry.status='ready' }" @retry="() => { for(const entry of importEntries) if(['failed','cancelled'].includes(entry.status)){entry.status='ready';entry.message=undefined} startImport() }" @start="startImport" @cancel="stopImport=true" @review="showPreparation" @back="cancelImportView"/>
             <DocumentTable ref="documentTablePanel"
               v-else-if="activeView === 'documents' && documentTableOpen"
               :matter-id="currentMatterId!"
@@ -3601,7 +3259,7 @@ watch(sidebarCollapsed, (collapsed) => {
               @open-document="openDocumentFromTable"
               @error="issue"
               @close="closeDocumentTable"
-            ><template #history><div class="table-history"><button class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :disabled="membershipOpen || engineBlocked || busy || !history.can_undo" @click="traverseHistory('undo')"><Undo2 :size="16"/></button><button class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :disabled="membershipOpen || engineBlocked || busy || !history.can_redo" @click="traverseHistory('redo')"><Redo2 :size="16"/></button></div></template></DocumentTable>
+            ></DocumentTable>
             <div
               v-else-if="activeView === 'documents'"
               ref="documentsWorkspace"
@@ -3619,7 +3277,7 @@ watch(sidebarCollapsed, (collapsed) => {
                   : undefined
               "
             >
-              <DocumentNavigator v-if="preparationVisible && preparationListOpen" :documents="docs" :selected-id="selectedDocId" :busy="engineBlocked || busy || isJobActive" @select="selectPreparationDocument" @open="openDocumentTab" @reorder="applyDocumentSort" @import="fileInput?.click()" @table="openDocumentTable" @cover="generateCover" @search-pages="openPreparationSearch" @collapse="closePreparationList"/>
+              <DocumentNavigator v-if="preparationVisible && preparationListOpen" :documents="docs" :selected-id="selectedDocId" :busy="engineBlocked || busy || isJobActive" @select="selectPreparationDocument" @open="openDocumentTab" @reorder="applyDocumentSort" @import="openImport" @table="openDocumentTable" @cover="generateCover" @search-pages="openPreparationSearch" @collapse="closePreparationList"/>
               <section
                 v-show="!preparationVisible && (!readerFocus || !selectedDoc) && !(compactDocuments && detailsOpen && selectedDoc)"
                 class="panel docs-panel"
@@ -3808,7 +3466,7 @@ watch(sidebarCollapsed, (collapsed) => {
                     hidden
                     @change="
                       (e) =>
-                        onUpload((e.target as HTMLInputElement).files || [])
+                        stageImport((e.target as HTMLInputElement).files || [])
                     "
                   /><UploadCloud :size="25" /><strong>Drop files here</strong
                   ><span>PDF, JPG, PNG · up to 80 MB/file</span
@@ -4489,7 +4147,8 @@ watch(sidebarCollapsed, (collapsed) => {
         </main>
       </Transition>
     </div>
-    <footer class="application-status"><button v-if="currentMatter && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="variantContext||supplementContext||inclusionSummary">{{variantContext?'Variant membership':supplementContext?'Supplement membership':'Bundle membership'}}</button><span v-if="variantContext">{{variantContext}}</span><span v-if="supplementContext">{{supplementContext}}</span><span v-if="membershipOpen || activeView==='index' || activeView==='variants'" class="membership-status-step">03 / 06 &nbsp; Prepare index</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="currentMatter" class="text-tool" @click="membershipOpen ? leaveMembership() : showPreparation()">{{membershipOpen ? 'Return to caller' : 'Back to preparation'}}</button></footer>
+    <div v-if="matterDetailsOpen && currentMatter" class="modal-backdrop" @click.self="matterDetailsOpen=false"><section class="modal-card matter-details-dialog" role="dialog" aria-modal="true" aria-label="Matter details" @keydown.tab="trapNavigationFocus" @keydown.esc="matterDetailsOpen=false"><header class="modal-head"><h2>Matter details</h2><button class="icon-btn" aria-label="Close matter details" @click="matterDetailsOpen=false"><X :size="18"/></button></header><dl class="overview-context"><dt>Matter</dt><dd>{{currentMatter.name}}</dd><dt>Petitioner</dt><dd>{{currentMatter.petitioner||'Not entered'}}</dd><dt>Respondent</dt><dd>{{currentMatter.respondent||'Not entered'}}</dd><dt>Advocate</dt><dd>{{currentMatter.advocate||'Not entered'}}</dd><dt>Court profile</dt><dd>{{selectedProfile?.name}}</dd></dl><section aria-label="Desktop file tools" class="workspace-actions"><button class="btn secondary" @click="matterDetailsOpen=false;showPreparation()">PDF tools &amp; print</button><button class="btn secondary" @click="matterDetailsOpen=false;showView('storage')">Local storage</button><button class="btn secondary" @click="matterDetailsOpen=false;openExports()">Office exports</button><button class="btn secondary" :disabled="busy" @click="backupCurrentMatter">Back up matter</button><button class="btn secondary" :disabled="busy" @click="matterDetailsOpen=false;removeMatter()">Archive matter</button><button class="btn secondary" :disabled="busy" @click="confirmDiscardDrafts() && loadMatterResources()">Refresh</button></section></section></div>
+    <footer class="application-status"><button v-if="matterContext && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="variantContext||supplementContext||inclusionSummary">{{variantContext?'Variant membership':supplementContext?'Supplement membership':'Bundle membership'}}</button><span v-if="variantContext">{{variantContext}}</span><span v-if="supplementContext">{{supplementContext}}</span><span v-if="matterContext" class="membership-status-step">{{activeView==='import'?'01 / 06 · Add documents':activeView==='overview'||activeView==='documents'?'02 / 06 · Review documents':activeView==='index'||activeView==='variants'?'03 / 06 · Prepare index':activeView==='validation'?'04 / 06 · Technical checks':activeView==='build'?'05 / 06 · Build and review':'06 / 06 · Saved packages'}}</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="matterContext" class="text-tool" @click="membershipOpen ? leaveMembership() : showPreparation()">{{membershipOpen ? 'Return to caller' : 'Back to preparation'}}</button></footer>
     <dialog
       v-if="selectedDoc && pageToolsOpen"
       ref="pageToolsDialog"

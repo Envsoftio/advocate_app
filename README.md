@@ -255,3 +255,9 @@ Page assembly remaps retained internal links and outlines, including rotated lin
 Page tools offer lossless cleanup, Balanced (240 DPI/JPEG 85), and Smaller (150 DPI/JPEG 70) compression. They report measured sizes, preserve native text and navigation, and create an undoable working revision only if the file gets smaller. Masked, bitonal and images above 40 megapixels are retained. A reproducible [synthetic scan/seal/small-text corpus](docs/PDF02_COMPRESSION_ACCEPTANCE.md) now supplies preset-specific regression budgets and visual-review sheets. Review every lossy result; the corpus is not a size, fidelity, signature-validity or filing-readiness guarantee. Compression jobs interrupted by restart must be restarted explicitly from page tools with a selected preset.
 
 New regression coverage includes write/validation/sync/rename failures, partial-copy cleanup, pending redaction protection, mixed-page OCR, rotated overlays and links, late cancellation, verified build recovery, Unicode/nested bookmarks and index-growth boundaries. See the acceptance log for results and release limitations.
+
+### Matter navigation and import — 30 October 2026
+
+Start at **Matters**, open a matter's **Overview**, then **Import documents**. The queue shows supported, duplicate and excluded files before **Import N files** starts local processing. Continue to document review opens preparation; **Open editor** keeps the working PDF. Imports remain reference-only until included through Bundle membership.
+
+One sidebar supplies Overview, Documents, Index & Bookmarks, Preflight, Build and Storage. Its collapse choice persists across sections. Return through **All matters** or the permanent Matters tab. Workspace settings contains appearance, restore, court profiles and About; **Matter details** contains backup, archive, Office exports and PDF/print tools. See the [design and verification record](docs/DESIGN_MATTER_FLOW_CORRECTION.md).

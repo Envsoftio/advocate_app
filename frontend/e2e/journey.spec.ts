@@ -1,3 +1,4 @@
+import { completeQueuedImport, enterLatestMatter } from './navigation'
 import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation'
 import { includeAllDocuments, openReaderView, closeDocumentActions, closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser, openWorkspaceNavigation, openWorkspaces } from './navigation'
 import { expect, test } from '@playwright/test'
@@ -19,8 +20,8 @@ test('court-neutral checklist and reviewed CSV index import persist', async ({pa
       buffer:await readFile(resolve(samples,'01_petition.pdf'))}},
   })
   const doc = (await uploaded.json())[0]
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Court Neutral Review'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Court Neutral Review'})).toBeVisible()
   await page.getByRole('button', {name:'Index & bookmarks'}).click()
   await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
   await page.locator('.bookmark-import>summary').click()
@@ -91,8 +92,8 @@ test('build workspace explains a late addition against a named prior build', asy
   const rebuiltJobId = (await rebuilt.json()).id as string
   await expect.poll(async () => (await (await request.get(`${backend}/jobs/${rebuiltJobId}`, {headers})).json()).status,
     {timeout:90_000}).toBe('completed')
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Rebuild Comparison'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Rebuild Comparison'})).toBeVisible()
   await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
   await page.getByRole('combobox', {name:'Saved build'}).selectOption(priorId)
   await page.locator('.build-workspace').getByRole('button',{name:'Review changes',exact:true}).click()
@@ -120,8 +121,8 @@ test('Bates and annexure policy update the page-map preview and actual-page mark
     data: {kind:'annexure',label:'E2E-1',label_status:'confirmed',label_source:'user'},
   })
   expect(labelled.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Bates and separators'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Bates and separators'})).toBeVisible()
   await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
   await openBuildTool(page,'Technical marks & Part extracts')
   const presets = page.getByRole('region', {name:'Reusable output presets'})
@@ -165,8 +166,8 @@ test('technical output preset is saved and explicitly applied in the build works
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Output Preset'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Output Preset'})).toBeVisible()
   await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
   await openBuildTool(page,'Presets')
   const presets = page.getByRole('dialog', { name: 'Bundle presets' })
@@ -199,8 +200,8 @@ test('Hindi OCR selection reaches the local engine', async ({ page, request }) =
       buffer: await readFile(resolve(samples, '05_hindi_scan.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Hindi OCR'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Hindi OCR'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab',{name:'OCR',exact:true}).click()
   await page.getByRole('combobox', { name: 'OCR language' }).selectOption('eng+hin')
@@ -243,8 +244,8 @@ test('visible-signature review warns before a working-copy transformation', asyn
   expect(reviewed.ok()).toBeTruthy()
   expect((await reviewed.json()).signature_status).toBe('visible_signature_only')
 
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Signature Warning'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Signature Warning'})).toBeVisible()
   await openDocumentActions(page)
   await page.getByRole('button', {name:/Document details/}).click()
   await openDocumentActions(page)
@@ -288,8 +289,8 @@ test('document table preserves explicit selection and previews batch ordering be
   }
   const initial = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
 
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Document Table'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Document Table'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.getByRole('button', { name: 'Open table' }).click()
   const register = page.getByRole('region', { name: 'Editable document table' })
@@ -366,8 +367,8 @@ test('label proposal preview cancels cleanly and applies one undoable grouped ma
   })
   expect(grouped.ok()).toBeTruthy()
 
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Label Proposal'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Label Proposal'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.getByRole('button', { name: 'Open table' }).click()
   const register = page.getByRole('region', { name: 'Editable document table' })
@@ -419,8 +420,8 @@ test('the workspace build flow blocks generation when settings cannot save', asy
     expect(uploaded.ok()).toBeTruthy()
   }
 
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Bundle Flow'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Bundle Flow'})).toBeVisible()
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('1 volume(s)')
   await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
@@ -458,8 +459,8 @@ test('compression exposes measured results and retains a usable PDF', async ({ p
   })
   expect(uploaded.ok()).toBeTruthy()
   const doc = (await uploaded.json())[0]
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Compression'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Compression'})).toBeVisible()
   await expect(page.locator('.page-counter input')).toHaveValue('1')
   await expect(page.locator('.page-counter')).toContainText('/ 1')
   await expect(page.getByRole('button', { name: 'Go to page 1' })).toBeVisible()
@@ -503,12 +504,12 @@ test('document import undo and redo refresh the workspace list', async ({ page, 
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Import History'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Import History'})).toBeVisible()
   await expect(page.locator('.doc-item')).toHaveCount(1)
   await page.getByRole('button', { name: /^Undo(?: last matter change)?$/, exact: true }).first().click()
   await expect(page.locator('.doc-item')).toHaveCount(0)
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(page.getByRole('button', { name: /^Redo(?: last matter change)?$/, exact: true })).toBeEnabled()
   await page.getByRole('button', { name: /^Redo(?: last matter change)?$/, exact: true }).click()
   await expect(page.locator('.doc-item')).toHaveCount(1)
@@ -525,7 +526,7 @@ test('manual bookmark survives reload and shows revision review', async ({ page,
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   const docId = (await uploaded.json())[0].id as string
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
   await page.getByRole('button',{name:'Add bookmark',exact:true}).click()
@@ -539,14 +540,14 @@ test('manual bookmark survives reload and shows revision review', async ({ page,
   await page.locator('.page-map-details>summary').click()
   await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('Reviewed synthetic page')
   await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('combined 2')
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Reviewed synthetic page')
   const rotated = await request.post(`${backend}/documents/${docId}/pages/rotate`,
     { headers, data: { page_index: 0, degrees: 90 } })
   expect(rotated.ok()).toBeTruthy()
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
   await expect(page.getByText('Needs resolution', { exact: true })).toBeVisible()
@@ -566,7 +567,7 @@ test('index preview updates with draft volume cap and opens the source document'
     })
     expect(uploaded.ok()).toBeTruthy()
   }
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await expect(page.locator('.matter-index-overview')).toHaveCount(0)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await expect(page.getByRole('region', { name: 'Index and page number preview' })).toContainText('1 volume(s)')
@@ -627,8 +628,8 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
   })
   expect(uploaded.ok()).toBeTruthy()
   await page.setViewportSize({width:1024,height:800})
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Page Bookmark'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Page Bookmark'})).toBeVisible()
   await expect.poll(() => page.locator('.preview-panel').evaluate(node => {
     const gap = window.innerHeight - node.getBoundingClientRect().bottom
     return gap >= -20 && gap <= 60
@@ -691,7 +692,7 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
   await expect.poll(async () => (await (await request.get(`${backend}/reader-position`, {
     headers, params: {key: `${savedDocument.id}:${savedDocument.revision}`},
   })).json())?.page).toBe(2)
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(page.getByRole('spinbutton', {name:'Go to page',exact:true})).toHaveValue('2')
   await page.getByRole('button', {name:/Page 2 bookmarks/}).click()
   await expect(savedOnPage).toContainText('Reviewed second page')
@@ -714,7 +715,7 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   const docId = (await uploaded.json())[0].id as string
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
   await page.getByRole('button',{name:'Add bookmark',exact:true}).click()
@@ -734,7 +735,7 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
   await page.getByRole('button',{name:'Save bookmark',exact:true}).click()
   await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Second')
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Second')
@@ -751,7 +752,7 @@ test('dragging document, bookmark and page order updates the shared index plan',
     })
     expect(uploaded.ok()).toBeTruthy()
   }
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await expect(page.locator('body')).toHaveCSS('font-family', /^Inter,/)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   const order = page.getByRole('region', { name: 'Index document order' }).locator('.index-order-row')
@@ -774,7 +775,7 @@ test('dragging document, bookmark and page order updates the shared index plan',
   await page.getByRole('button',{name:'Save bookmark',exact:true}).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('01_petition')
   await expect(page.getByRole('button', { name: 'Add bookmark' })).toBeEnabled()
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await page.getByRole('button', { name: 'Index & bookmarks' }).click()
   await page.locator('.structure-tabs').getByRole('button',{name:'Bookmarks',exact:true}).click()
   await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('01_petition')
@@ -817,7 +818,7 @@ test('dragging document, bookmark and page order updates the shared index plan',
   expect(await page.evaluate(() => (window as Window & {__courtBundleDocumentListAnimated?:boolean}).__courtBundleDocumentListAnimated)).toBe(true)
   await expect.poll(async () => (await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json())
     .map((document: {title:string}) => document.title)).toEqual(['01_petition', '02_impugned_order'])
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(rows.first()).toContainText('01_petition')
   await openDocumentBrowser(page)
   await rows.first().click()
@@ -847,8 +848,8 @@ test('text editing works on a page already marked as rotated', async ({ page, re
     data: { page_index: 0, degrees: 90 },
   })
   expect(rotated.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Rotated Text'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Rotated Text'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
@@ -881,8 +882,8 @@ test('selectable PDF text can be selected and replaced from the preview', async 
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Replace Text'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Replace Text'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
@@ -932,8 +933,8 @@ test('Edit text reviews signature risk without a failed request or inline error'
     headers, data: {visible_signature_status: 'present'},
   })
   expect(marked.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Signed Text Edit'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Signed Text Edit'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name: 'Edit', exact: true}).click()
   await page.getByRole('button', {name: 'Edit text', exact: true}).click()
@@ -974,8 +975,8 @@ test('PDFium paragraph trial edits a synthetic working revision from the viewer'
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E PDFium Paragraph'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E PDFium Paragraph'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
@@ -1008,8 +1009,8 @@ test('selectable text can be dragged diagonally and saved to the working copy', 
   const runsUrl = `${backend}/documents/${doc.id}/pages/0/text-runs`
   const before = await request.get(runsUrl, { headers })
   const original = (await before.json()).runs.find((run: {text:string}) => run.text.startsWith('IN THE COURT'))
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Move Text'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Move Text'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Edit text', exact: true }).click()
@@ -1055,8 +1056,8 @@ test('added text remains movable and enters saved PDF output', async ({ page, re
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   const doc = (await uploaded.json())[0]
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Text Overlay'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Text Overlay'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Add text' }).click()
@@ -1075,7 +1076,7 @@ test('added text remains movable and enters saved PDF output', async ({ page, re
   await page.mouse.move(position!.x+position!.width/2+20,position!.y+position!.height/2+20,{steps:5})
   await page.mouse.up()
   await expect.poll(async()=> (await (await request.get(`${backend}/matters/${matterId}/annotations`,{headers})).json())[0].rect_x as number).toBeGreaterThan(before.rect_x)
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(mark).toBeVisible()
   const snapshot=await request.get(`${backend}/documents/${doc.id}/pdf?revision=1&editable=true`,{headers})
   expect(snapshot.ok()).toBeTruthy()
@@ -1107,8 +1108,8 @@ test('redaction mark stays movable and is applied in saved PDF output', async ({
   const runsResponse = await request.get(`${backend}/documents/${document.id}/pages/0/text-runs`, { headers })
   const run = (await runsResponse.json()).runs.find((item: {text:string}) => item.text.includes('DRAFT PETITION'))
   expect(run).toBeDefined()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Permanent Redaction'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Permanent Redaction'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Redact', exact: true }).click()
@@ -1165,7 +1166,7 @@ test('redaction mark stays movable and is applied in saved PDF output', async ({
   await page.mouse.move(area!.x+area!.width/2+20,area!.y+area!.height/2+12,{steps:5})
   await page.mouse.up()
   await expect.poll(async()=> (await (await request.get(`${backend}/matters/${matterId}/annotations`,{headers})).json())[0].rect_x as number).toBeGreaterThan(before.rect_x)
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(staged).toBeVisible()
   const saved=await request.get(`${backend}/documents/${document.id}/pdf?revision=${document.revision}&editable=true&acknowledge_signature_risk=true`,{headers})
   expect(saved.ok()).toBeTruthy()
@@ -1192,8 +1193,8 @@ test('redaction applies to a rotated synthetic scan', async ({ page, request }) 
     headers, data: { page_index: 0, degrees: 90 },
   })
   expect(rotated.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Rotated Scan Redaction'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Rotated Scan Redaction'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Edit', exact:true}).click()
   await page.getByRole('button', { name: 'Redact', exact: true }).click()
@@ -1223,8 +1224,8 @@ test('image overlays, highlights and comments can be placed, edited and removed'
   })
   expect(uploaded.ok()).toBeTruthy()
 
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E PDF Annotations'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E PDF Annotations'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Annotate', exact:true}).click()
   await page.getByRole('button', {name:'Highlight', exact:true}).click()
@@ -1297,8 +1298,8 @@ test('reviewed link and output-mark preview persist through the matter workspace
   }
   const documents = await (await request.get(`${backend}/matters/${matterId}/documents`, {headers})).json()
 
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Links And Marks'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Links And Marks'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Annotate', exact:true}).click()
   await page.getByRole('button', {name:'More annotation tools'}).click()
@@ -1352,8 +1353,8 @@ test('appearance persists and keyboard search respects text editing', async ({ p
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Appearance Matter'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Appearance Matter'})).toBeVisible()
   // Check readable rendered controls rather than pinning the previous palette.
   const contrast = async (selector: string) => page.locator(selector).first().evaluate(el => {
     const luminance = (color: string) => {
@@ -1401,10 +1402,10 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   const tools=page.getByRole('dialog',{name:'Page tools'});await expect(tools).toBeVisible()
   await expect(tools.getByRole('combobox',{name:'Source document'})).toHaveCSS('color-scheme','dark')
   await page.keyboard.press('Escape');await expect(tools).toBeHidden()
-  await openWorkspaceNavigation(page);await page.locator('.sidebar').getByRole('button',{name:'Court rules'}).click()
+  await openWorkspaceNavigation(page);await page.locator('.workspace-drawer').getByRole('button',{name:'Court rules'}).click()
   await expect.poll(()=>contrast('.guide-card')).toBeGreaterThan(4.5)
   await expect(page.locator('.party-form select').first()).toHaveCSS('color-scheme','dark')
-  await page.getByRole('button',{name:'Documents',exact:true}).click();await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
   await expect(page.getByRole('combobox',{name:'Theme'})).toHaveValue('dark')
   await expect(page.getByRole('combobox',{name:'Interface size'})).toHaveValue('125')
@@ -1443,8 +1444,8 @@ test('working-copy page tools edit and save synthetic pages', async ({ page, req
     })
     expect(uploaded.ok()).toBeTruthy()
   }
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Page Tools'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Page Tools'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', {name:'Pages', exact:true}).click()
   await page.getByRole('button', { name: 'Page tools', exact: true }).click()
@@ -1518,8 +1519,8 @@ test('preview owns document actions while details stay collapsed until toggled',
     })
     expect(uploaded.ok()).toBeTruthy()
   }
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Preview Actions'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Preview Actions'})).toBeVisible()
   await expect.poll(() => page.locator('.pdf-paper').evaluate((node: HTMLCanvasElement) => node.width)).toBeGreaterThan(0)
   await expect(page.getByText('Loading PDF…')).toBeHidden()
   await expect(page.locator('.inspector-panel')).toHaveCount(0)
@@ -1575,8 +1576,8 @@ test('visible rotation controls turn the selected PDF page in either direction',
   page.on('request', request => {
     if (request.url().includes('/documents/') && request.url().includes('/pdf?revision=')) pdfRequests.push(request.url())
   })
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Page Rotation'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Page Rotation'})).toBeVisible()
   await page.getByRole('button', { name: 'Next page' }).click()
   await expect(page.locator('.page-counter input')).toHaveValue('2')
   await expect(page.locator('.page-counter')).toContainText('/ 3')
@@ -1631,8 +1632,8 @@ test('page text search opens a result and thumbnails navigate', async ({ page, r
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Search Matter'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Search Matter'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.getByRole('textbox', {name:'Find text on pages'}).fill('page 3/3')
   await expect(page.getByRole('button', {name:/01_petition · page 3/})).toBeVisible()
@@ -1664,8 +1665,8 @@ test('PDF editor groups tools and finds text in the current working PDF', async 
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E PDF Editor Navigation'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E PDF Editor Navigation'})).toBeVisible()
   await expect(page.getByRole('tab', {name:'Read'})).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', {name:'Go to page 1'})).toBeVisible()
   await page.getByRole('button', {name:'Search',exact:true}).click()
@@ -1685,13 +1686,13 @@ test('PDF editor groups tools and finds text in the current working PDF', async 
 
 test('synthetic browser journey, retained export and download bytes', async ({ page, request }) => {
   page.setDefaultTimeout(10_000)
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await expect(page.locator('.application-status').getByText('Processing locally',{exact:true})).toBeVisible()
   await openWorkspaceNavigation(page)
-  await page.locator('.sidebar').getByRole('button', { name: 'New matter' }).click()
+  await page.locator('.workspace-drawer').getByRole('button', { name: 'New matter' }).click()
   await page.getByRole('dialog', { name: 'Create matter' }).getByPlaceholder('Example: ABC Pvt Ltd v. XYZ').fill('E2E Synthetic Matter')
   await page.getByRole('dialog', { name: 'Create matter' }).getByRole('button', { name: 'Create matter' }).click()
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Synthetic Matter'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Synthetic Matter'})).toBeVisible()
 
   await page.locator('input[accept=".pdf,.jpg,.jpeg,.png"]').setInputFiles([
     resolve(samples, '01_petition.pdf'),
@@ -1699,6 +1700,7 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
     resolve(samples, '03_affidavit.pdf'),
     resolve(samples, '04_scanned_annexure.jpg'),
   ])
+  await completeQueuedImport(page)
   await expect(page.locator('.doc-item')).toHaveCount(4)
   await includeAllDocuments(page)
   await expect(page.locator('.page-counter input')).toHaveValue('1')
@@ -1726,19 +1728,19 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await page.getByRole('tab',{name:'OCR',exact:true}).click()
   await page.getByRole('button', { name: 'Run English OCR' }).click()
   await openDocumentActions(page)
-  await page.getByRole('button', { name: 'Document details' }).click()
+  await page.getByRole('button', { name: 'Document details', exact:true }).click()
   await expect(page.locator('.inspector-heading')).toContainText('processed', { timeout: 90_000 })
   await expect(page.locator('.ocr-provenance')).toContainText('Revision 2: eng')
   await expect(page.locator('.ocr-provenance')).toContainText('eng model SHA-256:')
   await page.getByRole('textbox', { name: 'Display title' }).fill('Synthetic OCR Annexure')
   await page.getByRole('button', { name: 'Save document details' }).click()
   await expect(page.getByText('Document details updated.')).toBeVisible()
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(page.locator('.doc-item')).toHaveCount(4)
   await openDocumentBrowser(page)
   await page.locator('.doc-item', { hasText: 'Synthetic OCR Annexure' }).click()
   await openDocumentActions(page)
-  await page.getByRole('button', { name: 'Document details' }).click()
+  await page.getByRole('button', { name: 'Document details', exact:true }).click()
   await expect(page.locator('.inspector-heading')).toContainText('processed')
   await expect(page.locator('.ocr-provenance')).toContainText('Revision 2: eng')
 
@@ -1768,7 +1770,7 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await openBuildTool(page)
   await page.locator('.volume-workspace').getByRole('button',{name:'Back to build',exact:true}).click()
   await request.patch(`${backend}/matters/${matterId}`,{headers,data:{max_pages_per_volume:2}})
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
   await submitBundleBuild(page)
   await expect(page.locator('.build-workspace')).toContainText('Earlier build', { timeout: 90_000 })
@@ -1784,7 +1786,7 @@ test('Memo of Parties autosaves per matter and reports a failed save', async ({ 
   } })
   expect(created.ok()).toBeTruthy()
   const id = (await created.json()).id as string
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await expect(page.locator('.application-status').getByText('Processing locally',{exact:true})).toBeVisible()
   await openWorkspaceNavigation(page)
   await page.getByRole('button', { name: 'Court rules' }).click()
@@ -1794,7 +1796,7 @@ test('Memo of Parties autosaves per matter and reports a failed save', async ({ 
   await expect(helper.getByRole('status')).toContainText('Saved to this matter')
   const stored = await request.get(`${backend}/matters/${id}/memo-parties`, { headers })
   expect((await stored.json()).parties[0].name).toBe('Synthetic Saved Party')
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
   await page.getByRole('button', { name: 'Court rules' }).click()
   await expect(page.locator('.memo-helper').getByRole('textbox', { name: 'Party name' }))
@@ -1823,7 +1825,7 @@ test('Memo of Parties Undo flushes a pending edit and reloads saved rows', async
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
   } })
   const id = (await created.json()).id as string
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
   await page.getByRole('button', { name: 'Court rules' }).click()
   const helper = page.locator('.memo-helper')
@@ -1849,10 +1851,10 @@ test('unsaved details are guarded and a failed settings save stops a build', asy
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Draft Guard'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Draft Guard'})).toBeVisible()
   await openDocumentActions(page)
-  await page.getByRole('button', { name: 'Document details' }).click()
+  await page.getByRole('button', { name: 'Document details', exact:true }).click()
   await page.getByRole('textbox', { name: 'Display title' }).fill('Unsaved synthetic title')
   await expect(page.getByText('Unsaved document changes')).toBeVisible()
   await page.getByRole('button', { name: 'Close document details' }).click()
@@ -1896,11 +1898,11 @@ test('portable matter backup restores a separate local copy', async ({ page, req
   const docId = (await uploaded.json())[0].id as string
   expect((await request.post(`${backend}/documents/${docId}/pages/rotate`, { headers,
     data: { page_index: 0, degrees: 90 } })).ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Portable Matter'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Portable Matter'})).toBeVisible()
   const pendingDownload = page.waitForEvent('download')
   await page.getByRole('button',{name:'Overview',exact:true}).click()
-  await page.locator('.matter-more summary').click()
+  await page.getByRole('button',{name:'Matter details',exact:true}).click()
   await page.getByRole('button', { name: 'Back up matter' }).click()
   const download = await pendingDownload
   const packagePath = await download.path()
@@ -1932,8 +1934,8 @@ test('archived document and matter remain recoverable', async ({ page, request }
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Archive Matter'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Archive Matter'})).toBeVisible()
   page.once('dialog', dialog => void dialog.accept())
   await openDocumentActions(page)
   await page.getByRole('button', { name: 'Archive document' }).click()
@@ -1944,12 +1946,12 @@ test('archived document and matter remain recoverable', async ({ page, request }
   await expect(page.getByText('Archived document restored.',{exact:true})).toBeVisible()
   page.once('dialog', dialog => void dialog.accept())
   await page.getByRole('button',{name:'Overview',exact:true}).click()
-  await page.locator('.matter-more summary').click()
+  await page.getByRole('button',{name:'Matter details',exact:true}).click()
   await page.getByRole('button', { name: 'Archive matter', exact: true }).click()
-  await openWorkspaceNavigation(page)
-  await expect(page.locator('button[title="Restore E2E Archive Matter"]')).toBeVisible()
-  await page.locator('button[title="Restore E2E Archive Matter"]').click()
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Archive Matter'})).toBeVisible()
+  await page.locator('.workspace-home-tab').click()
+  await page.getByRole('combobox',{name:'Filter matters',exact:true}).selectOption('archived')
+  await page.getByRole('button',{name:'Restore E2E Archive Matter',exact:true}).click()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Archive Matter'})).toBeVisible()
   await expect(page.locator('.doc-item')).toHaveCount(1)
 })
 
@@ -1963,16 +1965,16 @@ test('undo and redo metadata persist across browser reload', async ({ page, requ
     multipart: { files: { name: '01_petition.pdf', mimeType: 'application/pdf',
       buffer: await readFile(resolve(samples, '01_petition.pdf')) } },
   })
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E History Matter'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E History Matter'})).toBeVisible()
   await openDocumentActions(page)
-  await page.getByRole('button', { name: 'Document details' }).click()
+  await page.getByRole('button', { name: 'Document details', exact:true }).click()
   await page.getByRole('textbox', { name: 'Display title' }).fill('Changed title')
   await page.getByRole('button', { name: 'Save document details' }).click()
   await expect(page.locator('.doc-item')).toContainText('Changed title')
   await page.getByRole('button', { name: /^Undo(?: last matter change)?$/, exact: true }).first().click()
   await expect(page.locator('.doc-item')).toContainText('01_petition')
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(page.getByRole('button', { name: /^Redo(?: last matter change)?$/, exact: true })).toBeEnabled()
   await page.getByRole('button', { name: /^Redo(?: last matter change)?$/, exact: true }).click()
   await expect(page.locator('.doc-item')).toContainText('Changed title')

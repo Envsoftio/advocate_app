@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import {test,expect} from '@playwright/test'
 import {readFile,mkdir} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -19,7 +20,7 @@ test('B04C creates, reviews, builds and reopens an independent audience artifact
  await request.put(root+'/membership',{headers,data:{included_ids:[docs[0].id],expected_snapshot:membership.input_snapshot}})
  const primary=await(await request.post(root+'/build',{headers})).json()
  await expect.poll(async()=>(await(await request.get(`${base}/jobs/${primary.id}`,{headers})).json()).status).toBe('completed')
- await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible()
+ await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible()
  await page.locator('.matter-rail').getByRole('button',{name:'Index & bookmarks'}).click()
  await page.getByRole('button',{name:'Bundle variants'}).click()
  const w=page.locator('.variant-workspace');await expect(w).toBeVisible()
@@ -71,7 +72,7 @@ test('B04C creates, reviews, builds and reopens an independent audience artifact
  expect(createHash('sha256').update(exported).digest('hex')).toBe(variant.files.find((f:any)=>f.name==='combined.pdf').sha256)
  await exportDialog.getByRole('button',{name:'Close',exact:true}).click()
  await w.getByRole('button',{name:'Review PDF'}).click();await expect(page.locator('.pdf-paper')).toBeVisible()
- await page.reload();await expect(page.locator('.pdf-paper')).toBeVisible()
+ await page.reload();await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible()
  await page.locator('.matter-rail').getByRole('button',{name:'Index & bookmarks'}).click();await page.getByRole('button',{name:'Bundle variants'}).click()
  await expect(w.getByRole('heading',{name:'Internal review'})).toBeVisible()
  await w.getByRole('button',{name:'View 1 saved output'}).click();await expect(w).toContainText(variant.id.slice(0,8))
@@ -84,7 +85,7 @@ test('B04C navigation guard retains an unsaved variant draft and copied settings
  const doc=(await(await request.post(root+'/documents',{headers,multipart:{files:{name:'Guard.pdf',mimeType:'application/pdf',buffer}}})).json())[0]
  const membership=await(await request.get(root+'/membership',{headers})).json()
  await request.put(root+'/membership',{headers,data:{included_ids:[doc.id],expected_snapshot:membership.input_snapshot}})
- await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Index & bookmarks'}).click();await page.getByRole('button',{name:'Bundle variants'}).click()
+ await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Index & bookmarks'}).click();await page.getByRole('button',{name:'Bundle variants'}).click()
  const w=page.locator('.variant-workspace');await w.getByLabel('Variant name').fill('Uncopied plan');await w.getByLabel('Copy membership and settings').uncheck();await w.getByRole('button',{name:'Create variant'}).click()
  const uncopied=(await(await request.get(root+'/variants',{headers})).json())
  expect(uncopied.plans[0].included_ids).toEqual([])
@@ -107,7 +108,7 @@ test('B04C BU11 reference composition, keyboard and responsive appearance',async
  await request.put(root+'/membership',{headers,data:{included_ids:[doc.id],expected_snapshot:membership.input_snapshot}})
  const catalog=await(await request.get(root+'/variants',{headers})).json()
  await request.post(root+'/variants',{headers,data:{name:'Internal review',baseline_kind:'primary',baseline_id:catalog.primary_baseline.id,included_ids:[doc.id],expected_snapshot:catalog.source_snapshot,...catalog.primary_settings}})
- await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible()
+ await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible()
  await page.locator('.matter-rail').getByRole('button',{name:'Index & bookmarks'}).click();await page.getByRole('button',{name:'Bundle variants'}).click()
  const w=page.locator('.variant-workspace');await expect(w).toBeVisible();await page.evaluate(()=>document.fonts.ready)
  const card=(await w.locator('.variant-saved').boundingBox())!,create=(await w.locator('.variant-create').boundingBox())!

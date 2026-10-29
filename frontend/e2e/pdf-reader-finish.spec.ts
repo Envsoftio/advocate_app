@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { openReaderView, closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -17,7 +18,7 @@ test('reader persists revision-scoped positions after reload and keyboard dialog
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message))
   const matter=await (await request.post(`${base}/matters`,{headers,data:{name:'E2E Reader Persistence',court_profile:'general-demo'}})).json()
   const document=(await (await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'reader-restart.pdf',mimeType:'application/pdf',buffer:fixture()}}})).json())[0]
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'reader-restart'}).click()
   await expect(page.getByRole('spinbutton',{name:'Go to page',exact:true})).toBeEnabled()
@@ -34,7 +35,7 @@ test('reader persists revision-scoped positions after reload and keyboard dialog
     return state?.page===7 && state?.zoom==='125' && state?.mode==='continuous' && state?.y>.05
   }).toBeTruthy()
   const stored=await (await request.get(`${base}/reader-position`,{headers,params:{key}})).json()
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'reader-restart'}).click()
   await expect(page.getByRole('spinbutton',{name:'Go to page',exact:true})).toHaveValue('7')
@@ -65,7 +66,7 @@ test('reader persists revision-scoped positions after reload and keyboard dialog
 test('continuous reading covers the viewport for tiny pages with bounded raster memory',async({page,request})=>{
   const matter=await (await request.post(`${base}/matters`,{headers,data:{name:'E2E Tiny Pages',court_profile:'general-demo'}})).json()
   await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'tiny-pages.pdf',mimeType:'application/pdf',buffer:fixture(true)}}})
-  await page.setViewportSize({width:1440,height:1100});await page.goto('/')
+  await page.setViewportSize({width:1440,height:1100});await page.goto('/');await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'tiny-pages'}).click()
   await expect(page.getByRole('spinbutton',{name:'Go to page',exact:true})).toBeEnabled()
@@ -89,7 +90,7 @@ test('continuous reading covers the viewport for tiny pages with bounded raster 
 test('single-page navigation and zoom persist without scrolling or unmounting',async({page,request})=>{
   const matter=await (await request.post(`${base}/matters`,{headers,data:{name:'E2E Reader No Scroll',court_profile:'general-demo'}})).json()
   const document=(await (await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'reader-no-scroll.pdf',mimeType:'application/pdf',buffer:fixture()}}})).json())[0]
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'reader-no-scroll'}).click()
   const number=page.getByRole('spinbutton',{name:'Go to page',exact:true})
@@ -107,7 +108,7 @@ test('single-page navigation and zoom persist without scrolling or unmounting',a
     return state?.page===9 && state?.zoom==='125' && state?.mode==='single' && state?.y<.001
   }).toBeTruthy()
   // The save above happened while the reader was still mounted, without scroll.
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'reader-no-scroll'}).click()
   await expect(number).toHaveValue('9')

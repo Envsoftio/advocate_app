@@ -1,15 +1,16 @@
+import { enterLatestMatter } from './navigation'
 import { openWorkspaceNavigation } from './navigation'
 import { test, expect } from '@playwright/test'
 
 test('court rules identifies applied checks and keeps dark theme reference text legible', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
-  await page.locator('.sidebar').getByRole('button', { name: 'New matter' }).click()
+  await page.locator('.workspace-drawer').getByRole('button', { name: 'New matter' }).click()
   await expect(page.getByRole('combobox', { name: 'Court profile' })).toHaveValue('general-demo')
   await page.getByRole('dialog', { name: 'Create matter' }).getByRole('button', { name: 'Cancel' }).click()
   await openWorkspaceNavigation(page)
   await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark')
-  await page.locator('.sidebar').getByRole('button', { name: 'Court rules' }).click()
+  await page.locator('.workspace-drawer').getByRole('button', { name: 'Court rules' }).click()
   await expect(page.getByRole('heading', { name: 'Court rules & technical profiles' })).toBeVisible()
   await expect(page.locator('.profile-scope')).toContainText('searchable-page warnings and the export file size cap')
   await expect(page.locator('.guide-eyebrow')).toContainText('REFERENCE ONLY')

@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import {test,expect} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -8,7 +9,7 @@ async function seed(request:any){const matter=await(await request.post(`${base}/
  expect(r.ok()).toBeTruthy();docs.push((await r.json())[0])}return {matter,docs}}
 async function enter(page:any){page.on('pageerror',(e:Error)=>{throw e});
  await page.setViewportSize({width:1440,height:900});
- await page.goto('/');
+ await page.goto('/');await enterLatestMatter(page);await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();
  await expect(page.locator('.pdf-paper')).toBeVisible();
  await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click();
  await page.getByRole('button',{name:'Sort',exact:true}).click();
@@ -47,7 +48,7 @@ test('B02C new batch and suggestion layouts, explicit one-field acceptance and p
  expect((await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json())[0].document_date).toBe(docs[0].document_date);
  await page.getByRole('button',{name:'Back to batch review',exact:true}).click();
  await expect(page.getByLabel(`Title for ${docs[0].original_name}`,{exact:true})).toHaveValue('Reviewed order title');
- await page.reload();
+ await page.reload();await enterLatestMatter(page);
  await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click();
  await page.getByRole('button',{name:'Sort',exact:true}).click();
  await expect(page.getByLabel(`Title for ${docs[0].original_name}`,{exact:true})).toHaveValue('Reviewed order title')})

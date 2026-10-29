@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import {test,expect,type Page} from '@playwright/test'
 import {readFile,mkdir,writeFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -17,7 +18,7 @@ async function seed(request:any){
  const prior=(await(await request.get(root+'/exports',{headers})).json())[0],catalog=await(await request.get(root+'/supplements',{headers})).json()
  return {m,root,docs,prior,catalog}
 }
-async function enter(page:Page){await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(page.locator('.build-workspace')).toBeVisible();await expect(page.locator('.section-enter-active')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready)}
+async function enter(page:Page){await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(page.locator('.build-workspace')).toBeVisible();await expect(page.locator('.section-enter-active')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready)}
 async function appearance(page:Page,theme:string,scale:number){await openWorkspaceNavigation(page);await page.getByLabel('Theme',{exact:true}).selectOption(theme);await page.getByLabel('Interface size',{exact:true}).selectOption(String(scale));await closeWorkspaceNavigation(page)}
 async function seedPreservedInsert(request:any){
  const m=await(await request.post(`${base}/matters`,{headers,data:{name:'B04B Synthetic preserved insert',court_profile:'general-demo'}})).json(),root=`${base}/matters/${m.id}`
@@ -55,7 +56,7 @@ test('B04A eight stable pages, caller Apply Cancel, saved reopen, real map and a
  }
  await writeFile(resolve(evidence,'matrix.json'),JSON.stringify(matrix,null,2))
  await w.getByRole('button',{name:'Prepare supplement'}).click();await expect(w).toHaveAttribute('data-mode','map');await expect(w.locator('.page-map')).toContainText('10 physical pages');await page.screenshot({path:resolve(evidence,'11C-supplement-map.png')});await w.getByRole('button',{name:'Back to supplement'}).click();await expect(w.getByRole('button',{name:'Prepare supplement'})).toBeFocused()
- await page.reload();await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(w).toBeVisible();await expect(w.locator('.supplement-summary dd').first()).toHaveText('8');expect((await(await request.get(root+'/supplements',{headers})).json()).plans[0].selected_page_ids).toEqual(exactIds)
+ await page.reload();await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(w).toBeVisible();await expect(w.locator('.supplement-summary dd').first()).toHaveText('8');expect((await(await request.get(root+'/supplements',{headers})).json()).plans[0].selected_page_ids).toEqual(exactIds)
 })
 test('B04A failed saves, stale identities, delayed preview and explicit discard retain selection',async({page,request})=>{
  const {root,docs}=await seed(request);await enter(page);await page.getByRole('button',{name:'Create supplement',exact:true}).click();const w=page.locator('.supplement-workspace');await w.getByRole('button',{name:'Choose other material'}).click();await w.locator('.supplement-page-options input').first().check();await w.getByRole('button',{name:'Apply selection'}).click()

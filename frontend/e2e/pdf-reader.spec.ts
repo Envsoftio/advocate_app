@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { closeDocumentBrowser, openReaderView, closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -34,8 +35,8 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
     expect(annotated.ok()).toBeTruthy()
   }
   await page.setViewportSize({width:1440,height:1000})
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Shared Reader'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Shared Reader'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'reader-long'}).click()
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
@@ -143,7 +144,7 @@ test('expanded editor fits saved zoom and keeps many comments out of the canvas'
     expect(annotated.ok()).toBeTruthy()
   }
   await page.setViewportSize({width:1440,height:900})
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'compact'}).click()
   await expect(page.getByRole('combobox',{name:'Zoom',exact:true})).toHaveValue('fit-width')

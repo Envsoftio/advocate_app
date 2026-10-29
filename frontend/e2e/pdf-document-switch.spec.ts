@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { openReaderView, closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser } from './navigation'
 import { expect, test, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -51,7 +52,7 @@ test('document switches clear old PDF content before delayed reading state and i
   } })
   expect(saved.ok()).toBeTruthy()
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'alpha-switch' }).click()
   await expect(page.locator('.pdf-text-layer')).toContainText('ALPHA page 1')
@@ -122,7 +123,7 @@ test('same-document text edits retain their snapshot during delayed reading-stat
   } })).json()
   const document = (await (await request.post(`${backend}/matters/${matter.id}/documents?included=true`, { headers,
     multipart: { files: { name: 'snapshot-refresh.pdf', mimeType: 'application/pdf', buffer: fixture('BEFORE') } } })).json())[0]
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'snapshot-refresh' }).click()
   await expect(page.locator('.pdf-text-layer')).toContainText('BEFORE page 1')

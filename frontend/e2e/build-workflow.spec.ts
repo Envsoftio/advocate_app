@@ -1,3 +1,5 @@
+import { openNamedMatter } from './navigation'
+import { enterLatestMatter } from './navigation'
 import {test,expect} from '@playwright/test'
 import {openWorkspaceNavigation} from './navigation'
 import {readFile} from 'node:fs/promises'
@@ -37,7 +39,7 @@ async function capture(page:any,info:any,name:string){
 test('B01B real failure/retry, persisted output, generated review and matching export',async({page,request},info)=>{
  test.setTimeout(240_000)
  const {matter,docs,buffer}=await fixture(request)
- await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
+ await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
  const workspace=page.locator('.build-workspace')
  await expect(workspace).toContainText('1 included documents · 1 reference-only')
  for(const [selector,x,y,width,height] of [['.build-settings-card',208,272,882,518],['.build-summary',1106,272,310,518]] as const){const box=(await page.locator(selector).boundingBox())!;expect(Math.round(box.x)).toBe(x);expect(Math.round(box.y)).toBe(y);expect(Math.round(box.width)).toBe(width);expect(Math.round(box.height)).toBe(height)}
@@ -45,7 +47,7 @@ test('B01B real failure/retry, persisted output, generated review and matching e
  await workspace.getByRole('button',{name:'Plan volumes',exact:true}).click()
  const tool=page.locator('.volume-workspace')
  await tool.getByLabel('Maximum pages per volume').fill('2')
- await tool.getByRole('button',{name:'Preview changes',exact:true}).click();await expect(tool).toContainText('No document was split');await expect(tool.getByRole('button',{name:'Save choices',exact:true})).toBeDisabled();await tool.getByRole('button',{name:'Back to build',exact:true}).click();await page.getByRole('dialog',{name:'Unsaved volume choices'}).getByRole('button',{name:'Discard changes'}).click();await request.patch(`${base}/matters/${matter.id}`,{headers,data:{max_pages_per_volume:2}});await page.reload();await enter(page)
+ await tool.getByRole('button',{name:'Preview changes',exact:true}).click();await expect(tool).toContainText('No document was split');await expect(tool.getByRole('button',{name:'Save choices',exact:true})).toBeDisabled();await tool.getByRole('button',{name:'Back to build',exact:true}).click();await page.getByRole('dialog',{name:'Unsaved volume choices'}).getByRole('button',{name:'Discard changes'}).click();await request.patch(`${base}/matters/${matter.id}`,{headers,data:{max_pages_per_volume:2}});await page.reload();await enterLatestMatter(page);await enter(page)
  await expect(workspace.getByRole('button',{name:'Plan volumes',exact:true})).toBeVisible()
  await workspace.getByRole('button',{name:'Build bundle',exact:true}).click()
  await expect(workspace).toContainText('Build failed');await capture(page,info,'16A-failure')
@@ -70,10 +72,10 @@ test('B01B real failure/retry, persisted output, generated review and matching e
  const bytes=await readFile((await download.path())!);const source=await(await request.get(`${base}/matters/${matter.id}/exports/${build.id}/combined.pdf`,{headers})).body()
  expect(hash(bytes)).toBe(hash(source));expect(hash(bytes)).toBe(build.files.find((f:any)=>f.name==='combined.pdf').sha256)
  await expect(exp).toContainText('Download requested');await exp.getByRole('button',{name:'Close',exact:true}).click();await expect(review.getByRole('button',{name:'Export files',exact:true})).toBeFocused();await review.getByRole('button',{name:'Close review',exact:true}).click()
- await page.reload();await enter(page);await expect(workspace).toContainText(build.id)
+ await page.reload();await enterLatestMatter(page);await enter(page);await expect(workspace).toContainText(build.id)
  const original=await(await request.get(`${base}/documents/${docs[0].id}/original`,{headers})).body();expect(hash(original)).toBe(hash(buffer))
  await request.patch(`${base}/documents/${docs[0].id}`,{headers,data:{title:'Petition — updated working title'}})
- await page.reload();await enter(page);await expect(workspace.getByRole('heading',{name:'Bundle is out of date'})).toBeVisible();await capture(page,info,'19A-stale')
+ await page.reload();await enterLatestMatter(page);await enter(page);await expect(workspace.getByRole('heading',{name:'Bundle is out of date'})).toBeVisible();await capture(page,info,'19A-stale')
  await workspace.getByRole('button',{name:'Review changes',exact:true}).click();await expect(workspace).toContainText('title changed');await capture(page,info,'19B-changes')
  await workspace.getByRole('button',{name:'Open earlier bundle',exact:true}).click();await expect(review.locator('.pdf-paper').first()).toBeVisible();await expect(review).toContainText('Earlier output remains unchanged');await capture(page,info,'18C-stale-review');await review.getByRole('button',{name:'Close review',exact:true}).click()
  await page.locator('.matter-rail').getByRole('button',{name:'Storage',exact:true}).click();await expect(workspace).toContainText(build.id);await capture(page,info,'20A-storage')
@@ -81,7 +83,7 @@ test('B01B real failure/retry, persisted output, generated review and matching e
 })
 
 test('B01B settings geometry, keyboard, theme and scale matrix',async({page,request},info)=>{
- await fixture(request);await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
+ await fixture(request);await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
  for(const size of [{width:1440,height:900},{width:1024,height:768}])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){
   await page.setViewportSize(size)
   await page.evaluate(({theme,scale})=>{document.documentElement.dataset.theme=theme;document.documentElement.dataset.effectiveTheme=theme;document.documentElement.style.setProperty('--ui-scale',String(scale/100));document.documentElement.style.zoom=scale+'%'},{theme,scale})
@@ -99,7 +101,7 @@ test('B01B late build response cannot replace another matter workspace',async({p
  const name=`Synthetic late-result destination ${second.matter.id.slice(0,8)}`
  await request.patch(`${base}/matters/${second.matter.id}`,{headers,data:{name}})
  const first=await fixture(request)
- await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
+ await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
  let release!:()=>void;const held=new Promise<void>(r=>release=r)
  let fetched=0
  await page.route('**/jobs/*',async route=>{
@@ -112,7 +114,7 @@ test('B01B late build response cannot replace another matter workspace',async({p
   const builds=await(await request.get(`${base}/matters/${first.matter.id}/exports`,{headers})).json()
   expect(builds).toHaveLength(1)
   await openWorkspaceNavigation(page)
-  await page.locator('.matter-link').filter({hasText:name}).click()
+  await openNamedMatter(page,name)
   await enter(page)
   await expect(page.locator('.build-workspace')).toHaveAttribute('data-screen','settings')
   const lateResponse=page.waitForResponse(response=>response.url().includes('/jobs/')&&response.request().method()==='GET')

@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -74,8 +75,8 @@ test('generated PDFs above 25 MiB use bounded ranges, cancel cleanly, retry and 
     try { await route.continue() } catch { /* Expected if closing cancelled this held request. */ }
   })
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Large Generated Reader'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Large Generated Reader'})).toBeVisible()
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
   const review = page.getByRole('button', { name: 'Review combined.pdf', exact: true })
   const dialog = page.getByRole('dialog', { name: 'Review generated PDF' })
@@ -140,7 +141,7 @@ test('generated PDFs above 25 MiB use bounded ranges, cancel cleanly, retry and 
   // current working document, or overwrite its separately saved reading state.
   expect((await request.patch(`${backend}/documents/${document.id}`, { headers, data: { title: 'Changed after generated build' } })).ok()).toBeTruthy()
   phase = 'reload and restore'
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
   await page.getByRole('button', {name:'Open earlier bundle',exact:true}).click()
   await expect(dialog).toContainText('Matter inputs changed since this export.')

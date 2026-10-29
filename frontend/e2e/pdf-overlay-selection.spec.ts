@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { closeWorkspaceNavigation, openDocumentActions } from './navigation'
 import {expect,test} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
@@ -40,8 +41,8 @@ test('select, drag, and Delete affect only authored overlays',async({page,reques
     target_page_index:null,target_revision:null,uri:'https://example.com',
   }]}})
   expect(link.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Overlay Selection'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Overlay Selection'})).toBeVisible()
   const highlight=page.locator('.pdf-review-highlight')
   const reviewedLink=page.locator('.pdf-reviewed-link')
   await expect(highlight).toBeVisible()
@@ -105,8 +106,8 @@ test('Annotate and Stamps retain independent editable marks',async({page,request
     files:{name:'01_petition.pdf',mimeType:'application/pdf',buffer:await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))},
   }})
   expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Independent Marks'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Independent Marks'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab',{name:'Annotate'}).click()
   for (const name of ['Highlight','Comment','Draw','Box'])
@@ -160,7 +161,7 @@ test('Annotate and Stamps retain independent editable marks',async({page,request
   await expect(page.getByText('no verified signature or form filling')).toBeVisible()
   await expect(page.getByRole('button',{name:'Check',exact:true})).toBeVisible()
   await expect(page.getByRole('button',{name:'Date',exact:true})).toBeVisible()
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(box).toBeVisible()
   await expect(drawing).toBeVisible()
   await box.click()

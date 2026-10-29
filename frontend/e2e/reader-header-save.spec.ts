@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -6,7 +7,7 @@ test('document header Save commits a real tool draft once, without exporting or 
   const source=await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))
   const matter=await (await request.post(`${base}/matters`,{headers,data:{name:'Synthetic header save',court_profile:'general-demo'}})).json()
   const [doc]=await (await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'header-save.pdf',mimeType:'application/pdf',buffer:source}}})).json()
-  await page.setViewportSize({width:1440,height:900});await page.goto('/')
+  await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page)
   const save=page.getByRole('button',{name:'Save',exact:true})
   await expect(page.locator('.pdf-text-layer')).toContainText('DRAFT PETITION')
   await expect(save).toBeDisabled()
@@ -25,6 +26,7 @@ test('document header Save commits a real tool draft once, without exporting or 
     await save.click()
     await expect.poll(()=>writes).toBe(1)
     await expect(save).toBeDisabled()
+    await expect(page.locator('.preparation-utility').getByRole('button',{name:'Undo last matter change',exact:true})).toBeDisabled()
     await expect(page.locator('.document-save-state')).toContainText('Saving')
   } finally {release()}
   await expect(page.locator('.document-save-state')).toContainText('Saved locally')

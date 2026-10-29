@@ -1,0 +1,209 @@
+/* FLOW / 01, 01A / 04A / 03A / 03B. Shared navigation has one owner.
+   Reference: 1440×900, 32 title + 40 tabs + 44 utility, 184 nav, 28 status. */
+:root .app-shell.design-shell {grid-template-columns:184px minmax(0,1fr);grid-template-rows:32px minmax(0,1fr) 28px}
+:root .design-shell .application-bar {gap:10px;padding:0 12px;font-size:12px}
+:root .design-shell .application-brand {flex-basis:152px;height:30px}
+:root .design-shell .application-brand-copy {width:auto;height:auto}
+:root .design-shell .application-brand-copy small {display:none}
+:root .design-shell .application-matter {display:none}
+:root .design-shell .application-local {margin-left:0;font-size:12px}
+:root .design-shell .application-local svg {display:none}
+:root .design-shell .application-bar>.icon-btn {margin-left:auto}
+:root .design-shell .app-main {padding-top:84px;overflow:hidden}
+:root .design-shell .matter-rail {margin-top:84px;padding:24px 12px 28px;gap:6px;align-items:stretch;overflow:auto;border-right:1px solid var(--cb-nav-border)}
+:root .design-shell .matter-rail button {display:flex;align-items:center;justify-content:flex-start;gap:12px;width:160px;height:36px;min-height:36px;flex:0 0 36px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:500;white-space:nowrap;color:var(--cb-nav-text);text-align:left}
+:root .design-shell .matter-rail button svg {width:14px;height:14px;flex-shrink:0;color:var(--cb-nav-icon);stroke-width:1.7}
+:root .design-shell .matter-rail button[aria-current=page] {background:var(--cb-nav-selected);color:var(--cb-nav-activeText);font-weight:600}
+:root .design-shell .matter-rail button[aria-current=page] svg {color:var(--cb-nav-activeIcon)}
+.rail-context {height:62px;flex-shrink:0;padding:0 4px;color:var(--cb-nav-meta);font-size:12px;line-height:24px;min-width:0}
+.rail-context strong {display:block;text-transform:uppercase;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail-context>span {display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail-bottom {margin-top:auto;padding-top:16px;border-top:1px solid var(--cb-nav-border)}
+:root .design-shell .rail-bottom button {padding:0 4px;color:var(--cb-nav-meta)}
+.rail-local {display:flex;flex-direction:column;gap:16px;color:var(--cb-nav-meta);font-size:12px;margin:0 4px 20px}
+.rail-local small {font-size:11px}
+.rail-local>span {display:flex;align-items:center;gap:8px}
+.rail-local svg {width:16px;height:16px}
+:root .app-shell.design-shell[data-nav-collapsed=true] {grid-template-columns:64px minmax(0,1fr)}
+:root .design-shell[data-nav-collapsed=true] .matter-rail {padding-inline:12px}
+:root .design-shell[data-nav-collapsed=true] .matter-rail button {width:40px;justify-content:center;padding:0}
+:root .design-shell[data-nav-collapsed=true] .matter-rail button span,
+:root .design-shell[data-nav-collapsed=true] .rail-local {display:none}
+:root .design-shell[data-nav-collapsed=true] .rail-context {visibility:hidden}
+:root .design-shell .open-workspace-tabs {position:fixed;top:32px;left:0;width:100%;max-width:none;height:40px;max-height:40px;display:flex;flex-direction:row;gap:0;padding:0;background:var(--cb-surface2);border:0;border-radius:0;box-shadow:none;overflow-x:auto;overflow-y:hidden;z-index:30}
+:root .design-shell .open-workspace-tab {width:220px;min-width:180px;height:40px;flex:0 0 220px;border:0;border-radius:0;background:transparent}
+:root .design-shell .open-workspace-tab.active {background:var(--cb-surface);box-shadow:inset 0 -2px var(--cb-link)}
+:root .design-shell .workspace-home-tab {display:flex;align-items:center;gap:8px;flex:0 0 184px;height:40px;padding:0 16px;background:none;border:0;font-size:13px;color:var(--cb-text)}
+:root .design-shell .workspace-home-tab[aria-current=page] {background:var(--cb-surface);box-shadow:inset 0 -2px var(--cb-link)}
+.workspace-new-tab {align-self:center;flex-shrink:0;margin-inline:6px}
+:root .design-shell .mobile-nav-toggle {display:none}
+:root .design-shell .preparation-save-state {width:auto;margin-left:auto}
+:root .design-shell .navigation-scrim {inset:32px 0 28px;z-index:44;background:transparent}
+:root .design-shell .workspace-settings {position:fixed;inset:38px 12px auto auto;z-index:45;display:flex;flex-direction:column;gap:20px;width:min(360px,calc(100% - 24px));max-height:calc(var(--shell-height) - 80px);overflow:auto;padding:20px;background:var(--cb-surface);color:var(--cb-text);border:1px solid var(--cb-control-border);border-radius:8px;box-shadow:0 12px 32px #0003}
+.workspace-settings>header {display:flex;align-items:center;justify-content:space-between}
+.workspace-settings h2 {font-size:18px;margin:0}
+.workspace-actions {display:flex;flex-wrap:wrap;gap:8px}
+.workspace-settings .appearance-controls {padding:16px 0;border-block:1px solid var(--cb-border);color:var(--cb-text)}
+.workspace-settings .appearance-controls label {color:var(--cb-text)}
+.workspace-settings .appearance-controls select {color:var(--cb-text);background:var(--cb-surface);border:1px solid var(--cb-control-border)}
+:root .design-shell[data-flow=true] .workspace-page {padding:0;display:flex;min-height:0;flex:1;overflow:auto;width:100%;max-width:none;margin:0}
+:root .design-shell .flow-page {padding:28px;max-width:none;width:100%;min-width:0;overflow:auto;background:var(--cb-app);font-size:13px;color:var(--cb-text);border:0;border-radius:0;box-shadow:none}
+:root .flow-heading {display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin:0 0 26px;min-height:58px}
+:root .flow-heading h1 {font-size:28px;font-weight:500;line-height:34px;letter-spacing:0;margin:0 0 6px}
+:root .flow-heading p {font-size:13px;line-height:20px;color:var(--cb-muted);margin:0}
+:root .flow-page .btn {height:34px;min-height:34px;font-size:12px;white-space:nowrap;padding:0 12px;gap:8px;border-radius:6px;font-weight:600}
+:root .flow-page .btn.quiet {border-color:transparent;background:var(--cb-selected);color:var(--cb-link)}
+.flow-muted {font-size:12px;color:var(--cb-muted);line-height:20px}
+:root .flow-page h2 {font-size:18px;line-height:25px;font-weight:500;margin:0}
+.flow-section-heading {display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:42px;margin-bottom:14px}
+.flow-section-heading>span {color:var(--cb-muted);font-size:12px}
+.flow-table {width:100%;border-collapse:collapse;text-align:left;font-size:12px;table-layout:fixed;background:var(--cb-surface)}
+.flow-table th {background:var(--cb-surface2);color:var(--cb-muted);font-size:11px;font-weight:600;height:38px;padding:0 14px;border-block:1px solid var(--cb-border)}
+.flow-table td {padding:8px 14px;border-bottom:1px solid var(--cb-border);vertical-align:middle}
+.flow-status {display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:3px 9px;border-radius:20px;background:var(--cb-surface2);font-size:11px;color:var(--cb-muted);line-height:18px}
+.flow-status[data-status=ready],.flow-status[data-status=complete] {background:var(--cb-successBg);color:var(--cb-status-success-text)}
+.flow-status[data-status=duplicate],.flow-status[data-status=cancelled],.flow-status[data-status=oversize] {background:var(--cb-warningBg);color:var(--cb-status-warning-text)}
+.flow-status[data-status=unsupported],.flow-status[data-status=failed] {background:var(--cb-dangerBg);color:var(--cb-status-danger-text)}
+.flow-status[data-status=processing] {background:var(--cb-selected);color:var(--cb-link)}
+.flow-status svg {flex-shrink:0}
+.flow-footer {display:flex;align-items:center;gap:16px;border-top:1px solid var(--cb-border);padding-top:16px;margin-top:24px;min-height:50px;flex-shrink:0}
+.push-right {margin-left:auto}
+.matter-filters {display:flex;align-items:center;gap:12px;margin-bottom:22px;min-height:36px}
+.matter-search {display:flex;align-items:center;gap:10px;width:360px;flex-shrink:1;min-width:180px;height:36px;padding:0 12px;border:1px solid var(--cb-control-border);background:var(--cb-surface);border-radius:6px;color:var(--cb-muted)}
+.matter-search input {width:100%;min-width:0;border:0;background:none;font-size:12px;padding:0;color:var(--cb-text)}
+:root .matter-filters select {height:34px;min-height:34px;max-width:138px;padding:0 10px;font-size:12px}
+.matter-count {margin-left:auto;white-space:nowrap;color:var(--cb-muted);font-size:12px}
+.matter-filters [aria-label='Sort matters'] {width:128px}
+.matter-table-scroll {overflow:auto}
+.matter-table {min-width:840px}
+.matter-table th:first-child {width:33%}.matter-table th:nth-child(2){width:16%}.matter-table th:nth-child(3){width:8%}.matter-table th:nth-child(4){width:10%}.matter-table th:nth-child(5){width:13%}.matter-table th:nth-child(6){width:16%}.matter-table th:last-child{width:4%}
+.matter-table td {height:66px;padding:6px 10px}
+.matter-table.compact td {height:48px}
+:root .matter-table .matter-home-card {display:flex;align-items:flex-start;gap:12px;width:100%;min-width:0;padding:0 4px;border:0;border-radius:0;box-shadow:none;text-align:left;background:none;color:var(--cb-text)}
+.matter-home-card>svg {flex-shrink:0;margin-top:2px;color:var(--cb-muted)}
+.matter-home-card>span {min-width:0}
+.matter-home-card strong,.matter-home-card small {display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px;line-height:21px}
+.matter-home-card small {font-size:11px;color:var(--cb-muted)}
+.matter-table tr:focus-within,.matter-table tbody tr:hover {background:var(--cb-selected)}
+.matter-recent {margin-top:36px}.matter-recent .flow-section-heading {border-bottom:1px solid var(--cb-border);padding-bottom:12px}
+.matter-activity {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;padding:10px 0 20px}
+.matter-activity button {display:flex;align-items:flex-start;gap:12px;border:0;background:none;color:var(--cb-text);text-align:left;padding:0;font-size:12px}
+.matter-activity svg {flex-shrink:0;color:var(--cb-muted)}
+.matter-activity strong,.matter-activity small {display:block;font-size:12px;line-height:20px}.matter-activity small {color:var(--cb-muted);margin-top:8px}
+:root .matter-home .home-sample {display:flex;align-items:center;justify-content:space-between;margin:20px 0 0;padding:0;border:0;background:none}
+:root .overview-metrics {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));align-items:center;min-height:76px;border-block:1px solid var(--cb-border);margin:0 0 24px;gap:16px}
+.overview-metrics>span {display:flex;align-items:center;gap:28px;font-size:12px;color:var(--cb-muted)}
+.overview-metrics strong {font-size:24px;line-height:30px;font-weight:650;color:var(--cb-text)}
+.overview-review {display:flex;align-items:center;gap:20px;min-height:104px;padding:20px 24px;background:var(--cb-selected);border:1px solid var(--cb-border);border-radius:8px;margin-bottom:26px}
+.overview-review>svg {align-self:flex-start;margin-top:4px;color:var(--cb-link);flex-shrink:0}
+.overview-review p {font-size:13px;color:var(--cb-muted);margin:10px 0 0}
+.overview-review>.btn {margin-left:auto;flex-shrink:0}
+.overview-columns {display:grid;grid-template-columns:minmax(0,826fr) minmax(240px,336fr);gap:38px}
+.overview-preparation .flow-section-heading {margin:0;border-bottom:1px solid var(--cb-border);min-height:50px}
+.preparation-step {display:flex;align-items:center;gap:14px;min-height:70px;border-bottom:1px solid var(--cb-border)}
+.preparation-step>svg {align-self:flex-start;margin-top:20px;color:var(--cb-muted);flex-shrink:0}
+.preparation-step h3 {font-size:13px;margin:0;font-weight:600}.preparation-step p {font-size:12px;color:var(--cb-muted);margin:7px 0 0}
+.preparation-step>.btn {margin-left:auto;width:148px;flex-shrink:0}
+.overview-activity {padding-top:12px}.overview-activity>div {display:flex;gap:16px;margin-top:26px;font-size:12px}.overview-activity time {color:var(--cb-muted);font-size:11px;width:74px;flex-shrink:0}.overview-activity strong,.overview-activity small {display:block;font-size:12px;line-height:20px}.overview-activity small {color:var(--cb-muted);margin-top:10px}
+:root .design-shell .import-workspace {display:flex;flex-direction:column;flex:1;min-height:0}
+.import-drop {display:flex;align-items:center;gap:20px;min-height:110px;flex-shrink:0;padding:20px 24px;border:1px dashed var(--cb-control-border);border-radius:8px;margin:0 0 26px}
+.import-drop.over {background:var(--cb-selected);border-color:var(--cb-link)}
+.import-drop>svg {align-self:flex-start;color:var(--cb-link);margin-top:6px;flex-shrink:0}
+.import-drop p {font-size:12px;color:var(--cb-muted);margin:12px 0 0}.import-drop>.btn {margin-left:auto;flex-shrink:0}
+.import-table-scroll {overflow:auto;min-height:100px;flex:1}
+.import-table {min-width:650px}.import-table th:first-child {width:44%}.import-table th:nth-child(2) {width:12%}.import-table th:nth-child(3) {width:34%}.import-table th:last-child {width:10%}
+.import-table td {height:39px;padding-block:4px}.import-file-name {display:flex;align-items:center;gap:12px}.import-table td:first-child svg {flex-shrink:0;color:var(--cb-muted)}.import-table td:first-child span {white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.import-table .flow-status {width:100%;min-height:26px}.import-table td:last-child {text-align:right}.import-table .import-empty {height:150px;text-align:center;color:var(--cb-muted)}
+.import-note {margin:12px 0 0}.import-progress {padding:24px;border:1px solid var(--cb-border);border-radius:8px;margin-bottom:26px}.import-progress>div {display:flex;justify-content:space-between;align-items:center}.import-progress progress {width:100%;height:8px;display:block;margin:22px 0 16px;accent-color:var(--cb-link)}.import-progress p {font-size:12px;color:var(--cb-muted);margin:0}
+:root .design-shell .application-status {gap:24px}
+:root .design-shell .application-status>.membership-status-entry {order:3;margin-left:auto}
+:root .design-shell .application-status>.membership-status-step {order:1}
+:root .design-shell .application-status>button:last-child {order:4;margin-left:0}
+.matter-details-dialog {padding:24px}.matter-details-dialog dl {display:grid;grid-template-columns:120px 1fr;gap:12px;margin:24px 0}.matter-details-dialog dd {margin:0}
+@media(max-width:1199px) {.matter-filters{flex-wrap:wrap}.matter-count{margin-left:0}.overview-metrics>span{gap:10px}.overview-columns{gap:24px;grid-template-columns:minmax(0,2fr) minmax(200px,1fr)}.overview-review{flex-wrap:wrap}.overview-review>.btn{margin-left:42px}.flow-footer{flex-wrap:wrap}}
+@media(max-width:760px) {:root .app-shell.design-shell{grid-template-columns:64px minmax(0,1fr)}:root .design-shell .matter-rail{padding-inline:12px}:root .design-shell .matter-rail button{width:40px;justify-content:center;padding:0}:root .design-shell .matter-rail button span,:root .design-shell .rail-local{display:none}:root .design-shell .rail-context{visibility:hidden}:root .design-shell .flow-page{padding:20px}:root .flow-heading h1{font-size:23px}.flow-heading{flex-wrap:wrap}.overview-metrics{grid-template-columns:repeat(2,minmax(0,1fr));padding:16px 0}.overview-columns{grid-template-columns:1fr}.matter-activity{grid-template-columns:1fr}.import-drop{flex-wrap:wrap}.import-drop>.btn{margin-left:44px}.preparation-search-trigger kbd,.preparation-engine,.application-status .membership-status-step{display:none}.preparation-search-trigger{font-size:11px}.preparation-save-state{font-size:11px}.preparation-step>.btn{width:100px}.flow-section-heading{flex-wrap:wrap}.workspace-settings .appearance-controls{display:grid}}
+:root .design-shell[data-editor-expanded=true] {grid-template-columns:minmax(0,1fr)}
+:root .design-shell[data-editor-expanded=true] .matter-rail {display:none}
+
+:root .design-shell .matter-overview {display:block;gap:0;min-height:0}
+:root .design-shell .matter-overview .flow-footer {margin-top:24px}
+.import-table .include-duplicate {font-size:10px;padding:0;min-height:18px;white-space:nowrap}
+:root .design-shell .preparation-save-state .membership-saved-icon {color:var(--cb-status-success-text)}
+/* Exact FLOW 01 section spacing, without inherited Overview grid gaps. */
+:root .flow-heading {margin-bottom:22px}
+:root .overview-metrics {min-height:74px}
+.overview-review {margin-bottom:22px}
+.overview-preparation .flow-section-heading {min-height:52px}
+.overview-preparation .preparation-step:nth-child(2) {min-height:80px}
+.import-drop {min-height:108px;margin-bottom:20px}
+.import-workspace .flow-section-heading {min-height:25px;margin-bottom:19px}
+.import-table th {height:36px}
+:root .matter-filters select {border:1px solid var(--cb-control-border);border-radius:6px;background:var(--cb-surface);color:var(--cb-text)}
+:root .design-shell .application-status>.membership-status-entry {background:none;color:var(--cb-link);border:0;font-size:12px}
+:root .design-shell .matter-rail[data-context=false] .rail-context {height:32px}
+
+/* Explicit full screen owns the entire window and hides the workspace chrome. */
+:root .app-shell.design-shell[data-editor-expanded=true] {grid-template-rows:minmax(0,1fr)}
+:root .design-shell[data-editor-expanded=true] .app-main {padding-top:0}
+:root .design-shell[data-editor-expanded=true] .open-workspace-tabs,
+:root .design-shell[data-editor-expanded=true] .preparation-utility {display:none}
+
+:root .design-shell .open-workspace-tab-select {font-size:13px;max-width:190px}
+/* Retain a useful page beside findings with the expanded navigation rail. */
+@media(max-width:1100px) {
+  .design-shell[data-finding=true][data-nav-collapsed=false] .read-workspace .viewer-edit-workspace:has(>.virtual-thumbnail-rail) {grid-template-columns:100px minmax(0,1fr)}
+  .design-shell[data-finding=true][data-nav-collapsed=false] .read-workspace .virtual-thumbnail-rail {width:100px;padding-inline:8px}
+  .design-shell[data-finding=true] .read-workspace .canvas-scroll {padding-inline:16px}
+}
+.inspector-leave-active {pointer-events:none}
+
+/* Keep the reference footer inside the 900px Overview, without initial scrolling. */
+:root .flow-heading {min-height:60px}
+:root .design-shell .matter-overview {padding-bottom:4px}
+:root .design-shell .matter-overview .flow-footer {margin-top:26px;padding-top:12px}
+@media(max-width:1100px) {
+  .app-shell.design-shell[data-documents=true] .documents-workspace:not(.preparation-workspace).details-open>.inspector-panel {width:240px}
+  .design-shell .documents-workspace:not(.preparation-workspace).details-open .viewer-edit-workspace {margin-right:240px}
+  .design-shell .documents-workspace.details-open:not(.preparation-workspace) .viewer-edit-workspace:has(>.virtual-thumbnail-rail),
+  .design-shell .read-workspace .viewer-edit-workspace.has-document-information {grid-template-columns:100px minmax(0,1fr)}
+  .design-shell .read-workspace .viewer-edit-workspace.has-document-information {grid-template-columns:100px minmax(0,1fr) 240px}
+  .design-shell .read-workspace .viewer-edit-workspace.has-document-information>.document-information-panel {width:240px}
+  .design-shell .documents-workspace.details-open:not(.preparation-workspace) .virtual-thumbnail-rail,
+  .design-shell .read-workspace .viewer-edit-workspace.has-document-information>.virtual-thumbnail-rail {width:100px;padding-inline:8px}
+}
+
+/* 01A footer and focus ring stay within the supplied desktop frame. */
+.matter-search input {height:32px;min-height:0}
+.matter-search:focus-within {outline:2px solid var(--cb-focus);outline-offset:1px}
+.matter-search input:focus-visible {outline:none}
+.matter-activity {padding-bottom:14px}
+:root .matter-home .home-sample {margin-top:0}
+/* 03B has a distinct 130px progress block and 47px processing rows. */
+:root .design-shell .import-workspace {padding-bottom:22px}
+:root .design-shell .import-workspace[data-started=true] {padding-bottom:14px}
+.import-workspace[data-started=true] .flow-heading {margin-bottom:28px}
+.import-workspace[data-started=true] .import-progress {position:relative;flex-shrink:0;height:130px;padding:0;margin-bottom:28px}
+.import-progress>div {position:absolute;left:24px;right:24px;top:22px;height:25px}
+.import-progress progress {position:absolute;left:24px;top:68px;width:calc(100% - 48px);height:6px;margin:0;appearance:none;border:0;border-radius:3px;overflow:hidden;background:var(--cb-border)}
+.import-progress progress::-webkit-progress-bar {background:var(--cb-border);border-radius:3px}
+.import-progress progress::-webkit-progress-value {background:var(--cb-accent);border-radius:3px}
+.import-progress progress::-moz-progress-bar {background:var(--cb-accent);border-radius:3px}
+.import-progress p {position:absolute;left:24px;right:24px;top:95px;height:20px;margin:0}
+.import-workspace[data-started=true] .flow-section-heading {margin-bottom:21px}
+.import-workspace[data-started=true] .import-table th {height:38px}
+.import-workspace[data-started=true] .import-table td {height:47px}
+.import-workspace[data-started=true] .flow-footer {min-height:45px;padding-top:10px}
+
+.import-local {display:flex;align-items:center;gap:10px;width:174px;flex-shrink:0}
+
+/* Match each queue's column anchors and keep duplicate actions inside the row. */
+.import-table th:first-child {width:44.166667%}
+.import-table th:nth-child(2) {width:11.5%}
+.import-table th:nth-child(3) {width:34.333333%}
+.import-workspace[data-started=true] .import-table th:first-child {width:42%}
+.import-workspace[data-started=true] .import-table th:nth-child(2) {width:15%}
+.import-workspace[data-started=true] .import-table th:nth-child(3) {width:33%}
+.import-workspace[data-started=true] .import-table :is(th,td) {padding-inline:16px}
+.import-table td:last-child {white-space:nowrap}
+.import-table td.import-empty {text-align:center}
+.import-table td:last-child .icon-btn {display:inline-flex;width:28px;height:28px;padding:0;vertical-align:middle}

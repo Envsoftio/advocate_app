@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { openDocumentActions, openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { readFileSync } from 'node:fs'
@@ -30,8 +31,8 @@ test('Save copy downloads exact revision bytes without private notes and refuses
   const firstBytes = await (await request.get(`${backend}/documents/${document.id}/pdf?revision=1`, { headers })).body()
   expect(firstBytes).toEqual(original)
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Exact Working Save'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Exact Working Save'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'save-working-synthetic' }).click()
   await openDocumentActions(page)
@@ -67,7 +68,7 @@ test('Save copy downloads exact revision bytes without private notes and refuses
   expect(readFileSync(downloadedPath!)).toEqual(firstBytes)
 
   // Refresh to review r2; saving now must use exactly r2, not the old bytes.
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await openDocumentActions(page)
   await expect(save).toBeEnabled()
   const secondBytes = await (await request.get(`${backend}/documents/${document.id}/pdf?revision=2`, { headers })).body()

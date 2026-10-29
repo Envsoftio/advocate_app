@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -73,7 +74,7 @@ test('production PDF reader renders with the bundled main-thread fallback when W
       }
     } })
   })
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await expect(page.locator('.doc-item').filter({ hasText: 'worker-fallback-synthetic' })).toBeVisible()
     .catch(cause => { throw new Error(`Production app connection: ${JSON.stringify(network)}; ${JSON.stringify(errors)}; ${cause}`) })
@@ -91,7 +92,7 @@ test('production PDF reader renders with the bundled main-thread fallback when W
   expect([...served], `Production assets served: ${JSON.stringify([...served])}; worker: ${workerName}`).toContain(`/assets/${workerName}`)
 
   // Fallback stays usable for the next document lifecycle too.
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(page.getByRole('spinbutton', { name: 'Go to page', exact: true })).toBeEnabled()
   await expect(page.locator('.pdf-text-layer')).not.toHaveText('')
   expect(errors).toEqual([])

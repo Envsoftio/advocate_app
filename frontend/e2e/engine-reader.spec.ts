@@ -1,3 +1,5 @@
+import { openNamedMatter } from './navigation'
+import { enterLatestMatter } from './navigation'
 import { closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser, openWorkspaceNavigation } from './navigation'
 import {test, expect, type Page, type APIRequestContext, type Locator} from '@playwright/test'
 import {execFileSync} from 'node:child_process'
@@ -20,9 +22,9 @@ for i in range(${large?'12':'4'}):
 pdf.set_toc([[1,'Opening',1],[1,'Evidence',3]])
 sys.stdout.buffer.write(pdf.tobytes())`],{maxBuffer:64*1024*1024})
   const [doc]=await (await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'recovery.pdf',mimeType:'application/pdf',buffer:bytes}}})).json()
-  await page.setViewportSize({width:1440,height:900});await page.goto('/')
+  await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
-  await page.locator('.matter-link').filter({hasText:matter.name}).click()
+  await openNamedMatter(page,matter.name)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'recovery'}).click()
   await expect(page.locator('.pdf-text-layer')).toContainText('Recovery evidence page 1')
@@ -140,7 +142,7 @@ for(const viewport of [{width:1440,height:900},{width:1024,height:768}])test(`02
   await page.setViewportSize(viewport)
   for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){
     await page.evaluate(({theme,scale})=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme,scale})),{theme,scale})
-    await page.reload()
+    await page.reload();await enterLatestMatter(page)
     const selector=page.getByRole('combobox',{name:'Document version',exact:true});await expect(selector).toBeEnabled();await selector.focus();await expect(selector).toBeFocused();await selector.selectOption('original')
     for(const artifact of ['original',`export:${job.id}:combined.pdf`]){
       const review=page.locator('dialog.export-review')
@@ -201,7 +203,7 @@ test('02C compact dark disconnection leaves usable PDF space and reading control
   await fixture(page,request)
   await page.setViewportSize({width:1024,height:768})
   await page.evaluate(()=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme:'dark',scale:125})))
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(page.locator('.pdf-text-layer')).toContainText('Recovery evidence page 1')
   await page.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('fit-width')
   await disconnect(page)

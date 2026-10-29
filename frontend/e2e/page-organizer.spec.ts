@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { closeWorkspaceNavigation } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -44,8 +45,8 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
  print(json.dumps([{'text':page.get_text().strip(),'rotation':page.rotation} for page in pdf]))
 `], { input: await response.body(), encoding: 'utf8' })) as { text: string, rotation: number }[]
   }
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Page Organizer'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Page Organizer'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', { name: 'Pages', exact: true }).click()
   await page.getByRole('button', { name: 'Organize pages', exact: true }).click()

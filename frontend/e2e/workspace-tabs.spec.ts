@@ -1,3 +1,5 @@
+import { openNamedMatter } from './navigation'
+import { enterLatestMatter } from './navigation'
 import { closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser, openWorkspaceNavigation, openWorkspaces } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -34,9 +36,9 @@ test('matter and document tabs keep their selection, reader position and unsaved
     }})
     expect(response.ok()).toBeTruthy()
   }
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
-  await page.locator('.matter-link').filter({hasText:'E2E UX01 First Matter'}).click()
+  await openNamedMatter(page,'E2E UX01 First Matter')
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'alpha-tabs'}).click()
   await expect(page.locator('.reader-document strong')).toHaveText('alpha-tabs')
@@ -51,8 +53,8 @@ test('matter and document tabs keep their selection, reader position and unsaved
   await page.locator('.doc-item').filter({hasText:'bravo-tabs'}).click()
   await expect(page.locator('.reader-document strong')).toHaveText('bravo-tabs')
   await openWorkspaceNavigation(page)
-  await page.locator('.matter-link').filter({hasText:'E2E UX01 Second Matter'}).click()
-  await expect(page.locator('.application-matter')).toHaveText('E2E UX01 Second Matter')
+  await openNamedMatter(page,'E2E UX01 Second Matter')
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select')).toHaveText('E2E UX01 Second Matter')
   await openWorkspaces(page)
   await page.locator('.open-workspace-tabs .open-workspace-tab').filter({hasText:'alpha-tabs'})
     .locator('.open-workspace-tab-select').click()

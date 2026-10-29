@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation'
 import { openWorkspaceNavigation } from './navigation'
 import { test, expect } from '@playwright/test'
@@ -5,13 +6,13 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 test('top-level pages fit narrow windows', async ({ page }, info) => {
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   for (const width of [1440, 620, 390]) {
     await page.setViewportSize({width,height:900})
     for (const name of ['Court rules', 'About MatterDraft', 'Matters']) {
       await openWorkspaceNavigation(page)
-      await page.locator('.sidebar').getByRole('button', {name,exact:true}).click()
-      await expect(page.getByRole('heading', {name:name === 'Court rules' ? 'Court rules & technical profiles' : name === 'About MatterDraft' ? 'Built for structured legal filing preparation.' : 'Your matters'})).toBeVisible()
+      await page.locator('.workspace-drawer').getByRole('button', {name,exact:true}).click()
+      await expect(page.getByRole('heading', {name:name === 'Court rules' ? 'Court rules & technical profiles' : name === 'About MatterDraft' ? 'Built for structured legal filing preparation.' : 'Matters'})).toBeVisible()
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       if (name === 'About MatterDraft') {
         await page.screenshot({path:info.outputPath(`about-matterdraft-${width}.png`),animations:'disabled'})
@@ -33,7 +34,7 @@ test('workspace and export controls stay separated at desktop and narrow widths'
     files: { name: '01_petition.pdf', mimeType: 'application/pdf', buffer: await readFile(resolve(import.meta.dirname, '../../samples/01_petition.pdf')) },
   } })
   expect(upload.ok()).toBeTruthy()
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
   await page.locator('.workspace-drawer').getByRole('button', { name: 'Matters', exact: true }).click()
   await page.locator('.matter-home-card').filter({ hasText: 'Synthetic layout audit' }).click()

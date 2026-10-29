@@ -1,3 +1,4 @@
+import { completeQueuedImport, enterLatestMatter } from './navigation'
 import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation'
 import {test,expect} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
@@ -19,11 +20,11 @@ async function fixture(request:any,count=10){
 async function enter(page:any){await page.locator('.application-status').getByRole('button',{name:'Bundle membership',exact:true}).click();await expect(page.getByRole('heading',{name:'Bundle membership',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Apply membership',exact:true})).toBeEnabled()}
 test('BU05 reference geometry, membership apply/discard/failure/stale and caller focus',async({page,request},info)=>{
  const {matter,docs}=await fixture(request)
- await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
+ await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
  const panel=page.locator('.bundle-membership')
  await expect(panel.locator('input:checked')).toHaveCount(8)
  await expect(panel).toContainText('2 reference-only')
- for(const [selector,x,y,width] of [['.matter-rail',0,32,184],['.bundle-membership',184,116,1256],['.membership-card',208,266,1208]] as const){
+ for(const [selector,x,y,width] of [['.matter-rail',0,116,184],['.bundle-membership',184,116,1256],['.membership-card',208,266,1208]] as const){
   const box=(await page.locator(selector).boundingBox())!;expect(Math.round(box.x)).toBe(x);expect(Math.round(box.y)).toBe(y);expect(Math.round(box.width)).toBe(width)
  }
  await page.screenshot({path:info.outputPath('BU05-1440-light.png'),animations:'disabled'})
@@ -42,7 +43,7 @@ test('BU05 reference geometry, membership apply/discard/failure/stale and caller
  await page.unroute('**/membership')
  await panel.getByRole('button',{name:'Apply membership',exact:true}).click();await expect(panel).toBeHidden()
  let saved=await(await request.get(`${base}/matters/${matter.id}/membership`,{headers})).json();expect(saved.included_documents).toBe(7)
- await page.reload();await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page);await expect(first).not.toBeChecked()
+ await page.reload();await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page);await expect(first).not.toBeChecked()
  await first.check()
  await request.patch(`${base}/documents/${docs[0].id}`,{headers,data:{title:'Changed by another session'}})
  await panel.getByRole('button',{name:'Apply membership',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('inputs changed')
@@ -54,10 +55,10 @@ test('BU05 reference geometry, membership apply/discard/failure/stale and caller
 })
 test('BU05 themes/scales, scrolling, keyboard and loading/empty states',async({page,request},info)=>{
  const {docs}=await fixture(request,14)
- await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible()
+ await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible()
  for(const width of [1440,1024])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){
   await page.setViewportSize({width,height:width===1440?900:768})
-  await page.evaluate(({theme,scale})=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme,scale})),{theme,scale});await page.reload();await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
+  await page.evaluate(({theme,scale})=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme,scale})),{theme,scale});await page.reload();await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
   const panel=page.locator('.bundle-membership')
   await expect(panel.getByRole('button',{name:'Apply membership',exact:true})).toBeInViewport()
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth&&document.documentElement.scrollHeight<=innerHeight+1)).toBe(true)
@@ -70,14 +71,15 @@ test('BU05 themes/scales, scrolling, keyboard and loading/empty states',async({p
  await page.route('**/membership',async route=>{await new Promise(resolve=>setTimeout(resolve,600));await route.continue()})
  await page.locator('.application-status').getByRole('button',{name:'Bundle membership',exact:true}).click();await expect(page.getByText('Loading bundle membership…')).toBeVisible();await expect(page.getByRole('button',{name:'Apply membership',exact:true})).toBeEnabled();await page.unroute('**/membership');await page.getByRole('button',{name:'Return to caller'}).click()
  const empty=await(await request.post(`${base}/matters`,{headers,data:{name:'Empty membership test',court_profile:'general-demo'}})).json()
- await page.reload();await page.locator('.application-status').getByRole('button',{name:'Bundle membership',exact:true}).click()
+ await page.reload();await enterLatestMatter(page);await page.locator('.application-status').getByRole('button',{name:'Bundle membership',exact:true}).click()
  await expect(page.getByText(/No documents yet. Import documents/)).toBeVisible();await page.screenshot({path:info.outputPath('BU05-empty.png')})
 })
 
 test('BU05 selection drives a real build/download and reference import stays readable',async({page,request})=>{
  const {matter,docs}=await fixture(request,3)
- await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible()
+ await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible()
  await page.locator('input[accept=".pdf,.jpg,.jpeg,.png"]').setInputFiles(resolve(import.meta.dirname,'../../samples/03_affidavit.pdf'))
+ await completeQueuedImport(page)
  await expect.poll(async()=>(await(await request.get(`${base}/matters/${matter.id}/membership`,{headers})).json()).reference_documents).toBe(1)
  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
  await page.locator('.build-workspace').getByRole('button',{name:'Bundle membership',exact:true}).click()
@@ -104,7 +106,7 @@ test('BU05 selection drives a real build/download and reference import stays rea
 
 test('BU05 keyboard commands and disconnected saves retain the membership draft',async({page,request})=>{
  const {matter,docs}=await fixture(request,3)
- await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
+ await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await enter(page)
  const picker=page.locator('.bundle-membership');const first=picker.getByRole('checkbox',{name:`Include ${docs[0].title}`,exact:true})
  await first.uncheck();await page.getByRole('heading',{name:'Bundle membership',exact:true}).focus()
  const before=await(await request.get(`${base}/matters/${matter.id}/membership`,{headers})).json()

@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { closeWorkspaceNavigation, openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -44,8 +45,8 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
  print(json.dumps([page.get_text().strip() for page in pdf]))
 `], { input: await response.body(), encoding: 'utf8' })) as string[]
   }
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Visual Page Transfer'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Visual Page Transfer'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'transfer-target' }).click()
   await closeWorkspaceNavigation(page)

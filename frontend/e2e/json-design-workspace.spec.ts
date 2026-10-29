@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import {test,expect} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -12,7 +13,7 @@ test('JSON preparation matches 05A and preserves document context in the editor'
   const [doc]=await upload.json();documents.push(doc)
   expect((await request.patch(`${base}/documents/${doc.id}`,{headers,data:{title:name,part:index<4?1:2}})).ok()).toBeTruthy()
  }
- await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible()
+ await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page);if(await page.getByRole('button',{name:'Collapse sidebar',exact:true}).isVisible())await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();await expect(page.locator('.pdf-paper')).toBeVisible()
  await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click()
  const nav=page.getByRole('region',{name:'Matter documents'});await expect(nav).toBeVisible()
  await nav.locator('.navigator-document-select').filter({hasText:'Affidavit'}).click()
@@ -42,7 +43,7 @@ test('JSON preparation matches 05A and preserves document context in the editor'
  await page.getByRole('button',{name:'Focused reading',exact:true}).click()
  await expect(page.getByRole('region',{name:'Document information'})).toBeHidden()
  expect(Math.round((await page.locator('.viewer-page-column').boundingBox())!.x)).toBe(0)
- expect(Math.round((await page.locator('.viewer-page-column').boundingBox())!.y)).toBe(148)
+ expect(Math.round((await page.locator('.viewer-page-column').boundingBox())!.y)).toBe(108)
  await page.screenshot({path:info.outputPath('ED24-focused-reading.png'),animations:'disabled'})
  await page.keyboard.press('Escape')
  await page.getByRole('button',{name:'Close document information'}).click()
@@ -64,7 +65,7 @@ test('JSON preparation matches 05A and preserves document context in the editor'
  await expect(page.getByRole('button',{name:'Open editor',exact:true})).toBeVisible()
  for(const width of [1440,1024])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){
   await page.setViewportSize({width,height:width===1440?900:768})
-  await page.evaluate(({theme,scale})=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme,scale})),{theme,scale});await page.reload();await expect(page.locator('.pdf-paper')).toBeVisible()
+  await page.evaluate(({theme,scale})=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme,scale})),{theme,scale});await page.reload();await enterLatestMatter(page);if(await page.getByRole('button',{name:'Collapse sidebar',exact:true}).isVisible())await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();await expect(page.locator('.pdf-paper')).toBeVisible()
   await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click()
   await expect(page.getByRole('button',{name:'Open editor',exact:true})).toBeInViewport()
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth && document.documentElement.scrollHeight<=innerHeight+1)).toBe(true)

@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation'
 import { openDocumentActions } from './navigation'
 import { expect, test } from '@playwright/test'
@@ -20,14 +21,17 @@ test('storage, idle autosave, Office downloads and print copy use one completed 
   expect(uploaded.ok()).toBeTruthy()
   const documentId = (await uploaded.json())[0].id as string
 
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Desktop Foundation'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Desktop Foundation'})).toBeVisible()
   await page.getByRole('button', {name:'Overview', exact:true}).click()
-  await expect(page.getByRole('region', {name:'Desktop file tools'})).toContainText('Open, save, print and export')
+  await page.getByRole('button',{name:'Matter details',exact:true}).click()
+  await expect(page.getByRole('region', {name:'Desktop file tools'})).toContainText('PDF tools & print')
   await page.screenshot({path:testInfo.outputPath('desktop-file-tools.png')})
   await page.getByRole('button', {name:'PDF tools & print'}).click()
+  await page.getByRole('button',{name:'Open editor',exact:true}).click()
+  await expect(page.locator('.inspector-leave-active')).toHaveCount(0)
   await openDocumentActions(page)
-  await page.getByRole('button', {name:'Document details'}).click()
+  await page.getByRole('button', {name:'Document details',exact:true}).click()
   await page.getByRole('textbox', {name:'Display title'}).fill('Autosaved petition')
   await expect(page.getByRole('status').filter({hasText:'Document details saved'})).toBeVisible({timeout:15_000})
   const saved = await (await request.get(`${backend}/matters/${matterId}/documents`, {headers})).json()
@@ -57,6 +61,7 @@ test('storage, idle autosave, Office downloads and print copy use one completed 
   await openOutputTools(page)
   await expect(page.getByRole('group', {name:'Office review exports'})).toContainText('Word draft')
   await page.getByRole('button', {name:'Overview', exact:true}).click()
+  await page.getByRole('button',{name:'Matter details',exact:true}).click()
   await page.getByRole('button', {name:'Office exports', exact:true}).click()
   await expect(page.getByRole('group', {name:'Office review exports'})).toBeInViewport({ratio:.5})
   await page.screenshot({path:testInfo.outputPath('office-review-exports.png')})

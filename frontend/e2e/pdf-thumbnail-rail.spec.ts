@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { openDocumentActions, openDocumentBrowser } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -27,8 +28,8 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
     expect(uploaded.ok()).toBeTruthy();documents.set(count,(await uploaded.json())[0].id)
   }
   await page.setViewportSize({width:1440,height:1000})
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'E2E Virtual Thumbnail Rail'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Virtual Thumbnail Rail'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.locator(`.doc-item[data-document-id="${documents.get(1000)}"]`).click()
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)

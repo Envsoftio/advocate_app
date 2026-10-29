@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { closeWorkspaceNavigation, openDocumentBrowser } from './navigation'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -25,7 +26,7 @@ sys.stdout.buffer.write(pdf.tobytes())`])
   const [document] = await upload.json()
   expect((await request.put(`${base}/matters/${matter.id}/bookmarks`, { headers, data: { entries: [{ id: randomUUID().replaceAll('-', ''), title: 'Manual leaf four', document_id: document.id, page_index: 3, target_revision: document.revision, parent_id: null }] } })).ok()).toBeTruthy()
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto('/')
+  await page.goto('/');await enterLatestMatter(page)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'reader-02a' }).click()
   await expect(page.locator('.pdf-text-layer')).toContainText('Synthetic reading page 1')
@@ -109,13 +110,13 @@ test('Read workspace reports bookmark failure and refuses stale manual destinati
   let bookmarkReads = 0
   // Let the existing matter bootstrap finish; fail the reader's own lookup.
   await page.route(`**/matters/${matter.id}/bookmarks`, route => ++bookmarkReads === 1 ? route.continue() : route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Synthetic unavailable store' }) }))
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click()
   await expect(page.getByRole('region', { name: 'Source PDF outline' })).toContainText('Manual bookmarks could not be loaded')
   await expect(page.getByRole('region', { name: 'Source PDF outline' })).not.toContainText('No manual bookmarks')
   await page.unroute(`**/matters/${matter.id}/bookmarks`)
   expect((await request.post(`${base}/documents/${document.id}/pages/rotate`, { headers, data: { page_index: 0, degrees: 90 } })).ok()).toBeTruthy()
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Manual leaf four · Source 4 · Needs review' })).toBeDisabled()
   await page.getByRole('button', { name: 'Opening · p1' }).click()

@@ -1,3 +1,5 @@
+import { openNamedMatter } from './navigation'
+import { enterLatestMatter } from './navigation'
 import { closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser, openWorkspaceNavigation, openWorkspaces } from './navigation'
 import {test, expect, type Page, type APIRequestContext} from '@playwright/test'
 import {execFileSync} from 'node:child_process'
@@ -20,9 +22,9 @@ sys.stdout.buffer.write(pdf.tobytes())`])
     const upload=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:`${name}.pdf`,mimeType:'application/pdf',buffer:bytes}}})
     expect(upload.ok()).toBeTruthy();docs.push((await upload.json())[0])
   }
-  await page.setViewportSize({width:1440,height:900});await page.goto('/')
+  await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
-  await page.locator('.matter-link').filter({hasText:matter.name}).click()
+  await openNamedMatter(page,matter.name)
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'artifact-alpha'}).click()
   await expect(page.locator('.pdf-text-layer')).toContainText('Artifact evidence page 1')
@@ -34,7 +36,7 @@ test('02B original and generated artifacts are read only and retain independent 
   const job=await (await request.post(`${base}/matters/${matter.id}/build`,{headers})).json()
   await expect.poll(async()=> (await (await request.get(`${base}/jobs/${job.id}`,{headers})).json()).status).toBe('completed')
   expect((await request.post(`${base}/documents/${doc.id}/pages/delete`,{headers,data:{page_index:2,expected_revision:doc.revision}})).ok()).toBeTruthy()
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(page.locator('.application-status')).toContainText('Working revision 2')
   await page.getByRole('button',{name:'Search',exact:true}).click()
   await page.getByRole('searchbox',{name:'Find text in this PDF'}).fill('evidence')

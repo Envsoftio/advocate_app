@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import {expect,test} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -13,8 +14,8 @@ test('03A highlight and comment Save, retry, reload and source navigation',async
     files:{name:'03a-source.pdf',mimeType:'application/pdf',buffer:source},
   }})).json()
   await page.setViewportSize({width:1440,height:900})
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'Synthetic 03A review'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'Synthetic 03A review'})).toBeVisible()
   await expect(page.locator('.pdf-text-layer')).toContainText('DRAFT PETITION')
   await page.getByRole('tab',{name:'Annotate'}).click()
   await page.getByRole('button',{name:'Highlight',exact:true}).click()
@@ -59,7 +60,7 @@ test('03A highlight and comment Save, retry, reload and source navigation',async
     expect(item.output_scope).toBe('private')
     expect(item.created_at).toMatch(/T/)
   }
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(page.locator('.pdf-review-highlight')).toHaveCount(1)
   await expect(page.locator('.pdf-review-comment')).toHaveCount(1)
   await page.getByRole('tab',{name:'Annotate'}).click()
@@ -110,8 +111,8 @@ test('03A placement stays on rotated source page at 125% zoom',async({page,reque
   expect(rotated.ok()).toBe(true)
   const revision=(await rotated.json()).revision as number
   await page.setViewportSize({width:1440,height:900})
-  await page.goto('/')
-  await expect(page.locator('.application-matter').filter({hasText:'Synthetic 03A rotated'})).toBeVisible()
+  await page.goto('/');await enterLatestMatter(page)
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'Synthetic 03A rotated'})).toBeVisible()
   await expect(page.locator('.pdf-text-layer')).toContainText('DRAFT PETITION')
   await page.getByRole('tab',{name:'Annotate'}).click()
   await page.getByRole('button',{name:'Next page'}).click()
@@ -148,7 +149,7 @@ test('03A placement stays on rotated source page at 125% zoom',async({page,reque
   await expect(page.getByRole('button',{name:'Remove selected'})).toHaveCount(0)
   await page.getByRole('button',{name:'Redo last matter change'}).click()
   await expect(page.locator('.pdf-review-highlight')).toHaveCount(1)
-  await page.reload()
+  await page.reload();await enterLatestMatter(page)
   await expect(page.locator('.pdf-review-highlight')).toHaveCount(1)
   await expect(page.getByRole('spinbutton',{name:'Go to page'})).toHaveValue('2')
   const docs=await (await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json()

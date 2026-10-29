@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import {test,expect} from '@playwright/test'
 import {readFile,mkdir,writeFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -39,7 +40,7 @@ async function matrix(page:any,info:any,name:string){
 test('B01C new design, exact findings, persisted review, measured output and release',async({page,request},info)=>{
  test.setTimeout(240_000)
  const {matter,doc,build,buffer}=await fixture(request)
- await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible()
+ await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible()
  await page.locator('.matter-rail').getByRole('button',{name:'Preflight checks',exact:true}).click()
  const preflight=page.locator('.preflight-workspace');await expect(preflight).toContainText('UNSEARCHABLE_PAGE'.toLowerCase().split('_').join(' '));await expect(preflight.getByRole('button',{name:'Review source 2'})).toBeVisible()
  await expect(page.locator('.section-enter-active')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready)
@@ -65,7 +66,7 @@ test('B01C new design, exact findings, persisted review, measured output and rel
  await workspace.getByRole('button',{name:'View output checks'}).click();await expect(checks.getByLabel('Output file',{exact:true})).toHaveValue('index.csv');await page.keyboard.press('Escape')
  for(const label of ['Index links and bookmarks','Printed page references','Document order and coverage','Scan and image readability'])await workspace.getByLabel(label,{exact:true}).check()
  await expect(workspace).toContainText('Technical and human review recorded')
- await page.reload();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(workspace.getByLabel('Document order and coverage')).toBeChecked()
+ await page.reload();await enterLatestMatter(page);await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click();await expect(workspace.getByLabel('Document order and coverage')).toBeChecked()
  await workspace.getByRole('button',{name:'Export files',exact:true}).click();const exp=page.getByRole('dialog',{name:'Export bundle files'})
  await exp.getByLabel('Release reviewed output').check();await exp.getByLabel('File name').selectOption('combined.pdf')
  const event=page.waitForEvent('download');await exp.getByRole('button',{name:'Export files',exact:true}).click();const bytes=await readFile((await(await event).path())!)
@@ -84,7 +85,7 @@ test('B01C output history and late responses stay with the selected build',async
  const {matter,build}=await fixture(request)
  const job=await(await request.post(`${base}/matters/${matter.id}/build`,{headers})).json()
  await expect.poll(async()=>(await(await request.get(`${base}/jobs/${job.id}`,{headers})).json()).status).toBe('completed')
- await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
+ await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
  const workspace=page.locator('.build-workspace');await expect(workspace.getByRole('button',{name:'View output checks'})).toBeVisible()
  await page.evaluate(buildId=>{
   const original=window.fetch.bind(window),qa=window as any
@@ -127,7 +128,7 @@ c['labels'][i]='UNEXPECTED';write_bytes(p,json.dumps(m).encode())`,process.env.M
  const state=await(await request.post(url+'/run',{headers,data:{}})).json()
  const originalRun=state.history[0],finding=originalRun.checks.find((c:any)=>c.id==='labels').findings[0]
  expect(state.can_download).toBe(false)
- await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
+ await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
  await page.locator('.build-workspace').getByRole('button',{name:'View output checks'}).click()
  const checks=page.getByRole('dialog',{name:/Output checks/})
  await checks.getByLabel('Output file',{exact:true}).selectOption('combined.pdf');await checks.getByLabel('Validation history').selectOption(originalRun.id)

@@ -1,5 +1,6 @@
+import { enterLatestMatter } from './navigation'
 import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation'
-import { includeAllDocuments, openWorkspaceNavigation } from './navigation'
+import { includeAllDocuments, openDocumentBrowser, openWorkspaceNavigation } from './navigation'
 import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
@@ -19,15 +20,16 @@ with pymupdf.open(sys.argv[1]) as pdf:
  pdf.save(sys.argv[2],encryption=pymupdf.PDF_ENCRYPT_AES_256,owner_pw='synthetic owner',user_pw='synthetic input',permissions=4095)
 `, resolve(import.meta.dirname, '../../samples/01_petition.pdf'), locked])
 
-    await page.goto('/')
+    await page.goto('/');await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
-    await page.locator('.sidebar').getByRole('button', { name: 'New matter' }).click()
+    await page.locator('.workspace-drawer').getByRole('button', { name: 'New matter' }).click()
     const create = page.getByRole('dialog', { name: 'Create matter' })
     await create.getByPlaceholder('Example: ABC Pvt Ltd v. XYZ').fill('PDF-09 Browser Synthetic')
     await create.getByRole('button', { name: 'Create matter' }).click()
-    await expect(page.locator('.application-matter').filter({hasText:'PDF-09 Browser Synthetic'})).toBeVisible()
+    await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'PDF-09 Browser Synthetic'})).toBeVisible()
 
     await page.locator('input[accept=".pdf,.jpg,.jpeg,.png"]').setInputFiles(locked)
+    await page.getByRole('button',{name:'Import 1 file',exact:true}).click()
     const prompt = page.getByRole('dialog', { name: 'Open protected PDF' })
     await expect(prompt).toBeVisible()
     await prompt.getByLabel('PDF password', { exact: true }).fill('wrong')
@@ -35,11 +37,14 @@ with pymupdf.open(sys.argv[1]) as pdf:
     await expect(prompt.getByRole('alert')).toContainText('Incorrect PDF password')
     await prompt.getByRole('button', { name: 'Cancel import' }).click()
     await expect(page.locator('.doc-item')).toHaveCount(0)
-    await expect(page.locator('input[accept=".pdf,.jpg,.jpeg,.png"]')).toHaveValue('')
+    await expect(page.getByLabel('Choose import files')).toHaveValue('')
 
-    await page.locator('input[accept=".pdf,.jpg,.jpeg,.png"]').setInputFiles(locked)
+    await page.getByRole('button',{name:'Retry remaining files',exact:true}).click()
     await prompt.getByLabel('PDF password', { exact: true }).fill('synthetic input')
     await prompt.getByRole('button', { name: 'Open and import' }).click()
+    await page.getByRole('button',{name:'Continue to document review',exact:true}).click()
+    await page.getByRole('button',{name:'Open editor',exact:true}).click()
+    await openDocumentBrowser(page)
     await expect(page.locator('.doc-item')).toHaveCount(1)
     await includeAllDocuments(page)
 

@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import { closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser } from './navigation'
 import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
@@ -24,14 +25,14 @@ for i in range(32):
  p.insert_textbox((45,365,550,460),'The enclosed records should be read with the agreement and\\nthe earlier notice. Please confirm the date of receipt before\\nthe bundle is finalized.',fontsize=16,fontname='tiro')
 sys.stdout.buffer.write(pdf.tobytes())`])
   const upload=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'Annexure B — Email Correspondence.pdf',mimeType:'application/pdf',buffer:pdf}}});expect(upload.ok()).toBeTruthy()
-  await page.setViewportSize({width:1024,height:768});await page.goto('/')
+  await page.setViewportSize({width:1024,height:768});await page.goto('/');await enterLatestMatter(page);if(await page.getByRole('button',{name:'Collapse sidebar',exact:true}).isVisible())await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click()
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({hasText:'Email Correspondence'}).click()
   await expect(page.locator('.pdf-paper')).toBeVisible()
   await page.locator('.page-counter input').fill('14');await page.locator('.page-counter input').press('Enter')
   await expect(page.locator('.pdf-text-layer')).toContainText('ANNEXURE B')
   await expect(page.locator('.docs-panel')).toBeHidden()
-  for(const [selector,y,height] of [['.application-bar',0,40],['.document-header',40,64],['.reader-tool-navigation',104,44],['.read-workspace>.reader-navigation',148,44]] as const){
+  for(const [selector,y,height] of [['.application-bar',0,32],['.document-header',116,64],['.reader-tool-navigation',180,44],['.read-workspace>.reader-navigation',224,44]] as const){
     await expect.poll(async()=>Math.round((await page.locator(selector).boundingBox())!.y)).toBe(y)
     expect(Math.round((await page.locator(selector).boundingBox())!.height)).toBe(height)
   }
@@ -55,7 +56,7 @@ sys.stdout.buffer.write(pdf.tobytes())`])
   for(const width of [1440,1024])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){
     await page.setViewportSize({width,height:width===1440?900:768})
     await page.evaluate(({theme,scale})=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme,scale})),{theme,scale})
-    await page.reload()
+    await page.reload();await enterLatestMatter(page);if(await page.getByRole('button',{name:'Collapse sidebar',exact:true}).isVisible())await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click()
     // Browsing is an explicit drawer. Close it if restoring the matter instead of its document tab.
     const close=page.getByRole('button',{name:'Close document browser'})
     if(await close.isVisible())await close.click()
@@ -67,7 +68,7 @@ sys.stdout.buffer.write(pdf.tobytes())`])
     if(scale===100)await page.screenshot({animations:'disabled',path:testInfo.outputPath(`reader-${width}-${theme}.png`)})
   }
   await page.setViewportSize({width:1440,height:900})
-  await page.evaluate(()=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme:'light',scale:100})));await page.reload()
+  await page.evaluate(()=>localStorage.setItem('courtbundle.appearance.v1',JSON.stringify({theme:'light',scale:100})));await page.reload();await enterLatestMatter(page);if(await page.getByRole('button',{name:'Collapse sidebar',exact:true}).isVisible())await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click()
   await page.getByRole('combobox',{name:'Document version'}).selectOption('original')
   const original=page.getByRole('dialog',{name:'Review imported original'})
   await expect(original.locator('.pdf-text-layer')).toContainText('ANNEXURE B')

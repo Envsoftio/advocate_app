@@ -35,8 +35,7 @@ export async function openReaderView(page:Page) {
 }
 export async function openWorkspaces(page:Page) {
   await closeWorkspaceNavigation(page)
-  const toggle=page.getByRole('button',{name:'Open workspaces',exact:true})
-  if(await toggle.getAttribute('aria-expanded')!=='true')await toggle.click()
+  await expect(page.locator('.open-workspace-tabs')).toBeVisible()
 }
 
 export async function closeWorkspaceNavigation(page:Page) {
@@ -103,4 +102,41 @@ export async function submitBundleBuild(page:Page){
 export async function openOutputTools(page:Page){
  const details=page.locator('.build-extra-tools')
  if(await details.getAttribute('open')===null)await details.locator('summary').click()
+}
+
+// FLOW 01 starts at Matters. Existing feature journeys explicitly enter their
+// latest synthetic fixture, then choose the reader. Sidebar state stays under user control.
+export async function enterLatestMatter(page:Page) {
+  await expect(page.locator('.matter-home')).toBeVisible()
+  await expect(page.locator('.preparation-engine')).toContainText('Engine connected')
+  const rows=page.locator('.matter-home-card')
+  if(!await rows.count())return
+  await rows.first().click()
+  await expect(page.locator('.matter-overview')).toBeVisible()
+  await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click()
+  await expect(page.locator('.documents-workspace')).toBeVisible()
+  await expect(page.locator('.preparation-workspace')).toBeVisible()
+  await expect(page.locator('.section-enter-active,.section-leave-active')).toHaveCount(0)
+  const editor=page.getByRole('button',{name:'Open editor',exact:true})
+  if(await editor.isVisible()){await editor.click();await expect(page.locator('.inspector-leave-active')).toHaveCount(0)}
+  await expect(page.locator('.section-enter-active,.section-leave-active')).toHaveCount(0)
+}
+export async function openNamedMatter(page:Page,name:string) {
+  await closeWorkspaceNavigation(page)
+  await page.locator('.workspace-home-tab').click()
+  await expect(page.locator('.matter-home')).toBeVisible()
+  await page.locator('.matter-home-card').filter({hasText:name}).click()
+  await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click()
+  await expect(page.locator('.documents-workspace')).toBeVisible()
+  await expect(page.locator('.preparation-workspace')).toBeVisible()
+  await expect(page.locator('.section-enter-active,.section-leave-active')).toHaveCount(0)
+  const editor=page.getByRole('button',{name:'Open editor',exact:true})
+  if(await editor.isVisible()){await editor.click();await expect(page.locator('.inspector-leave-active')).toHaveCount(0)}
+}
+
+export async function completeQueuedImport(page:Page) {
+  await page.getByRole('button',{name:/^Import \d+ files?$/}).click()
+  await page.getByRole('button',{name:'Continue to document review',exact:true}).click()
+  await expect(page.locator('.preparation-workspace')).toBeVisible()
+  await page.getByRole('button',{name:'Open editor',exact:true}).click()
 }

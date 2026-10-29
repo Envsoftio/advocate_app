@@ -1,3 +1,4 @@
+import { enterLatestMatter } from './navigation'
 import {test,expect} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
@@ -12,7 +13,7 @@ async function seed(request:any){
  const saved=await request.put(`${base}/matters/${matter.id}/bundle-settings`,{headers,data:{max_pages_per_volume:300,keep_groups_intact:true,output_marks:{...s.output_marks,cover_heading:'SYNTHETIC REVIEW FORUM',cover_title:'HEARING BUNDLE'},expected_snapshot:s.input_snapshot}});expect(saved.ok()).toBeTruthy()
  return matter
 }
-async function enter(page:any){await page.setViewportSize({width:1440,height:900});await page.goto('/');await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Index & bookmarks',exact:true}).click();await expect(page.locator('.bundle-structure')).toBeVisible();await expect(page.locator('.section-enter-active')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready)}
+async function enter(page:any){await page.setViewportSize({width:1440,height:900});await page.goto('/');await enterLatestMatter(page);await expect(page.locator('.pdf-paper')).toBeVisible();await page.locator('.matter-rail').getByRole('button',{name:'Index & bookmarks',exact:true}).click();await expect(page.locator('.bundle-structure')).toBeVisible();await expect(page.locator('.section-enter-active')).toHaveCount(0);await page.evaluate(()=>document.fonts.ready)}
 async function matrix(page:any,info:any,name:string){
  for(const size of [{width:1440,height:900},{width:1024,height:768}])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){
   await page.setViewportSize(size);await page.evaluate(({theme,scale})=>{document.documentElement.dataset.theme=theme;document.documentElement.dataset.effectiveTheme=theme;document.documentElement.style.setProperty('--ui-scale',String(scale/100));document.documentElement.style.zoom=scale+'%'},{theme,scale})
@@ -47,7 +48,7 @@ test('B02A new BU01/BU02 design, persisted overrides, real preview and cancel',a
  await dialog.getByLabel('Hearing review',{exact:false}).check();await dialog.getByRole('button',{name:'Use selected preset'}).click();await expect(dialog).toBeHidden()
  await expect(workspace.getByLabel('Date',{exact:true})).not.toBeChecked()
  let saved=await(await request.get(`${base}/matters/${matter.id}/bundle-settings`,{headers})).json();expect(saved.max_pages_per_volume).toBe(200);expect(saved.output_marks.index_date).toBe(false);expect(saved.output_marks.cover_title).toBe('HEARING BUNDLE')
- await page.reload();await page.locator('.matter-rail').getByRole('button',{name:'Index & bookmarks',exact:true}).click();await expect(page.locator('.bundle-structure')).toBeVisible();await workspace.getByRole('button',{name:'Cover & index',exact:true}).click();await expect(workspace.getByLabel('Date',{exact:true})).not.toBeChecked()
+ await page.reload();await enterLatestMatter(page);await page.locator('.matter-rail').getByRole('button',{name:'Index & bookmarks',exact:true}).click();await expect(page.locator('.bundle-structure')).toBeVisible();await workspace.getByRole('button',{name:'Cover & index',exact:true}).click();await expect(workspace.getByLabel('Date',{exact:true})).not.toBeChecked()
  await workspace.getByRole('button',{name:'Preset',exact:true}).click();await dialog.getByRole('button',{name:'Cancel',exact:true}).click();await expect(workspace.getByRole('button',{name:'Preset',exact:true})).toBeFocused()
 })
 test('B02A failed saves keep drafts, stale preview is ignored, navigation saves atomically',async({page,request})=>{
