@@ -77,6 +77,7 @@ import OutputChecksDialog from './components/OutputChecksDialog.vue';
 import VolumePlanning from "./components/VolumePlanning.vue";
 import OutputOptions from "./components/OutputOptions.vue";
 import BuildWorkspace from "./components/BuildWorkspace.vue";
+import VariantWorkspace from "./components/VariantWorkspace.vue";
 import BundleExportDialog from "./components/BundleExportDialog.vue";
 import ExportPdfReview from "./components/ExportPdfReview.vue";
 import MatterForm from "./components/MatterForm.vue";
@@ -127,6 +128,7 @@ type View =
   | "overview"
   | "documents"
   | "index"
+  | "variants"
   | "build"
   | "validation"
   | "storage"
@@ -169,6 +171,7 @@ const membershipCollapsed = ref(false);
 const membershipPanel = ref<InstanceType<typeof BundleMembership>|null>(null);
 let membershipInvoker: HTMLElement|null = null;
 async function openMembership() {
+  if(variantPanel.value?.openMembership())return;
   if(buildWorkspace.value?.openSupplementMembership())return;
   if (!(await guardArtifactTransition('Bundle membership'))) return;
   membershipInvoker = document.activeElement as HTMLElement;
@@ -194,6 +197,9 @@ async function openMembershipDocument(id:string) {
 const includedDocuments = computed(()=>docs.value.filter(d=>d.bundle_included));
 const inclusionSummary = computed(()=>`${includedDocuments.value.length} included / ${includedDocuments.value.reduce((sum,d)=>sum+d.page_count,0)} source pages · ${docs.value.length-includedDocuments.value.length} reference-only`);
 const supplementDirty = ref(false);
+const variantDirty = ref(false);
+const variantContext = ref('');
+const variantPanel = ref<InstanceType<typeof VariantWorkspace>|null>(null);
 const supplementContext = ref('');
 const navigationSaving = ref(false);
 const navigationError = ref("");
@@ -236,6 +242,7 @@ async function saveBeforeNavigation() {
   navigationError.value = '';
   try {
     if (supplementDirty.value && !(await buildWorkspace.value?.saveDraft())) throw new Error('Supplemental plan could not be saved. Review its selected pages.');
+    if (variantDirty.value && !(await variantPanel.value?.saveDraft())) throw new Error('Audience variant could not be saved. Review its membership or settings.');
     if (tableDirty.value && !(await documentTablePanel.value?.save())) throw new Error('Review changes could not be saved. Check the selected fields and source context.');
     if (membershipDirty.value && !(await membershipPanel.value?.apply(false))) throw new Error('Membership could not be applied.');
     if (documentDirty.value && !(await saveDocument(true))) throw new Error('Document details could not be saved.');
@@ -251,10 +258,11 @@ async function saveBeforeNavigation() {
   finally { navigationSaving.value = false; }
 }
 async function guardArtifactTransition(destination: string) {
-  if (!supplementDirty.value && !tableDirty.value && !documentDirty.value && !settingsDirty.value && !formattingDirty.value && !pdfViewer.value?.hasPendingDraft()) return true;
+  if (!supplementDirty.value && !variantDirty.value && !tableDirty.value && !documentDirty.value && !settingsDirty.value && !formattingDirty.value && !pdfViewer.value?.hasPendingDraft()) return true;
   if (!(await askTabDiscard(`Save changes before opening ${destination}?`, true))) return false;
   buildWorkspace.value?.discard();
   supplementDirty.value = false;
+  variantPanel.value?.discard(); variantDirty.value = false;
   pdfViewer.value?.discardPendingDraft();
   outputPresetsPanel.value?.discard();
   formattingDirty.value = false;
@@ -540,7 +548,7 @@ const buildWorkspace = ref<InstanceType<typeof BuildWorkspace> | null>(null);
 const outputChecksArtifact = ref<ExportManifest|null>(null);
 const preflightFilter = ref('all');
 const exportDialogArtifact = ref<ExportManifest | null>(null);
-const buildShell = computed(() => !!currentMatterId.value && ['index','build','storage','validation'].includes(activeView.value));
+const buildShell = computed(() => !!currentMatterId.value && ['index','variants','build','storage','validation'].includes(activeView.value));
 const expandedBuildShell = computed(() => buildShell.value && !reviewingPdf.value);
 
 const retryOcrLanguage = ref<"eng" | "hin" | "eng+hin">("eng");
@@ -989,7 +997,7 @@ function tabHasDraft(tab: WorkspaceTab) {
 }
 let tabActivationSequence = 0;
 async function activateTab(tab: WorkspaceTab) {
-  if ((tableDirty.value || supplementDirty.value) && !(await guardArtifactTransition("the selected tab"))) return;
+  if ((tableDirty.value || supplementDirty.value || variantDirty.value) && !(await guardArtifactTransition("the selected tab"))) return;
   if (!(await leaveMembership())) return;
   if (
     activeTabId.value === tab.id &&
@@ -1032,7 +1040,7 @@ async function activateTab(tab: WorkspaceTab) {
   restoreTabDraft(tab);
 }
 async function openMatterTab(matterId: string, view: View = "overview") {
-  if ((tableDirty.value || supplementDirty.value) && !(await guardArtifactTransition(view))) return;
+  if ((tableDirty.value || supplementDirty.value || variantDirty.value) && !(await guardArtifactTransition(view))) return;
   if (view!=="documents") {documentTableOpen.value=false;tableDirty.value=false;}
   if (!(await leaveMembership())) return;
   const id = `matter:${matterId}`;
@@ -1103,7 +1111,7 @@ async function openDocumentTab(documentId: string, page?: number, revision?: num
     };
 }
 async function closeWorkspaceTab(tab: WorkspaceTab) {
-  if ((tableDirty.value || supplementDirty.value) && !(await guardArtifactTransition("closing this tab"))) return;
+  if ((tableDirty.value || supplementDirty.value || variantDirty.value) && !(await guardArtifactTransition("closing this tab"))) return;
   if (!(await leaveMembership())) return;
   const closing = tab.documentId
     ? [tab]
@@ -1229,6 +1237,7 @@ function onResize() {
 function beforeUnload(event: BeforeUnloadEvent) {
   if (
     !membershipDirty.value &&
+    !variantDirty.value &&
     !tableDirty.value &&
     !documentDirty.value &&
     !settingsDirty.value &&
@@ -2291,6 +2300,20 @@ async function startSupplementBuild(planId:string):Promise<boolean>{
     watchJob(job);return true;
   }catch(err){issue(err);return false}finally{buildSubmitting.value=false}
 }
+async function startVariantBuild(planId:string):Promise<boolean>{
+  if(!currentMatterId.value||isJobActive.value||buildSubmitting.value)return false;
+  buildSubmitting.value=true;
+  try{
+    const catalog=await api<{plans:Array<{id:string;included_ids:string[]}>}>(`/matters/${currentMatterId.value}/variants`);
+    const plan=catalog.plans.find(item=>item.id===planId);
+    if(!plan)throw new Error('The selected audience variant is unavailable.');
+    const included=new Set(plan.included_ids);
+    const signature=confirmSignatureTransformation(docs.value.filter(doc=>included.has(doc.id)),'Audience variant generation');
+    if(!signature.proceed)return false;
+    const job=await api<Job>(`/matters/${currentMatterId.value}/variants/${planId}/build`,'POST',{acknowledge_signature_risk:signature.acknowledged});
+    watchJob(job);return true;
+  }catch(err){issue(err);return false}finally{buildSubmitting.value=false}
+}
 function watchJob(job: Job) {
   activeJob.value = job;
   cancelPending.value = false;
@@ -2319,6 +2342,8 @@ function watchJob(job: Job) {
                 ? "PDF compression finished. Review the size and quality."
                 : next.kind === "supplement-build"
                   ? "Supplemental artifact generated successfully."
+                  : next.kind === "variant-build"
+                    ? "Audience variant artifact generated successfully."
                   : "Filing bundle generated successfully.",
             "success",
           );
@@ -2345,10 +2370,18 @@ async function cancelJob() {
 }
 async function retryInterrupted(job: Job) {
   try {
-    const relevant =
+    let relevant =
       job.kind === "ocr"
         ? docs.value.filter((document) => document.id === job.target_id)
-        : job.kind === "supplement-build" ? docs.value : includedDocuments.value;
+        : job.kind === "supplement-build" ? docs.value
+        : job.kind === "variant-build" ? docs.value : includedDocuments.value;
+    if(job.kind === 'variant-build' && job.target_id && currentMatterId.value){
+      const catalog=await api<{plans:Array<{id:string;included_ids:string[]}>}>(`/matters/${currentMatterId.value}/variants`);
+      const plan=catalog.plans.find(item=>item.id===job.target_id);
+      if(!plan)throw new Error('Audience variant for this interrupted job is unavailable.');
+      const included=new Set(plan.included_ids);
+      relevant=docs.value.filter(doc=>included.has(doc.id));
+    }
     const signature = confirmSignatureTransformation(
       relevant,
       job.kind === "ocr" ? "Retrying OCR" : "Retrying bundle generation",
@@ -2811,7 +2844,7 @@ watch(sidebarCollapsed, (collapsed) => {
       <template v-if="currentMatter">
         <button aria-label="Overview" title="Overview" :aria-current="!membershipOpen && activeView==='overview'?'page':undefined" @click="showView('overview')"><LayoutGrid :size="18"/><span v-if="membershipOpen || expandedBuildShell">Overview</span></button>
         <button aria-label="Documents" title="Documents" :aria-current="!membershipOpen && activeView==='documents'?'page':undefined" @click="showPreparation"><Files v-if="membershipOpen || expandedBuildShell" :size="18"/><FileStack v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Documents</span></button>
-        <button aria-label="Index & bookmarks" title="Index & bookmarks" :aria-current="membershipOpen || activeView==='index'?'page':undefined" @click="showView('index')"><ListTree v-if="membershipOpen || expandedBuildShell" :size="18"/><BookMarked v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Index & Bookmarks</span></button>
+        <button aria-label="Index & bookmarks" title="Index & bookmarks" :aria-current="membershipOpen || activeView==='index'||activeView==='variants'?'page':undefined" @click="showView('index')"><ListTree v-if="membershipOpen || expandedBuildShell" :size="18"/><BookMarked v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Index & Bookmarks</span></button>
         <button aria-label="Preflight checks" title="Preflight checks" :aria-current="!membershipOpen && activeView==='validation'?'page':undefined" @click="showView('validation')"><ListChecks v-if="membershipOpen || expandedBuildShell" :size="18"/><FileCheck2 v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Preflight</span></button>
         <button aria-label="Build bundle" title="Build bundle" :aria-current="!membershipOpen && activeView==='build'?'page':undefined" @click="showView('build')"><Box v-if="membershipOpen || expandedBuildShell" :size="18"/><Layers3 v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Build bundle</span></button>
         <button aria-label="Storage" title="Storage" :aria-current="!membershipOpen && activeView==='storage'?'page':undefined" @click="showView('storage')"><HardDrive v-if="membershipOpen || expandedBuildShell" :size="18"/><Archive v-else :size="18"/><span v-if="membershipOpen || expandedBuildShell">Storage</span></button>
@@ -3074,7 +3107,7 @@ watch(sidebarCollapsed, (collapsed) => {
 
       <div v-if="preparationVisible || documentTableOpen || membershipOpen || buildShell" class="preparation-utility">
         <button class="preparation-search-trigger" @click="openPreparationSearch"><Search :size="16"/> Search documents and page text <kbd>Ctrl K</kbd></button>
-        <span class="preparation-save-state"><CircleAlert v-if="tableDirty || documentDirty || settingsDirty || formattingDirty || membershipDirty" :size="14"/><CheckCircle2 v-else-if="membershipOpen" class="membership-saved-icon" :size="14"/>{{membershipDirty ? 'Unapplied changes' : (tableDirty || documentDirty || settingsDirty || formattingDirty) ? 'Unsaved changes' : 'Saved locally'}}</span>
+        <span class="preparation-save-state"><CircleAlert v-if="tableDirty || documentDirty || settingsDirty || formattingDirty || membershipDirty || variantDirty" :size="14"/><CheckCircle2 v-else-if="membershipOpen" class="membership-saved-icon" :size="14"/>{{membershipDirty ? 'Unapplied changes' : (tableDirty || documentDirty || settingsDirty || formattingDirty || variantDirty) ? 'Unsaved changes' : 'Saved locally'}}</span>
         <button class="icon-btn small" aria-label="Undo last matter change" :disabled="membershipOpen || engineBlocked || busy || !history.can_undo" :title="undoDescription" @click="traverseHistory('undo')"><Undo2 :size="16"/></button>
         <button class="icon-btn small" aria-label="Redo last matter change" :disabled="membershipOpen || engineBlocked || busy || !history.can_redo" :title="redoDescription" @click="traverseHistory('redo')"><Redo2 :size="16"/></button>
         <span class="preparation-engine"><CheckCircle2 :size="14"/>{{engineBlocked?'Engine disconnected':'Engine connected'}}</span>
@@ -3113,6 +3146,7 @@ watch(sidebarCollapsed, (collapsed) => {
 
       <Transition
         :name="inTauri() ? undefined : 'view'"
+        :css="!inTauri()"
         :mode="inTauri() ? undefined : 'out-in'"
         @after-enter="fitDocumentsWorkspace"
       >
@@ -4059,11 +4093,13 @@ watch(sidebarCollapsed, (collapsed) => {
               </Transition>
             </div>
 
+            <VariantWorkspace v-else-if="activeView === 'variants'" :key="currentMatterId!" ref="variantPanel" :matter-id="currentMatterId!" :artifacts="exportsList" :job="activeJob" :blocked="engineBlocked || busy || isJobActive" :refresh-key="previewRefreshKey" @primary="showView('index')" @build="startVariantBuild" @review="reviewGeneratedPdf" @export="exportDialogArtifact=$event" @checks="outputChecksArtifact=$event" @cancel-job="cancelJob" @retry="retryInterrupted" @dirty-changed="variantDirty=$event" @context="variantContext=$event" />
+
             <BundleStructure v-else-if="activeView === 'index'" :key="currentMatterId!" ref="outputPresetsPanel"
               :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :initial-mode="structureMode" :build-origin="!!buildStructureOrigin" @return-build="returnToBuildSettings" :bookmark-preset="bookmarkPreset"
               :disabled="engineBlocked || busy || isJobActive || documentDirty || settingsDirty"
               @dirty-changed="formattingDirty=$event" @modified="structureModified" @membership="openMembership"
-              @build="showView('build')" @policy="openStructurePolicy">
+              @build="showView('build')" @policy="openStructurePolicy" @variants="showView('variants')">
               <template #order>              <section
                 v-if="docs.length"
                 class="panel index-order-panel"
@@ -4453,7 +4489,7 @@ watch(sidebarCollapsed, (collapsed) => {
         </main>
       </Transition>
     </div>
-    <footer class="application-status"><button v-if="currentMatter && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="supplementContext||inclusionSummary">{{supplementContext?'Supplement membership':'Bundle membership'}}</button><span v-if="supplementContext">{{supplementContext}}</span><span v-if="membershipOpen || activeView==='index'" class="membership-status-step">03 / 06 &nbsp; Prepare index</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="currentMatter" class="text-tool" @click="membershipOpen ? leaveMembership() : showPreparation()">{{membershipOpen ? 'Return to caller' : 'Back to preparation'}}</button></footer>
+    <footer class="application-status"><button v-if="currentMatter && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="variantContext||supplementContext||inclusionSummary">{{variantContext?'Variant membership':supplementContext?'Supplement membership':'Bundle membership'}}</button><span v-if="variantContext">{{variantContext}}</span><span v-if="supplementContext">{{supplementContext}}</span><span v-if="membershipOpen || activeView==='index' || activeView==='variants'" class="membership-status-step">03 / 06 &nbsp; Prepare index</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="currentMatter" class="text-tool" @click="membershipOpen ? leaveMembership() : showPreparation()">{{membershipOpen ? 'Return to caller' : 'Back to preparation'}}</button></footer>
     <dialog
       v-if="selectedDoc && pageToolsOpen"
       ref="pageToolsDialog"

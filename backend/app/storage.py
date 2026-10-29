@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 20:
+            if version > 21:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -342,6 +342,15 @@ class Store:
                 matter_id TEXT PRIMARY KEY REFERENCES matters(id) ON DELETE CASCADE,
                 revision INTEGER NOT NULL DEFAULT 1
             )''')
+            if version < 21:
+                con.executescript('''
+                    CREATE TABLE IF NOT EXISTS audience_variants (
+                        id TEXT PRIMARY KEY, matter_id TEXT NOT NULL REFERENCES matters(id) ON DELETE CASCADE,
+                        payload_json TEXT NOT NULL, updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_audience_variants_matter ON audience_variants(matter_id,updated_at);
+                    PRAGMA user_version=21;
+                ''')
 
     def list_redactions(self, doc_id: str, active_only: bool = True) -> list[dict]:
         with self.connect() as con:
@@ -1801,7 +1810,13 @@ class Store:
             try:
                 info = json.loads(read_bytes(manifest))
                 recorded_digest = info.get('build_input_digest')
-                if info.get('artifact_kind') == 'supplement':
+                if info.get('artifact_kind') == 'variant':
+                    from . import variants
+                    plan = variants.get_plan(self, matter_id, info.get('variant_plan_id'))
+                    info['stale'] = bool(not plan or not variants.is_current(self, matter_id, plan)[0] or
+                        plan['version'] != info.get('variant_plan_version') or
+                        variants.plan_contract(plan) != recorded_digest)
+                elif info.get('artifact_kind') == 'supplement':
                     from . import supplements
                     plan = supplements.get_plan(self, matter_id, info.get('supplement_plan_id'))
                     ready, _reason = supplements.build_ready(self, matter_id, plan) if plan else (False, '')

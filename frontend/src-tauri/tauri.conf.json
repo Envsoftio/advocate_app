@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      {"label":"main", "title":"MatterDraft Studio — Filing Preparation", "width":1440, "height":900, "minWidth":900, "minHeight":640}
+      {"label":"main", "title":"MatterDraft Studio — Filing Preparation", "width":1440, "height":900, "minWidth":900, "minHeight":640, "backgroundThrottling":"disabled"}
     ],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:*; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:;"

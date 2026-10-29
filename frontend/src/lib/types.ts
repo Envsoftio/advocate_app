@@ -222,7 +222,10 @@ export interface ExportManifest {
   pages: number
   volumes: number
   stale?: boolean
-  artifact_kind?: 'primary' | 'supplement'
+  artifact_kind?: 'primary' | 'supplement' | 'variant'
+  variant_plan_id?: string | null
+  variant_plan_version?: number | null
+  variant_name?: string | null
   supplement_plan_id?: string | null
   supplement_plan_version?: number | null
   baseline_build_id?: string | null
@@ -235,7 +238,7 @@ export interface ExportManifest {
 export interface Job {
   id: string
   matter_id: string
-  kind: 'build' | 'supplement-build' | 'ocr' | 'compress'
+  kind: 'build' | 'supplement-build' | 'variant-build' | 'ocr' | 'compress'
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
   target_id?: string | null
   retry_job_id?: string | null

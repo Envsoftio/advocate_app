@@ -1,0 +1,38 @@
+.variant-workspace{box-sizing:border-box;min-height:100%;padding:24px;background:var(--cb-app);color:var(--cb-text);font:440 13px/1.35 Inter,sans-serif;min-width:0}
+.variant-workspace *{box-sizing:border-box}
+.variant-heading{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;min-height:98px}
+.variant-heading h1{font:680 28px/36px Inter,sans-serif;margin:0 0 4px}.variant-heading h1:focus{outline:none}
+.variant-heading p{margin:0;color:var(--cb-text-onCanvas);line-height:22px}.variant-heading>button{min-width:164px;margin-top:-4px}
+.variant-grid{display:grid;grid-template-columns:minmax(0,740fr) minmax(320px,448fr);gap:20px;max-width:1208px}
+.variant-card,.variant-task-card{background:var(--cb-surface);border:1px solid var(--cb-border);border-radius:12px;min-width:0}
+.variant-card{min-height:588px;padding:16px 18px;display:flex;flex-direction:column}
+.variant-card h2,.variant-task-card h2{font:650 16px/26px Inter,sans-serif;margin:0}
+.variant-table-scroll{overflow:auto;margin-top:24px;min-height:164px;max-height:174px}
+.variant-workspace table{border-collapse:collapse;width:100%;table-layout:fixed;min-width:650px}
+.variant-workspace th,.variant-workspace td{height:64px;padding:0 12px;text-align:left;border-bottom:1px solid var(--cb-border);overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.variant-workspace th{height:36px;background:var(--cb-surface2);color:var(--cb-text-onCanvas);font-size:12px;font-weight:600;white-space:nowrap}
+.variant-workspace td{color:var(--cb-muted)}.variant-workspace td:first-child{color:var(--cb-text)}
+.variant-workspace tbody tr.selected td:first-child{box-shadow:inset 3px 0 var(--cb-accent)}
+.variant-workspace tbody tr.selected td{background:var(--cb-surface)}
+.variant-workspace td button:not(.text-tool){border:0;padding:0;background:transparent;color:var(--cb-text);font:600 13px/20px Inter,sans-serif;text-align:left;cursor:pointer}
+.variant-workspace td button:focus-visible,.variant-workspace button:focus-visible,.variant-workspace input:focus-visible,.variant-workspace select:focus-visible{outline:2px solid var(--cb-focus);outline-offset:2px}
+.variant-selected-detail{border-top:1px solid var(--cb-border);padding:22px 2px 0;min-height:323px;display:flex;flex-direction:column}
+.variant-selected-detail h3{font:650 18px/28px Inter,sans-serif;margin:0 0 26px}.variant-selected-detail p{margin:0;line-height:18px;color:var(--cb-text-onCanvas)}
+.variant-selected-detail .variant-baseline{font-size:12px;color:var(--cb-muted);margin-top:12px;overflow-wrap:anywhere}
+.variant-actions{display:flex;gap:12px;margin-top:auto;margin-bottom:30px;flex-wrap:wrap}.variant-actions button{min-width:208px}
+.variant-selected-detail>.text-tool{align-self:flex-start;margin:-22px 0 20px 0}
+.variant-selected-detail .variant-footnote{font-size:12px;line-height:19px;color:var(--cb-muted);margin-top:0}
+.variant-create label{display:block;color:var(--cb-muted);font-size:12px;font-weight:600;margin-top:34px}
+.variant-create label+label{margin-top:16px}.variant-create input:not([type=checkbox]),.variant-create select,.variant-settings-fields input:not([type=checkbox]),.variant-settings-fields select{display:block;width:100%;height:36px;margin-top:9px;padding:6px 12px;background:var(--cb-surface);color:var(--cb-text);border:1px solid var(--cb-control-border);border-radius:7px;font:500 13px Inter,sans-serif}
+.variant-create .variant-checkbox,.variant-settings-fields .variant-checkbox{display:flex;align-items:center;gap:10px;margin-top:24px;color:var(--cb-text);font-size:13px;font-weight:500}
+.variant-checkbox input{width:16px;height:16px;accent-color:var(--cb-accent);margin:0}
+.variant-notice{margin-top:38px;min-height:122px;padding:12px;border-radius:8px;background:var(--cb-infoBg)}
+.variant-notice strong{display:flex;align-items:center;gap:10px;color:var(--cb-link);font-weight:600}.variant-notice p{line-height:18px;margin:12px 0 0}
+.variant-create-button{width:100%;margin-top:32px;justify-content:flex-start}.variant-create-note{font-size:12px;line-height:18px;color:var(--cb-text-onCanvas);margin:25px 0 0}
+.variant-error{padding:12px 14px;margin:0 0 16px;border-radius:8px;background:var(--cb-dangerBg);color:var(--cb-status-danger-text)}
+.variant-task-card{max-width:1208px;padding:20px;min-height:500px}.variant-task-card>p{line-height:22px;color:var(--cb-text-onCanvas)}
+.variant-member-scroll{overflow:auto;max-height:430px;margin:22px 0}.variant-member-scroll table{min-width:690px}.variant-member-scroll th,.variant-member-scroll td{height:46px}.variant-task-actions{display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin-top:30px}
+.variant-settings-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 24px;max-width:760px;margin:28px 0}.variant-settings-fields label{font-size:12px;font-weight:600;color:var(--cb-muted)}.variant-settings-fields .variant-checkbox{margin:24px 0 0}
+.variant-difference-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;min-width:0}.variant-difference-grid>div{border:1px solid var(--cb-border);border-radius:8px;min-width:0;max-height:370px;overflow:auto;padding:16px}.variant-difference-grid h3{margin:0;font-size:14px}.variant-difference-grid ul{list-style:none;padding:0;margin:14px 0}.variant-difference-grid li{border-top:1px solid var(--cb-border);padding:9px 0;line-height:19px}.variant-difference-grid strong{text-transform:capitalize;margin-right:6px}.variant-job{padding:12px;background:var(--cb-infoBg);border-radius:8px;display:flex;gap:8px;align-items:center}
+@media(max-width:1100px){.variant-workspace{padding:20px}.variant-grid{grid-template-columns:minmax(0,1fr) minmax(270px,34%);gap:16px}.variant-card{padding:16px}.variant-actions button{min-width:0}.variant-create-note{margin-top:20px}}
+@media(max-width:820px){.variant-workspace{padding:16px}.variant-heading{min-height:104px}.variant-heading h1{font-size:23px;line-height:30px}.variant-grid,.variant-difference-grid,.variant-settings-fields{grid-template-columns:1fr}.variant-card{min-height:0}.variant-create{margin-top:0}.variant-notice{margin-top:24px}.variant-actions{margin-top:28px}.variant-task-actions button{flex:1 1 auto}}

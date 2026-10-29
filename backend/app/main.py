@@ -33,8 +33,8 @@ from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reo
                       validate_overlay_image, insert_working_image)
 from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, FilingReview, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
 from .storage import Store, new_id, utcnow
-from . import metadata_review, supplements
-from .schemas import SupplementalPlanRequest
+from . import metadata_review, supplements, variants
+from .schemas import SupplementalPlanRequest, AudienceVariantRequest
 from .engine import supplemental_preview, supplemental_policy_preview
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes, size as file_size
 from .schemas import BundleSettingsUpdate, FrontMatterPreview, NumberingPreview, PresetApplication, BundleMembershipUpdate, BatchPageOperation, CompressionRequest, ReaderPosition, READER_KEY_PATTERN
@@ -1892,6 +1892,34 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         return jobs.submit(matter_id, 'supplement-build', task,
                            target_id=plan_id, job_id=job_id)
 
+    def submit_variant_build(matter_id: str, plan_id: str,
+                             job_id: str | None = None,
+                             acknowledge_signature_risk: bool = False):
+        with store.matter_lock(matter_id):
+            plan = variants.get_plan(store, matter_id, plan_id)
+            if not plan:
+                raise HTTPException(404, 'Audience variant not found')
+            current, reason = variants.is_current(store, matter_id, plan)
+            if not current:
+                raise HTTPException(409, reason)
+            review = variants.review(store, matter_id, plan)
+            if not plan['included_ids'] or any(item['severity'] == 'error' for item in review['checks']):
+                raise HTTPException(409, 'Variant Preflight has blocking findings. Review this exact plan before building.')
+            selected = variants.ordered_documents(store, matter_id, plan['included_ids'])
+            require_signature_acknowledgement(selected, acknowledge_signature_risk,
+                                              'building transformed audience-variant PDFs')
+            version, digest = plan['version'], variants.plan_contract(plan)
+        def task(job_id, progress, cancelled):
+            with store.matter_lock(matter_id):
+                latest = variants.get_plan(store, matter_id, plan_id)
+                if not latest or latest['version'] != version or variants.plan_contract(latest) != digest:
+                    raise ProcessingError('Variant changed while queued; review and submit a new build.')
+                return build_bundle(store, matter_id, job_id, progress, cancelled,
+                                    signature_acknowledged=acknowledge_signature_risk,
+                                    variant_plan=latest)
+        return jobs.submit(matter_id, 'variant-build', task,
+                           target_id=plan_id, job_id=job_id)
+
     @app.post('/matters/{matter_id}/build', status_code=202)
     def start_build(matter_id: str, payload: SignatureRiskAcknowledgement | None = None,
                     _: None = Depends(auth)):
@@ -1937,7 +1965,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             doc = doc_or_404(prior['target_id'])
             if doc['matter_id'] != prior['matter_id']:
                 raise HTTPException(status_code=409, detail='OCR document no longer belongs to this matter')
-        elif prior['kind'] not in ('build', 'supplement-build'):
+        elif prior['kind'] not in ('build', 'supplement-build', 'variant-build'):
             raise HTTPException(status_code=409, detail='This job type cannot be retried')
         acknowledged = payload.acknowledge_signature_risk if payload else False
         if prior['kind'] == 'ocr':
@@ -1950,6 +1978,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=409, detail='Only an interrupted job may be retried once')
         return (submit_ocr(doc, new_job_id, acknowledged,
                            payload.language if payload else 'eng') if prior['kind'] == 'ocr'
+                else submit_variant_build(prior['matter_id'], prior['target_id'], new_job_id, acknowledged)
+                if prior['kind'] == 'variant-build'
                 else submit_supplement_build(prior['matter_id'], prior['target_id'], new_job_id, acknowledged)
                 if prior['kind'] == 'supplement-build'
                 else submit_build(prior['matter_id'], new_job_id, acknowledged))
@@ -1958,6 +1988,57 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
     def exports(matter_id: str, _: None = Depends(auth)):
         matter_or_404(matter_id)
         return store.list_exports(matter_id)
+
+    @app.get('/matters/{matter_id}/variants')
+    def variant_catalog(matter_id: str, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            return dict(plans=variants.plans(store, matter_id),
+                        documents=store.get_documents(matter_id),
+                        source_snapshot=variants.source_snapshot(store, matter_id),
+                        primary_baseline=variants.primary_baseline(store, matter_id),
+                        primary_settings=variants.settings(store, matter_id),
+                        blank_settings={**variants.settings(store, matter_id),
+                                        'output_marks':store.default_output_marks()})
+
+    @app.post('/matters/{matter_id}/variants')
+    def create_variant(matter_id: str, payload: AudienceVariantRequest, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return variants.save(store, matter_id, payload)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @app.put('/matters/{matter_id}/variants/{plan_id}')
+    def update_variant(matter_id: str, plan_id: str, payload: AudienceVariantRequest,
+                       _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return variants.save(store, matter_id, payload, plan_id)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @app.get('/matters/{matter_id}/variants/{plan_id}/review')
+    def review_variant(matter_id: str, plan_id: str, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            plan = variants.get_plan(store, matter_id, plan_id)
+            if not plan:
+                raise HTTPException(404, 'Audience variant not found')
+            try:
+                return variants.review(store, matter_id, plan)
+            except (ValueError, OSError, ProcessingError) as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/variants/{plan_id}/build', status_code=202)
+    def start_variant_build(matter_id: str, plan_id: str,
+                            payload: SignatureRiskAcknowledgement | None = None,
+                            _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        return submit_variant_build(matter_id, plan_id,
+            acknowledge_signature_risk=payload.acknowledge_signature_risk if payload else False)
 
     @app.get('/matters/{matter_id}/supplements')
     def supplemental_catalog(matter_id: str, _: None = Depends(auth)):

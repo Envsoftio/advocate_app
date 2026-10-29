@@ -554,6 +554,32 @@ class BundleSettingsUpdate(BundlePreviewRequest):
     expected_snapshot: str = Field(min_length=64, max_length=64)
 
 
+class AudienceVariantRequest(BundlePreviewRequest):
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(min_length=1, max_length=80)
+    baseline_kind: Literal['primary', 'variant']
+    baseline_id: str = Field(min_length=1, max_length=80)
+    included_ids: list[str] = Field(max_length=1000)
+    output_marks: OutputMarks
+    expected_snapshot: str = Field(min_length=64, max_length=64)
+    expected_version: int | None = Field(default=None, ge=1)
+
+    @field_validator('name')
+    @classmethod
+    def variant_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError('Enter a variant name')
+        return value
+
+    @field_validator('included_ids')
+    @classmethod
+    def unique_variant_documents(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError('Select each document once')
+        return value
+
+
 class FrontMatterPreview(BundlePreviewRequest):
     output_marks: OutputMarks
     volume: int = Field(default=1, ge=1)

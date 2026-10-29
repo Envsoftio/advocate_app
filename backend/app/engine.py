@@ -83,10 +83,12 @@ def original_integrity_issues(store: Store, docs: list[dict]) -> list[dict]:
     return issues
 
 
-def preflight(store: Store, matter_id: str, profile: dict) -> list[dict]:
-    docs = store.get_bundle_documents(matter_id)
+def preflight(store: Store, matter_id: str, profile: dict, *,
+              documents_override: list[dict] | None = None,
+              settings_override: dict | None = None) -> list[dict]:
+    docs = documents_override if documents_override is not None else store.get_bundle_documents(matter_id)
     matter = store.get_matter(matter_id)
-    output_settings = store.get_output_marks(matter_id)
+    output_settings = settings_override if settings_override is not None else store.get_output_marks(matter_id)
     filing_review = store.get_filing_review(matter_id)
     issues = []
     if not docs:
@@ -1478,13 +1480,14 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
 
 def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancelled,
                  signature_acknowledged: bool = False,
-                 supplement_plan: dict | None = None) -> dict:
+                 supplement_plan: dict | None = None,
+                 variant_plan: dict | None = None) -> dict:
     matter = store.get_matter(matter_id)
     if not matter:
         raise ProcessingError('Matter not found')
     profiles = load_profiles()
     profile = profiles[matter['court_profile']]
-    artifact_kind = 'supplement' if supplement_plan else 'primary'
+    artifact_kind = 'variant' if variant_plan else 'supplement' if supplement_plan else 'primary'
     policy_preview = None
     resolved_selection = []
     if supplement_plan:
@@ -1535,6 +1538,31 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                             'source_page_count': d['page_count'],
                             'working_sha256': store.sha256(store.working_path(d))}
                            for d in source_documents]
+    elif variant_plan:
+        from . import variants
+        current, reason = variants.is_current(store, matter_id, variant_plan)
+        if not current:
+            raise ProcessingError(reason)
+        documents = variants.ordered_documents(store, matter_id, variant_plan['included_ids'])
+        source_documents = documents
+        output_marks = variant_plan['settings']['output_marks']
+        output_preset = None
+        build_input_digest = variants.plan_contract(variant_plan)
+        problems = preflight(store, matter_id, profile, documents_override=documents,
+                             settings_override=output_marks)
+        membership_snapshot = dict(bundle_id=variant_plan['id'], revision=variant_plan['version'],
+            selection_mode='whole_documents', documents=variant_plan['sources'])
+        build_settings = {**variant_plan['settings'], 'court_profile':matter['court_profile'],
+                          'variant_plan_id':variant_plan['id'],
+                          'variant_plan_version':variant_plan['version'],
+                          'baseline':variant_plan['baseline']}
+        included_ids = set(variant_plan['included_ids'])
+        bookmarks = [b for b in store.list_manual_bookmarks(matter_id) if b['document_id'] in included_ids]
+        reviewed_links = [link for link in store.list_reviewed_links(matter_id) if link['source_document_id'] in included_ids]
+        page_annotations = [a for a in store.list_page_annotations(matter_id) if a['document_id'] in included_ids]
+        input_revisions = [dict(document_id=item['document_id'], revision=item['working_revision'],
+                                page_ids=item['page_ids'], source_page_count=item['source_page_count'],
+                                working_sha256=item['working_sha256']) for item in variant_plan['sources']]
     else:
         documents = store.get_bundle_documents(matter_id)
         source_documents = documents
@@ -1608,10 +1636,9 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                          'visible_signature_status': d['visible_signature_status']}
                         for d in source_documents]
     docs = [dict(d, _working_path=str(store.working_path(d))) for d in documents]
-    max_pages = (supplement_plan['settings']['max_pages_per_volume'] if supplement_plan
-                 else matter['max_pages_per_volume'])
-    keep_groups = (supplement_plan['settings']['keep_groups_intact'] if supplement_plan
-                   else matter['keep_groups_intact'])
+    selected_settings = supplement_plan['settings'] if supplement_plan else variant_plan['settings'] if variant_plan else None
+    max_pages = selected_settings['max_pages_per_volume'] if selected_settings else matter['max_pages_per_volume']
+    keep_groups = selected_settings['keep_groups_intact'] if selected_settings else matter['keep_groups_intact']
     plans = volume_plan(docs, max_pages, keep_groups,
                         output_marks)
     bates_labels = bates_page_labels(plans, output_marks)
@@ -1787,6 +1814,10 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         problems.append(dict(severity='info', code='NOT_A_FILING_APPROVAL', document_id=None,
                              message='Technical checks passed or reported. Filing acceptance, legal validity and registry objections need human review.'))
         report = {'matter_id': matter_id, 'export_id': export_id, 'artifact_kind': artifact_kind,
+                  'variant_plan_id': variant_plan['id'] if variant_plan else None,
+                  'variant_plan_version': variant_plan['version'] if variant_plan else None,
+                  'variant_name': variant_plan['name'] if variant_plan else None,
+                  'variant_baseline': variant_plan['baseline'] if variant_plan else None,
                   'supplement_plan_id': supplement_plan['id'] if supplement_plan else None,
                   'supplement_plan_version': supplement_plan['version'] if supplement_plan else None,
                   'baseline_build_id': supplement_plan['baseline_build_id'] if supplement_plan else None,
@@ -1831,7 +1862,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                   'combined_pages': combined_pages, 'combined_bytes': file_bytes,
                   'checks': problems, 'volumes': [{'name':v['filename'],'items':len(v['rows'])} for v in volume_rows]}
         write_bytes(staging / 'validation-report.json', json.dumps(report, indent=2).encode('utf-8'))
-        readme = ('MatterDraft Studio - DRAFT ' + ('SUPPLEMENTAL ' if supplement_plan else '') + 'EXPORT\n\n'
+        readme = ('MatterDraft Studio - DRAFT ' + ('AUDIENCE VARIANT ' if variant_plan else 'SUPPLEMENTAL ' if supplement_plan else '') + 'EXPORT\n\n'
                   'This package is NOT court-certified and is NOT proof of filing.\n'
                   'The selected rules are illustrative technical checks only.\n'
                   'Original evidence and signed files must be reviewed independently.\n'
@@ -1877,10 +1908,14 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         # for download before the staging directory can be published as an export.
         check_export_sizes(staging, filenames, profile.get('max_file_mb'))
         page_snapshot = (page_map_entries({'volumes': numbered}) if supplement_plan else
-                         page_map_entries(bundle_preview(
-                             store, matter_id, matter['max_pages_per_volume'], matter['keep_groups_intact'])))
+                         page_map_entries(bundle_preview(store, matter_id, max_pages, keep_groups,
+                                                         output_marks, documents_override=documents)))
         export_manifest = dict(id=export_id, created_at=report['created_at'], matter_id=matter_id,
                                artifact_kind=artifact_kind,
+                               variant_plan_id=variant_plan['id'] if variant_plan else None,
+                               variant_plan_version=variant_plan['version'] if variant_plan else None,
+                               variant_name=variant_plan['name'] if variant_plan else None,
+                               variant_baseline=variant_plan['baseline'] if variant_plan else None,
                                supplement_plan_id=supplement_plan['id'] if supplement_plan else None,
                                supplement_plan_version=supplement_plan['version'] if supplement_plan else None,
                                baseline_build_id=supplement_plan['baseline_build_id'] if supplement_plan else None,
@@ -1892,7 +1927,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                                signature_inputs=signature_inputs,
                                signature_risk_acknowledged=bool(signature_risks and signature_acknowledged),
                                build_input_digest=build_input_digest,
-                               effective_input_digest=(build_input_digest if supplement_plan else store.build_input_digest(matter_id, effective=True)),
+                               effective_input_digest=(build_input_digest if supplement_plan or variant_plan else store.build_input_digest(matter_id, effective=True)),
                                redaction_inputs=[r for d in source_documents for r in store.list_redactions(d['id'])
                                                  if not supplement_plan or (d['id'], r['page_index']) in selected_coordinates],
                                validation_profile=profile,
@@ -1924,7 +1959,10 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                                   '; '.join(issue['message'] for issue in source_errors))
         if supplement_plan and supplement_plan.get('input_snapshot') != store.build_input_digest(matter_id):
             raise ProcessingError('Supplement inputs changed during assembly; no export was published')
-        current_contract = (plan_contract(supplement_plan) if supplement_plan else store.build_input_digest(matter_id))
+        if variant_plan and not variants.is_current(store, matter_id, variant_plan)[0]:
+            raise ProcessingError('Variant inputs changed during assembly; no export was published')
+        current_contract = (plan_contract(supplement_plan) if supplement_plan else
+                            variants.plan_contract(variant_plan) if variant_plan else store.build_input_digest(matter_id))
         if current_contract != build_input_digest:
             raise ProcessingError('Build inputs or profile changed during assembly; no export was published')
         final_dir = export_root / export_id
