@@ -200,7 +200,7 @@ body:has(.design-shell) {min-width:0;height:calc(100dvh / var(--ui-scale));overf
 }
 /* Original and generated artifacts use the same full-height document shell.
    A dialog retains the existing focus trap and immutable artifact lifecycle. */
-.design-shell .export-review[open] {inset:40px 0 28px 64px;margin:0;width:calc(100vw / var(--ui-scale) - 64px);height:calc(100dvh / var(--ui-scale) - 68px);max-width:none;max-height:none;border:0;border-radius:0;box-shadow:none;background:var(--cb-surface)}
+.design-shell .export-review[open] {inset:40px 0 28px var(--workspace-rail-width,64px);margin:0;width:calc(100vw / var(--ui-scale) - var(--workspace-rail-width,64px));height:calc(100dvh / var(--ui-scale) - 68px);max-width:none;max-height:none;border:0;border-radius:0;box-shadow:none;background:var(--cb-surface)}
 .design-shell .export-review::backdrop {background:transparent}
 .design-shell .export-review>.artifact-header {height:64px;min-height:64px;padding:7px 16px;gap:10px;background:var(--cb-surface);border-bottom:1px solid var(--cb-border)}
 .artifact-header>.btn:first-child {min-width:124px;height:34px}

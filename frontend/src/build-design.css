@@ -100,7 +100,7 @@
 }
 @media(max-width:900px){.build-settings-grid,.build-result-grid,.build-job-grid {grid-template-columns:1fr}.build-summary {height:auto;min-height:340px}.build-summary dl {display:grid;grid-template-columns:1fr 1fr;gap:0 20px}.build-settings-card {min-height:518px}.build-summary>.membership-button {margin-top:12px}.build-features {gap:12px 8px}.build-workspace {padding:20px}.build-heading h1 {font-size:24px}.build-review-checks {min-height:240px}.stale-summary {grid-template-columns:1fr}.build-job-card {margin-top:24px}.build-workspace[data-screen=job]>.build-footer {margin-top:20px}}
 /* Generated artifact layout: 18A / 18C. Original reader keeps its own layout. */
-.design-shell .export-review.generated-review[open] {inset:116px 0 28px 64px;width:calc(100vw / var(--ui-scale) - 64px);height:calc(100dvh / var(--ui-scale) - 144px);display:grid;grid-template-columns:246px minmax(0,1fr);grid-template-rows:64px 44px 44px minmax(0,1fr);overflow:hidden}
+.design-shell .export-review.generated-review[open] {inset:116px 0 28px var(--workspace-rail-width,64px);width:calc(100vw / var(--ui-scale) - var(--workspace-rail-width,64px));height:calc(100dvh / var(--ui-scale) - 144px);display:grid;grid-template-columns:246px minmax(0,1fr);grid-template-rows:64px 44px 44px minmax(0,1fr);overflow:hidden}
 .generated-header {grid-column:2;grid-row:1;display:flex;align-items:center;gap:12px;padding:8px 20px;min-width:0}
 .generated-header>div {min-width:0;flex:1}.generated-header h2 {font-size:14px;line-height:22px;margin:0;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
 .generated-header p {display:flex;align-items:center;gap:12px;margin:4px 0 0;font-size:12px;color:var(--cb-muted);white-space:nowrap}
@@ -141,6 +141,38 @@
  .generated-review .export-search-results {max-height:60px}
  .generated-version {left:12px;width:140px}
  .generated-header:has(.generated-version) p {padding-left:148px}
+}
+
+/* In a compact window the outline opens over the PDF instead of consuming its width. */
+@media(max-width:1375px){
+ .design-shell .export-review.generated-review[open],
+ .design-shell .generated-review:has(.artifact-info-panel),
+ .design-shell .generated-review:has(.export-review-content:not(.navigation-open)),
+ .design-shell .generated-review.artifact-focused {grid-template-columns:minmax(0,1fr)}
+ .design-shell .export-review.generated-review[open] {grid-template-rows:88px auto 44px minmax(0,1fr)}
+ .design-shell .export-review.generated-review[open]:has(.generated-stale-bar) {grid-template-rows:88px auto 44px minmax(0,1fr) auto}
+ .design-shell .generated-review .generated-header,
+ .design-shell .generated-review>.reader-navigation,
+ .design-shell .generated-review .generated-page-context,
+ .design-shell .generated-review .export-review-document,
+ .design-shell .generated-review .generated-stale-bar {grid-column:1}
+ .design-shell .generated-review .artifact-navigation {grid-column:1;grid-row:4;z-index:3;width:min(260px,72%);max-width:100%;box-shadow:12px 0 24px #0002}
+ .design-shell .generated-review .artifact-info-panel {grid-column:1;grid-row:4;justify-self:end;z-index:4;width:min(260px,78%);box-shadow:-12px 0 24px #0002}
+ .design-shell .generated-review .generated-header {padding-inline:12px;gap:8px}
+ .design-shell .generated-review>.reader-navigation {height:auto;min-height:44px;max-height:96px;flex-wrap:wrap;overflow-y:auto;padding-block:5px}
+ .generated-header:has(.generated-version) p {padding-left:0}
+ .generated-header .generated-version {position:static;display:block;width:min(180px,100%);margin-top:2px}
+ .generated-header p {margin-top:2px}
+ .generated-nav-footer {overflow-wrap:anywhere}
+}
+@media(max-width:700px){
+ .design-shell .generated-review .generated-header {flex-wrap:wrap;align-content:center;min-height:64px;height:auto}
+ .generated-header>div {flex-basis:calc(100% - 48px);order:0}
+ .generated-header>.icon-btn {order:1;margin-left:auto}
+ .generated-header>.primary {order:2;min-height:28px}
+ .design-shell .export-review.generated-review[open] {grid-template-rows:auto auto 44px minmax(0,1fr)}
+ .design-shell .export-review.generated-review[open]:has(.generated-stale-bar) {grid-template-rows:auto auto 44px minmax(0,1fr) auto}
+ .generated-stale-bar {flex-wrap:wrap}
 }
 
 /* B03C: resolved 15A / 22C / BU10, pre-interface-zoom dimensions. */

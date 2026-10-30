@@ -1,6 +1,6 @@
 /* FLOW / 01, 01A / 04A / 03A / 03B. Shared navigation has one owner.
    Reference: 1440×900, 32 title + 40 tabs + 44 utility, 184 nav, 28 status. */
-:root .app-shell.design-shell {grid-template-columns:184px minmax(0,1fr);grid-template-rows:32px minmax(0,1fr) 28px}
+:root .app-shell.design-shell {--workspace-rail-width:184px;grid-template-columns:184px minmax(0,1fr);grid-template-rows:32px minmax(0,1fr) 28px}
 :root .design-shell .application-bar {gap:10px;padding:0 12px;font-size:12px}
 :root .design-shell .application-brand {flex-basis:152px;height:30px}
 :root .design-shell .application-brand-copy {width:auto;height:auto}
@@ -24,7 +24,7 @@
 .rail-local small {font-size:11px}
 .rail-local>span {display:flex;align-items:center;gap:8px}
 .rail-local svg {width:16px;height:16px}
-:root .app-shell.design-shell[data-nav-collapsed=true] {grid-template-columns:64px minmax(0,1fr)}
+:root .app-shell.design-shell[data-nav-collapsed=true] {--workspace-rail-width:64px;grid-template-columns:64px minmax(0,1fr)}
 :root .design-shell[data-nav-collapsed=true] .matter-rail {padding-inline:12px}
 :root .design-shell[data-nav-collapsed=true] .matter-rail button {width:40px;justify-content:center;padding:0}
 :root .design-shell[data-nav-collapsed=true] .matter-rail button span,
@@ -177,6 +177,8 @@
 @media(max-width:1199px) {.matter-filters{flex-wrap:wrap}.matter-count{margin-left:0}.overview-metrics>span{gap:10px}.overview-columns{gap:24px;grid-template-columns:minmax(0,2fr) minmax(200px,1fr)}.overview-review{flex-wrap:wrap}.overview-review>.btn{margin-left:42px}.flow-footer{flex-wrap:wrap}}
 @media(max-width:760px) {:root .app-shell.design-shell{grid-template-columns:64px minmax(0,1fr)}:root .design-shell .matter-rail{padding-inline:12px}:root .design-shell .matter-rail button{width:40px;justify-content:center;padding:0}:root .design-shell .matter-rail button span,:root .design-shell .rail-local{display:none}:root .design-shell .rail-context{visibility:hidden}:root .design-shell .flow-page{padding:20px}:root .flow-heading h1{font-size:23px}.flow-heading{flex-wrap:wrap}.overview-metrics{grid-template-columns:repeat(2,minmax(0,1fr));padding:16px 0}.overview-columns{grid-template-columns:1fr}.matter-activity{grid-template-columns:1fr}.import-drop{flex-wrap:wrap}.import-drop>.btn{margin-left:44px}.preparation-search-trigger kbd,.preparation-engine,.application-status .membership-status-step{display:none}.preparation-search-trigger{font-size:11px}.preparation-save-state{font-size:11px}.preparation-step>.btn{width:100px}.flow-section-heading{flex-wrap:wrap}.workspace-settings .appearance-controls{display:grid}}
 :root .design-shell[data-editor-expanded=true] {grid-template-columns:minmax(0,1fr)}
+:root .design-shell[data-editor-expanded=true] {--workspace-rail-width:0px}
+@media(max-width:760px) {:root .app-shell.design-shell {--workspace-rail-width:64px}}
 :root .design-shell[data-editor-expanded=true] .matter-rail {display:none}
 
 :root .design-shell .matter-overview {display:block;gap:0;min-height:0}

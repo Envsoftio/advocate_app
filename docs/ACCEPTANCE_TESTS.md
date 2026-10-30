@@ -1049,3 +1049,23 @@ The 02A storage row is a deliberate functional adaptation: the backend uses one 
 - `cd frontend && npm run build && npm run test`: passed; **48 unit tests passed**.
 - Isolated synthetic `matter-creation-flow.spec.ts`: **2 passed**, covering 01B/02A/02B creation and short-window dialog scrolling. The settled 1440 × 900 01B screenshot was inspected with complete title/button text.
 - Matching Apple Silicon release app rebuilt at `frontend/src-tauri/target/release/bundle/macos/MatterDraft Studio.app` (**70.17 MiB**). An isolated **600 × 430** native debug app visibly showed the complete Matters title and New matter button. The `/Applications` app was not replaced and no real matter store was opened.
+
+## DL. Earlier bundle review layout and view motion — 30 October 2026
+
+[Certain] The generated PDF review now uses an overlay bookmark panel at compact widths, so opening an earlier bundle leaves the PDF and controls their full available width. Its header gets enough height for the version selector at 125% interface size. Short view and section transitions now run in Tauri as well as the browser, with reduced-motion preference respected.
+
+- `cd frontend && npm run build && npm run test`: passed; **48 unit tests passed**. The existing large-chunk advisory remains.
+- Isolated synthetic Chrome build/export/stale-review journey: **1 passed**. At **860 × 900, 125%**, the regression check confirmed the review stays within the viewport, the PDF area remains over 300 px wide, and the bookmark panel overlays that area. The resulting compact screenshot was inspected at `/private/tmp/matterdraft-earlier-bundle/`.
+- Isolated synthetic matter/document tab navigation journey: **1 passed** with the transitions enabled. Its first attempt used an alternate backend port despite a hard-coded test URL; the rerun on the test's configured port passed.
+- `cd frontend && npm run tauri:build -- --bundles app`: passed. The unsigned Apple Silicon app is at `frontend/src-tauri/target/release/bundle/macos/MatterDraft Studio.app` (**70.17 MiB**). Its embedded sidecar SHA-256 matches the existing binary: `baa0137d7018ca143759fb0232645da14ab3f67424815a04eb4eeffd969b6983`. The release executable SHA-256 is `29c415853145b07dbaf3ac27ac22d997f54f617c484208308985fa32a06ca65f`.
+- Packaged native runtime, Windows and Intel Mac were not exercised for this change. The installed `/Applications` app was not replaced, and no real matter was opened.
+
+## DM. Earlier bundle review sidebar alignment correction — 30 October 2026
+
+[Certain] The DL layout change left the reported clipping in the dev UI: the review dialog still used a fixed 64 px left inset after FLOW / 01 widened the expanded matter sidebar to 184 px. The dialog now uses one sidebar-width variable for its left edge and width, including collapsed and narrow-window states. At compact widths its PDF toolbar wraps so the remaining controls are visible. The same alignment rule applies to generated and imported-original reviews.
+
+- `cd frontend && npm run build && npm run test`: passed; **48 unit tests passed**.
+- Synthetic Chrome stale-bundle journey: **1 passed**. Its regression assertion measures the sidebar right edge against the dialog left edge with the sidebar expanded at 1440 px and 860 px/125%, then collapsed. It checks the dialog stays inside the viewport and the PDF area remains usable. The inspected [compact capture](ui-evidence/earlier-bundle-review/compact-860-125.png) and [dark capture](ui-evidence/earlier-bundle-review/dark-1024-125.png) show the sidebar labels uncovered and the wrapped toolbar.
+- Synthetic Chrome original-reader journey: **1 passed**, including immutable original review and its existing light/dark, width and interface-scale checks.
+- `cd frontend && npm run tauri:build -- --bundles app`: passed; unsigned Apple Silicon app is **70.17 MiB** at `frontend/src-tauri/target/release/bundle/macos/MatterDraft Studio.app`. Release executable SHA-256: `50a5049f61bd2170c1e0919191c502e85c046a08ebca46bb842d00865a3832e7`.
+- The user's running dev window and packaged native runtime were not directly exercised. The `/Applications` app was not replaced; no real matter was opened.

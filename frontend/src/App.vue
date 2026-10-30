@@ -3036,9 +3036,8 @@ watch(sidebarCollapsed, (collapsed) => {
       <FindingReviewPanel v-if="preflightContext && activeView === 'documents' && currentMatterId === preflightContext.matterId" :matter-id="currentMatterId" :finding="preflightContext.finding" :changed="preflightContext.finding.target_revision !== undefined && selectedDoc?.revision !== preflightContext.finding.target_revision" @return="returnToPreflight" @tools="pageToolsOpen=true"/>
 
       <Transition
-        :name="inTauri() ? undefined : 'view'"
-        :css="!inTauri()"
-        :mode="inTauri() ? undefined : 'out-in'"
+        name="view"
+        mode="out-in"
         @after-enter="fitDocumentsWorkspace"
       >
         <main
@@ -3243,8 +3242,7 @@ watch(sidebarCollapsed, (collapsed) => {
         >
           <Transition
             name="section"
-            :css="!inTauri()"
-            :mode="inTauri() ? undefined : 'out-in'"
+            mode="out-in"
             @after-enter="afterWorkspaceSectionEnter"
           >
             <MatterOverview v-if="activeView==='overview'" :matter="currentMatter" :documents="docs" :outputs="exportsList" :bookmarks="manualBookmarks" :profile="selectedProfile?.name || ''" :check-count="warningChecks.length+errorChecks.length" @navigate="view => view==='documents'?showPreparation():showView(view)" @import="openImport" @details="matterDetailsOpen=true"/>

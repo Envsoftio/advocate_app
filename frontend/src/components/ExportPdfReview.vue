@@ -147,7 +147,12 @@ async function load(retainContext = false) {
   }catch{if(call===generation)outlineError.value='The PDF bookmarks could not be read.'}
 }
 watch(()=>[props.matterId,props.exportId,props.filename,props.originalId],()=>void load(),{immediate:true})
-onMounted(()=>{returnFocus=document.activeElement as HTMLElement|null;dialog.value?.showModal()})
+onMounted(()=>{
+  returnFocus=document.activeElement as HTMLElement|null
+  // Keep the PDF usable when the available window is too narrow for a docked outline.
+  navigationOpen.value=window.innerWidth/Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')||'1')>1100
+  dialog.value?.showModal()
+})
 onBeforeUnmount(()=>{remember();generation++;if(originalImageUrl.value)URL.revokeObjectURL(originalImageUrl.value);dialog.value?.close();void nextTick(()=>{(returnFocus?.isConnected ? returnFocus : document.querySelector<HTMLElement>('.viewer-root'))?.focus({preventScroll:true})});void flushReadingPositions()})
 </script>
 
