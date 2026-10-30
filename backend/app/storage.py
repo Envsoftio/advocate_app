@@ -106,12 +106,14 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 22:
+            if version > 23:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
                 CREATE TABLE IF NOT EXISTS matters (
                     id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                    court_forum TEXT NOT NULL DEFAULT '', client_reference TEXT NOT NULL DEFAULT '',
+                    internal_reference TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
                     court_profile TEXT NOT NULL, case_type TEXT NOT NULL,
                     petitioner TEXT NOT NULL, respondent TEXT NOT NULL,
                     advocate TEXT NOT NULL, case_number TEXT NOT NULL,
@@ -358,6 +360,12 @@ class Store:
                 if 'updated_at' not in columns:
                     con.execute('ALTER TABLE page_annotations ADD COLUMN updated_at TEXT')
                 con.execute('PRAGMA user_version=22')
+            if version < 23:
+                columns = {row['name'] for row in con.execute('PRAGMA table_info(matters)')}
+                for name in ('court_forum', 'client_reference', 'internal_reference', 'notes'):
+                    if name not in columns:
+                        con.execute(f"ALTER TABLE matters ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+                con.execute('PRAGMA user_version=23')
 
     def list_redactions(self, doc_id: str, active_only: bool = True) -> list[dict]:
         with self.connect() as con:

@@ -1690,11 +1690,12 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await expect(page.locator('.application-status').getByText('Processing locally',{exact:true})).toBeVisible()
   await openWorkspaceNavigation(page)
   await page.locator('.workspace-drawer').getByRole('button', { name: 'New matter' }).click()
-  await page.getByRole('dialog', { name: 'Create matter' }).getByPlaceholder('Example: ABC Pvt Ltd v. XYZ').fill('E2E Synthetic Matter')
+  await page.getByRole('dialog', { name: 'Create matter' }).getByLabel('Matter name').fill('E2E Synthetic Matter')
   await page.getByRole('dialog', { name: 'Create matter' }).getByRole('button', { name: 'Create matter' }).click()
   await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Synthetic Matter'})).toBeVisible()
+  await page.getByRole('button', {name:'Import documents',exact:true}).click()
 
-  await page.locator('input[accept=".pdf,.jpg,.jpeg,.png"]').setInputFiles([
+  await page.getByLabel('Choose import files').setInputFiles([
     resolve(samples, '01_petition.pdf'),
     resolve(samples, '02_impugned_order.pdf'),
     resolve(samples, '03_affidavit.pdf'),

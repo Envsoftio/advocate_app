@@ -22,7 +22,7 @@ def test_legacy_document_schema_migrates_without_changing_records(tmp_path):
     with store.connect() as con:
         row = con.execute('SELECT * FROM documents WHERE id=?', ('d',)).fetchone()
         revision = con.execute('SELECT * FROM document_revisions WHERE document_id=?', ('d',)).fetchone()
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 22
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 23
         assert con.execute("SELECT name FROM sqlite_master WHERE name='audience_variants'").fetchone()
     assert row['bundle_included'] == 1
     assert row['revision'] == 1
@@ -56,9 +56,27 @@ def test_v5_store_gains_reusable_values_without_changing_matter(tmp_path):
     assert reopened.get_matter(matter['id'])['name'] == 'Synthetic matter'
     assert reopened.get_matter_values(matter['id']) == {}
     with reopened.connect() as con:
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 22
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 23
         assert con.execute("SELECT name FROM sqlite_master WHERE name='audience_variants'").fetchone()
     reopened.close()
+
+
+def test_matter_creation_references_persist_and_legacy_fields_default_empty(tmp_path):
+    store = Store(tmp_path)
+    fields = dict(name='Synthetic matter', court_profile='general-demo', case_type='',
+                  petitioner='', respondent='', advocate='', case_number='DEMO-01',
+                  max_pages_per_volume=300, keep_groups_intact=True,
+                  court_forum='Synthetic tribunal', client_reference='Client-01',
+                  internal_reference='MD-01', notes='Synthetic review only')
+    created = store.create_matter(fields)
+    assert {key: created[key] for key in ('court_forum', 'client_reference',
+        'internal_reference', 'notes')} == {key: fields[key] for key in ('court_forum',
+        'client_reference', 'internal_reference', 'notes')}
+    legacy = store.create_matter({key: value for key, value in fields.items()
+        if key not in ('court_forum', 'client_reference', 'internal_reference', 'notes')})
+    assert all(legacy[key] == '' for key in ('court_forum', 'client_reference',
+        'internal_reference', 'notes'))
+    store.close()
 
 
 def test_second_engine_cannot_open_active_matter_store(tmp_path):

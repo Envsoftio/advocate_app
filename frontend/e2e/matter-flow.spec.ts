@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-const base='http://127.0.0.1:8768',headers={Authorization:'Bearer e2e-isolated-token'}
+const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`,headers={Authorization:'Bearer e2e-isolated-token'}
 const evidence=resolve(import.meta.dirname,'../../docs/ui-evidence/matter-flow')
 test('FLOW 01: one sidebar, real queue, processing, review and persistent collapse',async({page,request})=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message))
@@ -80,10 +80,12 @@ test('FLOW 01: one sidebar, real queue, processing, review and persistent collap
  }
  expect(errors).toEqual([])
 })
-test('new matter enters import; cancellation preserves completed files',async({page,request})=>{
- await page.goto('/');await page.locator('.matter-home').getByRole('button',{name:'New matter',exact:true}).click()
+test('new matter enters no-documents state; cancellation preserves completed files',async({page,request})=>{
+ await page.goto('/');await page.locator('.matter-home').getByRole('button',{name:'New matter',exact:true}).first().click()
  await page.getByRole('textbox',{name:'Matter name'}).fill('Synthetic import cancellation')
  await page.getByRole('button',{name:'Create matter',exact:true}).click()
+ await expect(page.getByRole('heading',{name:'Add the source documents'})).toBeVisible()
+ await page.getByRole('button',{name:'Import documents',exact:true}).click()
  await expect(page.getByRole('heading',{name:'Import documents',exact:true})).toBeVisible()
  await page.getByLabel('Choose import files').setInputFiles([resolve(import.meta.dirname,'../../samples/01_petition.pdf'),resolve(import.meta.dirname,'../../samples/03_affidavit.pdf')])
  await expect(page.getByRole('button',{name:'Import 2 files'})).toBeEnabled()

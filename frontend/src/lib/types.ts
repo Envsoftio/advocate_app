@@ -1,6 +1,10 @@
 export interface Matter {
   id: string
   name: string
+  court_forum: string
+  client_reference: string
+  internal_reference: string
+  notes: string
   court_profile: string
   case_type: string
   petitioner: string
@@ -13,7 +17,8 @@ export interface Matter {
   updated_at: string
   archived_at?: string | null
 }
-export interface MatterNew extends Omit<Matter, 'id' | 'created_at' | 'updated_at'> {}
+export type MatterNew = Omit<Matter, 'id' | 'created_at' | 'updated_at' | 'court_forum' | 'client_reference' | 'internal_reference' | 'notes'> &
+  Partial<Pick<Matter, 'court_forum' | 'client_reference' | 'internal_reference' | 'notes'>>
 export type DocKind = 'petition' | 'affidavit' | 'order' | 'annexure' | 'application' | 'evidence' | 'other'
 export type SignatureStatus = 'certificate_signature_detected' | 'no_certificate_signature_detected' |
   'inspection_inconclusive' | 'visible_signature_only' | 'unsigned'

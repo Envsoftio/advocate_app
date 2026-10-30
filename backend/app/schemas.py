@@ -18,6 +18,10 @@ VisibleSignatureStatus = Literal['unreviewed', 'present', 'absent']
 
 class MatterCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
+    court_forum: str = Field(default='', max_length=300)
+    client_reference: str = Field(default='', max_length=300)
+    internal_reference: str = Field(default='', max_length=200)
+    notes: str = Field(default='', max_length=2000)
     court_profile: str = 'general-demo'
     case_type: str = Field(default='Demonstration filing', max_length=150)
     petitioner: str = Field(default='', max_length=300)
@@ -31,6 +35,10 @@ class MatterCreate(BaseModel):
 class MatterPatch(BaseModel):
     model_config = ConfigDict(extra='forbid')
     name: str | None = Field(default=None, min_length=2, max_length=200)
+    court_forum: str | None = Field(default=None, max_length=300)
+    client_reference: str | None = Field(default=None, max_length=300)
+    internal_reference: str | None = Field(default=None, max_length=200)
+    notes: str | None = Field(default=None, max_length=2000)
     court_profile: str | None = None
     case_type: str | None = Field(default=None, max_length=150)
     petitioner: str | None = Field(default=None, max_length=300)
