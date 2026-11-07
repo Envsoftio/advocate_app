@@ -30,9 +30,11 @@ def test_ocr_scanned_image(client, auth, matter):
                     files=[('files', ('scan.png', blob.getvalue(), 'image/png'))])
     assert r.status_code == 201, r.text
     doc_id = r.json()[0]['id']
+    assert r.json()[0]['ocr_status'] == 'needs_ocr'
     job = client.post(f'/documents/{doc_id}/ocr', headers=auth).json()
     done = wait_for_job(client, auth, job['id'], timeout=40)
     assert done['status'] == 'completed', done['error']
+    assert done['started_at']
     with pymupdf.open(stream=client.get(f'/documents/{doc_id}/pdf', headers=auth).content,filetype='pdf') as pdf:
         assert 'FILING' in pdf[0].get_text().upper()
     selectable = client.get(f'/documents/{doc_id}/pages/0/text-runs', headers=auth)
@@ -42,6 +44,56 @@ def test_ocr_scanned_image(client, auth, matter):
                          params={'q': 'FILING'}).json()['matches']
     assert len(matches) == 1
     assert matches[0]['document_id'] == doc_id and matches[0]['page'] == 1
+
+    review_url = f'/documents/{doc_id}/ocr-review'
+    review = client.get(review_url, headers=auth, params={'page_index': 0, 'revision': 2})
+    assert review.status_code == 200, review.text
+    measured = review.json()
+    assert measured['available'] is True
+    assert measured['confidence'] is None or 0 <= measured['confidence'] <= 100
+    assert measured['accepted_at'] is None and measured['can_rerun'] is True
+    assert client.post(review_url + '/accept', headers=auth,
+                       json={'page_index': 0, 'expected_revision': 1}).status_code == 409
+    accepted = client.post(review_url + '/accept', headers=auth,
+                           json={'page_index': 0, 'expected_revision': 2})
+    assert accepted.status_code == 200, accepted.text
+    assert client.get(review_url, headers=auth,
+                      params={'page_index': 0, 'revision': 2}).json()['accepted_at']
+    backup = client.get(f'/matters/{matter["id"]}/portable', headers=auth)
+    assert backup.status_code == 200, backup.text
+    restored = client.post('/matters/restore', headers=auth,
+                           files={'file': ('ocr-review.cbmatter', backup.content, 'application/zip')})
+    assert restored.status_code == 201, restored.text
+    restored_doc = client.get(f'/matters/{restored.json()["id"]}/documents', headers=auth).json()[0]
+    assert client.get(f'/documents/{restored_doc["id"]}/ocr-review', headers=auth,
+                      params={'page_index': 0, 'revision': 2}).json()['accepted_at']
+    original_before = client.get(f'/documents/{doc_id}/original', headers=auth).content
+    printed_original = client.post(f'/documents/{doc_id}/original/print', headers=auth,
+                                   json={'pages':'all','orientation':'source','scale':'fit'})
+    assert printed_original.status_code == 200, printed_original.text
+    with pymupdf.open(stream=printed_original.content, filetype='pdf') as printed:
+        assert printed.page_count == 1
+    rerun = client.post(f'/documents/{doc_id}/ocr-rerun', headers=auth,
+                        json={'page_index': 0, 'expected_revision': 2, 'language': 'eng'})
+    assert rerun.status_code == 202, rerun.text
+    rerun_done = wait_for_job(client, auth, rerun.json()['id'], timeout=40)
+    assert rerun_done['status'] == 'completed', rerun_done['error']
+    assert client.get(review_url, headers=auth,
+                      params={'page_index': 0, 'revision': 2}).status_code == 409
+    assert client.get(review_url, headers=auth,
+                      params={'page_index': 0, 'revision': 3}).json()['accepted_at'] is None
+    with pymupdf.open(stream=client.get(f'/documents/{doc_id}/pdf', headers=auth).content,
+                      filetype='pdf') as rerun_pdf:
+        assert rerun_pdf[0].get_text().upper().count('FILING') == 1
+    again = client.post(f'/documents/{doc_id}/ocr-rerun', headers=auth,
+                        json={'page_index': 0, 'expected_revision': 3, 'language': 'eng'})
+    assert again.status_code == 202, again.text
+    again_done = wait_for_job(client, auth, again.json()['id'], timeout=40)
+    assert again_done['status'] == 'completed', again_done['error']
+    with pymupdf.open(stream=client.get(f'/documents/{doc_id}/pdf', headers=auth).content,
+                      filetype='pdf') as rerun_pdf:
+        assert rerun_pdf[0].get_text().upper().count('FILING') == 1
+    assert client.get(f'/documents/{doc_id}/original', headers=auth).content == original_before
 
 
 @pytest.mark.skipif('hin' not in subprocess.run(
@@ -92,6 +144,52 @@ def test_ocr_rejects_unlisted_language(client, auth, matter, make_pdf):
     response = client.post(f'/documents/{imported["id"]}/ocr', headers=auth,
                            json={'language': 'ara'})
     assert response.status_code == 422
+
+
+@pytest.mark.skipif(not shutil.which('tesseract'), reason='Tesseract not installed')
+def test_page_scoped_ocr_preserves_other_pages_original_and_revision_guard(client, auth, matter):
+    image = Image.new('RGB', (1300, 500), 'white')
+    ImageDraw.Draw(image).text((80, 170), 'SCOPED OCR PAGE 2026', fill='black',
+                              font=ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 65)
+                              if Path('/System/Library/Fonts/Supplemental/Arial.ttf').exists()
+                              else ImageFont.load_default())
+    blob = io.BytesIO()
+    image.save(blob, format='PNG')
+    with pymupdf.open() as pdf:
+        for _ in range(2):
+            page = pdf.new_page(width=595, height=842)
+            page.insert_image(pymupdf.Rect(40, 80, 555, 340), stream=blob.getvalue())
+        source = pdf.tobytes()
+    uploaded = client.post(f'/matters/{matter["id"]}/documents?included=true', headers=auth,
+        files=[('files', ('two-scans.pdf', source, 'application/pdf'))])
+    assert uploaded.status_code == 201, uploaded.text
+    doc = uploaded.json()[0]
+    assert doc['ocr_status'] == 'needs_ocr'
+    printed_original = client.post(f'/documents/{doc["id"]}/original/print', headers=auth,
+                                   json={'pages':'1','orientation':'source','scale':'fit'})
+    assert printed_original.status_code == 200, printed_original.text
+    with pymupdf.open(stream=printed_original.content, filetype='pdf') as printed:
+        assert printed.page_count == 1
+    assert client.app.state.store.original_path(doc).read_bytes() == source
+    endpoint = f'/documents/{doc["id"]}/ocr'
+    assert client.post(endpoint, headers=auth, json={'expected_revision': 1, 'page_index': 2}).status_code == 422
+    started = client.post(endpoint, headers=auth,
+        json={'expected_revision': 1, 'page_index': 1, 'language': 'eng'})
+    assert started.status_code == 202, started.text
+    finished = wait_for_job(client, auth, started.json()['id'], timeout=40)
+    assert finished['status'] == 'completed', finished['error']
+    assert finished['result']['pages_checked'] == 1
+    assert finished['result']['requested_page_index'] == 1
+    with pymupdf.open(stream=client.get(f'/documents/{doc["id"]}/pdf', headers=auth).content,
+                      filetype='pdf') as working:
+        assert working[0].get_text().strip() == ''
+        assert 'SCOPED' in working[1].get_text().upper()
+    current = client.get(f'/matters/{matter["id"]}/documents', headers=auth).json()[0]
+    assert current['revision'] == 2
+    assert current['ocr_status'] == 'needs_ocr'
+    assert client.app.state.store.original_path(current).read_bytes() == source
+    assert client.post(endpoint, headers=auth,
+        json={'expected_revision': 1, 'page_index': 0}).status_code == 409
 
 
 @pytest.mark.skipif(not shutil.which('tesseract'), reason='Tesseract not installed')

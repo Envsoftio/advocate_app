@@ -200,6 +200,8 @@
 
 /* Explicit full screen owns the entire window and hides the workspace chrome. */
 :root .app-shell.design-shell[data-editor-expanded=true] {grid-template-rows:minmax(0,1fr)}
+:root .app-shell.design-shell[data-editor-expanded=true]:has(.focused-reading) {grid-template-columns:minmax(0,1fr);grid-template-rows:40px minmax(0,1fr) 28px}
+:root .app-shell.design-shell[data-editor-expanded=true]:has(.focused-reading)>.app-main {grid-column:1;grid-row:2}
 :root .design-shell[data-editor-expanded=true] .app-main {padding-top:0}
 :root .design-shell[data-editor-expanded=true] .open-workspace-tabs,
 :root .design-shell[data-editor-expanded=true] .preparation-utility {display:none}

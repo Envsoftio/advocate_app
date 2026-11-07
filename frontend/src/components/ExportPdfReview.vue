@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, BookOpen, Focus, Search, Info, Shield, Pencil, Highlighter, LayoutGrid, ScanText } from 'lucide-vue-next'
+import { ArrowLeft, BookOpen, Focus, Search, Info, Shield, Pencil, Highlighter, LayoutGrid, ScanText, Printer, RotateCw } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EngineNotice from './EngineNotice.vue'
 import { engineBlocked } from '../lib/engineConnection'
@@ -12,8 +12,8 @@ import { usePdfDocument, rememberReadingPosition, loadReadingPosition, flushRead
 import { usePdfSearch } from '../lib/pdfSearch'
 import { readPdfSourceOutline, type PdfSourceOutlineEntry } from '../lib/pdfNavigation'
 
-const props = defineProps<{matterId:string,exportId:string,filename:string,stale?:boolean,manifest?:ExportManifest,originalId?:string,artifactOptions?:Array<{value:string,label:string}>}>()
-const emit = defineEmits<{close:[],export:[],checks:[],rebuild:[],source:[id:string,page:number,revision:number],retryEngine:[],artifact:[value:string],openExternalLink:[url:string]}>()
+const props = defineProps<{matterId:string,exportId:string,filename:string,stale?:boolean,manifest?:ExportManifest,originalId?:string,inPreparation?:boolean,artifactOptions?:Array<{value:string,label:string}>}>()
+const emit = defineEmits<{close:[],export:[],checks:[],rebuild:[],source:[id:string,page:number,revision:number],retryEngine:[],artifact:[value:string],openExternalLink:[url:string],printOriginal:[request:{documentId:string,filename:string}]}>()
 type OriginalInfo = {filename:string,sha256:string,media_type:string,page_count:number|null,password_protected:boolean}
 const generated = computed(()=>!props.originalId)
 const sourceRow = computed(()=>{
@@ -45,6 +45,7 @@ const viewport = ref<InstanceType<typeof PdfReaderViewport>|null>(null)
 const reader = usePdfDocument()
 const {pdf,loading,error} = reader
 const pageNumber = ref(1), scale = ref(1), zoom = ref('fit-width'), mode = ref<ReaderMode>('single')
+const viewRotation = ref(0)
 const history = ref<ReaderPosition[]>([])
 const outline = ref<Array<{title:string,page:number|null,url:string|null,level:number}>>([])
 const outlineError = ref(''), renderError = ref('')
@@ -76,7 +77,7 @@ function nextMatch(delta:number){step(delta);chooseMatch(selectedIndex.value)}
 function closeReview() { remember();void flushReadingPositions();emit('close') }
 function keyboard(event:KeyboardEvent) {
   if(event.isComposing)return
-  if(event.key==='Tab'){
+  if(event.key==='Tab' && !(props.inPreparation && props.originalId)){
     const controls=Array.from(dialog.value?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]') || [])
       .filter(el=>el.getClientRects().length && el.closest('dialog')===dialog.value)
     const first=controls[0],last=controls[controls.length-1]
@@ -112,7 +113,7 @@ async function load(retainContext = false) {
   if(originalImageUrl.value)URL.revokeObjectURL(originalImageUrl.value)
   originalImageUrl.value=''
   void reader.close()
-  loadedKey='';outline.value=[];outlineError.value='';renderError.value='';error.value='';history.value=[];query.value=''
+  loadedKey='';outline.value=[];outlineError.value='';renderError.value='';error.value='';history.value=[];query.value='';viewRotation.value=0
   loading.value=true
   const saved=retained ? {...retained,zoom:retainedZoom,mode:retainedMode} : await loadReadingPosition(key)
   if(retainContext)query.value=retainedQuery
@@ -151,24 +152,29 @@ onMounted(()=>{
   returnFocus=document.activeElement as HTMLElement|null
   // Keep the PDF usable when the available window is too narrow for a docked outline.
   navigationOpen.value=window.innerWidth/Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')||'1')>1100
-  dialog.value?.showModal()
+  // In preparation the original occupies the document pane while the source
+  // navigator remains usable. Other artifact reviews retain modal behavior.
+  if (props.inPreparation && props.originalId) dialog.value?.show()
+  else dialog.value?.showModal()
 })
 onBeforeUnmount(()=>{remember();generation++;if(originalImageUrl.value)URL.revokeObjectURL(originalImageUrl.value);dialog.value?.close();void nextTick(()=>{(returnFocus?.isConnected ? returnFocus : document.querySelector<HTMLElement>('.viewer-root'))?.focus({preventScroll:true})});void flushReadingPositions()})
 </script>
 
 <template>
-  <dialog ref="dialog" class="export-review" :class="{'artifact-focused':focusedReading,'generated-review':generated}" :aria-label="originalId ? 'Review imported original' : 'Review generated PDF'" @keydown.stop="keyboard" @cancel.prevent="closeReview" @click="($event.target===dialog)&&closeReview()">
+  <dialog ref="dialog" class="export-review" :class="{'artifact-focused':focusedReading,'generated-review':generated,'preparation-original':inPreparation && !!originalId}" :aria-label="originalId ? 'Review imported original' : 'Review generated PDF'" @keydown.stop="keyboard" @cancel.prevent="closeReview" @click="($event.target===dialog)&&closeReview()">
     <header v-if="generated" class="generated-header"><div><h2>{{filename}}</h2><p><span>Generated Output</span> Build {{exportId.slice(0,8)}} · {{stale?'Stale':'Saved'}} · Read only</p><select v-if="artifactOptions" class="generated-version" aria-label="Document version" :value="artifactValue" @change="emit('artifact',($event.target as HTMLSelectElement).value)"><option v-for="option in artifactOptions" :key="option.value" :value="option.value">{{option.label}}</option></select></div><button class="membership-button quiet" @click="emit('checks')">Output checks</button><button class="membership-button primary" @click="emit('export')">{{stale?'Save a copy':'Export files'}}</button><button class="icon-btn" aria-label="Close review" @click="closeReview"><ArrowLeft :size="18"/></button></header>
-    <header v-else class="artifact-header"><button class="btn secondary small" aria-label="Close review" @click="closeReview"><ArrowLeft :size="16"/> Documents</button><div class="artifact-title"><h2 :title="filename">{{filename}}</h2><select v-if="artifactOptions" aria-label="Document version" :value="artifactValue" @change="emit('artifact',($event.target as HTMLSelectElement).value)"><option v-for="option in artifactOptions" :key="option.value" :value="option.value">{{option.label}}</option></select><span v-else>{{artifactLabel}} · Read only</span></div><span class="artifact-readonly">{{originalId ? 'Preserved source file' : stale ? 'Previous generated output · Stale' : 'Generated PDF · Read only'}}</span><button v-if="artifactOptions" class="btn primary small" @click="emit('artifact','working')">Working Copy</button></header>
+    <header v-else class="artifact-header"><button class="btn secondary small" aria-label="Close review" @click="closeReview"><ArrowLeft :size="16"/> Documents</button><div class="artifact-title"><h2 :title="filename">{{filename}}</h2><select v-if="artifactOptions" aria-label="Document version" :value="artifactValue" @change="emit('artifact',($event.target as HTMLSelectElement).value)"><option v-for="option in artifactOptions" :key="option.value" :value="option.value">{{option.label}}</option></select><span v-else>{{artifactLabel}} · Read only</span></div><span class="artifact-readonly">{{originalId ? 'Read-only preserved source' : stale ? 'Previous generated output · Stale' : 'Generated PDF · Read only'}}</span><button v-if="artifactOptions" class="btn primary small" @click="emit('artifact','working')">Working Copy</button></header>
     <EngineNotice review-label="Close review to reconcile" @retry="emit('retryEngine')" @review="closeReview"/>
     <div v-if="!generated" class="artifact-modebar"><span class="artifact-read-tab"><BookOpen :size="15"/> Read</span><button v-for="tool in ['Edit','Annotate','Pages','OCR','Redact']" :key="tool" class="text-tool" :aria-label="`${tool} unavailable in read-only artifact`" disabled :title="`${tool} is available in the working copy`"><component :is="tool==='Edit'?Pencil:tool==='Annotate'?Highlighter:tool==='Pages'?LayoutGrid:tool==='OCR'?ScanText:Shield" :size="15"/>{{tool}}</button><span class="artifact-readonly">{{artifactLabel}} · Read only</span><button ref="focusButton" class="icon-btn small" :aria-label="focusedReading ? 'Exit focused reading' : 'Focused reading'" :aria-pressed="focusedReading" @click="toggleFocus"><Focus :size="16"/></button></div>
     <span class="sr-only">{{originalInfo?.page_count}} original source pages · {{artifactLabel}} · Read only</span>
-    <div v-if="originalImageUrl" class="original-image"><img :src="originalImageUrl" :alt="`Imported original ${filename}`"/><p>Original image · The working PDF is a converted copy.</p></div>
+    <div v-if="originalImageUrl && inPreparation" class="original-image-toolbar"><span>Original 1 / 1</span><span>Image source · Read only</span><button class="icon-btn small" aria-label="Print imported original" @click="originalId && emit('printOriginal',{documentId:originalId,filename})"><Printer :size="16"/></button></div>
 
     <p v-if="loading" role="status">Opening {{artifactLabel}}…</p>
     <p v-if="error || renderError" class="error-msg" role="alert">{{artifactLabel}} could not be displayed. {{error || renderError}} <button class="btn secondary small" :disabled="engineBlocked" @click="load(true)">Retry review</button></p>
     <p v-if="readingPositionError && !engineBlocked" class="export-review-status" role="status">{{readingPositionError}}</p>
-    <template v-if="pdf">        <PdfReaderControls :page="pageNumber" :count="pdf.numPages" :scale="scale" v-model:zoom="zoom" v-model:mode="mode" :busy="loading" :can-back="!!history.length" :page-label="originalId ? 'Original source page number' : 'PDF page number'" @update:page="navigate" @back="back"><template #actions><button v-if="generated" ref="focusButton" class="icon-btn small" :aria-label="focusedReading ? 'Exit focused reading' : 'Focused reading'" :aria-pressed="focusedReading" @click="toggleFocus"><Focus :size="16"/></button><button class="icon-btn small" aria-label="Search artifact" :aria-expanded="searchOpen" @click="showSearch"><Search :size="16"/></button><button class="icon-btn small" :aria-expanded="navigationOpen && !focusedReading" aria-controls="artifact-navigation" :aria-label="originalId ? 'Pages' : 'PDF bookmarks'" @click="navigationOpen=!navigationOpen;focusedReading=false"><LayoutGrid :size="16"/></button><button class="icon-btn small reader-info-trigger" aria-label="Artifact information" :aria-expanded="infoOpen" @click="infoOpen=!infoOpen"><Info :size="16"/></button></template></PdfReaderControls></template>
+    <template v-if="pdf">        <PdfReaderControls :page="pageNumber" :count="pdf.numPages" :scale="scale" v-model:zoom="zoom" v-model:mode="mode" :busy="loading" :can-back="!!history.length" :page-label="originalId ? 'Original source page number' : 'PDF page number'" @update:page="navigate" @back="back"><template #actions><button v-if="generated" ref="focusButton" class="icon-btn small" :aria-label="focusedReading ? 'Exit focused reading' : 'Focused reading'" :aria-pressed="focusedReading" @click="toggleFocus"><Focus :size="16"/></button><button v-if="originalId" class="icon-btn small" aria-label="Rotate original view clockwise" title="Rotate view; original unchanged" @click="viewRotation=(viewRotation+90)%360"><RotateCw :size="16"/></button><button class="icon-btn small" aria-label="Search artifact" :aria-expanded="searchOpen" @click="showSearch"><Search :size="16"/></button><button class="icon-btn small" :aria-expanded="navigationOpen && !focusedReading" aria-controls="artifact-navigation" :aria-label="originalId ? 'Pages' : 'PDF bookmarks'" @click="navigationOpen=!navigationOpen;focusedReading=false"><LayoutGrid :size="16"/></button><button v-if="originalId" class="icon-btn small" aria-label="Print imported original" @click="emit('printOriginal',{documentId:originalId,filename})"><Printer :size="16"/></button><button class="icon-btn small reader-info-trigger" aria-label="Artifact information" :aria-expanded="infoOpen" @click="infoOpen=!infoOpen"><Info :size="16"/></button></template></PdfReaderControls></template>
+    <div v-if="originalId && inPreparation" class="original-preservation-banner"><div><strong>Imported original is read-only</strong><span>Changes are made to a separate working copy.</span></div><button class="btn primary small" @click="emit('artifact','working')">Open working copy</button></div>
+    <div v-if="originalImageUrl" class="original-image"><img :src="originalImageUrl" :alt="`Imported original ${filename}`"/><p>Original image · The working PDF is a converted copy.</p></div>
     <div v-if="generated && pdf" class="generated-page-context"><span>{{sourceRow ? `Volume ${sourceRow.volume} · Printed ${printedLabel}` : 'Generated front matter'}} · {{filename==='combined.pdf'?'Combined':'Physical'}} {{pageNumber}}</span><button v-if="sourceRow" class="text-tool" @click="viewSource">View source: {{sourceRow.title}}</button></div>
     <div v-if="pdf" class="export-review-content" :class="{'navigation-open':navigationOpen && !focusedReading}">
       <aside v-if="infoOpen && !focusedReading" class="artifact-info-panel" aria-label="Artifact information"><h3>{{originalId?'Original file':'Generated file'}}</h3><p>Read only</p><strong>{{filename}}</strong><template v-if="originalInfo"><h4>Pages</h4><p>{{originalInfo.page_count}} original source pages</p><h4>Preservation</h4><p>Source file unchanged. Edits belong to the separate working copy.</p><h4>SHA-256</h4><code>{{originalInfo.sha256}}</code></template><template v-else><h4>Build</h4><p>{{exportId}}</p><p>Source, printed and combined page positions are separate.</p></template><button v-if="artifactOptions" class="btn primary small" @click="emit('artifact','working')">Open Working Copy</button></aside>
@@ -181,7 +187,7 @@ onBeforeUnmount(()=>{remember();generation++;if(originalImageUrl.value)URL.revok
         <div v-show="searchOpen && !focusedReading" class="export-search" role="search" :aria-label="originalId ? 'Find in imported original' : 'Find in generated PDF'"><input ref="findInput" v-model="query" type="search" :aria-label="originalId ? 'Find text in imported original' : 'Find text in generated PDF'" placeholder="Find text in this PDF" @keydown.enter.prevent="nextMatch($event.shiftKey?-1:1)"/><span role="status">{{searching?'Searching…':query?`${matches.length}${truncated?'+':''} match${matches.length===1?'':'es'}${matches.length?` · ${selectedIndex+1}/${matches.length}`:''}`:''}}</span><button class="icon-btn small" aria-label="Previous search result" :disabled="!matches.length" @click="nextMatch(-1)">↑</button><button class="icon-btn small" aria-label="Next search result" :disabled="!matches.length" @click="nextMatch(1)">↓</button></div>
         <p v-if="searchError" class="error-msg" role="status">{{searchError}}</p>
         <div v-if="searchOpen && !focusedReading && query && matches.length" class="export-search-results" :aria-label="originalId ? 'Original PDF search occurrences' : 'Generated PDF search occurrences'"><button v-for="match in matches" :key="match.index" :class="{active:match.index===selectedIndex}" @click="chooseMatch(match.index)">p{{match.page}} · {{match.snippet}}</button></div>
-        <PdfReaderViewport :horizontal-gutter="32" ref="viewport" :pdf="pdf" v-model:page="pageNumber" :zoom="zoom" :mode="mode" :matches="matches" :active-match-index="query?selectedIndex:-1" @ready="scale=$event.scale;renderError=''" @position="remember" @error="renderError=`Page ${pageNumber} is unavailable. ${engineBlocked ? 'Its data may not be loaded; reconnect and retry.' : $event}`" @internal-link="navigate" @external-link="emit('openExternalLink',$event)"/>
+        <PdfReaderViewport :horizontal-gutter="32" ref="viewport" :pdf="pdf" v-model:page="pageNumber" :zoom="zoom" :rotation="viewRotation" :mode="mode" :matches="matches" :active-match-index="query?selectedIndex:-1" @ready="scale=$event.scale;renderError=''" @position="remember" @error="renderError=`Page ${pageNumber} is unavailable. ${engineBlocked ? 'Its data may not be loaded; reconnect and retry.' : $event}`" @internal-link="navigate" @external-link="emit('openExternalLink',$event)"/>
 
       </div>
     </div>

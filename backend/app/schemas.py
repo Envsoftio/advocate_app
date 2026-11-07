@@ -271,6 +271,20 @@ class SignatureRiskAcknowledgement(BaseModel):
 class OcrRequest(SignatureRiskAcknowledgement):
     expected_revision: int | None = Field(default=None, ge=1)
     language: Literal['eng', 'hin', 'eng+hin'] = 'eng'
+    page_index: int | None = Field(default=None, ge=0, strict=True)
+
+
+class OcrReviewAccept(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: int = Field(ge=1, strict=True)
+    page_index: int = Field(ge=0, strict=True)
+
+
+class OcrRerunRequest(SignatureRiskAcknowledgement):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: int = Field(ge=1, strict=True)
+    page_index: int = Field(ge=0, strict=True)
+    language: Literal['eng', 'hin', 'eng+hin'] = 'eng'
 
 
 class ReorderPages(SignatureRiskAcknowledgement):
@@ -764,6 +778,8 @@ class JobView(BaseModel):
     message: str
     error: str | None = None
     result: dict | None = None
+    created_at: str | None = None
+    started_at: str | None = None
 
 
 class Check(BaseModel):

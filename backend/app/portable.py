@@ -23,7 +23,7 @@ from .engine import load_profiles
 from .pdf_ops import ProcessingError, validate_overlay_image
 from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 17
+PACKAGE_VERSION = 18
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -47,7 +47,10 @@ def _validate_ocr_provenance(value: str) -> None:
                     not isinstance(run.get('applied_at'), str) or
                     type(run.get('applied_revision')) is not int or
                     type(run.get('pages_ocr_applied')) is not int or
-                    run['pages_ocr_applied'] < 1):
+                    run['pages_ocr_applied'] < 1 or
+                    (run.get('base_revision') is not None and
+                     (type(run['base_revision']) is not int or run['base_revision'] < 1)) or
+                    (run.get('rerun') is not None and type(run['rerun']) is not bool)):
                 raise ValueError
             hashes = run.get('model_sha256')
             if not isinstance(hashes, dict) or set(hashes) != set(run['language'].split('+')):
@@ -128,6 +131,9 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
         redactions = [dict(row) for row in con.execute('''SELECT r.* FROM redaction_records r
             JOIN documents d ON d.id=r.document_id WHERE d.matter_id=?
             ORDER BY r.created_at,r.id''', (matter_id,))]
+        ocr_reviews = [dict(row) for row in con.execute('''SELECT r.* FROM ocr_page_reviews r
+            JOIN documents d ON d.id=r.document_id WHERE d.matter_id=?
+            ORDER BY r.document_id,r.revision,r.page_index''', (matter_id,))]
     paths = {doc['source_relpath'] for doc in documents}
     paths.update(rev['working_relpath'] for rev in revisions)
     paths.update(doc['working_relpath'] for doc in documents)
@@ -151,6 +157,7 @@ def create_package(store: Store, matter_id: str, destination: Path) -> None:
     manifest = {'format': 'courtbundle-matter', 'version': PACKAGE_VERSION,
                 'created_at': utcnow(), 'matter': matter, 'documents': documents,
                 'revisions': revisions, 'redactions': redactions,
+                'ocr_page_reviews': ocr_reviews,
                 'membership_revision': store.bundle_membership(matter_id)['revision'],
                 'memo_parties': store.get_memo_parties(matter_id),
                 'matter_values': store.get_matter_values(matter_id),
@@ -253,6 +260,11 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
         documents = manifest['documents']
         revisions = manifest['revisions']
         redactions = manifest.get('redactions', [])
+        ocr_reviews = manifest.get('ocr_page_reviews', [])
+        if manifest['version'] >= 18 and 'ocr_page_reviews' not in manifest:
+            raise PortableMatterError('Missing OCR page reviews in v18 package')
+        if not isinstance(ocr_reviews, list) or len(ocr_reviews) > 100000:
+            raise PortableMatterError('Invalid OCR page reviews')
         if manifest['version'] >= 13 and not isinstance(redactions, list):
             raise PortableMatterError('Invalid redaction records')
         validated_matter = MatterCreate.model_validate(matter)
@@ -377,6 +389,20 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
             raise PortableMatterError('Duplicate manual bookmark IDs')
         revision_pages = {(rev['document_id'], rev['revision']): rev['page_count']
                           for rev in revisions}
+        review_keys = set()
+        for item in ocr_reviews:
+            try:
+                key = (item['document_id'], item['revision'], item['page_index'])
+                valid = (item['document_id'] in old_ids and
+                         type(item['revision']) is int and type(item['page_index']) is int and
+                         0 <= item['page_index'] < revision_pages.get((item['document_id'], item['revision']), 0) and
+                         isinstance(item['accepted_at'], str) and len(item['accepted_at']) <= 40)
+            except (KeyError, TypeError):
+                valid = False
+                key = None
+            if not valid or key in review_keys:
+                raise PortableMatterError('Invalid OCR page review reference')
+            review_keys.add(key)
         for index, item in enumerate(bookmarks):
             ManualBookmark.model_validate({key: item[key] for key in ('id', 'title',
                 'document_id', 'page_index', 'target_revision', 'parent_id')})
@@ -547,6 +573,11 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                      item['restore_x'], item['restore_y'], item['restore_width'], item['restore_height'],
                      item['before_revision'], item['after_revision'], item['active'],
                      item['removed_revision'], item['structure_changed'], item['created_at']))
+            for item in ocr_reviews:
+                con.execute('''INSERT INTO ocr_page_reviews
+                    (document_id,revision,page_index,accepted_at) VALUES (?,?,?,?)''',
+                    (id_map[item['document_id']], item['revision'],
+                     item['page_index'], item['accepted_at']))
             if manifest['memo_parties']:
                 con.execute('INSERT INTO memo_parties (matter_id,payload_json,updated_at) VALUES (?,?,?)',
                             (matter_id, json.dumps(manifest['memo_parties'], ensure_ascii=False), utcnow()))

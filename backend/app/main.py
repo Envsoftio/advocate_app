@@ -29,9 +29,9 @@ from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reo
                       rotate_page, delete_page, batch_page_operation, insert_pages, replace_pages, replace_document, crop_pages,
                       extract_pages, split_pages, add_text_overlay, editable_text_runs,
                       replace_text_run, move_text_run, permanently_redact_region, redaction_restore_footprint, restore_redacted_region, compress_pdf,
-                      ocr_pdf, ocr_provenance, make_cover_pdf, preview_output_marks,
+                      ocr_pdf, ocr_provenance, pdf_has_unsearchable_images, inspect_ocr_page, restore_page_for_ocr, make_cover_pdf, preview_output_marks,
                       validate_overlay_image, insert_working_image)
-from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, FilingReview, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
+from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, FilingReview, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, OcrReviewAccept, OcrRerunRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
 from .storage import Store, new_id, utcnow
 from . import metadata_review, supplements, variants
 from .schemas import SupplementalPlanRequest, AudienceVariantRequest
@@ -589,12 +589,13 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 finally:
                     raise
             name = Path(filename).name or 'Untitled'
+            needs_ocr = await asyncio.to_thread(pdf_has_unsearchable_images, target)
             item = dict(id=doc_id, matter_id=matter_id, title=Path(name).stem[:250],
                         kind='other', part=1, label='', label_status='unreviewed', bundle_included=int(included),
                         label_source='none', group_key='', group_role='member', page_count=pages,
                         document_date='', date_status='unknown', date_source='none', date_note='',
                         source_file_mtime=source_file_mtime,
-                        ocr_status='not_requested', original_name=name[:250],
+                        ocr_status='needs_ocr' if needs_ocr else 'not_requested', original_name=name[:250],
                         source_sha256=store.sha256(source), source_relpath=source_rel,
                         working_relpath=work_rel, **signature)
             return store.add_document(item)
@@ -1191,6 +1192,28 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             'Content-Disposition': f'inline; filename="{doc_id}-working-print.pdf"',
         })
 
+    @app.post('/documents/{doc_id}/original/print')
+    def printable_original_pdf(doc_id: str, payload: dict, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        path = store.original_path(doc)
+        if not path.is_file() or store.sha256(path) != doc['source_sha256']:
+            raise HTTPException(status_code=409, detail='Imported original is unavailable or its hash changed')
+        try:
+            with tempfile.TemporaryDirectory(prefix='matterdraft-original-print-') as directory:
+                source = path
+                if not doc['original_name'].lower().endswith('.pdf'):
+                    source = Path(directory) / 'original.pdf'
+                    normalize_to_pdf(path, source)
+                printable = print_copy(source, payload.get('pages', 'all'),
+                                       payload.get('orientation', 'source'),
+                                       payload.get('scale', 'fit'))
+        except (ProcessingError, RuntimeError, ValueError, TypeError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return Response(content=printable, media_type='application/pdf', headers={
+            'Cache-Control': 'no-store',
+            'Content-Disposition': f'inline; filename="{doc_id}-original-print.pdf"',
+        })
+
     @app.get('/documents/{doc_id}/thumbnail')
     def document_thumbnail(doc_id: str, revision: int, _: None = Depends(auth)):
         doc = doc_or_404(doc_id)
@@ -1666,8 +1689,11 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     def submit_ocr(doc: dict, job_id: str | None = None,
-                   acknowledge_signature_risk: bool = False, language: str = 'eng'):
+                   acknowledge_signature_risk: bool = False, language: str = 'eng',
+                   page_index: int | None = None):
         doc_id = doc['id']
+        if page_index is not None and page_index >= doc['page_count']:
+            raise HTTPException(status_code=422, detail='OCR page is outside the current working PDF')
         require_signature_acknowledgement([doc], acknowledge_signature_risk, 'running OCR')
         def task(job_id, progress, cancelled):
             with store.matter_lock(doc['matter_id']):
@@ -1683,16 +1709,19 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 try:
                     provenance = ocr_provenance(language)
                     copy_file(store.working_path(current), candidate)
-                    total, changed = ocr_pdf(candidate, language=language, progress=progress,
+                    total, changed = ocr_pdf(candidate, language=language, page_index=page_index, progress=progress,
                                              cancelled=cancelled)
                     if cancelled():
                         raise ProcessingError('Operation cancelled')
                     if changed:
+                        remaining_unsearchable = pdf_has_unsearchable_images(candidate)
                         previous_runs = json.loads(current['ocr_provenance_json'])
                         run = dict(provenance, pages_ocr_applied=changed,
-                                   applied_at=utcnow(), applied_revision=current['revision'] + 1)
+                                   requested_page_index=page_index,
+                                   applied_at=utcnow(), applied_revision=current['revision'] + 1,
+                                   base_revision=current['revision'])
                         store.update_document(doc_id, {'working_relpath': rel,
-                                                       'ocr_status': 'processed', 'page_count': total,
+                                                       'ocr_status': 'needs_ocr' if remaining_unsearchable else 'processed', 'page_count': total,
                                                        'ocr_provenance_json': json.dumps(
                                                            [*previous_runs, run], sort_keys=True)})
                         committed = True
@@ -1701,8 +1730,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 finally:
                     if not committed:
                         store.discard_uncommitted_working(doc_id, rel, candidate)
-                return {'document_id': doc_id, 'pages_checked': total,
+                return {'document_id': doc_id, 'pages_checked': total if page_index is None else 1,
                         'pages_ocr_applied': changed, 'language': language,
+                        'requested_page_index': page_index,
                         'provenance': run if changed else None}
         return jobs.submit(doc['matter_id'], 'ocr', task, target_id=doc_id, job_id=job_id)
 
@@ -1714,7 +1744,89 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             raise HTTPException(status_code=409, detail='Working revision changed before OCR submission')
         return submit_ocr(doc, acknowledge_signature_risk=(
             payload.acknowledge_signature_risk if payload else False),
-            language=payload.language if payload else 'eng')
+            language=payload.language if payload else 'eng',
+            page_index=payload.page_index if payload else None)
+
+    @app.get('/documents/{doc_id}/ocr-review')
+    def ocr_review(doc_id: str, page_index: int = Query(ge=0),
+                   revision: int = Query(ge=1), _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        if revision != doc['revision']:
+            raise HTTPException(status_code=409, detail='Working revision changed; reopen OCR review')
+        if page_index >= doc['page_count'] or doc['ocr_status'] != 'processed':
+            raise HTTPException(status_code=422, detail='This page is not ready for OCR review')
+        runs = json.loads(doc['ocr_provenance_json'])
+        language = runs[-1].get('language', 'eng') if runs else 'eng'
+        try:
+            with store.matter_lock(doc['matter_id']):
+                current = doc_or_404(doc_id)
+                if current['revision'] != revision:
+                    raise HTTPException(status_code=409, detail='Working revision changed; reopen OCR review')
+                measured = inspect_ocr_page(store.working_path(current), page_index, language)
+        except ProcessingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        accepted = store.get_ocr_page_review(doc_id, revision, page_index)
+        return {'document_id': doc_id, 'revision': revision, 'page_index': page_index,
+                'accepted_at': accepted['accepted_at'] if accepted else None,
+                'language': language,
+                'can_rerun': bool(runs and runs[-1].get('applied_revision') == revision and
+                                  runs[-1].get('requested_page_index') in (None, page_index)),
+                **measured}
+
+    @app.post('/documents/{doc_id}/ocr-review/accept')
+    def accept_ocr_review(doc_id: str, payload: OcrReviewAccept, _: None = Depends(auth)):
+        doc_or_404(doc_id)
+        try:
+            return store.accept_ocr_page_review(doc_id, payload.expected_revision, payload.page_index)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/ocr-rerun', status_code=202)
+    def rerun_ocr_page(doc_id: str, payload: OcrRerunRequest, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        if doc['revision'] != payload.expected_revision:
+            raise HTTPException(status_code=409, detail='Working revision changed; reopen OCR review')
+        if doc['ocr_status'] != 'processed' or payload.page_index >= doc['page_count']:
+            raise HTTPException(status_code=422, detail='This page is not ready for OCR rerun')
+        runs = json.loads(doc['ocr_provenance_json'])
+        last = runs[-1] if runs else {}
+        if last.get('applied_revision') != doc['revision'] or last.get('requested_page_index') not in (None, payload.page_index):
+            raise HTTPException(status_code=422, detail='Only a page from the latest OCR revision can be safely rerun')
+        require_signature_acknowledgement([doc], payload.acknowledge_signature_risk, 'rerunning OCR')
+        def task(job_id, progress, cancelled):
+            with store.matter_lock(doc['matter_id']):
+                current = doc_or_404(doc_id)
+                if current['revision'] != payload.expected_revision:
+                    raise ProcessingError('Working revision changed before OCR rerun')
+                base_revision = last.get('base_revision', current['revision'] - 1)
+                source = store.redaction_source_path(current, base_revision)
+                rel, candidate = store.next_working_path(current)
+                committed = False
+                try:
+                    copy_file(store.working_path(current), candidate)
+                    restore_page_for_ocr(candidate, source, payload.page_index)
+                    if cancelled():
+                        raise ProcessingError('Operation cancelled')
+                    total, changed = ocr_pdf(candidate, language=payload.language,
+                                             page_index=payload.page_index,
+                                             progress=progress, cancelled=cancelled)
+                    if not changed or cancelled():
+                        raise ProcessingError('Rerun produced no OCR text; prior working revision retained')
+                    remaining = pdf_has_unsearchable_images(candidate)
+                    run = dict(ocr_provenance(payload.language), pages_ocr_applied=changed,
+                               requested_page_index=payload.page_index, rerun=True,
+                               applied_at=utcnow(), applied_revision=current['revision'] + 1,
+                               base_revision=base_revision)
+                    store.update_document(doc_id, {'working_relpath': rel, 'page_count': total,
+                        'ocr_status': 'needs_ocr' if remaining else 'processed',
+                        'ocr_provenance_json': json.dumps([*runs, run], sort_keys=True)})
+                    committed = True
+                    return {'document_id': doc_id, 'page_index': payload.page_index,
+                            'provenance': run}
+                finally:
+                    if not committed:
+                        store.discard_uncommitted_working(doc_id, rel, candidate)
+        return jobs.submit(doc['matter_id'], 'ocr', task, target_id=doc_id)
 
     @app.post('/documents/{doc_id}/compress', status_code=202)
     def start_compression(doc_id: str, payload: CompressionRequest, _: None = Depends(auth)):

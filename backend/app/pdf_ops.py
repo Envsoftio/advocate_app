@@ -1,5 +1,6 @@
 from __future__ import annotations
 import io
+import csv
 import hashlib
 import math
 import os
@@ -941,7 +942,92 @@ def compress_pdf(path: Path, preset: str, progress=None, cancelled=None) -> dict
         candidate.unlink(missing_ok=True)
 
 
-def ocr_pdf(path: Path, *, language: str='eng', progress=None, cancelled=None) -> tuple[int, int]:
+def pdf_has_unsearchable_images(path: Path) -> bool:
+    """Identify source pages with image content but no searchable text."""
+    with open_pdf(path) as pdf:
+        return any(not page.get_text().strip() and bool(page.get_image_info()) for page in pdf)
+
+
+def inspect_ocr_page(path: Path, page_index: int, language: str = 'eng') -> dict:
+    """Measure OCR confidence from the visible page image, never infer verification.
+
+    The optional Tesseract executable supplies TSV confidence. The PDF remains
+    usable when that executable is unavailable in a target installation.
+    """
+    if language not in ('eng', 'hin', 'eng+hin'):
+        raise ProcessingError('Unsupported OCR language')
+    with open_pdf(path) as pdf:
+        if not 0 <= page_index < pdf.page_count:
+            raise ProcessingError('OCR review page is outside the current working PDF')
+        page = pdf[page_index]
+        pixels = math.ceil(page.rect.width * 240 / 72) * math.ceil(page.rect.height * 240 / 72)
+        if pixels > 40_000_000:
+            raise ProcessingError('OCR review page exceeds the 40-megapixel inspection limit')
+        pix = page.get_pixmap(dpi=240, colorspace=pymupdf.csRGB, alpha=False, annots=False)
+        image = pix.tobytes('png')
+        width, height = pix.width, pix.height
+    executable = shutil.which('tesseract')
+    if not executable:
+        return {'available': False, 'confidence': None, 'regions': [],
+                'message': 'Tesseract confidence analysis is unavailable on this device.'}
+    try:
+        result = subprocess.run([executable, 'stdin', 'stdout', '-l', language,
+                                 '--tessdata-dir', pymupdf.get_tessdata(),
+                                 '-c', 'tessedit_create_tsv=1'],
+                                input=image, capture_output=True, timeout=90, check=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProcessingError('Tesseract confidence analysis failed: ' + str(exc)) from exc
+    words = []
+    table = csv.DictReader(io.StringIO(result.stdout.decode('utf-8', errors='replace')), delimiter='\t')
+    if not table.fieldnames or not {'conf', 'text', 'left', 'top', 'width', 'height'} <= set(table.fieldnames):
+        raise ProcessingError('Tesseract did not return confidence data')
+    for row in table:
+        try:
+            confidence = float(row['conf'])
+            word = row['text'].strip()
+            if not word or confidence < 0:
+                continue
+            left, top, w, h = (int(row[key]) for key in ('left', 'top', 'width', 'height'))
+        except (KeyError, TypeError, ValueError):
+            continue
+        words.append({'text': word[:100], 'confidence': round(confidence, 1),
+                      'rect': [round(left / width, 4), round(top / height, 4),
+                               round(w / width, 4), round(h / height, 4)]})
+    mean = round(sum(item['confidence'] for item in words) / len(words), 1) if words else None
+    low = sorted((item for item in words if item['confidence'] < 75),
+                 key=lambda item: item['confidence'])[:25]
+    return {'available': True, 'confidence': mean, 'regions': low,
+            'message': 'Measured by a separate Tesseract pass on the visible page. Compare the embedded OCR text with the scan.'}
+
+
+def restore_page_for_ocr(path: Path, before_ocr: Path, page_index: int) -> None:
+    """Replace only the latest OCR page using its preserved pre-OCR revision.
+
+    Complex navigation is rejected: replacing a PDF page can change its object
+    identity even when its numeric source page remains the same.
+    """
+    with open_pdf(path) as current, open_pdf(before_ocr) as prior:
+        if current.page_count != prior.page_count or not 0 <= page_index < current.page_count:
+            raise ProcessingError('Page structure changed; this OCR page cannot be safely rerun')
+        if current.get_toc() or current.embfile_count() or current.is_form_pdf:
+            raise ProcessingError('This PDF has bookmarks, attachments or forms; page OCR rerun needs manual review')
+        for page in current:
+            if page.get_links():
+                raise ProcessingError('This PDF has links; page OCR rerun needs manual review')
+        if current[page_index].first_annot or prior[page_index].first_annot:
+            raise ProcessingError('This page has annotations; page OCR rerun needs manual review')
+        blocks = prior[page_index].get_text('dict')['blocks']
+        if any('glyphless' in span['font'].lower() for block in blocks if block.get('type') == 0
+               for line in block['lines'] for span in line['spans']):
+            raise ProcessingError('Pre-OCR source page already contains OCR text')
+        current.insert_pdf(prior, from_page=page_index, to_page=page_index,
+                           start_at=page_index, annots=True, links=False)
+        current.delete_page(page_index + 1)
+        replace_pdf_atomically(path, current)
+
+
+def ocr_pdf(path: Path, *, language: str='eng', page_index: int | None = None,
+            progress=None, cancelled=None) -> tuple[int, int]:
     """Add an invisible OCR layer while retaining original page content/navigation.
 
     Mixed pages are recognized too. Existing text regions are removed from the
@@ -950,7 +1036,10 @@ def ocr_pdf(path: Path, *, language: str='eng', progress=None, cancelled=None) -
     with open_pdf(path) as source:
         changed = 0
         total = source.page_count
-        for index in range(total):
+        if page_index is not None and not 0 <= page_index < total:
+            raise ProcessingError('OCR page is outside the current working PDF')
+        selected = range(total) if page_index is None else (page_index,)
+        for completed, index in enumerate(selected, start=1):
             if cancelled and cancelled():
                 raise ProcessingError('Operation cancelled')
             page = source[index]
@@ -1003,7 +1092,7 @@ def ocr_pdf(path: Path, *, language: str='eng', progress=None, cancelled=None) -
                 finally:
                     page.set_rotation(rotation)
             if progress:
-                progress(int((index + 1) / total * 95), f'OCR page {index + 1} of {total}')
+                progress(int(completed / len(selected) * 95), f'OCR page {index + 1} of {total}')
         if cancelled and cancelled():
             raise ProcessingError('Operation cancelled')
         if changed:

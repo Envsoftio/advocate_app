@@ -15,13 +15,14 @@ const props = withDefaults(defineProps<{
   pageNumber: number
   /** PDF.js viewport scale. Numeric 100% zoom is 96 / 72. */
   scale: number
+  rotation?: number
   /** Inactive pages retain their layout footprint but release their bitmap. */
   active?: boolean
   interactive?: boolean
   searchFragments?: PdfSearchFragment[]
   activeMatchIndex?: number
   maxRasterPixels?: number
-}>(), {active:true,interactive:true,searchFragments:() => [],activeMatchIndex:-1,maxRasterPixels:16_000_000})
+}>(), {active:true,interactive:true,rotation:0,searchFragments:() => [],activeMatchIndex:-1,maxRasterPixels:16_000_000})
 const emit = defineEmits<{
   ready: [value:PageReady]
   busy: [value:boolean]
@@ -186,7 +187,7 @@ async function renderSurface() {
     if (!isCurrent(call, pdf, pageNumber)) return
     ownedPage = page
     const scale = Number.isFinite(props.scale) && props.scale > 0 ? props.scale : 1
-    const viewport = page.getViewport({scale})
+    const viewport = page.getViewport({scale,rotation:(page.rotate+props.rotation)%360})
     if (!props.active) { width.value = viewport.width; height.value = viewport.height; return }
     const size = pdfRasterSize(viewport.width, viewport.height, window.devicePixelRatio || 1,props.maxRasterPixels)
     rasterRequest = {pdf,page:pageNumber,scale,width:size.width,height:size.height}
@@ -239,7 +240,7 @@ function scrollToMatch(index: number): boolean {
   pendingMatch = null
   return true
 }
-watch(() => [props.pdf,props.pageNumber,props.scale,props.active] as const, () => { void renderSurface() })
+watch(() => [props.pdf,props.pageNumber,props.scale,props.rotation,props.active] as const, () => { void renderSurface() })
 watch(() => props.maxRasterPixels, () => {
   const request = rasterRequest
   // A viewport budget change need not discard a sharp bitmap or its selectable
@@ -247,7 +248,7 @@ watch(() => props.maxRasterPixels, () => {
   // Before getPage resolves, renderSurface will read the latest budget itself.
   if (!request || !props.active || request.pdf !== props.pdf || request.page !== props.pageNumber ||
       request.scale !== props.scale || !ownedPage) return
-  const viewport = ownedPage.getViewport({scale:request.scale})
+  const viewport = ownedPage.getViewport({scale:request.scale,rotation:(ownedPage.rotate+props.rotation)%360})
   const size = pdfRasterSize(viewport.width,viewport.height,window.devicePixelRatio || 1,props.maxRasterPixels)
   if (size.width !== request.width || size.height !== request.height) void renderSurface()
 })

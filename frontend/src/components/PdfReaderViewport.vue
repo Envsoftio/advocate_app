@@ -6,8 +6,8 @@ import { pageAtOffset, readerScale, type ReaderMode, type ReaderPosition } from 
 import type { PdfSearchMatch } from '../lib/pdfSearch'
 
 const props = withDefaults(defineProps<{pdf:PDFDocumentProxy|null,page:number,zoom:string,mode:ReaderMode,
-  horizontalGutter?:number, interactive?:boolean, matches?:PdfSearchMatch[],activeMatchIndex?:number, surfaceClass?:Record<string,boolean>}>(),
-  {horizontalGutter:20,interactive:true,matches:()=>[],activeMatchIndex:-1})
+  horizontalGutter?:number, interactive?:boolean, matches?:PdfSearchMatch[],activeMatchIndex?:number, surfaceClass?:Record<string,boolean>,rotation?:number}>(),
+  {horizontalGutter:20,interactive:true,matches:()=>[],activeMatchIndex:-1,rotation:0})
 const emit = defineEmits<{'update:page':[number],position:[ReaderPosition], ready:[{page:number,scale:number,width:number,height:number}],
   error:[string], internalLink:[number], externalLink:[string], surfaceClick:[MouseEvent],
   surfacePointerdown:[PointerEvent],surfacePointermove:[PointerEvent],surfacePointerup:[PointerEvent],surfacePointercancel:[PointerEvent]}>()
@@ -123,7 +123,7 @@ function pageSize(document:PDFDocumentProxy, number:number) {
   let pending=pendingMeasurements.get(number)
   if (!pending) {
     pending=document.getPage(number).then(page=>{
-      const viewport=page.getViewport({scale:1})
+      const viewport=page.getViewport({scale:1,rotation:(page.rotate+props.rotation)%360})
       return {width:viewport.width,height:viewport.height}
     })
     pendingMeasurements.set(number,pending)
@@ -204,6 +204,7 @@ function getElement() { return surfaces.get(props.page)?.getElement() || null }
 function getScroller() { return scroller.value }
 async function scrollToMatch(index:number) { await nextTick(); surfaces.get(props.page)?.scrollToMatch(index) }
 watch(()=>props.pdf,()=>void loadSizes(),{immediate:true})
+watch(()=>props.rotation,()=>{pendingPosition=capture();void loadSizes()})
 watch(()=>[metadataDocument.value,props.page,visiblePages.value.join(',')],()=>{
   const call=generation
   // Jump targets bypass sequential metadata hydration. Until measured, their
@@ -245,7 +246,7 @@ defineExpose({getCanvas,getElement,getScroller,capture,restore,scrollToMatch,wai
     <div class="reader-page-stack" :style="{minWidth:`${maxWidth+horizontalGutter*2}px`}">
       <div v-if="topSpace" :style="{height:`${topSpace}px`}" aria-hidden="true"></div>
       <div v-for="number in visiblePages" :key="number" class="reader-page-frame" :data-reader-page="number" :aria-label="`PDF page ${number}`" :style="{height:`${metrics[number-1]?.renderHeight||0}px`,width:`${metrics[number-1]?.renderWidth||0}px`}">
-        <PdfPageSurface :ref="(value:any)=>{if(value)surfaces.set(number,value);else {surfaces.delete(number);rendered.delete(number)}}" :pdf="pageMeasured(number)?pdf:null" :page-number="number" :scale="metrics[number-1]?.scale||1" :interactive="interactive" :active="true" :max-raster-pixels="rasterBudget"
+        <PdfPageSurface :ref="(value:any)=>{if(value)surfaces.set(number,value);else {surfaces.delete(number);rendered.delete(number)}}" :pdf="pageMeasured(number)?pdf:null" :page-number="number" :scale="metrics[number-1]?.scale||1" :rotation="rotation" :interactive="interactive" :active="true" :max-raster-pixels="rasterBudget"
           :style="{width:`${metrics[number-1]?.renderWidth||0}px`,height:`${metrics[number-1]?.renderHeight||0}px`}" :class="number===page?surfaceClass:undefined" :search-fragments="fragments(number)" :active-match-index="activeMatchIndex"
           @ready="onReady" @error="surfaceError" @internal-link="emit('internalLink',$event)" @external-link="emit('externalLink',$event)"
           @click="surfaceEvent('surfaceClick',$event,number)" @pointerdown="surfaceEvent('surfacePointerdown',$event,number)" @pointermove="surfaceEvent('surfacePointermove',$event,number)" @pointerup="surfaceEvent('surfacePointerup',$event,number)" @pointercancel="surfaceEvent('surfacePointercancel',$event,number)">

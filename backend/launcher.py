@@ -59,6 +59,9 @@ def main():
         tessdata = Path(sys._MEIPASS) / 'tessdata'
         if tessdata.is_dir():
             os.environ['TESSDATA_PREFIX'] = str(tessdata)
+        ocr_tools = Path(sys._MEIPASS) / 'ocr-tools'
+        if ocr_tools.is_dir():
+            os.environ['PATH'] = str(ocr_tools) + os.pathsep + os.environ.get('PATH', '')
     import uvicorn
     from app.main import create_app
     config = uvicorn.Config(create_app(data_dir=args.data_dir), host='127.0.0.1', port=args.port,

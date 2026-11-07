@@ -98,6 +98,7 @@ import {
   downloadMatter,
   inTauri,
   printableExport,
+  printableOriginalPdf,
   printableWorkingPdf,
   restoreMatter,
   uploadDocument,
@@ -390,7 +391,7 @@ async function showPreparation() {
   fitDocumentsWorkspace();
   preparationListOpen.value = !compactDocuments.value;
   readerFocus.value = true;
-  detailsOpen.value = !compactDocuments.value;
+  detailsOpen.value = !compactDocuments.value && !['needs_ocr','processed'].includes(selectedDoc.value?.ocr_status || '');
   editorExpanded.value = false;
   await nextTick();
   fitDocumentsWorkspace();
@@ -403,8 +404,9 @@ async function closePreparationList() {
 async function selectPreparationDocument(id:string) {
   await openDocumentTab(id);
   if (selectedDocId.value !== id) return;
+  if (reviewingPdf.value) reviewingPdf.value = null;
   preparationMode.value = true;
-  detailsOpen.value = !compactDocuments.value;
+  detailsOpen.value = !compactDocuments.value && !['needs_ocr','processed'].includes(selectedDoc.value?.ocr_status || '');
 }
 function openEditor() {
   preparationMode.value = false;
@@ -634,6 +636,7 @@ const savingExport = ref(false);
 const printRequest = ref<
   | (
       | { kind: "export"; exportId: string; filename: string }
+      | { kind: "original"; documentId: string; filename: string }
       | {
           kind: "working";
           documentId: string;
@@ -2241,7 +2244,7 @@ async function refreshGuide() {
   await refreshHistory();
   await resumeAutosaveWhenClean();
 }
-async function startOcr(language: "eng" | "hin" | "eng+hin") {
+async function startOcr(language: "eng" | "hin" | "eng+hin", pageIndex?: number) {
   if (!selectedDoc.value || isJobActive.value) return;
   if (!(await guardArtifactTransition("OCR for the working copy"))) return;
   const signature = confirmSignatureTransformation([selectedDoc.value], "OCR");
@@ -2254,6 +2257,7 @@ async function startOcr(language: "eng" | "hin" | "eng+hin") {
         acknowledge_signature_risk: signature.acknowledged,
         expected_revision: selectedDoc.value.revision,
         language,
+        ...(pageIndex === undefined ? {} : {page_index: pageIndex}),
       },
     );
     watchJob(job);
@@ -2264,6 +2268,21 @@ async function startOcr(language: "eng" | "hin" | "eng+hin") {
   } catch (err) {
     issue(err);
   }
+}
+async function rerunOcrPage(pageIndex:number, language:'eng'|'hin'|'eng+hin') {
+  const document=selectedDoc.value
+  if(!document || isJobActive.value)return
+  if(!(await guardArtifactTransition('OCR rerun for the working copy')))return
+  const signature=confirmSignatureTransformation([document],'Rerun OCR on this page')
+  if(!signature.proceed)return
+  try {
+    const job=await api<Job>(`/documents/${document.id}/ocr-rerun`,'POST',{
+      expected_revision:document.revision,page_index:pageIndex,language,
+      acknowledge_signature_risk:signature.acknowledged,
+    })
+    watchJob(job)
+    notify('Rerunning OCR on the selected page. Review the new result.','info')
+  }catch(error){issue(error)}
 }
 async function validate(): Promise<PreflightCheck[]> {
   const id = currentMatterId.value;
@@ -2540,6 +2559,11 @@ function beginWorkingPrint(request: {
   printScale.value = "fit";
   printError.value = "";
 }
+function beginOriginalPrint(request:{documentId:string,filename:string}) {
+  clearPrintPreview()
+  printRequest.value={kind:'original',...request}
+  printPages.value='all';printOrientation.value='source';printScale.value='fit';printError.value=''
+}
 function closePrint() {
   clearPrintPreview();
   printRequest.value = null;
@@ -2557,20 +2581,11 @@ async function preparePrint() {
       scale: printScale.value,
     };
     const request = printRequest.value;
-    const file =
-      request.kind === "working"
-        ? await printableWorkingPdf(
-            request.documentId,
-            request.revision,
-            options,
-            request.acknowledged,
-          )
-        : await printableExport(
-            currentMatterId.value!,
-            request.exportId,
-            request.filename,
-            options,
-          );
+    const file = request.kind === 'working'
+      ? await printableWorkingPdf(request.documentId,request.revision,options,request.acknowledged)
+      : request.kind === 'original'
+        ? await printableOriginalPdf(request.documentId,options)
+        : await printableExport(currentMatterId.value!,request.exportId,request.filename,options);
     printPreviewUrl.value = URL.createObjectURL(file);
   } catch (err) {
     printError.value = friendlyError(err);
@@ -3008,7 +3023,7 @@ watch(sidebarCollapsed, (collapsed) => {
         <span class="preparation-save-state"><CircleAlert v-if="tableDirty || documentDirty || settingsDirty || formattingDirty || membershipDirty || variantDirty" :size="14"/><CheckCircle2 v-else class="membership-saved-icon" :size="14"/>{{membershipDirty ? 'Unapplied changes' : (tableDirty || documentDirty || settingsDirty || formattingDirty || variantDirty) ? 'Unsaved changes' : 'Saved locally'}}</span>
         <button class="icon-btn small" aria-label="Undo last matter change" :disabled="!matterContext || membershipOpen || engineBlocked || busy || pdfViewer?.historyBusy || !history.can_undo" :title="undoDescription" @click="traverseHistory('undo')"><Undo2 :size="16"/></button>
         <button class="icon-btn small" aria-label="Redo last matter change" :disabled="!matterContext || membershipOpen || engineBlocked || busy || pdfViewer?.historyBusy || !history.can_redo" :title="redoDescription" @click="traverseHistory('redo')"><Redo2 :size="16"/></button>
-        <span class="preparation-engine"><CheckCircle2 :size="14"/>{{apiStatus==='connecting'?'Connecting…':engineBlocked?'Engine disconnected':'Engine connected'}}</span>
+        <span class="preparation-engine"><CheckCircle2 :size="14"/>{{apiStatus==='connecting'?'Connecting…':engineBlocked?'Engine disconnected':isJobActive?'Engine busy':'Engine connected'}}</span>
       </div>
 
       <div
@@ -3018,21 +3033,23 @@ watch(sidebarCollapsed, (collapsed) => {
       >
         <section
           class="vault-card tab-discard-dialog"
+          :class="{'batch-review-guard':documentTableOpen && tableDirty}"
           @keydown.tab="trapNavigationFocus"
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="tab-discard-title"
           aria-describedby="tab-discard-message"
         >
-          <h2 id="tab-discard-title">Unsaved work in this tab</h2>
-          <p id="tab-discard-message">{{ tabDiscardRequest.message }}</p>
+          <Info v-if="documentTableOpen && tableDirty" class="batch-review-guard-icon" :size="24" aria-hidden="true"/>
+          <h2 id="tab-discard-title">{{documentTableOpen && tableDirty ? 'Save changes before leaving?' : 'Unsaved work in this tab'}}</h2>
+          <p id="tab-discard-message">{{documentTableOpen && tableDirty ? `${documentTablePanel?.pendingCount() || 1} metadata ${documentTablePanel?.pendingCount() === 1 ? 'edit has' : 'edits have'} not been saved. Save ${documentTablePanel?.pendingCount() === 1 ? 'it' : 'them'} to this matter, discard ${documentTablePanel?.pendingCount() === 1 ? 'it' : 'them'}, or stay in batch review.` : tabDiscardRequest.message}}</p>
           <p v-if="navigationError" role="alert" class="error-msg">{{navigationError}}</p>
           <p v-if="!tabDiscardRequest.canSave" class="hint">Activate each inactive tab to save its retained draft before closing these tabs.</p>
           <div class="tab-discard-actions">
-            <button class="btn secondary" :disabled="navigationSaving" @click="answerTabDiscard(false)">
-              Keep editing</button
-            ><button class="btn danger" :disabled="navigationSaving" @click="answerTabDiscard(true)">
-              Discard changes
+            <button class="btn secondary" :aria-label="documentTableOpen && tableDirty ? 'Keep editing' : undefined" :disabled="navigationSaving" @click="answerTabDiscard(false)">
+              {{documentTableOpen && tableDirty ? 'Cancel' : 'Keep editing'}}</button
+            ><button class="btn danger" :aria-label="documentTableOpen && tableDirty ? 'Discard changes' : undefined" :disabled="navigationSaving" @click="answerTabDiscard(true)">
+              {{documentTableOpen && tableDirty ? 'Discard' : 'Discard changes'}}
             </button><button class="btn primary" :disabled="engineBlocked || navigationSaving || busy || !tabDiscardRequest.canSave" @click="saveBeforeNavigation">{{navigationSaving ? 'Saving…' : 'Save changes'}}</button>
           </div>
         </section>
@@ -3502,6 +3519,7 @@ watch(sidebarCollapsed, (collapsed) => {
                   @toggle-focus="readerFocus = !readerFocus"
                   :document="selectedDoc"
                   :documents="docs"
+                  :ocr-job="activeJob"
                   :busy="busy || isJobActive"
                   :disabled="engineBlocked || busy || isJobActive || documentDirty"
                   :can-undo="history.can_undo"
@@ -3527,6 +3545,9 @@ watch(sidebarCollapsed, (collapsed) => {
                   @open-bookmarks="showView('index')"
                   @toggle-details="toggleDocumentDetails"
                   @ocr="startOcr"
+                  @ocr-page="(pageIndex, language) => startOcr(language, pageIndex)"
+                  @ocr-rerun="rerunOcrPage"
+                  @cancel-ocr="cancelJob"
                   @archive-document="deleteDocument"
                   @open-internal-link="openSearchMatch"
                   @open-external-link="openReviewedExternalLink"
@@ -3671,7 +3692,7 @@ watch(sidebarCollapsed, (collapsed) => {
                       /></label>
                     </div>
                     <label class="field preparation-notes">Notes<textarea v-model="docEditor.notes" aria-label="Document notes" maxlength="2000" rows="3"/></label>
-                    <div v-if="preparationVisible" class="preparation-ocr-status"><strong>OCR / PROCESSING</strong><span><CheckCircle2 v-if="selectedDoc.ocr_status==='native_text'" :size="16"/><CircleAlert v-else-if="selectedDoc.ocr_status==='needs_ocr'" :size="16"/><Info v-else :size="16"/>{{selectedDoc.ocr_status==='native_text'?'Searchable text available':selectedDoc.ocr_status==='needs_ocr'?'OCR required':selectedDoc.ocr_status==='not_requested'?'Text status not assessed':selectedDoc.ocr_status.split('_').join(' ')}}</span></div>
+                    <div v-if="preparationVisible" class="preparation-ocr-status"><strong>OCR / PROCESSING</strong><span><CheckCircle2 v-if="selectedDoc.ocr_status==='native_text'" :size="16"/><CircleAlert v-else-if="selectedDoc.ocr_status==='needs_ocr'" :size="16"/><Info v-else :size="16"/>{{activeJob?.kind==='ocr' && activeJob.target_id===selectedDoc.id && isJobActive?'OCR processing':selectedDoc.ocr_status==='native_text'?'Searchable text available':selectedDoc.ocr_status==='needs_ocr'?'OCR required':selectedDoc.ocr_status==='processed'?'OCR review recommended':selectedDoc.ocr_status==='not_requested'?'Text status not assessed':selectedDoc.ocr_status.split('_').join(' ')}}</span></div>
                     <details class="metadata-signature-review" :open="!preparationVisible"><summary>{{ preparationVisible ? 'More document details' : 'Signature review' }}</summary>
                     <div
                       :class="[
@@ -4207,6 +4228,7 @@ watch(sidebarCollapsed, (collapsed) => {
       :export-id="reviewingPdf.exportId"
       :filename="reviewingPdf.filename"
       :original-id="reviewingPdf.originalId"
+      :in-preparation="preparationVisible && !!reviewingPdf.originalId"
       :artifact-options="selectedDoc ? artifactOptions : undefined"
       :manifest="exportsList.find(item=>item.id===reviewingPdf!.exportId)"
       @source="openGeneratedSource"
@@ -4219,6 +4241,7 @@ watch(sidebarCollapsed, (collapsed) => {
         exportsList.find((item) => item.id === reviewingPdf!.exportId)?.stale
       "
       @open-external-link="openReviewedExternalLink"
+      @print-original="beginOriginalPrint"
       @close="reviewingPdf = null"
     />
     <div v-if="printRequest" class="vault-restore-overlay" role="presentation">

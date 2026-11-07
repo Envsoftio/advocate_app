@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowLeft, Save, Shield, PanelLeft, CheckCircle2, Ellipsis, Maximize2, Minimize2, Archive, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, FilePlus2, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare, Eraser, Undo2, Redo2, X, Search, Square, Circle, Minus, ArrowUpRight, Check, CalendarDays, Printer, BookOpen, Info, Focus } from 'lucide-vue-next'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
-import type { MatterDocument, OutputMarkPreview, OutputMarks, PageAnnotation, ReviewedLink } from '../lib/types'
+import type { Job, MatterDocument, OutputMarkPreview, OutputMarks, PageAnnotation, ReviewedLink } from '../lib/types'
 import { ApiError, api, downloadWorkingPdf, inTauri, pageAnnotationAsset, pdfDocumentSource, uploadPageAnnotationImage } from '../lib/api'
 import { engineBlocked } from '../lib/engineConnection'
 import { friendlyError } from '../lib/format'
@@ -20,6 +20,7 @@ const readerPdf = pdfOwner.pdf
 const readerViewport = ref<InstanceType<typeof PdfReaderViewport> | null>(null)
 const readerMode = ref<ReaderMode>('single')
 const zoomChoice = ref('fit-width')
+const viewRotation = ref(0)
 const readingHistory = ref<ReaderPosition[]>([])
 type ReadPanel = 'search' | 'outline' | 'comments' | 'page-bookmarks' | 'information' | null
 const readPanel = ref<ReadPanel>(null)
@@ -67,12 +68,12 @@ async function toggleFocusedReading(event?: Event) {
     focusTrigger = event?.currentTarget instanceof HTMLElement ? event.currentTarget : window.document.activeElement as HTMLElement
     focusWasExpanded = !!props.expanded
     focusedReading.value = true
-    if (!props.expanded) emit('toggleExpanded')
+    if (!props.preparation && !props.expanded) emit('toggleExpanded')
     await nextTick()
-    viewerElement.value?.querySelector<HTMLButtonElement>('[aria-label="Exit focused reading"]')?.focus({preventScroll:true})
+    viewerElement.value?.querySelector<HTMLButtonElement>('.document-header [aria-label="Exit focused reading"]')?.focus({preventScroll:true})
   } else {
     focusedReading.value = false
-    if (!focusWasExpanded && props.expanded) emit('toggleExpanded')
+    if (!props.preparation && !focusWasExpanded && props.expanded) emit('toggleExpanded')
     await nextTick()
     ;(focusTrigger?.isConnected ? focusTrigger : viewerElement.value)?.focus({preventScroll:true})
   }
@@ -187,8 +188,8 @@ function tabKey(event:KeyboardEvent, category:EditorCategory) {
   ;(event.currentTarget as HTMLElement).parentElement?.querySelector<HTMLButtonElement>(`[data-category="${categories[index]}"]`)?.focus()
 }
 
-const props = defineProps<{ preparation?:boolean, artifactOptions?: Array<{value:string,label:string}>, expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], busy?: boolean, disabled?: boolean, canUndo?: boolean, canRedo?: boolean, undoLabel?: string | null, redoLabel?: string | null, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number, revision?:number} }>()
-const emit = defineEmits<{ openEditor:[], showDocumentList:[], browseDocuments: [], saveDetails: [], retryReader: [], artifact: [value:string], toggleExpanded: [], toggleFocus: [], modified: [], undo: [], redo: [], error: [message: string], pageTools: [], toggleDetails: [], openBookmarks: [], ocr: [language: 'eng' | 'hin' | 'eng+hin'], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string], printWorking: [request:{documentId:string,revision:number,title:string,acknowledged:boolean}] }>()
+const props = defineProps<{ preparation?:boolean, artifactOptions?: Array<{value:string,label:string}>, expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], ocrJob?: Job | null, busy?: boolean, disabled?: boolean, canUndo?: boolean, canRedo?: boolean, undoLabel?: string | null, redoLabel?: string | null, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number, revision?:number} }>()
+const emit = defineEmits<{ openEditor:[], showDocumentList:[], browseDocuments: [], saveDetails: [], retryReader: [], artifact: [value:string], toggleExpanded: [], toggleFocus: [], modified: [], undo: [], redo: [], error: [message: string], pageTools: [], toggleDetails: [], openBookmarks: [], ocr: [language: 'eng' | 'hin' | 'eng+hin'], ocrPage: [pageIndex:number,language:'eng'|'hin'|'eng+hin'], ocrRerun:[pageIndex:number,language:'eng'|'hin'|'eng+hin'], cancelOcr: [], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string], printWorking: [request:{documentId:string,revision:number,title:string,acknowledged:boolean}] }>()
 const undoDescription = computed(() => props.undoLabel
   ? `Undo: ${props.undoLabel}. Applies to the last change anywhere in this matter.`
   : 'Undo last matter change. No change available.')
@@ -196,8 +197,53 @@ const redoDescription = computed(() => props.redoLabel
   ? `Redo: ${props.redoLabel}. Restores the next undone change anywhere in this matter.`
   : 'Redo matter change. No change available.')
 const ocrLanguage = ref<'eng' | 'hin' | 'eng+hin'>('eng')
-const canvas = ref<HTMLCanvasElement | null>(null)
+const dismissedOcrPrompt = ref('')
+const activeOcrJob = computed(() => props.ocrJob?.kind === 'ocr' && props.ocrJob.target_id === props.document?.id && ['queued','running'].includes(props.ocrJob.status) ? props.ocrJob : null)
+const needsOcrPrompt = computed(() => props.preparation && !!props.document &&
+  props.document.ocr_status === 'needs_ocr' &&
+  !activeOcrJob.value && dismissedOcrPrompt.value !== `${props.document.id}:${props.document.revision}`)
+const needsOcrReview = computed(() => props.preparation && props.document?.ocr_status === 'processed' && !activeOcrJob.value)
 const current = ref(1)
+type OcrReview = {document_id:string,revision:number,page_index:number,available:boolean,confidence:number|null,
+  regions:Array<{text:string,confidence:number,rect:number[]}>,message:string,accepted_at:string|null,
+  language:'eng'|'hin'|'eng+hin',can_rerun:boolean}
+const ocrReview = ref<OcrReview|null>(null)
+const ocrReviewBusy = ref(false)
+const ocrReviewError = ref('')
+let ocrReviewSequence = 0
+watch(() => [needsOcrReview.value,props.document?.id,props.document?.revision,current.value] as const, async () => {
+  const sequence=++ocrReviewSequence
+  ocrReview.value=null;ocrReviewError.value=''
+  if(!needsOcrReview.value || !props.document)return
+  try {
+    const result=await api<OcrReview>(`/documents/${props.document.id}/ocr-review?page_index=${current.value-1}&revision=${props.document.revision}`, 'GET', undefined, 120_000)
+    if(sequence===ocrReviewSequence)ocrReview.value=result
+  } catch(error) {if(sequence===ocrReviewSequence)ocrReviewError.value=friendlyError(error)}
+},{immediate:true})
+async function acceptOcrReview() {
+  const document=props.document, review=ocrReview.value
+  if(!document || !review || ocrReviewBusy.value)return
+  ocrReviewBusy.value=true;ocrReviewError.value=''
+  try {
+    const result=await api<{accepted_at:string}>(`/documents/${document.id}/ocr-review/accept`,'POST',
+      {expected_revision:document.revision,page_index:current.value-1})
+    if(props.document?.id===document.id && props.document?.revision===document.revision && ocrReview.value===review)
+      ocrReview.value={...review,accepted_at:result.accepted_at}
+  }catch(error){ocrReviewError.value=friendlyError(error)}
+  finally{ocrReviewBusy.value=false}
+}
+const clockNow = ref(Date.now())
+let ocrClock:ReturnType<typeof setInterval>|null=null
+onMounted(()=>{ocrClock=setInterval(()=>clockNow.value=Date.now(),1000)})
+onBeforeUnmount(()=>{if(ocrClock)clearInterval(ocrClock)})
+const ocrElapsed = computed(()=>{
+  const started=activeOcrJob.value?.started_at
+  if(!started)return ''
+  const seconds=Math.max(0,Math.floor((clockNow.value-Date.parse(started))/1000))
+  if(!Number.isFinite(seconds))return ''
+  return `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`
+})
+const canvas = ref<HTMLCanvasElement | null>(null)
 const loading = ref(false)
 const editing = ref(false)
 const switchingPage = ref(false)
@@ -218,6 +264,7 @@ function toggleThumbnails() {
 type EditorCategory = 'read' | 'edit' | 'review' | 'stamps' | 'pages' | 'output' | 'ocr' | 'redact'
 const activeCategory = ref<EditorCategory>('read')
 watch(()=>props.preparation,preparing=>{
+  viewRotation.value=0
   if(preparing) { selectCategory('read');readPanel.value=null;focusedReading.value=false }
 })
 const findOpen = panelFlag('search')
@@ -1737,7 +1784,9 @@ async function applyReplacement() {
         <button v-if="!preparation" class="btn secondary small document-browser-trigger" aria-label="Browse documents" @click="emit('browseDocuments')"><ArrowLeft :size="16"/> Documents</button>
         <button v-if="preparation" class="icon-btn small preparation-list-toggle" aria-label="Toggle documents panel" title="Toggle documents panel" @click="emit('showDocumentList')"><PanelLeft :size="16"/></button>
         <div class="toolbar-group reader-document"><div><strong :title="document.title">{{document.title}}</strong><div class="document-version-line"><select v-if="artifactOptions" class="artifact-select" aria-label="Document version" value="working" :disabled="editing || loading" @change="emit('artifact',($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value='working'"><option v-for="option in artifactOptions" :key="option.value" :value="option.value">{{preparation && option.value==='working' ? 'Working Copy' : option.label}}</option></select><span v-else>Working Copy · Editable</span><span class="document-revision">Revision {{document.revision}} · {{preparation ? 'Original preserved' : `${document.page_count} source pages`}}</span></div></div></div>
-        <template v-if="preparation"><button class="btn secondary small open-editor" @click="emit('openEditor')">Open editor</button><button class="icon-btn small" aria-label="Document details" :aria-expanded="!!detailsOpen" aria-controls="document-details-panel" title="Document details" @click="emit('toggleDetails')"><PanelRightOpen :size="16"/></button></template>
+        <template v-if="preparation && !focusedReading"><button class="btn secondary small open-editor" @click="emit('openEditor')">Open editor</button><button class="icon-btn small" aria-label="Document details" :aria-expanded="!!detailsOpen" aria-controls="document-details-panel" title="Document details" @click="emit('toggleDetails')"><PanelRightOpen :size="16"/></button></template>
+        <button v-if="preparation && !focusedReading" class="icon-btn small" aria-label="Focused reading" title="Focused reading" @click="toggleFocusedReading"><Maximize2 :size="16"/></button>
+        <button v-if="focusedReading" class="btn secondary small" aria-label="Exit focused reading" @click="toggleFocusedReading"><Minimize2 :size="16"/> Exit focus</button>
         <span v-if="!preparation" class="document-save-state" role="status"><CheckCircle2 v-if="!hasPendingDraft() && !detailsDirty && !editing && !headerSaving" :size="14"/>{{editing || headerSaving ? 'Saving…' : hasPendingDraft() || detailsDirty ? 'Unsaved changes' : 'Saved locally'}}</span>
         <button v-if="!preparation" class="btn primary small document-save" :disabled="busy || headerSaving || engineBlocked || editing || loading || (!detailsDirty && (!hasPendingDraft() || disabled))" @click="detailsDirty ? emit('saveDetails') : saveHeaderDraft()"><Save :size="15"/> Save</button>
       </div>
@@ -1763,7 +1812,7 @@ async function applyReplacement() {
         </div>
       </div>
       <div v-show="!focusedReading && !preparation && activeCategory!=='read'" id="pdf-tool-panel" class="page-editbar" role="tabpanel" :aria-labelledby="`pdf-tab-${activeCategory}`">
-        <div v-if="activeCategory==='ocr'" class="document-actionbar" role="group" aria-label="Document tools"><label for="ocr-language">OCR language</label><select id="ocr-language" v-model="ocrLanguage" :disabled="editing || loading || disabled"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr', ocrLanguage)"><ScanText :size="15"/> Run {{ocrLanguage==='eng'?'English':ocrLanguage==='hin'?'Hindi':'English + Hindi'}} OCR</button><span>Review recognized text before use.</span></div>
+        <div v-if="activeCategory==='ocr'" class="document-actionbar" role="group" aria-label="Document tools"><label for="ocr-language">OCR language</label><select id="ocr-language" v-model="ocrLanguage" :disabled="editing || loading || disabled"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr', ocrLanguage)"><ScanText :size="15"/> Run {{ocrLanguage==='eng'?'English':ocrLanguage==='hin'?'Hindi':'English + Hindi'}} OCR</button><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocrPage',current-1,ocrLanguage)">OCR current page if unprocessed</button><span>Review recognized text before use.</span></div>
         <div v-if="activeCategory==='edit'" class="editor-tool-group" role="group" aria-label="Edit PDF">
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="toggleTool('add-text')"><Type :size="15"/> Add text</button>
@@ -1815,7 +1864,11 @@ async function applyReplacement() {
       <p v-if="bookmarkNotice" class="page-bookmark-notice" role="status">{{bookmarkNotice}}</p>
       <Transition name="soft"><div v-if="detailsDirty" class="preview-draft-warning" role="status">Save document details to use PDF tools.<button v-if="!detailsOpen" class="text-tool" @click="emit('toggleDetails')">Open details</button></div></Transition>
 
-      <PdfReaderControls :compact="preparation" editing-tools :page="current" :count="total" v-model:zoom="zoomChoice" :scale="pageZoom" v-model:mode="readerMode" :busy="loading || editing" :can-back="!!readingHistory.length" @update:page="navigateToPage($event)" @back="goBack"><template #actions><button class="icon-btn small" aria-label="Search" title="Search document" :aria-expanded="findOpen" @click="showFind"><Search :size="16"/></button><button class="icon-btn small reader-info-trigger" aria-label="Document information" title="Document information" :aria-expanded="readPanel==='information'" @click="openReadPanel('information',$event)"><Info :size="16"/></button></template></PdfReaderControls>
+      <PdfReaderControls :compact="preparation" editing-tools :page="current" :count="total" v-model:zoom="zoomChoice" :scale="pageZoom" v-model:mode="readerMode" :busy="loading || editing" :can-back="!!readingHistory.length" @update:page="navigateToPage($event)" @back="goBack"><template #actions><button v-if="preparation" class="icon-btn small" aria-label="Rotate view clockwise" title="Rotate view clockwise; working PDF unchanged" @click="viewRotation=(viewRotation+90)%360"><RotateCw :size="16"/></button><button class="icon-btn small" aria-label="Search" title="Search document" :aria-expanded="findOpen" @click="showFind"><Search :size="16"/></button><button v-if="preparation" class="icon-btn small" aria-label="Print working copy" :disabled="disabled || editing || loading" @click="printWorkingCopy"><Printer :size="16"/></button><button class="icon-btn small reader-info-trigger" aria-label="Document information" title="Document information" :aria-expanded="readPanel==='information'" @click="openReadPanel('information',$event)"><Info :size="16"/></button></template></PdfReaderControls>
+      <section v-if="needsOcrPrompt" class="preparation-ocr-banner" role="status" aria-label="Scanned pages detected"><div><strong>Scanned pages detected</strong><span>Text search and selection may be unavailable. OCR can contain recognition errors.</span></div><button class="btn primary small" :disabled="disabled" @click="emit('ocr',ocrLanguage)">Run OCR</button><button class="btn secondary small" @click="dismissedOcrPrompt=`${document.id}:${document.revision}`">Continue without OCR</button></section>
+      <section v-else-if="activeOcrJob" class="preparation-ocr-banner processing" role="status" aria-label="OCR processing"><div><strong>OCR — {{document.original_name}}</strong><span>{{activeOcrJob.message}} · {{activeOcrJob.progress}}%</span><progress :value="activeOcrJob.progress" max="100">{{activeOcrJob.progress}}%</progress><span>{{ocrElapsed ? `Elapsed ${ocrElapsed} · ` : ''}}Running locally · You can browse other documents.</span></div><button class="btn secondary small" :disabled="activeOcrJob.status==='queued' && activeOcrJob.message==='Cancelling'" @click="emit('cancelOcr')">Cancel OCR</button></section>
+      <section v-else-if="needsOcrReview" class="preparation-ocr-banner review" role="status" aria-label="OCR review recommended"><div><strong>{{ocrReview?.accepted_at ? 'OCR page review accepted' : 'OCR completed · review recommended'}}</strong><span>{{ocrReview?.available ? (ocrReview.regions.length ? `${ocrReview.regions.length} low-confidence ${ocrReview.regions.length===1?'word needs':'words need'} attention on this page. Compare recognized text with the scan.` : 'No low-confidence words detected on this page. Compare recognized text with the scan.') : 'Compare recognized text against the scanned page before relying on it. Recognition accuracy has not been verified.'}}</span></div><button class="btn primary small" :disabled="!ocrReview || ocrReviewBusy || !!ocrReview.accepted_at" @click="acceptOcrReview">{{ocrReview?.accepted_at ? 'Review accepted' : 'Accept review'}}</button></section>
+      <aside v-if="needsOcrReview && !focusedReading" class="ocr-confidence-inspector" aria-label="OCR confidence inspector"><strong><ScanText :size="16"/> {{ocrReview?.confidence===null || !ocrReview?.available ? 'Recognition confidence unavailable' : `Recognition confidence · ${Math.round(ocrReview.confidence)}%`}}</strong><p v-if="ocrReview?.regions.length">Recognized: “{{ocrReview.regions[0].text}}”<br/>Compare with the scan before use.</p><p v-else>{{ocrReview?.message || 'Checking OCR confidence…'}}</p><button class="btn secondary small" :disabled="!ocrReview?.can_rerun || !!ocrReview?.accepted_at || disabled" @click="emit('ocrRerun',current-1,ocrReview!.language)">Rerun this page</button><p v-if="ocrReviewError" role="alert" class="error-msg">{{ocrReviewError}}</p></aside>
       <div class="viewer-edit-workspace" :class="{'has-tool-inspector':inspectorVisible,'expanded-pages':expanded,'has-read-panel':!!readPanel && !focusedReading, 'has-document-information':readPanel==='information' && !focusedReading}">
       <div v-show="!focusedReading && !preparation" class="reader-panel-tabs" aria-label="Reader panels">
         <button class="icon-btn small" :class="{active:thumbnailsVisible}" :aria-label="thumbnailsVisible?'Hide thumbnails':'Show thumbnails'" title="Pages" @click="toggleThumbnails"><PanelLeft :size="16"/></button>
@@ -1824,10 +1877,10 @@ async function applyReplacement() {
         <button class="icon-btn small" :class="{active:commentsOpen}" :aria-label="`Comments (${documentComments.length})`" title="Comments" @click="openReadPanel('comments',$event)"><MessageSquare :size="16"/></button>
         <button v-if="pageBookmarks.length" class="icon-btn small" :aria-label="`Page ${current} bookmarks${pageBookmarks.some(item=>!item.resolved)?' need review':''}`" @click="openReadPanel('page-bookmarks',$event)"><BookOpen :size="16"/></button>
       </div>
-      <PdfThumbnailRail v-if="!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading && (expanded || activeTool==='select' || activeCategory==='review')" :pdf="readerPdf" :count="total" :page="current" :title="document.title"
+      <PdfThumbnailRail v-if="(preparation && focusedReading && total > 0 && readPanel!=='search') || (!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading && (expanded || activeTool==='select' || activeCategory==='review'))" :pdf="readerPdf" :count="total" :page="current" :title="document.title" :search="preparation && focusedReading" @search="showFind"
         :disabled="disabled || editing || loading" :dragging-page="draggingPage" :drop-target-page="dropTargetPage" @select="navigateToPage($event)" @reorder="reorderThumbnailPage"
         @dragstart="startPageDrag" @dragover="overPage" @drop="dropPage" @dragend="draggingPage=null;dropTargetPage=null"/>
-      <aside v-if="readPanel && !focusedReading" ref="panelElement" id="pdf-read-panel" class="reader-side-panel" :class="{'document-information-panel':readPanel==='information'}" role="region" :aria-label="findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Source PDF outline' : commentsOpen ? 'Private review comments' : `Bookmarks on page ${current}`">
+      <aside v-if="readPanel && (!focusedReading || (preparation && readPanel==='search'))" ref="panelElement" id="pdf-read-panel" class="reader-side-panel" :class="{'document-information-panel':readPanel==='information'}" role="region" :aria-label="findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Source PDF outline' : commentsOpen ? 'Private review comments' : `Bookmarks on page ${current}`">
         <div class="reader-side-panel-heading"><strong>{{findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Document bookmarks' : commentsOpen ? `Comments (${documentComments.length})` : `Page ${current} bookmarks`}}</strong><button v-if="!findOpen" class="icon-btn small" :aria-label="readPanel==='information' ? 'Close document information' : outlineOpen ? 'Close PDF outline' : commentsOpen ? 'Close comments' : 'Close page bookmarks'" @click="closeReadPanel"><X :size="16"/></button></div>
       <div v-if="findOpen" class="pdf-findbar" role="search" aria-label="Find in working PDF">
         <Search :size="16" aria-hidden="true"/>
@@ -1949,7 +2002,7 @@ async function applyReplacement() {
       <div v-if="(loading || editing) && !(replacingText && editSnapshot)" class="preview-status" role="status"><LoaderCircle :size="18" class="spin"/> {{editing?'Updating PDF…':'Loading PDF…'}}</div>
       <div v-if="readingPositionError && !engineBlocked" class="preview-status error-msg" role="status">{{readingPositionError}}</div>
       <div v-if="viewerError" class="preview-status error-msg" role="alert">Page {{current}} unavailable. {{engineBlocked ? 'Its data may not be loaded. Reconnect, then retry this PDF.' : viewerError}} <button class="btn secondary small" :disabled="engineBlocked" @click="emit('retryReader')">Retry PDF</button></div>
-      <PdfReaderViewport :horizontal-gutter="32" ref="readerViewport" :pdf="readerPdf" v-model:page="current" :zoom="zoomChoice" :mode="activeTool==='select'?readerMode:'single'" :interactive="activeTool==='select' && (!disabled || engineBlocked)" :matches="findOpen?findMatches:[]" :active-match-index="findOpen?findIndex:-1"
+      <PdfReaderViewport :horizontal-gutter="32" ref="readerViewport" :pdf="readerPdf" v-model:page="current" :zoom="zoomChoice" :rotation="viewRotation" :mode="activeTool==='select'?readerMode:'single'" :interactive="activeTool==='select' && (!disabled || engineBlocked)" :matches="findOpen?findMatches:[]" :active-match-index="findOpen?findIndex:-1"
         :surface-class="{'selecting-text':activeTool==='select' && (!disabled || engineBlocked),'placing-text':textMode && !disabled,'drawing-link':linkPanelOpen && !disabled,'drawing-annotation':annotationPanelOpen && !disabled,'drawing-redaction':redactionOpen && !disabled,'is-busy':(loading || editing) && !replacingText,'is-edit-refreshing':replacingText,'is-stale':!pageReady,'is-rotating':rotatingPage}"
         @position="rememberPosition" @ready="pageRendered" @error="viewerError=$event" @internal-link="navigateToPage($event)" @external-link="emit('openExternalLink',$event)"
         @surface-click="clickPageSurface" @surface-pointerdown="beginLinkRegion($event);beginAnnotationRegion($event);beginRedactionRegion($event)" @surface-pointermove="updateLinkRegion($event);updateAnnotationRegion($event);updateRedactionRegion($event)" @surface-pointerup="finishLinkRegion($event);finishAnnotationRegion($event);finishRedactionRegion($event)" @surface-pointercancel="finishLinkRegion($event);finishAnnotationRegion($event);finishRedactionRegion($event)">

@@ -305,6 +305,13 @@ export async function printableWorkingPdf(documentId: string, revision: number,
   return response.blob()
 }
 
+export async function printableOriginalPdf(documentId: string,
+    options: { pages: string, orientation: 'source' | 'portrait' | 'landscape', scale: 'fit' | 'actual' }): Promise<Blob> {
+  const response = await request(`/documents/${encodeURIComponent(documentId)}/original/print`,
+    { method:'POST', body:JSON.stringify(options), cache:'no-store' }, 5 * 60_000)
+  return response.blob()
+}
+
 export async function downloadProtectedPdf(matterId: string, exportId: string,
                                            filename: string, password: string): Promise<boolean> {
   requireEngine()

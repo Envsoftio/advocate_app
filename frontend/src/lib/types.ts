@@ -251,6 +251,7 @@ export interface Job {
   target_id?: string | null
   retry_job_id?: string | null
   created_at?: string
+  started_at?: string | null
   progress: number
   message: string
   error: string | null

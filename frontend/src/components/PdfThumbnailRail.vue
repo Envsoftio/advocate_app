@@ -3,9 +3,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import { pdfRasterSize } from '../lib/pdfSurface'
 
-const props = defineProps<{pdf:PDFDocumentProxy|null,count:number,page:number,title:string,disabled?:boolean,readOnly?:boolean,
+const props = defineProps<{pdf:PDFDocumentProxy|null,count:number,page:number,title:string,disabled?:boolean,readOnly?:boolean,search?:boolean,
   draggingPage:number|null,dropTargetPage:number|null}>()
 const emit = defineEmits<{select:[number],reorder:[source:number,target:number],
+  search:[],
   dragstart:[event:DragEvent,page:number],dragend:[],dragover:[event:DragEvent,page:number],drop:[event:DragEvent,page:number]}>()
 const rail = ref<HTMLDivElement|null>(null)
 const heading = ref<HTMLDivElement|null>(null)
@@ -169,7 +170,7 @@ onBeforeUnmount(() => {mounted=false;cancelRender();stopDragScroll();observer?.d
 <template>
   <div ref="rail" class="thumbnail-strip thumbnail-rail virtual-thumbnail-rail" role="navigation" aria-label="Page thumbnails"
     @scroll.passive="onScroll" @dragover="trackDrag" @dragleave="leaveDrag">
-    <div ref="heading" class="thumbnail-rail-heading"><span class="thumbnail-hint" :title="title">Pages</span><span>{{count}}</span></div>
+    <div ref="heading" class="thumbnail-rail-heading"><span class="thumbnail-hint" :title="title">Pages</span><button v-if="search" class="thumbnail-search" aria-label="Search pages" @click="emit('search')">Search</button><span v-else>{{count}}</span></div>
     <span class="thumbnail-keyboard-help">Use arrow keys to navigate pages. <template v-if="!readOnly">Alt plus up or down moves a page in the working copy.</template></span>
     <div class="thumbnail-rail-window" :style="{height:`${count*rowHeight}px`}">
       <button v-for="number in visiblePages" :key="number" :data-thumbnail-page="number" class="thumbnail-button"

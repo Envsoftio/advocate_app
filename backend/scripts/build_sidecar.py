@@ -48,6 +48,9 @@ def main():
         raise SystemExit('PDFium runtime is missing or unusable in this Python environment. '
                          'Install backend/requirements-dev.txt for this platform before building.') from exc
     tessdata = [locate_tessdata(language) for language in ('eng', 'hin')]
+    cli_source = os.getenv('TESSERACT_CLI_SOURCE') or shutil.which('tesseract')
+    if not cli_source or not Path(cli_source).is_file():
+        raise SystemExit('Tesseract executable is required for OCR confidence review. Set TESSERACT_CLI_SOURCE or install it on the build host.')
     addition = os.pathsep
     out = ROOT / '.build-sidecar'
     build_env = os.environ.copy()
@@ -59,6 +62,7 @@ def main():
            '--add-data', f'{BACKEND / "app" / "rules" / "profiles.json"}{addition}app/rules',
            '--add-data', f'{BACKEND / "app" / "assets" / "editable-draft-template.pptx"}{addition}app/assets',
            *(item for path in tessdata for item in ('--add-data', f'{path}{addition}tessdata')),
+           '--add-binary', f'{Path(cli_source).resolve()}{addition}ocr-tools',
            str(BACKEND / 'launcher.py')]
     print('Building native sidecar for', triple)
     subprocess.check_call(cmd, cwd=ROOT, env=build_env)

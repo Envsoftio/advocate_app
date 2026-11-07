@@ -133,6 +133,22 @@
 .preparation-ocr-status svg {color:var(--cb-muted)}
 .preparation-ocr-status svg.lucide-circle-check {color:var(--cb-success)}
 .preparation-ocr-status svg.lucide-circle-alert {color:var(--cb-warning)}
+.design-shell .preparation-ocr-banner {display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 16px;border-bottom:1px solid var(--cb-border);background:var(--cb-warningBg);color:var(--cb-text)}
+.design-shell .preparation-ocr-banner>div {display:grid;gap:3px;min-width:0;flex:1}
+.design-shell .preparation-ocr-banner strong {font-size:13px;font-weight:700}
+.design-shell .preparation-ocr-banner span {font-size:12px;color:var(--cb-muted)}
+.design-shell .preparation-ocr-banner.processing {background:var(--cb-infoBg)}
+.design-shell .preparation-ocr-banner.review {background:var(--cb-successBg)}
+.design-shell .preparation-ocr-banner progress {width:min(100%,420px);height:5px;accent-color:var(--cb-accent)}
+.vault-card.batch-review-guard {width:min(620px,calc(100vw - 32px));max-width:620px;height:320px;min-height:320px;padding:24px 24px 0;display:flex;flex-direction:column;gap:0;transform:translateY(-30px);border-radius:12px}
+.batch-review-guard-icon {flex:0 0 24px;color:var(--cb-link)}
+.batch-review-guard h2 {flex:0 0 54px;margin:14px 0 8px;font-size:20px;line-height:27px}
+.batch-review-guard #tab-discard-message {font-size:13px;line-height:20px}
+.batch-review-guard .tab-discard-actions {height:66px;min-height:66px;flex:0 0 66px;align-items:center;margin:auto -24px 0;padding:0 24px;border-top:1px solid var(--cb-border)}
+.batch-review-guard .tab-discard-actions .btn.danger {order:1;margin-right:auto}
+.batch-review-guard .tab-discard-actions .btn.secondary {order:2}
+.batch-review-guard .tab-discard-actions .btn.primary {order:3}
+@media (max-width:1024px) {.design-shell .preparation-ocr-banner {flex-wrap:wrap}.design-shell .preparation-ocr-banner>div {flex-basis:100%}}
 .design-shell[data-preparation=true] .metadata-signature-review {margin-top:28px}
 
 .inspector-save-footer {flex-shrink:0;padding:12px 16px;border-top:1px solid var(--cb-border);background:var(--cb-surface)}
@@ -157,12 +173,69 @@
 .app-shell.design-shell:has(.focused-reading)>.application-status {display:flex;grid-row:3}
 .app-shell.design-shell:has(.focused-reading)>.matter-rail {display:none}
 .app-shell.design-shell:has(.focused-reading)>.app-main {grid-column:1;grid-row:2}
+.design-shell .read-workspace.focused-reading>.reader-tool-navigation {display:none!important}
+.design-shell .read-workspace.focused-reading .viewer-edit-workspace {padding-top:4px}
 .design-shell .focused-reading>.reader-navigation {position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:24;height:36px;min-height:36px;gap:2px;padding:2px 6px;border:1px solid var(--cb-control-border);border-radius:8px;box-shadow:0 4px 12px #0002}
 .design-shell .focused-reading>.reader-navigation>* {display:none}
 .design-shell .focused-reading>.reader-navigation>:nth-child(-n+6) {display:flex}
 .design-shell .focused-reading>.reader-navigation>.icon-btn {width:24px;height:30px;min-height:30px}
 .design-shell .focused-reading>.reader-navigation .page-counter {min-width:110px;height:30px;border:0;padding:0}
 .design-shell .focused-reading>.reader-navigation .zoom-select {width:70px;flex-basis:70px;height:30px;min-height:30px;border:0}
+.design-shell[data-preparation=true] .export-review.preparation-original[open] {inset:116px 0 28px 344px;width:calc(100vw / var(--ui-scale) - 344px);height:calc(100dvh / var(--ui-scale) - 144px);z-index:24}
+.design-shell .preparation-original>.artifact-header>.btn:last-child,.design-shell .preparation-original>.artifact-modebar {display:none}
+.design-shell .preparation-original>.artifact-header>.btn:first-child {order:3;min-width:34px;width:34px;height:34px;font-size:0;padding:0}
+.design-shell .preparation-original>.artifact-header {padding-left:20px}
+.design-shell .preparation-original>.artifact-header .artifact-title select {background:var(--cb-selected);color:var(--cb-link)}
+.design-shell .preparation-original>.reader-navigation,.design-shell .preparation-original>.original-image-toolbar {height:44px;min-height:44px;flex:0 0 44px}
+.original-image-toolbar {display:flex;align-items:center;gap:24px;padding:0 16px;border-bottom:1px solid var(--cb-border);font-size:13px;font-weight:600;color:var(--cb-text)}
+.original-image-toolbar span+span {color:var(--cb-muted);font-weight:400}
+.original-preservation-banner {display:flex;align-items:center;gap:12px;flex:0 0 66px;min-height:66px;padding:10px 16px;background:var(--cb-infoBg);color:var(--cb-text)}
+.original-preservation-banner>div {display:grid;gap:4px;flex:1;min-width:0}
+.original-preservation-banner strong {font-size:13px}
+.original-preservation-banner span {font-size:12px;color:var(--cb-muted)}
+.design-shell .preparation-original .artifact-navigation {display:none}
+.design-shell .preparation-original .export-review-content {flex:1}
+.design-shell .preparation-original .original-image {flex:1;min-height:0;background:var(--cb-canvas);padding:24px 32px}
+.design-shell .preparation-original .original-image img {max-height:none}
+@media(max-width:1100px){.design-shell[data-preparation=true] .export-review.preparation-original[open] {inset:116px 0 28px 64px;width:calc(100vw / var(--ui-scale) - 64px)}}
+
+/* FLOW / 02 07A–07C: the source remains full width while OCR state changes. */
+.design-shell .preparation-preview:has(>.preparation-ocr-banner) {position:relative}
+.design-shell .preparation-preview>.preparation-ocr-banner:not(.processing) {flex:0 0 auto}
+.design-shell .preparation-preview>.preparation-ocr-banner:not(.processing):not(.review) {height:88px;min-height:88px}
+.design-shell .preparation-preview>.preparation-ocr-banner:not(.processing):not(.review) {display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:34px 34px;column-gap:12px;align-content:center}
+.design-shell .preparation-preview>.preparation-ocr-banner:not(.processing):not(.review)>div {grid-row:1/3}
+.design-shell .preparation-preview>.preparation-ocr-banner:not(.processing):not(.review)>.btn {grid-column:2;height:32px}
+.design-shell .preparation-preview>.preparation-ocr-banner.review {height:66px;min-height:66px}
+.design-shell .preparation-preview>.preparation-ocr-banner.processing {position:absolute;bottom:0;left:0;right:0;z-index:3;height:148px;min-height:148px;align-items:flex-start;padding:20px 24px;border-top:1px solid var(--cb-border);border-bottom:0;box-shadow:0 -4px 12px #0001}
+.design-shell .preparation-preview>.preparation-ocr-banner.processing>div {gap:14px}
+.design-shell .preparation-preview>.preparation-ocr-banner.processing progress {width:100%;max-width:none}
+.design-shell .preparation-preview>.preparation-ocr-banner.processing>.btn {align-self:flex-end}
+.design-shell .preparation-preview:has(>.preparation-ocr-banner.processing)>.viewer-edit-workspace {margin-bottom:148px}
+.design-shell:has(.preparation-ocr-banner.processing)>.toast {bottom:176px}
+.ocr-confidence-inspector {position:absolute;right:20px;top:396px;z-index:4;width:274px;min-height:174px;padding:16px;background:var(--cb-surface);border:1px solid var(--cb-border);border-radius:8px;box-shadow:0 8px 24px #0002;color:var(--cb-text);font-size:12px}
+.ocr-confidence-inspector strong {display:flex;align-items:center;gap:8px;font-size:12px}
+.ocr-confidence-inspector p {line-height:1.5;color:var(--cb-muted);margin:12px 0}
+.ocr-confidence-inspector .btn {height:32px}
+@media(max-width:750px){.ocr-confidence-inspector {right:8px;top:auto;bottom:16px;width:min(274px,calc(100% - 16px))}}
+
+/* 08A keeps the application chrome and uses the full-width reading rail. */
+:root .app-shell.design-shell[data-preparation=true]:has(.preparation-preview.focused-reading) {grid-template-columns:minmax(0,1fr);grid-template-rows:32px minmax(0,1fr) 28px}
+.app-shell.design-shell[data-preparation=true]:has(.preparation-preview.focused-reading)>.application-bar {grid-row:1}
+.app-shell.design-shell[data-preparation=true]:has(.preparation-preview.focused-reading)>.app-main {grid-column:1;grid-row:2;padding-top:84px}
+.app-shell.design-shell[data-preparation=true]:has(.preparation-preview.focused-reading)>.application-status {grid-row:3}
+.design-shell:has(.preparation-preview.focused-reading) .matter-rail,.design-shell:has(.preparation-preview.focused-reading) .document-navigator,.design-shell:has(.preparation-preview.focused-reading) .inspector-panel {display:none!important}
+.design-shell:has(.preparation-preview.focused-reading) .documents-workspace.preparation-workspace {width:100%;max-width:none}
+.design-shell:has(.preparation-preview.focused-reading) .documents-workspace.preparation-workspace>.preview-panel {width:100%;flex:1}
+.design-shell .preparation-preview.focused-reading>.document-header {padding-left:228px}
+.design-shell .preparation-preview.focused-reading>.preparation-ocr-banner {display:none}
+.design-shell .preparation-preview.focused-reading>.reader-navigation {position:relative;inset:auto;left:auto;bottom:auto;transform:none;z-index:1;width:auto;height:44px;min-height:44px;border:0;border-bottom:1px solid var(--cb-border);border-radius:0;box-shadow:none;padding:4px 12px 4px 220px}
+.design-shell .preparation-preview.focused-reading>.reader-navigation>* {display:flex}
+.design-shell .preparation-preview.focused-reading .viewer-edit-workspace {position:static;display:grid;grid-template-columns:208px minmax(0,1fr);grid-template-rows:minmax(0,1fr);padding:0}
+.design-shell .preparation-preview.focused-reading .viewer-edit-workspace>.virtual-thumbnail-rail {display:block;position:absolute;inset:0 auto 0 0;z-index:2;grid-column:1;grid-row:1;width:208px;height:100%;padding:0 24px;border-right:1px solid var(--cb-border);background:var(--cb-surface)}
+.design-shell .preparation-preview.focused-reading .viewer-edit-workspace>.reader-side-panel {position:absolute;inset:0 auto 0 0;z-index:2;grid-column:1;grid-row:1;width:208px;height:100%;border-right:1px solid var(--cb-border);background:var(--cb-surface)}
+.design-shell .preparation-preview.focused-reading .viewer-edit-workspace>.viewer-page-column {grid-column:2;grid-row:1}
+.design-shell .preparation-preview.focused-reading .thumbnail-search {border:0;background:transparent;color:var(--cb-link);font:inherit;cursor:pointer}
 
 .navigator-filters select {height:32px;min-height:32px}
 :root[data-effective-theme] .navigator-filters select {background:transparent}

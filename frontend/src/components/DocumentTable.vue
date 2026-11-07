@@ -62,7 +62,7 @@ async function save(){return suggestionsOpen.value?!!(await suggestionsRef.value
 async function openSuggestions(){closeBatchMenu();if(dirtyRows.value.length){loadError.value='Save or discard table changes before reviewing source suggestions.';return}reviewIds.value=selectedIds.value.length?[...selectedIds.value]:baseline.value.map(d=>d.id);suggestionsOpen.value=true}
 function closeSuggestions(){if(suggestionsDirty.value){emit('close');return}suggestionsOpen.value=false;void loadReview()}
 function escapeCell(doc:MatterDocument,event:KeyboardEvent){if(event.key==='Escape'){const d=baseline.value.find(d=>d.id===doc.id);if(d){drafts[d.id]={title:d.title,label:d.label,kind:d.kind,part:d.part,group_key:d.group_key,group_role:d.group_role,document_date:d.document_date,date_confirmed:d.date_status==='confirmed'}}}}
-defineExpose({save,discard,hasPendingDraft:()=>dirty.value,closeSuggestions:()=>{suggestionsOpen.value=false;void loadReview()},isSuggestionsOpen:()=>suggestionsOpen.value})
+defineExpose({save,discard,hasPendingDraft:()=>dirty.value,pendingCount:()=>dirtyRows.value.length,closeSuggestions:()=>{suggestionsOpen.value=false;void loadReview()},isSuggestionsOpen:()=>suggestionsOpen.value})
 
 const selectedIds = ref<string[]>([])
 const collapsedParts = ref<number[]>([])

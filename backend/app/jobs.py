@@ -42,7 +42,7 @@ class JobManager:
                     if self._store:
                         self._store.save_job(job)
                     return
-                job.update(status='running', message='Starting')
+                job.update(status='running', message='Starting', started_at=utcnow())
                 if self._store:
                     self._store.save_job(job)
             try:

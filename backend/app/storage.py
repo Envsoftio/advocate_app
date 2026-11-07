@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 24:
+            if version > 25:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -372,6 +372,39 @@ class Store:
                 if 'notes' not in columns:
                     con.execute("ALTER TABLE documents ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
                 con.execute('PRAGMA user_version=24')
+            con.execute('''CREATE TABLE IF NOT EXISTS ocr_page_reviews (
+                document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+                revision INTEGER NOT NULL, page_index INTEGER NOT NULL,
+                accepted_at TEXT NOT NULL,
+                PRIMARY KEY(document_id,revision,page_index)
+            )''')
+            if version < 25:
+                if 'started_at' not in {row['name'] for row in con.execute('PRAGMA table_info(jobs)')}:
+                    con.execute('ALTER TABLE jobs ADD COLUMN started_at TEXT')
+                con.execute('PRAGMA user_version=25')
+
+    def get_ocr_page_review(self, doc_id: str, revision: int, page_index: int) -> dict | None:
+        with self.connect() as con:
+            row = con.execute('''SELECT accepted_at FROM ocr_page_reviews
+                WHERE document_id=? AND revision=? AND page_index=?''',
+                (doc_id, revision, page_index)).fetchone()
+        return dict(row) if row else None
+
+    def accept_ocr_page_review(self, doc_id: str, revision: int, page_index: int) -> dict:
+        with self.connect() as con:
+            current = con.execute('SELECT revision,page_count,ocr_status FROM documents WHERE id=? AND archived_at IS NULL',
+                                  (doc_id,)).fetchone()
+            if current is None or current['revision'] != revision:
+                raise ValueError('Working revision changed; reopen OCR review')
+            if page_index < 0 or page_index >= current['page_count'] or current['ocr_status'] != 'processed':
+                raise ValueError('This page is not ready for OCR review')
+            accepted_at = utcnow()
+            con.execute('''INSERT INTO ocr_page_reviews (document_id,revision,page_index,accepted_at)
+                VALUES (?,?,?,?) ON CONFLICT(document_id,revision,page_index)
+                DO UPDATE SET accepted_at=excluded.accepted_at''',
+                (doc_id, revision, page_index, accepted_at))
+            return {'document_id': doc_id, 'revision': revision,
+                    'page_index': page_index, 'accepted_at': accepted_at}
 
     def list_redactions(self, doc_id: str, active_only: bool = True) -> list[dict]:
         with self.connect() as con:
@@ -1883,16 +1916,18 @@ class Store:
         with self.connect() as con:
             con.execute('''INSERT INTO jobs
                 (id,matter_id,kind,target_id,status,progress,message,error,result_json,
-                 retry_job_id,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                 retry_job_id,created_at,updated_at,started_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,progress=excluded.progress,message=excluded.message,
                 error=excluded.error,result_json=excluded.result_json,
-                retry_job_id=excluded.retry_job_id,updated_at=excluded.updated_at''',
+                retry_job_id=excluded.retry_job_id,updated_at=excluded.updated_at,
+                started_at=excluded.started_at''',
                 (job['id'], job['matter_id'], job['kind'], job.get('target_id'),
                  job['status'], job['progress'], job['message'], job.get('error'),
                  json.dumps(job.get('result')) if job.get('result') is not None else None,
-                 job.get('retry_job_id'), job.get('created_at', now), now))
+                 job.get('retry_job_id'), job.get('created_at', now), now,
+                 job.get('started_at')))
 
     @staticmethod
     def _job(row) -> dict:
