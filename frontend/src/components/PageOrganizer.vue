@@ -4,14 +4,14 @@ import { ArrowDown, ArrowUp, CheckSquare2, ChevronLeft, ChevronRight, GripVertic
 import * as pdfjs from 'pdfjs-dist'
 import workerSrc from '../lib/pdfWorker?worker&url'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
-import { api, ApiError, pdfDocumentSource } from '../lib/api'
+import { api, ApiError, pdfDocumentSource, replaceWorkingPagesFromFile } from '../lib/api'
 import { friendlyError } from '../lib/format'
 import { signatureRiskDocuments, signatureStatusLabel } from '../lib/signatures'
 import type { MatterDocument } from '../lib/types'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc
 const props = defineProps<{ document: MatterDocument, disabled?: boolean }>()
-const emit = defineEmits<{ close: [], modified: [], error: [message: string] }>()
+const emit = defineEmits<{ close: [], modified: [], error: [message: string], pageTools:[task:'insert'|'crop'|'extract', pages:number[], side?:'before'|'after'], reviewPageMap:[] }>()
 const dialog = ref<HTMLDialogElement | null>(null)
 const grid = ref<HTMLDivElement | null>(null)
 const confirmButton = ref<HTMLButtonElement | null>(null)
@@ -33,8 +33,17 @@ const dropBefore = ref<number | null>(null)
 const droppingAtEnd = ref(false)
 const thumbnailState = ref<Record<number, 'ready' | 'error'>>({})
 const signatureAcknowledged = ref(false)
-type Confirmation = { operation: 'rotate' | 'delete' | 'reorder', pages: number[], revision: number, degrees?: number, order?: number[] }
+type Confirmation = { operation: 'rotate' | 'delete' | 'reorder' | 'replace-file', pages: number[], revision: number, degrees?: number, order?: number[] }
 const confirmation = ref<Confirmation | null>(null)
+const signaturePrompt = ref<Confirmation | null>(null)
+const replaceFileOpen = ref(false)
+const replacementFile = ref<File | null>(null)
+const replacementPageCount = ref<number | null>(null)
+const replacementBusy = ref(false)
+const replacementError = ref('')
+const replacementInput = ref<HTMLInputElement | null>(null)
+const reviewMappingAfterReplacement = ref(true)
+const selectionOptionsOpen = ref(false)
 const pageCount = computed(() => currentDocument.value.page_count)
 const chunkCount = computed(() => Math.max(1, Math.ceil(pageCount.value / chunkSize)))
 const visiblePages = computed(() => order.value.slice(chunk.value * chunkSize, (chunk.value + 1) * chunkSize))
@@ -48,6 +57,7 @@ const actionLabel = computed(() => {
   const pending = confirmation.value
   if (!pending) return ''
   if (pending.operation === 'reorder') return 'Apply page order'
+  if (pending.operation === 'replace-file') return `Replace ${pending.pages.length} ${pending.pages.length === 1 ? 'page' : 'pages'}`
   return `${pending.operation === 'delete' ? 'Delete' : 'Rotate'} ${pending.pages.length} ${pending.pages.length === 1 ? 'page' : 'pages'}`
 })
 let pdf: PDFDocumentProxy | null = null
@@ -103,7 +113,7 @@ async function renderThumbnails() {
       page = await source.getPage(index + 1)
       if (sequence !== renderSequence || disposed || source !== pdf) return
       const initial = page.getViewport({ scale: 1 })
-      const scale = Math.min(176 / initial.width, 214 / initial.height)
+      const scale = Math.min(116 / initial.width, 124 / initial.height)
       const density = Math.min(window.devicePixelRatio || 1, 2)
       const viewport = page.getViewport({ scale: scale * density })
       canvas.width = Math.ceil(viewport.width)
@@ -142,6 +152,10 @@ async function loadDocument(document: MatterDocument) {
   selected.value = new Set()
   selectionAnchor.value = null
   confirmation.value = null
+  signaturePrompt.value = null
+  replaceFileOpen.value = false
+  replacementFile.value = null
+  replacementPageCount.value = null
   selectionError.value = ''
   rangeText.value = ''
   error.value = ''
@@ -203,6 +217,18 @@ function selectRanges() {
 
 function selectAll() { selected.value = new Set(order.value); selectionAnchor.value = null }
 function clearSelection() { selected.value = new Set(); selectionAnchor.value = null }
+async function openReplacementFile() {
+  replacementFile.value=null;replacementPageCount.value=null;replacementError.value='';reviewMappingAfterReplacement.value=true
+  replaceFileOpen.value=true
+  await nextTick()
+  dialog.value?.querySelector<HTMLButtonElement>('.organizer-file-choice button')?.focus()
+}
+function openTool(task:'insert'|'crop'|'extract', side?:'before'|'after') {
+  if (controlsLocked.value || !selected.value.size || orderChanged.value) return
+  emit('pageTools',task,[...selected.value].sort((a,b)=>a-b),side)
+  dialog.value?.close()
+  emit('close')
+}
 
 async function movePage(index: number, offset: number) {
   if (controlsLocked.value) return
@@ -243,12 +269,52 @@ async function reviewOperation(operation: Confirmation['operation'], degrees?: n
   if (controlsLocked.value) return
   const pages = operation === 'reorder' ? [...order.value] : [...selected.value].sort((a, b) => a - b)
   if (!pages.length || (operation === 'delete' && pages.length === pageCount.value)) return
-  confirmation.value = { operation, degrees, pages, revision: currentDocument.value.revision,
+  const pending: Confirmation = { operation, degrees, pages, revision: currentDocument.value.revision,
     ...(operation === 'reorder' ? { order: [...order.value] } : {}) }
   signatureAcknowledged.value = false
+  if (riskySignature.value) signaturePrompt.value = pending
+  else confirmation.value = pending
   error.value = ''
   await nextTick()
+  if (signaturePrompt.value)
+    dialog.value?.querySelector<HTMLButtonElement>('.organizer-signature-card button')?.focus()
+  else confirmButton.value?.focus()
+}
+
+async function continueAfterSignature() {
+  signatureAcknowledged.value=true
+  confirmation.value=signaturePrompt.value
+  signaturePrompt.value=null
+  await nextTick()
   confirmButton.value?.focus()
+}
+
+async function chooseReplacementFile(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  replacementFile.value = null
+  replacementPageCount.value = null
+  replacementError.value = ''
+  if (!file) return
+  if (!/\.(pdf|png|jpe?g)$/i.test(file.name) || file.size > 80 * 1024 * 1024) {
+    replacementError.value = 'Choose a PDF, PNG or JPEG up to 80 MB.'
+    return
+  }
+  replacementBusy.value = true
+  try {
+    if (/\.pdf$/i.test(file.name)) {
+      const task = pdfjs.getDocument({data: await file.arrayBuffer()})
+      try { replacementPageCount.value = (await task.promise).numPages }
+      finally { await task.destroy() }
+    } else replacementPageCount.value = 1
+    replacementFile.value = file
+  } catch (cause) { replacementError.value = 'Cannot read this file. Choose an unprotected PDF or image.' }
+  finally { replacementBusy.value = false }
+}
+
+function reviewFileReplacement() {
+  if (!replacementFile.value || replacementPageCount.value !== selected.value.size || controlsLocked.value) return
+  replaceFileOpen.value = false
+  void reviewOperation('replace-file')
 }
 
 async function applyOperation() {
@@ -257,6 +323,22 @@ async function applyOperation() {
   working.value = true
   error.value = ''
   try {
+    if (pending.operation === 'replace-file') {
+      if (!replacementFile.value) throw new Error('Choose a replacement file.')
+      const updated = await replaceWorkingPagesFromFile(currentDocument.value.id, replacementFile.value, {
+        target_pages: pending.pages, expected_revision: pending.revision,
+        acknowledge_signature_risk: signatureAcknowledged.value,
+      })
+      notice.value = `${pending.pages.length} working ${pending.pages.length===1?'page':'pages'} replaced. Undo restores this action.`
+      await loadDocument(updated)
+      emit('modified')
+      if (reviewMappingAfterReplacement.value) {
+        dialog.value?.close()
+        emit('close')
+        emit('reviewPageMap')
+      }
+      return
+    }
     const body = { expected_revision: pending.revision, acknowledge_signature_risk: signatureAcknowledged.value,
       ...(pending.operation === 'reorder' ? { order: pending.order } :
         { operation: pending.operation, pages: pending.pages, ...(pending.degrees ? { degrees: pending.degrees } : {}) }) }
@@ -311,13 +393,13 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <dialog ref="dialog" class="page-organizer" aria-labelledby="organizer-title" aria-describedby="organizer-description" @keydown.stop @cancel.prevent="requestClose">
+    <dialog ref="dialog" class="page-organizer" aria-label="Organize pages" aria-describedby="organizer-description" @keydown.stop @cancel.prevent="requestClose">
       <header class="organizer-heading">
-        <div><span class="organizer-eyebrow">WORKING COPY · REVISION {{currentDocument.revision}}</span><h2 id="organizer-title">Organize pages</h2><p class="organizer-document">{{currentDocument.title}}</p></div>
+        <div><h2 id="organizer-title">{{currentDocument.original_name}}</h2><p class="organizer-document">Revision {{currentDocument.revision}} · {{selected.size}} {{selected.size===1?'page':'pages'}} selected · Imported original preserved</p></div>
         <button class="icon-btn" aria-label="Close page organizer" :disabled="working" @click="requestClose"><X :size="20"/></button>
       </header>
-      <p id="organizer-description" class="organizer-description">Select pages to rotate or delete. Drag a page to a marked position, or use its arrow buttons to preview a new order. Page numbers refer to this working PDF.</p>
-      <div class="organizer-selection">
+      <p id="organizer-description" class="organizer-description">Drag selected pages to reorder. Shift-click selects a range.</p>
+      <div v-show="selectionOptionsOpen" class="organizer-selection">
         <div class="organizer-selection-actions"><strong aria-live="polite">{{selected.size}} of {{pageCount}} selected</strong><button class="btn secondary small" :disabled="controlsLocked" @click="selectAll"><CheckSquare2 :size="15"/>Select all</button><button class="btn secondary small" :disabled="controlsLocked || !selected.size" @click="clearSelection">Clear</button><span class="organizer-hint">Shift-click selects a range.</span></div>
         <form class="organizer-ranges" @submit.prevent="selectRanges"><label for="organizer-ranges">Select page ranges</label><input id="organizer-ranges" v-model="rangeText" placeholder="1, 3–5" :disabled="controlsLocked" aria-describedby="organizer-range-help"/><button class="btn secondary small" :disabled="controlsLocked || !rangeText.trim()">Select ranges</button></form>
         <span id="organizer-range-help" class="organizer-hint">Ranges replace the current selection. Selections remain when you browse the grid.</span>
@@ -325,20 +407,19 @@ onBeforeUnmount(() => {
         <p v-if="selected.size" class="organizer-selected-pages">Selected pages: {{selectionLabel}}</p>
       </div>
       <div class="organizer-toolbar">
+        <button class="btn secondary small" :aria-expanded="selectionOptionsOpen" @click="selectionOptionsOpen=!selectionOptionsOpen">Selection options</button>
         <button class="btn secondary small" :disabled="controlsLocked || !selected.size || orderChanged" @click="reviewOperation('rotate',270)"><RotateCcw :size="16"/>Rotate left</button>
         <button class="btn secondary small" :disabled="controlsLocked || !selected.size || orderChanged" @click="reviewOperation('rotate',90)"><RotateCw :size="16"/>Rotate right</button>
+        <button class="btn secondary small" :disabled="controlsLocked || !selected.size || orderChanged" @click="openTool('crop')">Crop</button>
         <button class="btn secondary small organizer-delete" :disabled="controlsLocked || !selected.size || selected.size===pageCount || orderChanged" @click="reviewOperation('delete')"><Trash2 :size="16"/>Delete selected</button>
+        <button class="btn secondary small" :disabled="controlsLocked || !selected.size || orderChanged" @click="openReplacementFile">Replace selected</button>
+        <button class="btn secondary small" :disabled="controlsLocked || !selected.size || orderChanged" @click="openTool('insert','before')">Insert before</button>
+        <button class="btn secondary small" :disabled="controlsLocked || !selected.size || orderChanged" @click="openTool('insert','after')">Insert after</button>
+        <button class="btn secondary small" :disabled="controlsLocked || !selected.size || orderChanged" @click="openTool('extract')">Extract</button>
+        <button class="btn secondary small" :disabled="controlsLocked || !orderChanged" @click="reviewOperation('reorder')">Reorder</button>
         <span v-if="selected.size===pageCount && !orderChanged" class="organizer-hint">Keep at least one page.</span>
         <span v-if="orderChanged" class="organizer-hint">Apply or reset the order before rotating or deleting.</span>
       </div>
-      <section v-if="confirmation" class="organizer-confirmation" aria-label="Review page action">
-        <strong>{{actionLabel}} · {{currentDocument.title}}</strong>
-        <p v-if="confirmation.operation==='reorder'">New order: {{confirmation.order!.map(index=>index+1).join(', ')}}. This creates one undoable working-copy revision.</p>
-        <p v-else>Pages {{confirmationLabel}} will be {{confirmation.operation==='delete' ? 'removed from this working copy' : `rotated ${confirmation.degrees===270 ? '90° left' : '90° right'}`}}. This is one undoable action.</p>
-        <p>Imported originals remain unchanged. Revision-linked bookmarks, links and notes may need review after page changes.</p>
-        <label v-if="riskySignature" class="organizer-signature"><input v-model="signatureAcknowledged" type="checkbox" :disabled="working"/><span>{{signatureStatusLabel(currentDocument.signature_status)}}. I reviewed this selection and understand that editing may invalidate or omit signature protections; certificate validity and visible signatures are unverified.</span></label>
-        <div><button ref="confirmButton" class="btn primary small" :disabled="unavailable || (riskySignature && !signatureAcknowledged)" @click="applyOperation">{{working ? 'Applying…' : actionLabel}}</button><button class="btn secondary small" :disabled="working" @click="confirmation=null">Cancel</button></div>
-      </section>
       <div v-if="error" class="organizer-error organizer-load-error" role="alert">{{error}} <button class="btn secondary small" :disabled="working" @click="reloadDocument">Reload document</button></div>
       <div ref="grid" class="organizer-grid" :aria-busy="loading || working">
         <article v-for="(index, position) in visiblePages" :key="`${currentDocument.id}:${currentDocument.revision}:${index}`" class="organizer-page" :class="{'is-selected':selected.has(index),'is-dragging':dragging===index,'drop-before':dropBefore===index && dragging!==index}" :data-page="index" @dragover.prevent="dropBefore=index;droppingAtEnd=false" @drop.prevent="dropPage(index)">
@@ -353,18 +434,56 @@ onBeforeUnmount(() => {
         <div class="organizer-pagination"><button class="icon-btn" :disabled="controlsLocked || chunk===0" aria-label="Previous page grid" @click="chunk--"><ChevronLeft :size="18"/></button><span>Showing {{chunk*chunkSize+1}}–{{Math.min((chunk+1)*chunkSize,pageCount)}} of {{pageCount}}</span><button class="icon-btn" :disabled="controlsLocked || chunk>=chunkCount-1" aria-label="Next page grid" @click="chunk++"><ChevronRight :size="18"/></button></div>
         <p class="organizer-notice" role="status">{{loading ? 'Loading page previews…' : notice || 'Changes affect the working copy. Each applied action can be undone.'}}</p>
         <div v-if="orderChanged" class="organizer-order-actions"><button class="btn secondary small" :disabled="controlsLocked" @click="order=Array.from({length:pageCount},(_,index)=>index);notice='Page order reset.'">Reset order</button><button class="btn primary small" :disabled="controlsLocked" @click="reviewOperation('reorder')">Apply page order</button></div>
-        <button v-else class="btn secondary small" :disabled="working" @click="requestClose">Done</button>
+        <button v-else class="btn secondary small" :disabled="working" @click="requestClose">Done editing</button>
       </footer>
+      <div v-if="replaceFileOpen" class="organizer-modal-scrim">
+        <section class="organizer-modal-card organizer-replace-card" role="dialog" aria-modal="true" aria-label="Replace working pages">
+          <h2>Replace selected working pages</h2>
+          <p>Source pages {{selectionLabel}} · {{currentDocument.title}}</p>
+          <div class="organizer-file-choice"><strong>Choose PDF, JPEG or PNG</strong><p>The replacement is applied only to the working copy.</p><input ref="replacementInput" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" class="sr-only" @change="chooseReplacementFile"/><button class="btn secondary small" :disabled="replacementBusy" @click="replacementInput?.click()">Choose file</button><span v-if="replacementFile">{{replacementFile.name}} · {{replacementPageCount}} {{replacementPageCount===1?'page':'pages'}}</span></div>
+          <p v-if="replacementPageCount!==null && replacementPageCount!==selected.size" class="organizer-error" role="alert">Select exactly {{replacementPageCount}} working {{replacementPageCount===1?'page':'pages'}} for this file.</p>
+          <p v-if="replacementError" class="organizer-error" role="alert">{{replacementError}}</p>
+          <label class="organizer-mapping-choice"><input v-model="reviewMappingAfterReplacement" type="checkbox"/>Review page mapping after replacement</label>
+          <p>The imported original is retained. Existing bookmarks may need a new destination after replacement.</p>
+          <footer><button class="btn secondary small" @click="replaceFileOpen=false">Cancel</button><button class="btn primary small" :disabled="!replacementFile || replacementBusy || replacementPageCount!==selected.size" @click="reviewFileReplacement">Review replacement</button></footer>
+        </section>
+      </div>
+      <div v-if="signaturePrompt" class="organizer-modal-scrim">
+        <section class="organizer-modal-card organizer-signature-card" role="alertdialog" aria-modal="true" aria-label="Possible signature detected">
+          <h2>Possible signature detected</h2>
+          <p>{{signatureStatusLabel(currentDocument.signature_status)}}. A visible or scanned signature may be affected by this transformation. Certificate validity and visible marks are unverified.</p>
+          <p>The imported original remains unchanged. Review the selected working pages before continuing.</p>
+          <footer><button class="btn secondary small" @click="signaturePrompt=null">Cancel</button><button class="btn secondary small" @click="continueAfterSignature">Continue</button><button class="btn primary small" @click="signaturePrompt=null;grid?.querySelector<HTMLElement>('.organizer-page.is-selected')?.scrollIntoView({block:'center'})">Review page</button></footer>
+        </section>
+      </div>
+      <div v-if="confirmation" class="organizer-modal-scrim">
+        <section class="organizer-modal-card" :class="{'organizer-delete-card':confirmation.operation==='delete'}" role="alertdialog" aria-modal="true" aria-label="Review page action">
+          <div role="region" aria-label="Review page action">
+            <h2>{{confirmation.operation==='delete' ? `Delete ${confirmation.pages.length} ${confirmation.pages.length===1?'page':'pages'} from working copy?` : `${actionLabel} · ${currentDocument.title}`}}</h2>
+            <p v-if="confirmation.operation==='reorder'">New order: {{confirmation.order!.map(index=>index+1).join(', ')}}. This creates one undoable working-copy revision.</p>
+            <p v-else-if="confirmation.operation==='replace-file'">Working pages {{confirmationLabel}} will be replaced with {{replacementFile?.name}}. Review the page mapping after replacement.</p>
+            <p v-else>Pages {{confirmationLabel}} will be {{confirmation.operation==='delete' ? 'removed from this working copy' : `rotated ${confirmation.degrees===270 ? '90° left' : '90° right'}`}}. This is one undoable action.</p>
+            <p>The imported original remains unchanged. Source references and bundle page numbers may change; review bookmarks and the page map after this action.</p>
+            <footer><button class="btn secondary small" :disabled="working" @click="confirmation=null">Cancel</button><button ref="confirmButton" class="btn small" :class="confirmation.operation==='delete'?'danger':'primary'" :disabled="unavailable" @click="applyOperation">{{working ? 'Applying…' : actionLabel}}</button></footer>
+          </div>
+        </section>
+      </div>
     </dialog>
   </Teleport>
 </template>
 
 <style scoped>
-.page-organizer{width:min(1160px,calc(100vw - 40px));max-width:none;height:min(900px,calc(100dvh - 40px));max-height:none;padding:0;border:1px solid var(--border);border-radius:16px;background:var(--panel);color:var(--text);box-shadow:0 24px 90px #0005;overflow:hidden}
-.page-organizer[open]{display:flex;flex-direction:column}.page-organizer::backdrop{background:#08182a99;backdrop-filter:blur(3px)}
-.organizer-heading{display:flex;align-items:flex-start;justify-content:space-between;padding:22px 26px 10px;gap:20px}.organizer-eyebrow{font-size:10px;font-weight:800;letter-spacing:1.4px;color:var(--muted)}.organizer-heading h2{font-size:24px;letter-spacing:-.6px;margin:5px 0}.organizer-document{margin:0;font-size:13px;max-width:900px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.organizer-description{margin:0;padding:0 26px 14px;color:var(--muted);font-size:12px;line-height:1.6}
+.page-organizer{position:fixed;left:64px;top:116px;right:0;bottom:28px;width:calc(100vw - 64px);max-width:none;height:calc(100dvh - 144px);max-height:none;margin:0;padding:0;border:0;border-radius:0;background:var(--panel);color:var(--text);box-shadow:none;overflow:hidden}
+.page-organizer[open]{display:flex;flex-direction:column}.page-organizer::backdrop{background:transparent;backdrop-filter:none}
+.organizer-modal-scrim{position:fixed;inset:0;z-index:15;display:flex;align-items:center;justify-content:center;background:#08182a99}.organizer-modal-card{width:min(590px,calc(100vw - 32px));min-height:300px;max-height:calc(100dvh - 32px);overflow:auto;padding:24px;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 70px #0004;display:flex;flex-direction:column;gap:12px}.organizer-modal-card h2{font-size:20px;margin:0}.organizer-modal-card p{font-size:13px;line-height:1.55;margin:0}.organizer-modal-card footer{display:flex;justify-content:flex-end;gap:8px;margin:auto -24px -24px;padding:16px 24px;border-top:1px solid var(--border)}.organizer-replace-card{width:min(640px,calc(100vw - 32px));min-height:480px}.organizer-signature-card{width:min(620px,calc(100vw - 32px));min-height:376px}.organizer-file-choice{border:1px dashed var(--border);padding:16px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}.organizer-file-choice p{color:var(--muted)}
+.organizer-modal-card [role=region]{display:flex;flex:1;flex-direction:column;gap:12px}
+.organizer-mapping-choice{display:flex;align-items:center;gap:8px;font-size:13px}.organizer-mapping-choice input{width:16px;height:16px;accent-color:var(--primary)}
+.organizer-delete-card{min-height:360px;transform:translateY(-24px)}.organizer-signature-card{transform:translateY(-28px)}.organizer-replace-card{transform:translateY(-6px)}
+.organizer-heading{display:flex;align-items:flex-start;justify-content:space-between;min-height:102px;padding:18px 24px 10px;gap:20px}.organizer-eyebrow{font-size:10px;font-weight:800;letter-spacing:1.4px;color:var(--muted)}.organizer-heading h2{font-size:20px;letter-spacing:-.4px;margin:0 0 12px}.organizer-document{margin:0;font-size:13px;max-width:900px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.organizer-description{margin:0;padding:12px 24px;color:var(--muted);font-size:12px;line-height:1.6}
 .organizer-selection{padding:12px 26px;border-block:1px solid var(--border);display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px}.organizer-selection-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.organizer-selection-actions strong{font-size:13px}.organizer-hint{font-size:11px;color:var(--muted);line-height:1.5}.organizer-ranges{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:11px}.organizer-ranges input{width:145px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)}.organizer-selected-pages{width:100%;margin:0;max-height:44px;overflow:auto;color:var(--primary);font-size:11px;overflow-wrap:anywhere}.organizer-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 26px}.organizer-delete{color:#be3c45}.organizer-grid{flex:1;min-height:140px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));align-content:start;gap:18px;padding:18px 26px 24px;background:var(--surface-soft)}
 .organizer-page{border:2px solid transparent;border-radius:10px;background:var(--panel);box-shadow:0 2px 8px #0d22300a;position:relative;padding:10px;min-width:0}.organizer-page.is-selected{border-color:var(--primary)}.organizer-page.is-dragging{opacity:.45}.organizer-page.drop-before{border-top-color:var(--primary);box-shadow:0 -4px 0 var(--primary)}.organizer-page-label{display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;min-height:24px}.organizer-page-label input{accent-color:#1d69c3;width:16px;height:16px}.organizer-page-label small{font-size:10px;color:var(--muted);margin-left:auto}.organizer-thumbnail{height:228px;display:flex;align-items:center;justify-content:center;position:relative;margin:8px 0;background:var(--surface-soft);border-radius:4px}.organizer-thumbnail canvas{display:block;max-width:100%;max-height:214px;opacity:0;background:#fff;box-shadow:0 2px 7px #0002}.organizer-thumbnail canvas.thumbnail-ready{opacity:1}.organizer-thumbnail>span{position:absolute;font-size:11px;color:var(--muted)}.organizer-page-actions{display:flex;align-items:center;gap:4px}.organizer-page-actions>span{margin-right:auto}.organizer-page-actions button:first-child{cursor:grab}.organizer-drop-label{position:absolute;z-index:1;top:-13px;left:8px;background:var(--primary);color:var(--panel);font-size:10px;border-radius:3px;padding:3px 6px}.organizer-end-target{grid-column:1/-1;text-align:center;border:2px dashed var(--border);padding:18px;font-size:12px;border-radius:8px}.organizer-end-target.drop-active{border-color:var(--primary);color:var(--primary)}
 .organizer-confirmation{padding:15px 26px;border-block:1px solid var(--border);background:var(--surface-soft);font-size:12px;flex-shrink:0;max-height:260px;overflow:auto}.organizer-confirmation p{line-height:1.5;margin:7px 0;overflow-wrap:anywhere}.organizer-confirmation>div{display:flex;gap:8px;margin-top:12px}.organizer-signature{display:flex;align-items:flex-start;gap:9px;line-height:1.5;padding:10px;border:1px solid #c89143;border-radius:7px}.organizer-signature input{margin-top:3px;flex-shrink:0}.organizer-error{color:#b52c37;font-size:12px;line-height:1.5;margin:0;width:100%}.organizer-load-error{padding:8px 26px}.organizer-footer{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px 26px;border-top:1px solid var(--border);font-size:11px}.organizer-pagination{display:flex;align-items:center;gap:5px;white-space:nowrap}.organizer-notice{flex:1;min-width:140px;margin:0;color:var(--muted);line-height:1.5}.organizer-order-actions{display:flex;gap:8px}.page-organizer .icon-btn{color:var(--muted)}
-@media(max-width:700px){.page-organizer{width:calc(100vw - 12px);height:calc(100dvh - 12px);border-radius:10px}.organizer-heading,.organizer-selection,.organizer-toolbar,.organizer-grid,.organizer-footer,.organizer-confirmation{padding-left:14px;padding-right:14px}.organizer-description{padding-inline:14px}.organizer-ranges{margin-left:0;flex-wrap:wrap}.organizer-grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px}.organizer-hint{font-size:10px}.organizer-heading h2{font-size:20px}.organizer-document{max-width:65vw}.organizer-selection-actions{gap:7px}}
+.organizer-heading{min-height:110px}.organizer-toolbar{order:1;min-height:52px;padding:8px 24px}.organizer-description{order:2;min-height:50px;padding:16px 24px}.organizer-grid{order:3;grid-template-columns:repeat(6,minmax(0,1fr));gap:30px 26px;padding:16px 24px}.organizer-footer{order:4}.organizer-selection{position:absolute;z-index:8;top:162px;left:24px;right:24px;min-height:102px;background:var(--panel);box-shadow:0 12px 32px #0002;border:1px solid var(--border);border-radius:8px}.organizer-page{height:184px;padding:8px}.organizer-page-label{min-height:20px}.organizer-thumbnail{height:124px;margin:4px 0}.organizer-thumbnail canvas{max-height:124px}.organizer-page-actions{min-height:20px}
+@media(max-width:1200px){.organizer-grid{grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:18px}}
+@media(max-width:700px){.page-organizer{left:0;top:116px;width:100vw;height:calc(100dvh - 144px)}.organizer-heading,.organizer-selection,.organizer-toolbar,.organizer-grid,.organizer-footer,.organizer-confirmation{padding-left:14px;padding-right:14px}.organizer-description{padding-inline:14px}.organizer-ranges{margin-left:0;flex-wrap:wrap}.organizer-grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px}.organizer-hint{font-size:10px}.organizer-heading h2{font-size:20px}.organizer-document{max-width:65vw}.organizer-selection-actions{gap:7px}}
 </style>

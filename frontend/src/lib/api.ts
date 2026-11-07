@@ -224,6 +224,21 @@ export async function uploadWorkingPageImage(documentId: string, file: File,
   return response.json() as Promise<import('./types').MatterDocument>
 }
 
+export async function replaceWorkingPagesFromFile(documentId: string, file: File,
+  fields: {target_pages:number[],expected_revision:number,acknowledge_signature_risk:boolean}): Promise<MatterDocument> {
+  const headers:Record<string,string> = {
+    'Content-Type':'application/octet-stream',
+    'X-CourtBundle-Filename':encodeURIComponent(file.name),
+    'X-CourtBundle-Target-Pages':JSON.stringify(fields.target_pages),
+    'X-CourtBundle-Expected-Revision':String(fields.expected_revision),
+    'X-CourtBundle-Signature-Acknowledge':String(fields.acknowledge_signature_risk),
+  }
+  const response = await request(`/documents/${documentId}/pages/replace-file`, {
+    method: 'POST', body: file, headers,
+  }, 5 * 60_000)
+  return response.json() as Promise<MatterDocument>
+}
+
 export async function pageAnnotationAsset(annotationId: string): Promise<Blob> {
   const response = await request(`/annotations/${annotationId}/asset`, {cache:'no-store'})
   return response.blob()

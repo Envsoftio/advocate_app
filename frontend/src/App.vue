@@ -356,6 +356,9 @@ const selectedOcrRuns = computed<OcrRun[]>(() => {
 });
 const detailsOpen = ref(false);
 const compactDocuments = ref(false);
+watch(compactDocuments, compact => {
+  if (compact && preparationVisible.value) detailsOpen.value = false;
+});
 const documentDetailsPanel = ref<HTMLElement | null>(null);
 let detailsTrigger: HTMLElement | null = null;
 async function toggleDocumentDetails() {
@@ -377,6 +380,16 @@ async function closeDocumentDetails() {
     documentsWorkspace.value?.querySelector<HTMLElement>('[aria-controls="document-details-panel"]');
   const menu = trigger?.closest('details');
   (menu && !menu.open ? menu.querySelector<HTMLElement>('summary') : trigger)?.focus({preventScroll:true});
+}
+async function cancelDocumentDetails() {
+  const doc = selectedDoc.value;
+  if (doc) Object.assign(docEditor, {
+    title:doc.title, notes:doc.notes, kind:doc.kind, part:doc.part, label:doc.label,
+    group_key:doc.group_key, document_date:doc.document_date,
+    date_confirmed:doc.date_status === 'confirmed',
+    visible_signature_status:doc.visible_signature_status,
+  });
+  await closeDocumentDetails();
 }
 const preparationMode = ref(false);
 const preparationVisible = computed(() => preparationMode.value && activeView.value === 'documents' && !documentTableOpen.value);
@@ -462,6 +475,18 @@ const documentTableOpen = ref(false);
 const documentTablePanel = ref<InstanceType<typeof DocumentTable>|null>(null);
 const tableDirty = ref(false);
 const pageToolsOpen = ref(false);
+const pageToolsInitial = ref<{task:'insert'|'crop'|'extract',pages:number[],side?:'before'|'after'} | null>(null);
+function openPageTools(task?:'insert'|'crop'|'extract', pages?:number[], side?:'before'|'after') {
+  pageToolsInitial.value = task && pages ? {task,pages,side} : null;
+  pageToolsOpen.value = true;
+}
+const ocrOptionsOpen = ref(false);
+const ocrOptionsLanguage = ref<"eng" | "hin" | "eng+hin">("eng");
+const ocrOptionsScope = ref<"all" | "page">("all");
+const ocrOptionsPage = ref(0);
+const ocrOptionsDocument = ref<{id:string,revision:number} | null>(null);
+const ocrOptionsPanel = ref<HTMLElement | null>(null);
+let ocrOptionsTrigger: HTMLElement | null = null;
 const pageToolsDialog = ref<HTMLDialogElement | null>(null);
 const documentsWorkspace = ref<HTMLElement | null>(null);
 const documentsWorkspaceHeight = ref<number | null>(null);
@@ -943,12 +968,14 @@ const settingsDirty = computed(
 function queueDocumentAutosave() {
   if (documentAutosaveTimer) clearTimeout(documentAutosaveTimer);
   const id = selectedDocId.value;
-  if (engineBlocked.value || autosaveHeld.value || !documentDirty.value || !id || !docEditor.title.trim()) return;
+  if (engineBlocked.value || autosaveHeld.value || !documentDirty.value || !id || !docEditor.title.trim() ||
+      (preparationVisible.value && compactDocuments.value && detailsOpen.value)) return;
   if (documentAutosaveState.value === "failed")
     documentAutosaveState.value = "idle";
   documentAutosaveTimer = setTimeout(() => {
     documentAutosaveTimer = null;
-    if (engineBlocked.value || autosaveHeld.value || selectedDocId.value !== id || !documentDirty.value) return;
+    if (engineBlocked.value || autosaveHeld.value || selectedDocId.value !== id || !documentDirty.value ||
+        (preparationVisible.value && compactDocuments.value && detailsOpen.value)) return;
     if (busy.value || tabDiscardRequest.value) {
       queueDocumentAutosave();
       return;
@@ -959,6 +986,7 @@ function queueDocumentAutosave() {
 watch(
   () => [
     selectedDocId.value,
+    detailsOpen.value,
     docEditor.title,
     docEditor.notes,
     docEditor.kind,
@@ -1291,6 +1319,7 @@ watch(pageToolsOpen, async (open) => {
   const dialog = pageToolsDialog.value;
   if (open && dialog && !dialog.open) dialog.showModal();
   if (!open && dialog?.open) dialog.close();
+  if (!open) pageToolsInitial.value = null;
 });
 async function showView(view: View) {
   if (!(await leaveMembership())) return;
@@ -2244,11 +2273,35 @@ async function refreshGuide() {
   await refreshHistory();
   await resumeAutosaveWhenClean();
 }
-async function startOcr(language: "eng" | "hin" | "eng+hin", pageIndex?: number) {
-  if (!selectedDoc.value || isJobActive.value) return;
-  if (!(await guardArtifactTransition("OCR for the working copy"))) return;
+function openOcrOptions(language: "eng" | "hin" | "eng+hin", pageIndex: number) {
+  if (!selectedDoc.value || isJobActive.value || engineBlocked.value) return;
+  ocrOptionsLanguage.value = language;
+  ocrOptionsScope.value = "all";
+  ocrOptionsPage.value = pageIndex;
+  ocrOptionsDocument.value = {id:selectedDoc.value.id,revision:selectedDoc.value.revision};
+  ocrOptionsTrigger = document.activeElement as HTMLElement | null;
+  ocrOptionsOpen.value = true;
+  void nextTick(() => ocrOptionsPanel.value?.querySelector<HTMLElement>('select')?.focus());
+}
+function closeOcrOptions() {
+  ocrOptionsOpen.value = false;
+  void nextTick(() => ocrOptionsTrigger?.isConnected && ocrOptionsTrigger.focus());
+}
+async function startOcrOptions() {
+  const bound = ocrOptionsDocument.value;
+  if (!bound || selectedDoc.value?.id !== bound.id || selectedDoc.value.revision !== bound.revision) {
+    issue("The working PDF changed. Reopen OCR options and review the current pages.");
+    closeOcrOptions();
+    return;
+  }
+  if (await startOcr(ocrOptionsLanguage.value,
+    ocrOptionsScope.value === "page" ? ocrOptionsPage.value : undefined)) closeOcrOptions();
+}
+async function startOcr(language: "eng" | "hin" | "eng+hin", pageIndex?: number): Promise<boolean> {
+  if (!selectedDoc.value || isJobActive.value) return false;
+  if (!(await guardArtifactTransition("OCR for the working copy"))) return false;
   const signature = confirmSignatureTransformation([selectedDoc.value], "OCR");
-  if (!signature.proceed) return;
+  if (!signature.proceed) return false;
   try {
     const job = await api<Job>(
       `/documents/${selectedDoc.value.id}/ocr`,
@@ -2265,8 +2318,10 @@ async function startOcr(language: "eng" | "hin" | "eng+hin", pageIndex?: number)
       "OCR started on scanned and mixed-content pages. Review recognized text.",
       "info",
     );
+    return true;
   } catch (err) {
     issue(err);
+    return false;
   }
 }
 async function rerunOcrPage(pageIndex:number, language:'eng'|'hin'|'eng+hin') {
@@ -3541,10 +3596,11 @@ watch(sidebarCollapsed, (collapsed) => {
                   @undo="traverseHistory('undo')"
                   @redo="traverseHistory('redo')"
                   @error="issue"
-                  @page-tools="pageToolsOpen = true"
+                  @page-tools="openPageTools"
+                  @review-page-map="showView('index')"
                   @open-bookmarks="showView('index')"
                   @toggle-details="toggleDocumentDetails"
-                  @ocr="startOcr"
+                  @ocr="openOcrOptions"
                   @ocr-page="(pageIndex, language) => startOcr(language, pageIndex)"
                   @ocr-rerun="rerunOcrPage"
                   @cancel-ocr="cancelJob"
@@ -3768,8 +3824,9 @@ watch(sidebarCollapsed, (collapsed) => {
                     </p>
                   </div>
                   <div class="inspector-save-footer">
+                    <button v-if="preparationVisible && compactDocuments" class="btn secondary" @click="cancelDocumentDetails">Cancel</button>
                     <button
-                      class="btn primary block"
+                      class="btn primary" :class="{block:!preparationVisible || !compactDocuments}"
                       aria-label="Save document details"
                       :disabled="
                         engineBlocked || busy || !docEditor.title.trim() || !documentDirty
@@ -4181,6 +4238,15 @@ watch(sidebarCollapsed, (collapsed) => {
     </div>
     <div v-if="matterDetailsOpen && currentMatter" class="modal-backdrop" @click.self="matterDetailsOpen=false"><section class="modal-card matter-details-dialog" role="dialog" aria-modal="true" aria-label="Matter details" @keydown.tab="trapNavigationFocus" @keydown.esc="matterDetailsOpen=false"><header class="modal-head"><h2>Matter details</h2><button class="icon-btn" aria-label="Close matter details" @click="matterDetailsOpen=false"><X :size="18"/></button></header><dl class="overview-context"><dt>Matter</dt><dd>{{currentMatter.name}}</dd><dt>Court / forum</dt><dd>{{currentMatter.court_forum||'Not entered'}}</dd><dt>Case number</dt><dd>{{currentMatter.case_number||'Not entered'}}</dd><dt>Client / party reference</dt><dd>{{currentMatter.client_reference||'Not entered'}}</dd><dt>Internal reference</dt><dd>{{currentMatter.internal_reference||'Not entered'}}</dd><dt>Notes</dt><dd>{{currentMatter.notes||'Not entered'}}</dd><dt>Petitioner</dt><dd>{{currentMatter.petitioner||'Not entered'}}</dd><dt>Respondent</dt><dd>{{currentMatter.respondent||'Not entered'}}</dd><dt>Advocate</dt><dd>{{currentMatter.advocate||'Not entered'}}</dd><dt>Court profile</dt><dd>{{selectedProfile?.name}}</dd></dl><section aria-label="Desktop file tools" class="workspace-actions"><button class="btn secondary" @click="matterDetailsOpen=false;showPreparation()">PDF tools &amp; print</button><button class="btn secondary" @click="matterDetailsOpen=false;showView('storage')">Local storage</button><button class="btn secondary" @click="matterDetailsOpen=false;openExports()">Office exports</button><button class="btn secondary" :disabled="busy" @click="backupCurrentMatter">Back up matter</button><button class="btn secondary" :disabled="busy" @click="matterDetailsOpen=false;removeMatter()">Archive matter</button><button class="btn secondary" :disabled="busy" @click="confirmDiscardDrafts() && loadMatterResources()">Refresh</button></section></section></div>
     <footer class="application-status"><button v-if="matterContext && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="variantContext||supplementContext||inclusionSummary">{{variantContext?'Variant membership':supplementContext?'Supplement membership':'Bundle membership'}}</button><span v-if="variantContext">{{variantContext}}</span><span v-if="supplementContext">{{supplementContext}}</span><span v-if="matterContext" class="membership-status-step">{{activeView==='import'||activeView==='overview'&&!docs.length?'01 / 06 · Add documents':activeView==='overview'||activeView==='documents'?'02 / 06 · Review documents':activeView==='index'||activeView==='variants'?'03 / 06 · Prepare index':activeView==='validation'?'04 / 06 · Technical checks':activeView==='build'?'05 / 06 · Build and review':'06 / 06 · Saved packages'}}</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="matterContext" class="text-tool" @click="membershipOpen ? leaveMembership() : showPreparation()">{{membershipOpen ? 'Return to caller' : 'Back to preparation'}}</button></footer>
+    <div v-if="ocrOptionsOpen && selectedDoc" class="flow02-modal-scrim" @keydown.esc.stop.prevent="closeOcrOptions">
+      <section ref="ocrOptionsPanel" class="flow02-ocr-options" role="dialog" aria-modal="true" aria-label="OCR options" @keydown.tab="trapNavigationFocus">
+        <header><h2>Run OCR</h2><p>{{selectedDoc.original_name}} · {{selectedDoc.page_count}} source {{selectedDoc.page_count===1?'page':'pages'}}</p></header>
+        <label class="field">Recognition language<select v-model="ocrOptionsLanguage"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select></label>
+        <fieldset><legend>Source pages</legend><label><input v-model="ocrOptionsScope" type="radio" value="all"/> All scanned and mixed-content pages</label><label><input v-model="ocrOptionsScope" type="radio" value="page"/> Current page {{ocrOptionsPage+1}} only</label></fieldset>
+        <p class="flow02-ocr-note"><strong>Keep the original scan as the visible page.</strong><br/>OCR adds a searchable text layer to the working copy. Recognition errors can occur; compare text with the scan before use.</p>
+        <footer><button class="btn secondary" @click="closeOcrOptions">Cancel</button><button class="btn primary" :disabled="engineBlocked || isJobActive" @click="startOcrOptions">Start OCR</button></footer>
+      </section>
+    </div>
     <dialog
       v-if="selectedDoc && pageToolsOpen"
       ref="pageToolsDialog"
@@ -4212,6 +4278,9 @@ watch(sidebarCollapsed, (collapsed) => {
       <PageTools
         :document="selectedDoc"
         :documents="docs"
+        :initial-task="pageToolsInitial?.task"
+        :initial-pages="pageToolsInitial?.pages"
+        :initial-side="pageToolsInitial?.side"
         :disabled="engineBlocked || busy || isJobActive || documentDirty"
         :job="activeJob"
         expanded

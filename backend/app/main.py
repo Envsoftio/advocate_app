@@ -143,6 +143,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                        expose_headers=['Accept-Ranges', 'Content-Range', 'Content-Length',
                                        'Content-Disposition', 'X-CourtBundle-Conversion-Note'],
                        allow_headers=['Authorization','Content-Type', 'Range', 'If-Range', 'X-CourtBundle-Filename',
+                                      'X-CourtBundle-Target-Pages', 'X-CourtBundle-Expected-Revision',
                                       'X-CourtBundle-File-Mtime', 'X-CourtBundle-Pdf-Password',
                                       'X-CourtBundle-Signature-Acknowledge',
                                       'X-CourtBundle-Backup-Credential', 'X-CourtBundle-Backup-Recovery',
@@ -1366,6 +1367,81 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 changes_page_structure=True)
         except ProcessingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/pages/replace-file')
+    async def page_replace_file(doc_id: str, request: Request, _: None = Depends(auth)):
+        """Replace selected working pages from an untracked local file, without importing it."""
+        if request.headers.get('content-type', '').split(';', 1)[0] != 'application/octet-stream':
+            raise HTTPException(status_code=415, detail='Replacement requires a streamed binary file')
+        filename = Path(unquote(request.headers.get('x-courtbundle-filename', ''))).name
+        suffix = Path(filename).suffix.lower()
+        if suffix not in {'.pdf', '.png', '.jpg', '.jpeg'}:
+            raise HTTPException(status_code=415, detail='Choose a PDF, PNG or JPEG file')
+        try:
+            pages = json.loads(request.headers.get('x-courtbundle-target-pages', ''))
+            if (not isinstance(pages, list) or not pages or len(pages) > 2000 or
+                    any(type(page) is not int or page < 0 for page in pages) or
+                    len(set(pages)) != len(pages)):
+                raise ValueError
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail='Choose distinct working pages to replace')
+        revision_text = request.headers.get('x-courtbundle-expected-revision', '')
+        if not revision_text.isascii() or not revision_text.isdecimal():
+            raise HTTPException(status_code=422, detail='Invalid working revision')
+        expected_revision = int(revision_text)
+        acknowledge_signature_risk = request.headers.get('x-courtbundle-signature-acknowledge') == 'true'
+        if expected_revision < 1:
+            raise HTTPException(status_code=422, detail='Invalid working revision')
+        doc = doc_or_404(doc_id)
+        if doc['revision'] != expected_revision:
+            raise HTTPException(status_code=409, detail='Working PDF revision changed; reload the document')
+        async def finish_native(function, *args, **kwargs):
+            task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # Keep the temporary source until native PDF work has stopped.
+                try:
+                    await task
+                finally:
+                    raise
+        with tempfile.TemporaryDirectory(prefix='matterdraft-page-source-', dir=store.root) as folder:
+            source = Path(folder) / ('source' + suffix)
+            normalized = Path(folder) / 'normalized.pdf'
+            size = 0
+            if protected(source):
+                with encrypted_sink(source, store._data_key) as output:
+                    async for chunk in request.stream():
+                        size += len(chunk)
+                        if size > FILE_LIMIT_BYTES:
+                            raise HTTPException(status_code=413, detail='Replacement file limit is 80 MB')
+                        output.write(chunk)
+            else:
+                with source.open('wb') as output:
+                    async for chunk in request.stream():
+                        size += len(chunk)
+                        if size > FILE_LIMIT_BYTES:
+                            raise HTTPException(status_code=413, detail='Replacement file limit is 80 MB')
+                        output.write(chunk)
+            if not size:
+                raise HTTPException(status_code=422, detail='Replacement file is empty')
+            try:
+                signature = await finish_native(inspect_source_signature, source, suffix)
+                if transformation_risk(signature):
+                    raise HTTPException(status_code=422, detail=(
+                        'The replacement source has possible signature content. Import and review it in this matter first.'))
+                source_count = await finish_native(normalize_to_pdf, source, normalized)
+                if source_count != len(pages):
+                    raise HTTPException(status_code=422, detail=(
+                        f'Replacement has {source_count} pages; select exactly {source_count} working pages'))
+                return await finish_native(
+                    edit_working_copy, doc_id, lambda path, current: {
+                        'page_count': replace_pages(path, normalized, pages,
+                                                    list(range(source_count))),
+                        'ocr_status': 'modified'}, acknowledge_signature_risk,
+                    expected_revision=expected_revision, changes_page_structure=True)
+            except ProcessingError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post('/documents/{doc_id}/replace')
     def document_replace(doc_id: str, payload: ReplaceDocument, _: None = Depends(auth)):

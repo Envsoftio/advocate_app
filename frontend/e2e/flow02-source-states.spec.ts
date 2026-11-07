@@ -36,6 +36,12 @@ test('FLOW / 02 source, OCR and focus states use real document and job data', as
   await original.getByRole('button', { name: 'Close review' }).click()
 
   await page.getByRole('button', { name: 'Run OCR', exact: true }).click()
+  const ocrOptions = page.getByRole('dialog', { name: 'OCR options' })
+  await expect(ocrOptions).toBeVisible()
+  await expect.poll(async()=>{const box=await ocrOptions.boundingBox();return [Math.round(box!.x),Math.round(box!.y),Math.round(box!.width),Math.round(box!.height)]}).toEqual([430,196,580,484])
+  await expect(ocrOptions.getByText('Keep the original scan as the visible page.')).toBeVisible()
+  await page.screenshot({ path: info.outputPath('07D-1440-light.png'), animations:'disabled' })
+  await ocrOptions.getByRole('button', { name: 'Start OCR' }).click()
   await expect(page.getByRole('status', { name: 'OCR processing' })).toBeVisible()
   await expect.poll(async () => Math.round((await page.getByRole('status', { name: 'OCR processing' }).boundingBox())!.y)).toBe(724)
   await page.screenshot({ path: info.outputPath('07B-1440-light.png'), animations: 'disabled' })

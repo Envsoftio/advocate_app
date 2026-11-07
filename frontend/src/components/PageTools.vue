@@ -8,7 +8,8 @@ import type { Job, MatterDocument } from '../lib/types'
 import PageCropPreview from './PageCropPreview.vue'
 import PageTransferPreview from './PageTransferPreview.vue'
 
-const props = defineProps<{ document: MatterDocument, documents: MatterDocument[], disabled: boolean, expanded?: boolean, job?: Job | null }>()
+const props = defineProps<{ document: MatterDocument, documents: MatterDocument[], disabled: boolean, expanded?: boolean, job?: Job | null,
+  initialTask?:'insert'|'crop'|'extract', initialPages?:number[], initialSide?:'before'|'after' }>()
 const emit = defineEmits<{ modified: [], jobStarted: [job: Job], cancel: [] }>()
 const tasks = [
   {id:'insert', title:'Add pages', description:'Copy selected pages into this PDF.', detail:'Choose a document already in this matter, then choose where its pages should go.', icon:FilePlus2},
@@ -90,17 +91,17 @@ watch(() => [props.document.id, props.document.revision, source.value?.id, sourc
   task.value, sourceRange.value, targetRange.value, insertionSide.value, beforePage.value, afterPage.value],
   () => {transferPreviewReady.value=false})
 watch(() => props.document.id, () => {
-  task.value = 'insert'
-  insertionSide.value = 'before'
+  task.value = props.initialTask || 'insert'
+  insertionSide.value = props.initialSide || 'before'
   notice.value = ''
   crop.value = {left:0,top:0,right:100,bottom:100}
   sourceId.value = ''
   sourceRange.value = '1'
   targetRange.value = '1'
-  beforePage.value = 1
-  afterPage.value = 1
-  cropRange.value = '1'
-  extractRange.value = '1'
+  beforePage.value = (props.initialPages?.[0] ?? 0) + 1
+  afterPage.value = (props.initialPages?.[props.initialPages.length - 1] ?? 0) + 1
+  cropRange.value = props.initialPages?.length ? props.initialPages.map(page=>page+1).join(',') : '1'
+  extractRange.value = props.initialPages?.length ? props.initialPages.map(page=>page+1).join(',') : '1'
   splitAfter.value = '1'
   error.value = ''
 }, { immediate: true })

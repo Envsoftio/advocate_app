@@ -1,6 +1,10 @@
 """Synthetic organizer operations are atomic, revision-checked and undoable."""
 import pymupdf
 import pytest
+import json
+from fastapi.testclient import TestClient
+from app.main import create_app
+from app.vault import MAGIC
 
 from app.pdf_ops import ProcessingError
 
@@ -56,6 +60,68 @@ def test_batch_rotation_and_deletion_each_have_one_history_entry(client, auth, m
     assert pdf_state(client, auth, document['id']) == before_deletion
     assert original.read_bytes() == content
     assert initial_working.read_bytes() == initial_working_bytes
+
+
+def test_file_replacement_only_changes_selected_working_pages(client, auth, matter, make_pdf):
+    original_bytes = make_pdf(3, 'TARGET')
+    document = upload(client, auth, matter['id'], original_bytes)
+    path = f'/documents/{document["id"]}/pages/replace-file'
+    before = pdf_state(client, auth, document['id'])
+    history = client.get(f'/matters/{matter["id"]}/history', headers=auth).json()['undo_count']
+    replacement = make_pdf(2, 'REPLACEMENT')
+    fields = {'Content-Type': 'application/octet-stream',
+              'X-CourtBundle-Filename': 'replacement.pdf',
+              'X-CourtBundle-Target-Pages': json.dumps([1, 2]),
+              'X-CourtBundle-Expected-Revision': '1'}
+    result = client.post(path, headers={**auth, **fields}, content=replacement)
+    assert result.status_code == 200, result.text
+    assert result.json()['revision'] == 2
+    assert [text for text, _ in pdf_state(client, auth, document['id'])] == [
+        before[0][0], 'REPLACEMENT page 1', 'REPLACEMENT page 2']
+    assert client.app.state.store.original_path(document).read_bytes() == original_bytes
+    assert client.get(f'/matters/{matter["id"]}/history', headers=auth).json()['undo_count'] == history + 1
+    stale = client.post(path, headers={**auth, **fields}, content=replacement)
+    assert stale.status_code == 409
+    current = client.app.state.store.get_document(document['id'])
+    working = client.app.state.store.working_path(current).read_bytes()
+    for pages in ('[1]', '[1,1]', '[99,100]', '[true,2]'):
+        failed = client.post(path, headers={**auth, **fields,
+                                           'X-CourtBundle-Target-Pages': pages,
+                                           'X-CourtBundle-Expected-Revision': '2'}, content=replacement)
+        assert failed.status_code == 422, failed.text
+        assert client.app.state.store.working_path(current).read_bytes() == working
+
+
+def test_file_replacement_uses_encrypted_temporary_source_in_protected_store(tmp_path, make_pdf):
+    root = tmp_path / 'protected'
+    app = create_app(data_dir=root, token='synthetic-secret', data_key=b'k' * 32,
+                     require_vault=True)
+    headers = {'Authorization': 'Bearer synthetic-secret'}
+    with TestClient(app) as client:
+        matter = client.post('/matters', headers=headers, json={
+            'name': 'Synthetic protected replacement', 'court_profile': 'general-demo'}).json()
+        original = make_pdf(2, 'PROTECTED TARGET')
+        uploaded = client.post(f'/matters/{matter["id"]}/documents/raw',
+                               headers={**headers, 'Content-Type': 'application/octet-stream',
+                                        'X-CourtBundle-Filename': 'target.pdf'}, content=original)
+        assert uploaded.status_code == 201, uploaded.text
+        document = uploaded.json()[0]
+        replacement = make_pdf(1, 'PROTECTED REPLACEMENT')
+        multipart = client.post(f'/documents/{document["id"]}/pages/replace-file',
+                                headers=headers,
+                                files={'file': ('replacement.pdf', replacement, 'application/pdf')})
+        assert multipart.status_code == 415
+        changed = client.post(f'/documents/{document["id"]}/pages/replace-file',
+                              headers={**headers, 'Content-Type':'application/octet-stream',
+                                       'X-CourtBundle-Filename':'replacement.pdf',
+                                       'X-CourtBundle-Target-Pages':'[1]',
+                                       'X-CourtBundle-Expected-Revision':'1'},
+                              content=replacement)
+        assert changed.status_code == 200, changed.text
+        assert [text for text, _ in pdf_state(client, headers, document['id'])] == [
+            'PROTECTED TARGET page 1', 'PROTECTED REPLACEMENT page 1']
+        assert app.state.store.original_path(document).read_bytes().startswith(MAGIC)
+        assert not list(root.glob('matterdraft-page-source-*'))
 
 
 @pytest.mark.parametrize('payload', [

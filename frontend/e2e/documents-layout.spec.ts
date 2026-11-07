@@ -24,7 +24,7 @@ async function visiblePaper(page: import('@playwright/test').Page) {
 for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
   test(`New reader keeps usable paper, metadata and keyboard focus at ${viewport.width}`, async ({ page, request }) => {
     test.setTimeout(180_000);page.setDefaultTimeout(15_000)
-    const base='http://127.0.0.1:8768',headers={Authorization:'Bearer e2e-isolated-token'}
+    const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`,headers={Authorization:'Bearer e2e-isolated-token'}
     const matter=await (await request.post(`${base}/matters`,{headers,data:{name:`Synthetic Documents ${viewport.width}`,court_profile:'general-demo'}})).json()
     const uploaded=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'01_petition.pdf',mimeType:'application/pdf',buffer:await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))}}})
     expect(uploaded.ok()).toBeTruthy();const [document]=await uploaded.json()
