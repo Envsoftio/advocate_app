@@ -56,6 +56,25 @@ def test_accept_exact_field_persists_history_and_preserves_original(client, auth
         reopened.close()
 
 
+def test_private_document_notes_round_trip_without_staling_bundle(client, auth, matter):
+    doc = upload(client, auth, matter['id'], 'notes.pdf')
+    store = client.app.state.store
+    before_digest = store.build_input_digest(matter['id'], effective=True)
+    original_hash = store.sha256(store.original_path(doc))
+    response = client.patch(f'/documents/{doc["id"]}', headers=auth,
+                            json={'notes': 'Synthetic source checked against the working copy.'})
+    assert response.status_code == 200, response.text
+    assert response.json()['notes'] == 'Synthetic source checked against the working copy.'
+    assert store.build_input_digest(matter['id'], effective=True) == before_digest
+    assert store.sha256(store.original_path(doc)) == original_hash
+    assert client.post(f'/matters/{matter["id"]}/history/undo', headers=auth).status_code == 200
+    assert store.get_document(doc['id'])['notes'] == ''
+    assert store.build_input_digest(matter['id'], effective=True) == before_digest
+    assert client.post(f'/matters/{matter["id"]}/history/redo', headers=auth).status_code == 200
+    assert store.get_document(doc['id'])['notes'] == 'Synthetic source checked against the working copy.'
+    assert store.build_input_digest(matter['id'], effective=True) == before_digest
+
+
 @pytest.mark.parametrize('text,value,ambiguous', [
     ('Dated: 12 January 2026', '2026-01-12', False),
     ('2026-02-31', '', True), ('03/04/2026', '', True),

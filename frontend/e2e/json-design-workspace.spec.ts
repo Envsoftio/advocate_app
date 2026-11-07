@@ -23,6 +23,8 @@ test('JSON preparation matches 05A and preserves document context in the editor'
  }
  await expect(page.getByRole('tab',{name:'Edit',exact:true})).toBeHidden()
  await expect(page.getByRole('textbox',{name:'Display title',exact:true})).toHaveCSS('height','36px')
+ await expect(page.getByRole('textbox',{name:'Document notes',exact:true})).toBeVisible()
+ await expect(page.getByRole('button',{name:'Save document details',exact:true})).toContainText('Save changes')
  await page.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('fit-width')
  await page.getByRole('button',{name:'Next page',exact:true}).click();await expect(page.locator('.page-counter input')).toHaveValue('2')
  await page.screenshot({path:info.outputPath('05A-documents-1440-light.png'),animations:'disabled'})
@@ -56,11 +58,13 @@ test('JSON preparation matches 05A and preserves document context in the editor'
  await nav.getByRole('button',{name:'Reorder Order · 12 January 2026. Use Up or Down.',exact:true}).press('ArrowUp')
  await expect.poll(async()=>(await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json()).map((d:any)=>d.id).slice(0,3)).toEqual([documents[0].id,documents[2].id,documents[1].id])
  await page.getByRole('textbox',{name:'Display title',exact:true}).fill('Reviewed synthetic affidavit')
+ await page.getByRole('textbox',{name:'Document notes',exact:true}).fill('Synthetic source checked against the working copy.')
  await page.getByRole('button',{name:'Save document details',exact:true}).click()
  await expect.poll(async()=>(await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json()).find((d:any)=>d.id===documents[1].id).title).toBe('Reviewed synthetic affidavit')
- const saved=(await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json()).find((d:any)=>d.id===documents[1].id);expect(saved.source_sha256).toBe(documents[1].source_sha256)
+ const saved=(await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json()).find((d:any)=>d.id===documents[1].id);expect(saved.source_sha256).toBe(documents[1].source_sha256);expect(saved.notes).toBe('Synthetic source checked against the working copy.')
  await nav.getByRole('button',{name:'Sort',exact:true}).click()
  await expect(page.getByRole('region',{name:'Editable document table'}).getByRole('textbox',{name:/^Title for Affidavit/})).toHaveValue('Reviewed synthetic affidavit')
+ await page.locator('.batch-tools-menu>summary').click()
  await page.getByRole('button',{name:'Close table',exact:true}).click()
  await expect(page.getByRole('button',{name:'Open editor',exact:true})).toBeVisible()
  for(const width of [1440,1024])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){

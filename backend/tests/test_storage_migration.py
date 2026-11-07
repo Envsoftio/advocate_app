@@ -22,7 +22,7 @@ def test_legacy_document_schema_migrates_without_changing_records(tmp_path):
     with store.connect() as con:
         row = con.execute('SELECT * FROM documents WHERE id=?', ('d',)).fetchone()
         revision = con.execute('SELECT * FROM document_revisions WHERE document_id=?', ('d',)).fetchone()
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 23
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 24
         assert con.execute("SELECT name FROM sqlite_master WHERE name='audience_variants'").fetchone()
     assert row['bundle_included'] == 1
     assert row['revision'] == 1
@@ -30,6 +30,7 @@ def test_legacy_document_schema_migrates_without_changing_records(tmp_path):
     assert row['document_date'] == ''
     assert row['date_status'] == 'unknown'
     assert row['date_note'] == ''
+    assert row['notes'] == ''
     assert row['label_status'] == 'unreviewed'
     assert row['label_source'] == 'legacy'
     assert row['label'] == 'P-1'
@@ -56,7 +57,7 @@ def test_v5_store_gains_reusable_values_without_changing_matter(tmp_path):
     assert reopened.get_matter(matter['id'])['name'] == 'Synthetic matter'
     assert reopened.get_matter_values(matter['id']) == {}
     with reopened.connect() as con:
-        assert con.execute('PRAGMA user_version').fetchone()[0] == 23
+        assert con.execute('PRAGMA user_version').fetchone()[0] == 24
         assert con.execute("SELECT name FROM sqlite_master WHERE name='audience_variants'").fetchone()
     reopened.close()
 

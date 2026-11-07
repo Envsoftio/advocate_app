@@ -15,7 +15,7 @@ async function enter(page:any){page.on('pageerror',(e:Error)=>{throw e});
  await page.getByRole('button',{name:'Sort',exact:true}).click();
  await expect(page.locator('.batch-table tbody tr')).toHaveCount(3);
  await page.evaluate(()=>document.fonts.ready)}
-async function suggestions(page:any){await page.getByRole('button',{name:'Review title & dates',exact:true}).click();
+async function suggestions(page:any){await page.locator('.batch-tools-menu>summary').click();await page.getByRole('button',{name:'Review title & dates',exact:true}).click();
  await expect(page.locator('.metadata-source-page img')).toBeVisible()}
 async function matrix(page:any,info:any,name:string){for(const size of [{width:1440,height:900},{width:1024,height:768}])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){await page.setViewportSize(size);
  await page.evaluate(({theme,scale})=>{document.documentElement.dataset.theme=theme;document.documentElement.dataset.effectiveTheme=theme;document.documentElement.style.setProperty('--ui-scale',String(scale/100));(document.querySelector('.app-shell') as HTMLElement).style.setProperty('--documents-interface-scale',String(scale/100));document.documentElement.style.zoom=scale+'%'},{theme,scale});
@@ -24,6 +24,35 @@ async function matrix(page:any,info:any,name:string){for(const size of [{width:1
  await expect(action).toBeInViewport();
  await page.screenshot({path:info.outputPath(`${name}-${size.width}-${theme}-${scale}.png`),animations:'disabled'})}await page.setViewportSize({width:1440,height:900});
  await page.evaluate(()=>{document.documentElement.dataset.theme='light';document.documentElement.dataset.effectiveTheme='light';document.documentElement.style.setProperty('--ui-scale','1');(document.querySelector('.app-shell') as HTMLElement).style.setProperty('--documents-interface-scale','1');document.documentElement.style.zoom='100%'})}
+test('06B batch save shows the supplied saved state and persists the reviewed value',async({page,request},info)=>{
+ const {matter,docs}=await seed(request)
+ await enter(page)
+ const geometry=[] as Array<{selector:string,actual:number[],expected:number[]}>
+ for(const [selector,x,y,width,height] of [
+  ['.batch-review-toolbar',88,220,1328,48],
+  ['.batch-table thead',88,284,1328,38],
+  ['.batch-table tbody tr:first-child',88,322,1328,38],
+  ['.batch-review-heading>.membership-button',1236,140,180,34],
+ ] as const){const box=(await page.locator(selector).boundingBox())!;geometry.push({selector,actual:[box.x,box.y,box.width,box.height].map(Math.round),expected:[x,y,width,height]})}
+ for(const item of geometry)for(let index=0;index<4;index++)expect(Math.abs(item.actual[index]-item.expected[index]),`${item.selector} coordinate ${index}`).toBeLessThanOrEqual(1)
+ const title=page.getByLabel(`Title for ${docs[0].original_name}`,{exact:true})
+ await title.fill('Reviewed synthetic order')
+ await expect(page.locator('.batch-savebar .unsaved')).toHaveText('1 unsaved changes')
+ await expect(page.locator('.preparation-save-state')).toContainText('Unsaved changes')
+ await page.screenshot({path:info.outputPath('06A-dirty-1440-light-100.png'),animations:'disabled'})
+ await page.getByRole('button',{name:'Save changes',exact:true}).click()
+ await expect(page.locator('.batch-savebar .saved')).toHaveText('All changes saved')
+ await expect(page.locator('.batch-savebar').getByRole('button',{name:'Save changes'})).toBeDisabled()
+ await expect(page.locator('.design-shell>.toast.success')).toContainText('Changes saved locally')
+ await page.screenshot({path:info.outputPath('06B-1440-light-100.png'),animations:'disabled'})
+ const toast=(await page.locator('.design-shell>.toast.success').boundingBox())!
+ expect([toast.x,toast.y,toast.width,toast.height].map(Math.round)).toEqual([1130,806,282,44])
+ await expect(page.locator('.preparation-save-state')).toContainText('Saved locally')
+ const saved=await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json()
+ expect(saved[0].title).toBe('Reviewed synthetic order')
+ expect(saved[0].source_sha256).toBe(docs[0].source_sha256)
+ expect(saved.slice(1)).toEqual(docs.slice(1))
+})
 test('B02C new batch and suggestion layouts, explicit one-field acceptance and persistence',async({page,request},info)=>{test.setTimeout(180000);
  const {matter,docs}=await seed(request);
  await enter(page);
@@ -48,6 +77,7 @@ test('B02C new batch and suggestion layouts, explicit one-field acceptance and p
  expect((await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json())[0].document_date).toBe(docs[0].document_date);
  await page.getByRole('button',{name:'Back to batch review',exact:true}).click();
  await expect(page.getByLabel(`Title for ${docs[0].original_name}`,{exact:true})).toHaveValue('Reviewed order title');
+ await expect(page.locator('.batch-tools-menu')).not.toHaveAttribute('open');
  await page.reload();await enterLatestMatter(page);
  await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click();
  await page.getByRole('button',{name:'Sort',exact:true}).click();

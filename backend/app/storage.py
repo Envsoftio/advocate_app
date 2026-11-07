@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 23:
+            if version > 24:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -143,6 +143,7 @@ class Store:
                     date_status TEXT NOT NULL DEFAULT 'unknown',
                     date_source TEXT NOT NULL DEFAULT 'none',
                     date_note TEXT NOT NULL DEFAULT '',
+                    notes TEXT NOT NULL DEFAULT '',
                     source_file_mtime TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
@@ -366,6 +367,11 @@ class Store:
                     if name not in columns:
                         con.execute(f"ALTER TABLE matters ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
                 con.execute('PRAGMA user_version=23')
+            if version < 24:
+                columns = {row['name'] for row in con.execute('PRAGMA table_info(documents)')}
+                if 'notes' not in columns:
+                    con.execute("ALTER TABLE documents ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+                con.execute('PRAGMA user_version=24')
 
     def list_redactions(self, doc_id: str, active_only: bool = True) -> list[dict]:
         with self.connect() as con:
@@ -1222,7 +1228,6 @@ class Store:
         if not changes:
             return self.get_document(doc_id)
         changes = dict(changes)
-        changes['updated_at'] = utcnow()
         with self.connect() as con:
             current = con.execute('SELECT * FROM documents WHERE id=?', (doc_id,)).fetchone()
             if current is None:
@@ -1231,9 +1236,10 @@ class Store:
             final_group = changes.get('group_key', current['group_key']).strip()
             final_role = changes.get('group_role', current['group_role'])
             self._validate_group_parent(con, matter_id, doc_id, final_group, final_role)
-            tracked = {key: value for key, value in changes.items() if key != 'updated_at'}
-            if all(current[key] == value for key, value in tracked.items()):
+            tracked = {key: value for key, value in changes.items() if current[key] != value}
+            if not tracked:
                 return dict(current)
+            changes = dict(tracked, updated_at=current['updated_at'] if set(tracked) == {'notes'} else utcnow())
             if 'working_relpath' in changes:
                 changes['revision'] = current['revision'] + 1
             annotation_ids = []
@@ -1623,7 +1629,7 @@ class Store:
                             ELSE active END WHERE document_id=?''',
                             (source_revision, source_revision, source_revision,
                              source_revision, state['id']))
-                changes = dict(fields, updated_at=now)
+                changes = dict(fields, updated_at=doc['updated_at'] if set(fields) == {'notes'} else now)
                 con.execute('UPDATE documents SET ' + ','.join(f'{key}=?' for key in changes) +
                             ' WHERE id=?', (*changes.values(), state['id']))
                 for annotation_id in state.get('preserved_annotation_ids', []):

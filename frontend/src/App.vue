@@ -739,6 +739,7 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const matterFileInput = ref<HTMLInputElement | null>(null);
 const docEditor = reactive({
   title: "",
+  notes: "",
   kind: "other" as DocKind,
   part: 1,
   label: "",
@@ -917,6 +918,7 @@ const documentDirty = computed(
   () =>
     !!selectedDoc.value &&
     (docEditor.title !== selectedDoc.value.title ||
+      docEditor.notes !== selectedDoc.value.notes ||
       docEditor.kind !== selectedDoc.value.kind ||
       docEditor.part !== selectedDoc.value.part ||
       docEditor.label !== selectedDoc.value.label ||
@@ -955,6 +957,7 @@ watch(
   () => [
     selectedDocId.value,
     docEditor.title,
+    docEditor.notes,
     docEditor.kind,
     docEditor.part,
     docEditor.label,
@@ -996,6 +999,7 @@ function resetDrafts() {
   documentTablePanel.value?.discard();
   const doc = selectedDoc.value;
   docEditor.title = doc?.title || "";
+  docEditor.notes = doc?.notes || "";
   docEditor.kind = doc?.kind || "other";
   docEditor.part = doc?.part || 1;
   docEditor.label = doc?.label || "";
@@ -1410,6 +1414,7 @@ watch(
       doc &&
       previous?.id === doc.id &&
       (docEditor.title !== previous.title ||
+        docEditor.notes !== previous.notes ||
         docEditor.kind !== previous.kind ||
         docEditor.part !== previous.part ||
         docEditor.label !== previous.label ||
@@ -1421,6 +1426,7 @@ watch(
     )
       return;
     docEditor.title = doc?.title || "";
+    docEditor.notes = doc?.notes || "";
     docEditor.kind = doc?.kind || "other";
     docEditor.part = doc?.part || 1;
     docEditor.label = doc?.label || "";
@@ -2079,6 +2085,7 @@ async function saveDocument(quiet = false) {
       "PATCH",
       {
         title: draft.title,
+        notes: draft.notes,
         kind: draft.kind,
         part: draft.part,
         label: draft.label,
@@ -2131,7 +2138,7 @@ async function documentTableModified() {
   await refreshMatters();
   await loadMatterResources();
   notify(
-    "Document table changes saved. Bundle order and freshness were refreshed.",
+    "Changes saved locally",
     "success",
   );
 }
@@ -3597,8 +3604,9 @@ watch(sidebarCollapsed, (collapsed) => {
                       </span>
                     </div>
                     <label class="field"
-                      >Display title<input
+                      >{{ preparationVisible ? 'Title' : 'Display title' }}<input
                         v-model="docEditor.title"
+                        aria-label="Display title"
                         maxlength="250"
                     /></label>
                     <label class="field"
@@ -3608,14 +3616,14 @@ watch(sidebarCollapsed, (collapsed) => {
                         @input="docEditor.date_confirmed = true"
                       /><span
                         v-if="
-                          selectedDoc.date_status === 'ambiguous' &&
+                          !preparationVisible && selectedDoc.date_status === 'ambiguous' &&
                           !docEditor.document_date
                         "
                         class="hint"
                         >Ambiguous {{ selectedDoc.date_source }} text:
                         {{ selectedDoc.date_note }}. Enter and confirm a date
                         only after checking the document.</span
-                      ><span v-else class="hint"
+                      ><span v-else-if="!preparationVisible" class="hint"
                         >Unknown is preserved when blank. A file timestamp is
                         never treated as the document date.</span
                       ></label
@@ -3647,7 +3655,7 @@ watch(sidebarCollapsed, (collapsed) => {
                         </option>
                       </select></label
                     >
-                    <div class="field-row">
+                    <div class="field-row" :class="{'preparation-field-row':preparationVisible}">
                       <label class="field"
                         >Part<select v-model.number="docEditor.part">
                           <option v-for="part in 4" :value="part">
@@ -3655,13 +3663,16 @@ watch(sidebarCollapsed, (collapsed) => {
                           </option>
                         </select></label
                       ><label class="field"
-                        >Label<input
+                        >{{ preparationVisible ? 'Label / Group' : 'Label' }}<input
                           v-model="docEditor.label"
+                          aria-label="Label"
                           placeholder="P-1"
                           maxlength="60"
                       /></label>
                     </div>
-                    <details class="metadata-signature-review" :open="!preparationVisible"><summary>Signature review</summary>
+                    <label class="field preparation-notes">Notes<textarea v-model="docEditor.notes" aria-label="Document notes" maxlength="2000" rows="3"/></label>
+                    <div v-if="preparationVisible" class="preparation-ocr-status"><strong>OCR / PROCESSING</strong><span><CheckCircle2 v-if="selectedDoc.ocr_status==='native_text'" :size="16"/><CircleAlert v-else-if="selectedDoc.ocr_status==='needs_ocr'" :size="16"/><Info v-else :size="16"/>{{selectedDoc.ocr_status==='native_text'?'Searchable text available':selectedDoc.ocr_status==='needs_ocr'?'OCR required':selectedDoc.ocr_status==='not_requested'?'Text status not assessed':selectedDoc.ocr_status.split('_').join(' ')}}</span></div>
+                    <details class="metadata-signature-review" :open="!preparationVisible"><summary>{{ preparationVisible ? 'More document details' : 'Signature review' }}</summary>
                     <div
                       :class="[
                         'notice',
@@ -3702,7 +3713,6 @@ watch(sidebarCollapsed, (collapsed) => {
                         signature.</span
                       >
                     </label>
-                    </details>
                     <label class="field"
                       >Keep-together group<input
                         v-model="docEditor.group_key"
@@ -3712,6 +3722,7 @@ watch(sidebarCollapsed, (collapsed) => {
                         when enabled.</span
                       ></label
                     >
+                    </details>
                     <p
                       v-if="!preparationVisible || documentDirty || documentAutosaveState==='failed'"
                       role="status"
@@ -3738,12 +3749,13 @@ watch(sidebarCollapsed, (collapsed) => {
                   <div class="inspector-save-footer">
                     <button
                       class="btn primary block"
+                      aria-label="Save document details"
                       :disabled="
                         engineBlocked || busy || !docEditor.title.trim() || !documentDirty
                       "
                       @click="saveDocument()"
                     >
-                      <Check :size="16" /> Save document details
+                      <Check :size="16" /> {{ preparationVisible ? 'Save changes' : 'Save document details' }}
                     </button>
                   </div>
                 </section>

@@ -138,7 +138,8 @@
 .generated-version {min-height:24px;max-height:24px;padding:0 8px}
 .generated-header p {overflow:hidden;text-overflow:ellipsis}
 @media(max-width:1199px){
- .generated-review .export-search-results {max-height:60px}
+ .generated-review .export-search-results {max-height:30px}
+ .design-shell .generated-review .shared-reader-viewport {padding-top:16px!important}
  .generated-version {left:12px;width:140px}
  .generated-header:has(.generated-version) p {padding-left:148px}
 }

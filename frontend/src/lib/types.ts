@@ -27,6 +27,7 @@ export interface MatterDocument {
   id: string
   matter_id: string
   title: string
+  notes: string
   kind: DocKind
   part: number
   group_key: string

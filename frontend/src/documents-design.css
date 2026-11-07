@@ -93,7 +93,7 @@
 .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-panel h2 {font-size:16px}
 .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-panel .panel-header>div>span,
 .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-heading {display:none}
-.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content {padding:2px 16px 12px;gap:16px}
+.app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content {padding:2px 18px 12px;gap:14px}
 .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content .field {font-size:12px;gap:8px}
 :root .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content .field input,
 .app-shell.design-shell[data-preparation=true] .documents-workspace.preparation-workspace .inspector-content .field select {min-height:36px;height:36px;font-size:13px;border-color:var(--cb-control-border);border-radius:8px}
@@ -122,8 +122,18 @@
 .app-shell.design-shell[data-preparation=true][data-compact-preparation=true] .documents-workspace.preparation-workspace.details-open .viewer-edit-workspace {margin-right:272px}
 .design-shell[data-preparation=true] .inspector-content {display:flex;flex-direction:column}
 .design-shell[data-preparation=true] .document-revision {min-width:0}
-.design-shell[data-preparation=true] .preparation-metadata-state {margin-bottom:8px}
+.design-shell[data-preparation=true] .preparation-metadata-state {margin-bottom:0}
 .design-shell[data-preparation=true] .inspector-content .field {flex-shrink:0}
+.design-shell[data-preparation=true] .preparation-field-row {display:flex;flex-direction:column;gap:12px}
+.design-shell[data-preparation=true] .preparation-field-row>.field {width:100%}
+.design-shell[data-preparation=true] .preparation-notes textarea {height:62px;min-height:62px;max-height:160px;resize:vertical;border:1px solid var(--cb-control-border);border-radius:8px;background:var(--cb-surface);color:var(--cb-text);padding:9px 10px;font:13px Inter,sans-serif}
+.preparation-ocr-status {display:grid;gap:12px;margin-top:9px;color:var(--cb-muted);font-size:12px}
+.preparation-ocr-status strong {font-size:12px;font-weight:600;color:var(--cb-muted)}
+.preparation-ocr-status span {display:flex;align-items:center;gap:8px}
+.preparation-ocr-status svg {color:var(--cb-muted)}
+.preparation-ocr-status svg.lucide-circle-check {color:var(--cb-success)}
+.preparation-ocr-status svg.lucide-circle-alert {color:var(--cb-warning)}
+.design-shell[data-preparation=true] .metadata-signature-review {margin-top:28px}
 
 .inspector-save-footer {flex-shrink:0;padding:12px 16px;border-top:1px solid var(--cb-border);background:var(--cb-surface)}
 .inspector-save-footer .btn {min-height:34px;height:34px;font-size:12px}

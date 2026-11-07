@@ -34,7 +34,8 @@ def test_portable_matter_round_trip_preserves_originals_and_revisions(client, au
     dated = client.patch(f'/documents/{doc["id"]}', headers=auth, json={
         'document_date': '2026-10-16', 'date_status': 'confirmed', 'date_source': 'user',
         'label': 'P-7', 'label_status': 'confirmed', 'label_source': 'user',
-        'group_key': 'portable-group', 'group_role': 'parent'})
+        'group_key': 'portable-group', 'group_role': 'parent',
+        'notes': 'Synthetic source checked against the working copy.'})
     assert dated.status_code == 200, dated.text
     rotated = client.post(f'/documents/{doc["id"]}/pages/rotate', headers=auth,
                           json={'page_index': 0, 'degrees': 90})
@@ -54,6 +55,7 @@ def test_portable_matter_round_trip_preserves_originals_and_revisions(client, au
     assert (new_doc['label'], new_doc['label_status'], new_doc['label_source']) == (
         'P-7', 'confirmed', 'user')
     assert (new_doc['group_key'], new_doc['group_role']) == ('portable-group', 'parent')
+    assert new_doc['notes'] == 'Synthetic source checked against the working copy.'
     assert (new_doc['certificate_signature_status'], new_doc['visible_signature_status'],
             new_doc['signature_status']) == ('not_detected', 'unreviewed',
                                              'no_certificate_signature_detected')
@@ -76,7 +78,7 @@ def test_legacy_v1_portable_package_still_restores(client, auth, make_pdf):
         manifest['version'] = 1
         manifest.pop('manual_bookmarks')
         for document in manifest['documents']:
-            for field in ('document_date', 'date_status', 'date_source', 'date_note',
+            for field in ('document_date', 'date_status', 'date_source', 'date_note', 'notes',
                           'source_file_mtime', 'label_status', 'label_source',
                           'certificate_signature_status', 'certificate_signature_count',
                           'signature_inspection_note', 'visible_signature_status',
@@ -90,6 +92,7 @@ def test_legacy_v1_portable_package_still_restores(client, auth, make_pdf):
     assert client.get(f'/matters/{restored.json()["id"]}/bookmarks', headers=auth).json() == []
     legacy_doc = client.get(f'/matters/{restored.json()["id"]}/documents', headers=auth).json()[0]
     assert legacy_doc['signature_status'] == 'inspection_inconclusive'
+    assert legacy_doc['notes'] == ''
 
 
 def test_portable_matter_values_round_trip_and_legacy_v2(client, auth):

@@ -58,6 +58,7 @@ class BundlePreviewRequest(BaseModel):
 class DocumentPatch(BaseModel):
     model_config = ConfigDict(extra='forbid')
     title: str | None = Field(default=None, min_length=1, max_length=250)
+    notes: str | None = Field(default=None, max_length=2000)
     kind: DocKind | None = None
     part: int | None = Field(default=None, ge=1, le=4)
     label: str | None = Field(default=None, max_length=60)

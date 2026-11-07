@@ -23,7 +23,7 @@ from .engine import load_profiles
 from .pdf_ops import ProcessingError, validate_overlay_image
 from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 16
+PACKAGE_VERSION = 17
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -267,6 +267,8 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
         by_path = {item['path']: item for item in files}
         active_group_parents: set[str] = set()
         for doc in documents:
+            if manifest['version'] < 17:
+                doc.setdefault('notes', '')
             if manifest['version'] < 4:
                 doc.setdefault('document_date', '')
                 doc.setdefault('date_status', 'unknown')
@@ -294,7 +296,7 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                 raise PortableMatterError('Invalid bundle membership in package')
             _validate_ocr_provenance(doc['ocr_provenance_json'])
             DocumentPatch.model_validate({key: doc[key] for key in
-                ('title', 'kind', 'part', 'label', 'label_status', 'label_source',
+                ('title', 'notes', 'kind', 'part', 'label', 'label_status', 'label_source',
                  'group_key', 'group_role', 'document_date',
                  'date_status', 'date_source', 'date_note', 'visible_signature_status')})
             if (doc['certificate_signature_status'] not in ('detected', 'not_detected', 'unknown') or
@@ -516,7 +518,7 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                         (matter_id, membership_revision))
             for doc in documents:
                 fields = {key: doc[key] for key in (
-                    'title', 'kind', 'part', 'label', 'label_status', 'label_source',
+                    'title', 'notes', 'kind', 'part', 'label', 'label_status', 'label_source',
                     'group_key', 'group_role', 'position', 'page_count',
                     'document_date', 'date_status', 'date_source', 'date_note', 'source_file_mtime',
                     'ocr_status', 'ocr_provenance_json', 'original_name', 'source_sha256', 'source_relpath',
