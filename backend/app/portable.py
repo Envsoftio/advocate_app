@@ -23,7 +23,7 @@ from .engine import load_profiles
 from .pdf_ops import ProcessingError, validate_overlay_image
 from .signatures import combined_signature_status
 
-PACKAGE_VERSION = 18
+PACKAGE_VERSION = 19
 PROTECTED_PACKAGE_MAGIC = b'CBMAT4\n'
 MAX_FILE_BYTES = 1024 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * MAX_FILE_BYTES
@@ -257,6 +257,8 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                     raise PortableMatterError(f'Hash mismatch in package: {rel}')
 
         matter = manifest['matter']
+        if manifest['version'] >= 19 and ('parts' not in matter or 'next_part' not in matter):
+            raise PortableMatterError('Missing matter Parts in v19 package')
         documents = manifest['documents']
         revisions = manifest['revisions']
         redactions = manifest.get('redactions', [])
@@ -276,6 +278,13 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
             if 'matter_values' not in manifest:
                 raise PortableMatterError('Missing matter values in v3 package')
             MatterValuesUpdate.model_validate({'values': manifest['matter_values']})
+            try:
+                review_items = json.loads(manifest['matter_values'].get('filing_review_items', '[]'))
+                if any(item.get('part') is not None and item['part'] not in validated_matter.parts
+                       for item in review_items):
+                    raise PortableMatterError('Filing review uses a Part missing from the matter')
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise PortableMatterError('Invalid filing review Parts in package') from exc
         by_path = {item['path']: item for item in files}
         active_group_parents: set[str] = set()
         for doc in documents:
@@ -311,6 +320,8 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
                 ('title', 'notes', 'kind', 'part', 'label', 'label_status', 'label_source',
                  'group_key', 'group_role', 'document_date',
                  'date_status', 'date_source', 'date_note', 'visible_signature_status')})
+            if doc['part'] not in validated_matter.parts:
+                raise PortableMatterError('Document uses a Part missing from the matter')
             if (doc['certificate_signature_status'] not in ('detected', 'not_detected', 'unknown') or
                     type(doc['certificate_signature_count']) is not int or
                     doc['certificate_signature_count'] < 0 or
@@ -533,6 +544,7 @@ def restore_package(store: Store, package: Path | bytes | object) -> dict:
         with store.connect() as con:
             con.execute('BEGIN IMMEDIATE')
             matter_fields = validated_matter.model_dump()
+            matter_fields['parts_json'] = json.dumps(matter_fields.pop('parts'))
             matter_fields['created_at'] = matter['created_at']
             matter_fields.update(id=matter_id, updated_at=utcnow())
             con.execute('INSERT INTO matters (' + ','.join(matter_fields) + ') VALUES (' +

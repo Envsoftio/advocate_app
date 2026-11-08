@@ -13,11 +13,13 @@ export interface Matter {
   case_number: string
   max_pages_per_volume: number
   keep_groups_intact: boolean
+  parts: number[]
+  next_part: number
   created_at: string
   updated_at: string
   archived_at?: string | null
 }
-export type MatterNew = Omit<Matter, 'id' | 'created_at' | 'updated_at' | 'court_forum' | 'client_reference' | 'internal_reference' | 'notes'> &
+export type MatterNew = Omit<Matter, 'id' | 'created_at' | 'updated_at' | 'court_forum' | 'client_reference' | 'internal_reference' | 'notes' | 'parts' | 'next_part'> &
   Partial<Pick<Matter, 'court_forum' | 'client_reference' | 'internal_reference' | 'notes'>>
 export type DocKind = 'petition' | 'affidavit' | 'order' | 'annexure' | 'application' | 'evidence' | 'other'
 export type SignatureStatus = 'certificate_signature_detected' | 'no_certificate_signature_detected' |

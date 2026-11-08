@@ -70,6 +70,7 @@ import IndexImport from "./components/IndexImport.vue";
 import BundleStructure from "./components/BundleStructure.vue";
 import OutputPresets from "./components/OutputPresets.vue";
 import DocumentTable from "./components/DocumentTable.vue";
+import PartManager from "./components/PartManager.vue";
 import EngineNotice from "./components/EngineNotice.vue";
 import { engineState, engineBlocked, engineReviewReason, autosaveHeld, disconnectEngine } from "./lib/engineConnection";
 import FindingReviewPanel from './components/FindingReviewPanel.vue';
@@ -472,6 +473,7 @@ function toggleEditorExpanded() {
 }
 
 const documentTableOpen = ref(false);
+const partManagerOpen = ref(false);
 const documentTablePanel = ref<InstanceType<typeof DocumentTable>|null>(null);
 const tableDirty = ref(false);
 const pageToolsOpen = ref(false);
@@ -1486,6 +1488,7 @@ watch(
   { immediate: true },
 );
 watch(currentMatterId, () => {
+  partManagerOpen.value = false;
   detailsOpen.value = false;
   documentTableOpen.value = false;
   pageQuery.value = "";
@@ -2165,6 +2168,15 @@ async function closeDocumentTable() {
 async function openDocumentTable() {
   if (!(await guardArtifactTransition('Batch review'))) return;
   documentTableOpen.value=true;
+}
+function openPartManager() {
+  if (!currentMatter.value || busy.value || tableDirty.value) return;
+  partManagerOpen.value = true;
+}
+async function partManagerModified() {
+  await refreshMatters();
+  await loadMatterResources();
+  notify('Matter Parts saved locally', 'success');
 }
 async function documentTableModified() {
   await refreshMatters();
@@ -3330,6 +3342,7 @@ watch(sidebarCollapsed, (collapsed) => {
               v-else-if="activeView === 'documents' && documentTableOpen"
               :matter-id="currentMatterId!"
               :documents="docs"
+              :parts="currentMatter.parts"
               :busy="busy || isJobActive"
               :keep-groups="currentMatter.keep_groups_intact"
               @dirty-changed="tableDirty=$event"
@@ -3337,6 +3350,7 @@ watch(sidebarCollapsed, (collapsed) => {
               @open-document="openDocumentFromTable"
               @error="issue"
               @close="closeDocumentTable"
+              @manage-parts="openPartManager"
             ></DocumentTable>
             <div
               v-else-if="activeView === 'documents'"
@@ -3355,7 +3369,7 @@ watch(sidebarCollapsed, (collapsed) => {
                   : undefined
               "
             >
-              <DocumentNavigator v-if="preparationVisible && preparationListOpen" :documents="docs" :selected-id="selectedDocId" :busy="engineBlocked || busy || isJobActive" @select="selectPreparationDocument" @open="openDocumentTab" @reorder="applyDocumentSort" @import="openImport" @table="openDocumentTable" @cover="generateCover" @search-pages="openPreparationSearch" @collapse="closePreparationList"/>
+              <DocumentNavigator v-if="preparationVisible && preparationListOpen" :documents="docs" :parts="currentMatter.parts" :selected-id="selectedDocId" :busy="engineBlocked || busy || isJobActive" @select="selectPreparationDocument" @open="openDocumentTab" @reorder="applyDocumentSort" @import="openImport" @table="openDocumentTable" @manage-parts="openPartManager" @cover="generateCover" @search-pages="openPreparationSearch" @collapse="closePreparationList"/>
               <section
                 v-show="!preparationVisible && (!readerFocus || !selectedDoc) && !(compactDocuments && detailsOpen && selectedDoc)"
                 class="panel docs-panel"
@@ -3735,7 +3749,7 @@ watch(sidebarCollapsed, (collapsed) => {
                     <div class="field-row" :class="{'preparation-field-row':preparationVisible}">
                       <label class="field"
                         >Part<select v-model.number="docEditor.part">
-                          <option v-for="part in 4" :value="part">
+                          <option v-for="part in currentMatter.parts" :key="part" :value="part">
                             Part {{ part }}
                           </option>
                         </select></label
@@ -4230,7 +4244,7 @@ watch(sidebarCollapsed, (collapsed) => {
             </details></section>
 
             <PreflightWorkspace v-else-if="activeView === 'validation'" :checks="checks" :loading="checksLoading" :error="checksError" :pending="documentDirty || settingsDirty || formattingDirty || busy || isJobActive" :blocked="engineBlocked" v-model:filter="preflightFilter" @run="validate" @finding="openFinding($event)" @build="showView('build')">
-              <FilingReview :matter-id="currentMatterId!" :refresh-key="previewRefreshKey" :disabled="engineBlocked || busy || isJobActive" @modified="loadMatterResources"/>
+              <FilingReview :matter-id="currentMatterId!" :parts="currentMatter.parts" :refresh-key="previewRefreshKey" :disabled="engineBlocked || busy || isJobActive" @modified="loadMatterResources"/>
             </PreflightWorkspace>
           </Transition>
         </main>
@@ -4507,6 +4521,7 @@ watch(sidebarCollapsed, (collapsed) => {
         </form>
       </section>
     </div>
+    <PartManager v-if="partManagerOpen && currentMatter" :matter="currentMatter" :documents="docs" :archived-documents="archivedDocs" @close="partManagerOpen=false" @modified="partManagerModified"/>
     <Transition name="modal"
       ><MatterForm
         v-if="modalOpen"

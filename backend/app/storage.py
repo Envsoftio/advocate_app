@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 25:
+            if version > 26:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -119,6 +119,8 @@ class Store:
                     advocate TEXT NOT NULL, case_number TEXT NOT NULL,
                     max_pages_per_volume INTEGER NOT NULL,
                     keep_groups_intact INTEGER NOT NULL,
+                    parts_json TEXT NOT NULL DEFAULT '[1,2,3,4]',
+                    next_part INTEGER NOT NULL DEFAULT 5,
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS documents (
@@ -382,6 +384,13 @@ class Store:
                 if 'started_at' not in {row['name'] for row in con.execute('PRAGMA table_info(jobs)')}:
                     con.execute('ALTER TABLE jobs ADD COLUMN started_at TEXT')
                 con.execute('PRAGMA user_version=25')
+            if version < 26:
+                columns = {row['name'] for row in con.execute('PRAGMA table_info(matters)')}
+                if 'parts_json' not in columns:
+                    con.execute("ALTER TABLE matters ADD COLUMN parts_json TEXT NOT NULL DEFAULT '[1,2,3,4]'")
+                if 'next_part' not in columns:
+                    con.execute('ALTER TABLE matters ADD COLUMN next_part INTEGER NOT NULL DEFAULT 5')
+                con.execute('PRAGMA user_version=26')
 
     def get_ocr_page_review(self, doc_id: str, revision: int, page_index: int) -> dict | None:
         with self.connect() as con:
@@ -511,6 +520,8 @@ class Store:
     def create_matter(self, fields: dict) -> dict:
         matter_id = new_id()
         now = utcnow()
+        fields = dict(fields)
+        fields['parts_json'] = json.dumps(fields.pop('parts', [1, 2, 3, 4]))
         item = {'id': matter_id, **fields, 'keep_groups_intact': int(fields['keep_groups_intact']), 'created_at': now, 'updated_at': now}
         with self.connect() as con:
             cols = ','.join(item)
@@ -534,7 +545,63 @@ class Store:
     def _matter(row) -> dict:
         d = dict(row)
         d['keep_groups_intact'] = bool(d['keep_groups_intact'])
+        d['parts'] = json.loads(d.pop('parts_json'))
         return d
+
+    @staticmethod
+    def _part_numbers(con, matter_id: str) -> list[int]:
+        row = con.execute('SELECT parts_json FROM matters WHERE id=? AND archived_at IS NULL', (matter_id,)).fetchone()
+        if row is None:
+            raise ValueError('Matter not found')
+        return json.loads(row['parts_json'])
+
+    def add_part(self, matter_id: str) -> dict:
+        with self.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            row = con.execute('SELECT parts_json,next_part FROM matters WHERE id=? AND archived_at IS NULL', (matter_id,)).fetchone()
+            if row is None:
+                raise ValueError('Matter not found')
+            before = {'parts_json': row['parts_json'], 'next_part': row['next_part']}
+            parts = json.loads(row['parts_json'])
+            if len(parts) >= 50 or row['next_part'] > 99:
+                raise ValueError('This matter has reached the 50-Part or Part 99 limit')
+            parts.append(row['next_part'])
+            after = {'parts_json': json.dumps(parts), 'next_part': row['next_part'] + 1}
+            con.execute('UPDATE matters SET parts_json=?,next_part=?,updated_at=? WHERE id=?',
+                        (after['parts_json'], after['next_part'], utcnow(), matter_id))
+            self._record_edit(con, matter_id, 'matter_parts', before, after)
+            self._audit(con, 'matter_part_added', matter_id)
+        return self.get_matter(matter_id)
+
+    def remove_part(self, matter_id: str, part: int) -> dict:
+        with self.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            row = con.execute('SELECT parts_json,next_part FROM matters WHERE id=? AND archived_at IS NULL', (matter_id,)).fetchone()
+            if row is None:
+                raise ValueError('Matter not found')
+            parts = json.loads(row['parts_json'])
+            if part not in parts:
+                raise ValueError('Part is not in this matter')
+            if len(parts) == 1:
+                raise ValueError('A matter must retain at least one Part')
+            count = con.execute('SELECT COUNT(*) FROM documents WHERE matter_id=? AND part=?',
+                                (matter_id, part)).fetchone()[0]
+            if count:
+                raise ValueError(f'Part {part} has {count} document(s), including archived documents. Reassign them before removal.')
+            review_row = con.execute('SELECT payload_json FROM matter_values WHERE matter_id=?', (matter_id,)).fetchone()
+            if review_row:
+                values = json.loads(review_row['payload_json'])
+                items = json.loads(values.get('filing_review_items', '[]'))
+                if any(item.get('part') == part for item in items):
+                    raise ValueError(f'Part {part} is used by the filing review checklist. Change those items before removal.')
+            before = {'parts_json': row['parts_json'], 'next_part': row['next_part']}
+            after = {'parts_json': json.dumps([value for value in parts if value != part]),
+                     'next_part': row['next_part']}
+            con.execute('UPDATE matters SET parts_json=?,updated_at=? WHERE id=?',
+                        (after['parts_json'], utcnow(), matter_id))
+            self._record_edit(con, matter_id, 'matter_parts', before, after)
+            self._audit(con, 'matter_part_removed', matter_id)
+        return self.get_matter(matter_id)
 
     def get_matter(self, matter_id: str, include_archived: bool = False) -> dict | None:
         with self.connect() as con:
@@ -1211,6 +1278,9 @@ class Store:
 
     def set_filing_review(self, matter_id: str, review: dict) -> dict:
         from .schemas import MatterValuesUpdate
+        allowed = set(self.get_matter(matter_id)['parts'])
+        if any(item['part'] is not None and item['part'] not in allowed for item in review['items']):
+            raise ValueError('Filing review item uses a Part that is not in this matter')
         values = self.get_matter_values(matter_id)
         values['filing_review_meta'] = json.dumps({key: review[key] for key in
             ('court', 'case_type', 'stage', 'source_note')}, ensure_ascii=False)
@@ -1240,6 +1310,8 @@ class Store:
 
     def add_document(self, data: dict) -> dict:
         with self.connect() as con:
+            if data['part'] not in self._part_numbers(con, data['matter_id']):
+                raise ValueError('Document Part is not in this matter')
             pos = con.execute('SELECT COALESCE(MAX(position),-1)+1 FROM documents WHERE matter_id=?', (data['matter_id'],)).fetchone()[0]
             item = dict(data, position=pos, created_at=utcnow(), updated_at=utcnow())
             con.execute('INSERT INTO documents (' + ','.join(item) + ') VALUES (' + ','.join('?' for _ in item) + ')', tuple(item.values()))
@@ -1266,6 +1338,8 @@ class Store:
             if current is None:
                 raise ValueError('Document not found')
             matter_id = current['matter_id']
+            if 'part' in changes and changes['part'] not in self._part_numbers(con, matter_id):
+                raise ValueError('Document Part is not in this matter')
             final_group = changes.get('group_key', current['group_key']).strip()
             final_role = changes.get('group_role', current['group_role'])
             self._validate_group_parent(con, matter_id, doc_id, final_group, final_role)
@@ -1311,6 +1385,8 @@ class Store:
         if not changes:
             raise ValueError('Choose at least one batch field')
         with self.connect() as con:
+            if 'part' in changes and changes['part'] not in self._part_numbers(con, matter_id):
+                raise ValueError('Document Part is not in this matter')
             rows = [dict(row) for row in con.execute(
                 '''SELECT * FROM documents WHERE matter_id=? AND archived_at IS NULL
                 ORDER BY position,created_at''', (matter_id,))]
@@ -1575,6 +1651,7 @@ class Store:
             return {
                 'document_batch': 'Batch document details',
                 'matter': 'Matter settings',
+                'matter_parts': 'Matter Parts',
                 'bundle_membership': 'Bundle membership',
                 'order': 'Document order',
                 'bookmarks': 'Bookmarks',
@@ -1678,7 +1755,7 @@ class Store:
                     changes = dict(fields, updated_at=now)
                     con.execute('UPDATE documents SET ' + ','.join(f'{key}=?' for key in changes) +
                                 ' WHERE id=?', (*changes.values(), item['id']))
-            elif row['kind'] == 'matter':
+            elif row['kind'] in ('matter', 'matter_parts'):
                 changes = dict(state, updated_at=now)
                 con.execute('UPDATE matters SET ' + ','.join(f'{key}=?' for key in changes) +
                             ' WHERE id=?', (*changes.values(), matter_id))

@@ -8,6 +8,7 @@
 .batch-review-heading>.membership-button{width:180px;height:34px;flex:none}
 .batch-review h1,.metadata-review h1{font:680 28px/36px Inter,sans-serif;margin:0 0 6px;letter-spacing:0}
 .batch-review-heading p,.metadata-heading p{margin:0;font-size:13px;line-height:22px;color:var(--cb-text-onCanvas)}
+.batch-review-heading .manage-parts-link{border:0;background:none;color:var(--cb-link);font:inherit;font-weight:600;padding:0 0 0 5px;cursor:pointer}.batch-review-heading .manage-parts-link:disabled{color:var(--cb-muted);cursor:not-allowed}
 .batch-review-toolbar{display:flex;gap:10px;align-items:center;min-height:48px;flex-shrink:0;background:var(--cb-surface);border:1px solid var(--cb-border);border-radius:8px;padding:6px 12px;margin-bottom:16px;flex-wrap:wrap}
 .design-shell[data-batch=true] .batch-review-toolbar{height:48px;min-height:48px;flex-wrap:nowrap;padding-right:9px}
 :root .design-shell[data-batch=true] .batch-review-toolbar select,:root .design-shell[data-batch=true] .batch-review-toolbar input[type=search]{height:34px!important}
@@ -117,4 +118,45 @@
 :root .design-shell[data-batch=true] .batch-review input:not([type=checkbox]),:root .design-shell[data-batch=true] .batch-review select,:root .design-shell[data-batch=true] .metadata-review input:not([type=checkbox]){height:36px!important;min-height:0!important}
 :root .design-shell[data-batch=true] .batch-table input:not([type=checkbox]),:root .design-shell[data-batch=true] .batch-table select{height:30px!important;min-height:0!important;border-color:transparent;background:transparent}
 :root .design-shell[data-batch=true] .batch-table input:focus,:root .design-shell[data-batch=true] .batch-table select:focus{background:var(--cb-surface)}
-.batch-row-menu[open]>div{position:fixed;top:280px;left:120px;width:220px;max-height:300px;overflow:auto}
+.batch-row-menu[open]>div{position:fixed;width:220px;max-height:300px;overflow:auto}
+.batch-toolbar-shell{position:relative;flex-shrink:0;margin-top:-1px;margin-bottom:16px;z-index:5}
+.design-shell[data-batch=true] .batch-review-toolbar{display:grid;grid-template-columns:16px 98px 220px 154px minmax(0,1fr) 112px 92px;column-gap:10px;margin-bottom:0;gap:10px;padding-left:13px;padding-right:9px}
+:root .design-shell[data-batch=true] .batch-review-toolbar select{height:34px!important}
+.batch-review-toolbar .batch-part-select,.batch-review-toolbar .batch-part-select select{width:220px}
+.batch-review-toolbar .batch-part-select{position:relative;top:-1px}
+.batch-review-toolbar .batch-kind-select{position:relative;left:4px;top:-1px;width:154px;margin-left:0}
+.batch-review-toolbar>strong{min-width:0}
+.batch-toolbar-middle{position:relative;top:-1px;display:flex;align-items:center;gap:6px;min-width:0;overflow:visible}
+.batch-inline-action{border:0;background:transparent;color:var(--cb-link);font:600 12px Inter,sans-serif;white-space:nowrap;padding:7px 3px;cursor:pointer}
+.batch-inline-action:disabled{color:var(--cb-muted);opacity:.65;cursor:not-allowed}
+.batch-apply-action{flex:0 0 132px;border-radius:7px;background:var(--cb-selected);color:var(--cb-link);overflow:hidden;text-overflow:ellipsis}
+.batch-review-action{flex:0 0 136px;background:transparent;border-radius:7px;padding:8px 3px;overflow:hidden;text-overflow:ellipsis}
+:root .design-shell[data-batch=true] .batch-review-toolbar .batch-search{width:128px;flex:1 1 128px;height:34px!important}
+.batch-popover-anchor{position:relative;flex:none}
+.batch-filter-trigger{width:80px}
+.batch-review-toolbar .batch-columns-trigger{position:relative;left:4px;width:112px}
+.batch-review-toolbar>.batch-popover-anchor{top:-1px}
+.batch-review-toolbar .batch-density-trigger{position:relative;top:-1px;width:92px;margin-left:0}
+.batch-tools-menu{margin-left:0}
+.batch-popover{position:absolute;right:0;top:40px;z-index:40;width:220px;padding:14px;background:var(--cb-surface);border:1px solid var(--cb-border);border-radius:10px;box-shadow:0 10px 28px var(--cb-overlay-scrim);display:grid;gap:10px}
+.batch-popover>strong{font-size:13px;color:var(--cb-text)}
+.batch-popover label{display:grid;gap:5px;color:var(--cb-text-onCanvas);font-size:12px}
+.batch-popover .text-tool{justify-self:start}
+.batch-popover.batch-columns{display:grid;gap:10px}
+.batch-popover.batch-columns label{display:flex;gap:9px;align-items:center;color:var(--cb-text)}
+.batch-table{min-width:0}
+.batch-table th{position:sticky;overflow:visible;padding-right:16px}
+.batch-table th.batch-frozen{z-index:5}
+.batch-table td.batch-frozen{position:sticky;z-index:3;background:var(--cb-surface)}
+.batch-table td.batch-frozen:has(.batch-row-menu[open]){z-index:20}
+.batch-table .row-selected td.batch-frozen{background:var(--cb-selected)}
+.batch-table th.batch-frozen:nth-child(3),.batch-table td.batch-frozen:nth-child(3){box-shadow:inset -1px 0 var(--cb-border)}
+.batch-table th>span{display:block;overflow:hidden;text-overflow:ellipsis}
+.batch-column-resize{position:absolute;right:0;top:2px;bottom:2px;width:8px;border:0;border-radius:0;background:linear-gradient(var(--cb-control-border),var(--cb-control-border)) center/1px 16px no-repeat;cursor:col-resize;z-index:4;padding:0}
+.batch-column-resize:hover,.batch-column-resize:focus-visible{background:var(--cb-accent);opacity:.5;outline:0}
+.batch-resizing,.batch-resizing *{cursor:col-resize!important;user-select:none!important}
+.batch-table td:nth-child(3) input{min-width:0}
+.batch-row-menu-panel{box-sizing:border-box}
+.batch-advanced{position:absolute;left:0;right:0;top:calc(100% + 16px);z-index:30;max-height:min(58vh,520px);overflow:auto;box-shadow:0 12px 32px var(--cb-overlay-scrim);border-radius:10px}
+@media(max-width:1300px){.design-shell[data-batch=true] .batch-review-toolbar{display:flex;height:auto;min-height:48px;flex-wrap:wrap}.batch-toolbar-middle{flex:1 1 100%;order:2}.batch-review-toolbar .batch-part-select,.batch-review-toolbar .batch-part-select select{width:170px}.batch-review-toolbar .batch-kind-select{left:0;width:150px}.batch-review-toolbar .batch-columns-trigger{left:0;width:112px}.batch-review-toolbar .batch-density-trigger{margin-left:auto}}
+@media(max-width:720px){.batch-toolbar-middle{flex-wrap:wrap}.batch-toolbar-middle .batch-search{min-width:120px}.batch-review-toolbar .batch-part-select,.batch-review-toolbar .batch-part-select select{width:150px}}

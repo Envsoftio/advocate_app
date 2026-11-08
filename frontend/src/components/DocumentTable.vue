@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import MetadataSuggestions from './MetadataSuggestions.vue'
 import { api } from '../lib/api'
 import { friendlyError } from '../lib/format'
@@ -33,23 +33,83 @@ type LabelPreview = {
   export_history:{has_prior_exports:boolean,prior_uses:Array<{id:string,created_at:string,labels:Array<{document_id:string,label:string}>}>,unknown_exports:Array<{id:string,created_at:string}>}
 }
 
-const props = defineProps<{matterId:string, documents:MatterDocument[], busy:boolean, keepGroups:boolean}>()
+const props = defineProps<{matterId:string, documents:MatterDocument[], parts:number[], busy:boolean, keepGroups:boolean}>()
 const emit = defineEmits<{
   modified: []
   openDocument: [id:string]
   error: [error:unknown]
   close: []
+  manageParts: []
   dirtyChanged: [value:boolean]
 }>()
 const kinds: DocKind[] = ['petition','affidavit','order','annexure','application','evidence','other']
 const query = ref('')
+const filterPart = ref(''), filterKind = ref(''), filterStatus = ref('')
+const filtersOpen = ref(false)
+const columnsRef = ref<HTMLElement|null>(null), filtersRef = ref<HTMLElement|null>(null)
+const advancedRef = ref<HTMLElement|null>(null)
+const columnDefinitions = [
+  {key:'select',label:'Selection',width:43,min:43}, {key:'actions',label:'Actions',width:39,min:39},
+  {key:'title',label:'Title',width:256,min:150}, {key:'filename',label:'File name',width:171,min:110},
+  {key:'date',label:'Document date',width:135,min:124}, {key:'kind',label:'Type',width:108,min:86},
+  {key:'part',label:'Part',width:76,min:64}, {key:'label',label:'Label',width:102,min:75},
+  {key:'group',label:'Group',width:102,min:80}, {key:'pages',label:'Source pages',width:102,min:88},
+  {key:'ocr',label:'OCR',width:76,min:65}, {key:'status',label:'Status',width:118,min:88},
+] as const
+type ColumnKey = typeof columnDefinitions[number]['key']
+const columnWidths = reactive<Record<ColumnKey,number>>(Object.fromEntries(columnDefinitions.map(c=>[c.key,c.width])) as Record<ColumnKey,number>)
+const visibleColumns = computed(()=>columnDefinitions.filter(c=>!hiddenColumns.value.includes(c.label)))
+const tableWidth = computed(()=>visibleColumns.value.reduce((total,c)=>total+columnWidths[c.key],0))
+function frozenLeft(key:ColumnKey){return key==='select'?0:key==='actions'?columnWidths.select:columnWidths.select+columnWidths.actions}
+let resizing: {key:ColumnKey,startX:number,startWidth:number}|null=null
+function startResize(key:ColumnKey,event:PointerEvent){
+  if(event.button!==0)return
+  event.preventDefault();event.stopPropagation()
+  resizing={key,startX:event.clientX,startWidth:columnWidths[key]}
+  window.addEventListener('pointermove',resizeColumn)
+  window.addEventListener('pointerup',stopResize,{once:true})
+  document.body.classList.add('batch-resizing')
+}
+function resizeColumn(event:PointerEvent){
+  if(!resizing)return
+  const minimum=columnDefinitions.find(c=>c.key===resizing?.key)?.min||64
+  columnWidths[resizing.key]=Math.max(minimum,Math.round(resizing.startWidth+event.clientX-resizing.startX))
+}
+function resizeColumnByKey(key:ColumnKey,event:KeyboardEvent){if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;event.preventDefault();const minimum=columnDefinitions.find(c=>c.key===key)?.min||64;columnWidths[key]=Math.max(minimum,columnWidths[key]+(event.key==='ArrowRight'?16:-16));saveColumns()}
+function stopResize(){resizing=null;window.removeEventListener('pointermove',resizeColumn);document.body.classList.remove('batch-resizing');saveColumns()}
+function resetColumnWidths(){for(const column of columnDefinitions)columnWidths[column.key]=column.width;saveColumns()}
+function toggleColumn(label:string){hiddenColumns.value=hiddenColumns.value.includes(label)?hiddenColumns.value.filter(x=>x!==label):[...hiddenColumns.value,label];saveColumns()}
+function saveColumns(){try{localStorage.setItem('matterdraft.batch.columns',JSON.stringify({widths:columnWidths,hidden:hiddenColumns.value}))}catch{/* Storage may be unavailable. */}}
+function clearFilters(){query.value='';filterPart.value='';filterKind.value='';filterStatus.value='';filtersOpen.value=false}
+const activeFilterCount=computed(()=>[query.value.trim(),filterPart.value,filterKind.value,filterStatus.value].filter(Boolean).length)
+const batchPending=computed(()=>!!(batch.part||batch.kind||batch.applyGroup))
+const batchActionLabel=computed(()=>!selectedIds.value.length?'Select rows first':`Apply to ${selectedIds.value.length} selected`)
+const batchActionTitle=computed(()=>{
+  if(!selectedIds.value.length)return 'Select document rows before changing their Part or Type.'
+  if(!batchPending.value)return 'Choose a Part or Type, then apply the change to the selected documents.'
+  return `Apply ${[batch.part&&`Part ${batch.part}`,batch.kind&&`Type ${batch.kind}`,batch.applyGroup&&`Group ${batch.group_key||'(clear)'}`].filter(Boolean).join(', ')} to ${selectedIds.value.length} selected document(s), including selected rows hidden by filters.`
+})
+function closeAdvanced(){advanced.value=false;labelPreview.value=null;sortPreview.value=null}
+function closeOverlays(event:PointerEvent){
+  const target=event.target as Node
+  if(showColumns.value&&!columnsRef.value?.contains(target))showColumns.value=false
+  if(filtersOpen.value&&!filtersRef.value?.contains(target))filtersOpen.value=false
+  if(batchToolsMenu.value&&!batchToolsMenu.value.contains(target))closeBatchMenu()
+  if(advanced.value&&!advancedRef.value?.contains(target)&&!batchToolsMenu.value?.contains(target))closeAdvanced()
+  document.querySelectorAll<HTMLDetailsElement>('.batch-row-menu[open]').forEach(menu=>{if(!menu.contains(target))menu.open=false})
+}
+function onEscape(event:KeyboardEvent){if(event.key!=='Escape')return;showColumns.value=false;filtersOpen.value=false;closeBatchMenu();closeAdvanced();document.querySelectorAll<HTMLDetailsElement>('.batch-row-menu[open]').forEach(menu=>menu.open=false)}
+function placeRowMenu(menu:HTMLDetailsElement){const rect=menu.getBoundingClientRect();const panel=menu.querySelector<HTMLElement>('.batch-row-menu-panel');if(panel){panel.style.left=`${Math.max(8,Math.min(rect.left,window.innerWidth-236))}px`;panel.style.top=`${Math.max(8,Math.min(rect.bottom+4,window.innerHeight-320))}px`}}
+function positionRowMenu(event:Event){const menu=event.currentTarget as HTMLDetailsElement;if(!menu.open)return;document.querySelectorAll<HTMLDetailsElement>('.batch-row-menu[open]').forEach(other=>{if(other!==menu)other.open=false});placeRowMenu(menu)}
+function placeOpenRowMenus(){document.querySelectorAll<HTMLDetailsElement>('.batch-row-menu[open]').forEach(placeRowMenu)}
+onMounted(()=>{try{const saved=JSON.parse(localStorage.getItem('matterdraft.batch.columns')||'{}');for(const column of columnDefinitions){const width=Number(saved.widths?.[column.key]);if(Number.isFinite(width))columnWidths[column.key]=Math.max(column.min,Math.min(width,800))}if(Array.isArray(saved.hidden))hiddenColumns.value=saved.hidden.filter((label:unknown)=>typeof label==='string'&&['File name','Group','OCR','Status'].includes(label))}catch{/* Use design defaults. */}document.addEventListener('pointerdown',closeOverlays);document.addEventListener('keydown',onEscape)})
 const suggestionsOpen=ref(false),suggestionsRef=ref<InstanceType<typeof MetadataSuggestions>|null>(null),suggestionsDirty=ref(false),reviewIds=ref<string[]>([])
 const baseline=ref<MatterDocument[]>([]),snapshot=ref(''),loadError=ref(''),advanced=ref(false),compact=ref(true),showColumns=ref(false)
 const batchToolsMenu=ref<HTMLDetailsElement|null>(null)
 function closeBatchMenu(){if(batchToolsMenu.value)batchToolsMenu.value.open=false}
 const hiddenColumns=ref<string[]>([])
 let loadSequence=0,alive=true
-onBeforeUnmount(()=>{alive=false;loadSequence++})
+onBeforeUnmount(()=>{alive=false;loadSequence++;document.removeEventListener('pointerdown',closeOverlays);document.removeEventListener('keydown',onEscape);window.removeEventListener('pointermove',resizeColumn);window.removeEventListener('pointerup',stopResize);document.body.classList.remove('batch-resizing')})
 const dirtyRows=computed(()=>baseline.value.filter(rowDirty))
 const dirty=computed(()=>!!dirtyRows.value.length||suggestionsDirty.value)
 watch(dirty,v=>emit('dirtyChanged',v),{immediate:true})
@@ -59,7 +119,7 @@ function discard(){suggestionsRef.value?.discard();resetRows()}
 function rowChanges(doc:MatterDocument){const d=drafts[doc.id];const fields:Record<string,unknown>={};for(const k of ['title','label','kind','part','group_key','group_role'] as const)if(d[k]!==doc[k])fields[k]=typeof d[k]==='string'?(d[k] as string).trim():d[k];if('label' in fields){fields.label_status=fields.label?'confirmed':'unreviewed';fields.label_source=fields.label?'user':'none'}if(d.document_date!==doc.document_date||d.date_confirmed!==(doc.date_status==='confirmed'))Object.assign(fields,{document_date:d.document_date,date_status:d.document_date?'confirmed':'unknown',date_source:d.document_date?'user':'none',date_note:''});return fields}
 async function saveRows(ids?:string[]){if(localBusy.value)return false;const rows=dirtyRows.value.filter(d=>!ids||ids.includes(d.id));const retained=Object.fromEntries(dirtyRows.value.filter(d=>ids&&!ids.includes(d.id)).map(d=>[d.id,{...drafts[d.id]}]));if(!rows.length)return true;localBusy.value=true;loadError.value='';message.value='';try{await api(`/matters/${props.matterId}/metadata-review`,'PUT',{expected_snapshot:snapshot.value,rows:rows.map(d=>({document_id:d.id,changes:rowChanges(d)}))});await loadReview();Object.assign(drafts,retained);emit('modified');return true}catch(e){loadError.value=friendlyError(e);return false}finally{localBusy.value=false}}
 async function save(){return suggestionsOpen.value?!!(await suggestionsRef.value?.save()):await saveRows()}
-async function openSuggestions(){closeBatchMenu();if(dirtyRows.value.length){loadError.value='Save or discard table changes before reviewing source suggestions.';return}reviewIds.value=selectedIds.value.length?[...selectedIds.value]:baseline.value.map(d=>d.id);suggestionsOpen.value=true}
+async function openSuggestions(){closeBatchMenu();closeAdvanced();if(dirtyRows.value.length){loadError.value='Save or discard table changes before reviewing source suggestions.';return}reviewIds.value=selectedIds.value.length?[...selectedIds.value]:baseline.value.map(d=>d.id);suggestionsOpen.value=true}
 function closeSuggestions(){if(suggestionsDirty.value){emit('close');return}suggestionsOpen.value=false;void loadReview()}
 function escapeCell(doc:MatterDocument,event:KeyboardEvent){if(event.key==='Escape'){const d=baseline.value.find(d=>d.id===doc.id);if(d){drafts[d.id]={title:d.title,label:d.label,kind:d.kind,part:d.part,group_key:d.group_key,group_role:d.group_role,document_date:d.document_date,date_confirmed:d.date_status==='confirmed'}}}}
 defineExpose({save,discard,hasPendingDraft:()=>dirty.value,pendingCount:()=>dirtyRows.value.length,closeSuggestions:()=>{suggestionsOpen.value=false;void loadReview()},isSuggestionsOpen:()=>suggestionsOpen.value})
@@ -88,13 +148,16 @@ watch(() => props.documents, ()=>{if(!dirty.value&&!localBusy.value&&!suggestion
 
 const filtered = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
-  if (!needle) return baseline.value
-  return baseline.value.filter(doc => [doc.title, doc.original_name, doc.label, doc.kind,
-    doc.group_key, doc.document_date].join(' ').toLocaleLowerCase().includes(needle))
+  return baseline.value.filter(doc =>
+    (!needle || [drafts[doc.id]?.title,doc.original_name,drafts[doc.id]?.label,drafts[doc.id]?.kind,
+      drafts[doc.id]?.group_key,drafts[doc.id]?.document_date].join(' ').toLocaleLowerCase().includes(needle)) &&
+    (!filterPart.value || String(drafts[doc.id]?.part)===filterPart.value) &&
+    (!filterKind.value || drafts[doc.id]?.kind===filterKind.value) &&
+    (!filterStatus.value || (filterStatus.value==='unsaved'?rowDirty(doc):
+      filterStatus.value==='needs_ocr'?doc.ocr_status==='needs_ocr':
+      filterStatus.value==='needs_review'?doc.date_status!=='confirmed':doc.date_status==='confirmed'))
+  )
 })
-const parts = computed(() => [1,2,3,4].map(part => ({part,
-  all:props.documents.filter(doc => doc.part === part),
-  visible:filtered.value.filter(doc => doc.part === part)})).filter(section => section.all.length))
 const selectedSet = computed(() => new Set(selectedIds.value))
 const visibleSelected = computed(() => filtered.value.filter(doc => selectedSet.value.has(doc.id)).length)
 const allVisibleSelected = computed(() => !!filtered.value.length && visibleSelected.value === filtered.value.length)
@@ -229,6 +292,7 @@ async function applyBatch() {
   try {
     await api(`/matters/${props.matterId}/documents/batch`, 'PATCH', payload)
     message.value = `Updated ${selectedIds.value.length} selected document(s) in one undoable action.`
+    batch.kind='';batch.part='';batch.group_key='';batch.applyGroup=false
     await loadReview()
     emit('modified')
   } catch (error) { emit('error', error) }
@@ -275,11 +339,28 @@ async function moveDocument(doc:MatterDocument) {
  <div class="metadata-batch-root">
  <MetadataSuggestions v-if="suggestionsOpen" ref="suggestionsRef" :matter-id="matterId" :documents="documents" :ids="reviewIds" :disabled="busy" @dirty-changed="suggestionsDirty=$event" @modified="emit('modified')" @close="closeSuggestions"/>
  <section v-show="!suggestionsOpen" class="document-register batch-review" aria-label="Editable document table">
-  <header class="batch-review-heading"><div><h1>Batch review</h1><p>{{documents.length}} documents · Edit metadata, labels and Parts in place.</p></div><button class="membership-button secondary" :disabled="!selectedIds.length" @click="emit('openDocument',selectedIds[0])">Open document</button></header>
-  <div class="batch-review-toolbar"><input type="checkbox" aria-label="Select all filtered documents" :checked="allVisibleSelected" @change="toggleVisible(($event.target as HTMLInputElement).checked)"/><strong :title="`${visibleSelected} visible in this filter`">{{selectedIds.length}} selected</strong><label class="batch-part-select"><span class="sr-only">Assign selected Part</span><select v-model="batch.part" aria-label="Assign selected Part"><option value="">Assign selected → Part</option><option v-for="part in 4" :value="part" :key="part">Part {{part}}</option></select></label><select class="batch-kind-select" v-model="batch.kind" aria-label="Document type"><option value="">Document type</option><option v-for="kind in kinds" :value="kind" :key="kind">{{kind}}</option></select><details ref="batchToolsMenu" class="batch-tools-menu"><summary aria-label="More batch actions" title="More batch actions">⋯</summary><div><label>Filter documents<input v-model="query" type="search" aria-label="Filter rows" placeholder="Filter documents"/></label><button :disabled="busy||localBusy||!selectedIds.length||!!dirtyRows.length" @click="closeBatchMenu();applyBatch()">Apply batch change</button><button :disabled="!documents.length||!!dirtyRows.length" @click="openSuggestions">Review title &amp; dates</button><button :aria-expanded="advanced" @click="closeBatchMenu();advanced=!advanced">More tools</button><button @click="closeBatchMenu();emit('close')">Close table</button></div></details><button class="membership-button secondary batch-columns-trigger" :aria-expanded="showColumns" @click="showColumns=!showColumns">Columns</button><button class="membership-button secondary batch-density-trigger" :aria-pressed="compact" @click="compact=!compact">{{compact?'Compact':'Comfortable'}}</button></div>
-  <div v-if="showColumns" class="batch-columns"><label v-for="name in ['File name','Group','OCR','Status']" :key="name"><input type="checkbox" :checked="!hiddenColumns.includes(name)" @change="hiddenColumns=hiddenColumns.includes(name)?hiddenColumns.filter(x=>x!==name):[...hiddenColumns,name]"/>{{name}}</label></div>
-  <div v-if="loadError" role="alert" class="review-error">{{loadError}} <button class="text-tool" @click="loadReview(true)">Discard table drafts and reload</button></div>
-  <div v-if="advanced" class="batch-advanced"><slot name="history"/><button class="text-tool" @click="selectedIds=[]">Clear selection</button><label><input v-model="batch.applyGroup" type="checkbox"/>Change selected group<input v-model="batch.group_key" maxlength="100" :disabled="!batch.applyGroup"/></label><button class="text-tool" :disabled="!!dirtyRows.length" @click="applyBatch">Apply group</button>
+  <header class="batch-review-heading"><div><h1>Batch review</h1><p>{{documents.length}} documents · Edit metadata, labels and Parts in place. <button class="manage-parts-link" :disabled="busy || localBusy || dirty" @click="emit('manageParts')">Manage Parts</button></p></div><button class="membership-button secondary" :disabled="!selectedIds.length" @click="emit('openDocument',selectedIds[0])">Open document</button></header>
+  <div class="batch-toolbar-shell">
+  <div class="batch-review-toolbar">
+    <input type="checkbox" aria-label="Select all filtered documents" :checked="allVisibleSelected" @change="toggleVisible(($event.target as HTMLInputElement).checked)"/>
+    <strong :title="`${visibleSelected} visible in this filter`">{{selectedIds.length}} selected</strong>
+    <label class="batch-part-select" :title="selectedIds.length?'Change the Part for selected documents; then choose Apply.':'Select document rows to enable batch changes.'"><span class="sr-only">Set selected Part</span><select v-model="batch.part" aria-label="Set selected Part" :disabled="!selectedIds.length||busy||localBusy"><option value="">Set selected Part…</option><option v-for="part in parts" :value="part" :key="part">Part {{part}}</option></select></label>
+    <select class="batch-kind-select" v-model="batch.kind" aria-label="Set selected document type" :title="selectedIds.length?'Change the type for selected documents; then choose Apply.':'Select document rows to enable batch changes.'" :disabled="!selectedIds.length||busy||localBusy"><option value="">Set selected type…</option><option v-for="kind in kinds" :value="kind" :key="kind">{{kind}}</option></select>
+    <div class="batch-toolbar-middle">
+      <button class="batch-inline-action batch-apply-action" :title="batchActionTitle" :disabled="busy||localBusy||!selectedIds.length||!!dirtyRows.length||!batchPending" @click="applyBatch">{{batchActionLabel}}</button>
+      <button class="batch-inline-action batch-review-action" :disabled="!documents.length||!!dirtyRows.length" @click="openSuggestions">Review title &amp; dates</button>
+      <input v-model="query" class="batch-search" type="search" aria-label="Filter rows" placeholder="Find rows"/>
+      <div ref="filtersRef" class="batch-popover-anchor"><button class="membership-button secondary batch-filter-trigger" :aria-expanded="filtersOpen" aria-controls="batch-filter-panel" @click="filtersOpen=!filtersOpen;showColumns=false">Filters<span v-if="activeFilterCount"> · {{activeFilterCount}}</span></button>
+        <div v-if="filtersOpen" id="batch-filter-panel" class="batch-popover batch-filter-panel"><strong>Filter documents</strong><label>Part<select v-model="filterPart" aria-label="Filter by Part"><option value="">All Parts</option><option v-for="part in parts" :key="part" :value="String(part)">Part {{part}}</option></select></label><label>Type<select v-model="filterKind" aria-label="Filter by type"><option value="">All types</option><option v-for="kind in kinds" :key="kind" :value="kind">{{kind}}</option></select></label><label>Review status<select v-model="filterStatus" aria-label="Filter by status"><option value="">All statuses</option><option value="needs_review">Needs date review</option><option value="reviewed">Date reviewed</option><option value="needs_ocr">OCR needed</option><option value="unsaved">Unsaved edits</option></select></label><button class="text-tool" :disabled="!activeFilterCount" @click="clearFilters">Clear filters</button></div>
+      </div>
+      <details ref="batchToolsMenu" class="batch-tools-menu"><summary aria-label="More batch actions" title="More batch actions">⋯</summary><div><button :aria-expanded="advanced" @click="closeBatchMenu();advanced=!advanced">More tools</button><button @click="closeBatchMenu();emit('close')">Close table</button></div></details>
+    </div>
+    <div ref="columnsRef" class="batch-popover-anchor"><button class="membership-button secondary batch-columns-trigger" :aria-expanded="showColumns" aria-controls="batch-columns-panel" @click="showColumns=!showColumns;filtersOpen=false">Columns</button>
+      <div v-if="showColumns" id="batch-columns-panel" class="batch-popover batch-columns"><strong>Visible columns</strong><label v-for="name in ['File name','Group','OCR','Status']" :key="name"><input type="checkbox" :checked="!hiddenColumns.includes(name)" @change="toggleColumn(name)"/>{{name}}</label><button class="text-tool" @click="resetColumnWidths">Reset column widths</button></div>
+    </div>
+    <button class="membership-button secondary batch-density-trigger" :aria-pressed="compact" @click="compact=!compact">{{compact?'Compact':'Comfortable'}}</button>
+  </div>
+  <div v-if="advanced" ref="advancedRef" class="batch-advanced" aria-label="More batch tools"><slot name="history"/><button class="text-tool" @click="selectedIds=[]">Clear selection</button><label><input v-model="batch.applyGroup" type="checkbox"/>Change selected group<input v-model="batch.group_key" maxlength="100" :disabled="!batch.applyGroup"/></label><button class="text-tool" :disabled="!!dirtyRows.length||!selectedIds.length||!batchPending" @click="applyBatch">{{batchActionLabel}}</button>
     <div class="label-proposal-bar">
       <div><strong>Propose labels for the explicit selection</strong><small>Preview only. Labels stay independent of filenames and page numbers until you confirm the full mapping.</small></div>
       <label>Method<select v-model="labelOptions.mode"><option value="sequential">Sequential</option><option value="grouped_suffix">Grouped suffix</option><option value="filename">Conservative filename scan</option></select></label>
@@ -331,16 +412,16 @@ async function moveDocument(doc:MatterDocument) {
       <div class="sort-preview-head"><div><strong>Proposed {{sortPreview.mode.replace('_',' ')}} order</strong><small>Unknown dates: last · ties: {{sortPreview.stable_ties}} · {{sortPreview.group_policy}}.</small></div><div><button class="btn secondary small" @click="sortPreview=null">Cancel</button><button class="btn primary small" :disabled="busy || localBusy" @click="applySort">Apply order</button></div></div>
       <ol><li v-for="row in sortPreview.rows" :key="row.id" :class="{'sort-moved':row.old_position!==row.new_position}"><span>{{row.new_position+1}}</span><div><strong>{{row.title}}</strong><small>{{row.original_name}}<template v-if="row.group_key"> · Group {{row.group_key}}</template></small></div><span class="date-badge" :class="row.date_status">{{row.document_date || (row.date_status==='ambiguous' ? row.date_note : 'Unknown date')}} · {{row.date_status}}</span><small>#{{row.old_position+1}} → #{{row.new_position+1}}</small></li></ol>
     </div>
-
-
   </div>
+  </div>
+  <div v-if="loadError" role="alert" class="review-error">{{loadError}} <button class="text-tool" @click="loadReview(true)">Discard table drafts and reload</button></div>
   <p v-if="message" role="status" class="review-notice">{{message}}</p>
   <p v-if="duplicateLabels.size||labelGaps.length" class="review-notice">Label review: {{[...duplicateLabels,...labelGaps].join(', ')}}. No automatic correction made.</p>
-  <div class="batch-table-scroll" :inert="localBusy"><table :class="['batch-table',{'comfortable':!compact}]"><colgroup><col style="width:3.3%"/><col style="width:3%"/><col style="width:19.3%"/><col v-if="!hiddenColumns.includes('File name')" style="width:12.9%"/><col style="width:10.1%"/><col style="width:8.2%"/><col style="width:5.7%"/><col style="width:7.7%"/><col v-if="!hiddenColumns.includes('Group')" style="width:7.7%"/><col style="width:7.7%"/><col v-if="!hiddenColumns.includes('OCR')" style="width:5.7%"/><col v-if="!hiddenColumns.includes('Status')" style="width:8.8%"/></colgroup>
-   <thead><tr><th></th><th>↕</th><th>Title</th><th v-if="!hiddenColumns.includes('File name')">File name</th><th>Document date</th><th>Type</th><th>Part</th><th>Label</th><th v-if="!hiddenColumns.includes('Group')">Group</th><th>Source pages</th><th v-if="!hiddenColumns.includes('OCR')">OCR</th><th v-if="!hiddenColumns.includes('Status')">Status</th></tr></thead>
-   <tbody><tr v-for="doc in filtered" :key="doc.id" :class="{'row-selected':selectedSet.has(doc.id),'row-dirty':rowDirty(doc)}" @keydown="escapeCell(doc,$event)"><td><input type="checkbox" :aria-label="'Select '+doc.title" :checked="selectedSet.has(doc.id)" @change="toggleSelected(doc.id,($event.target as HTMLInputElement).checked)"/></td><td><details class="batch-row-menu"><summary :aria-label="'Actions for '+doc.title">⋮</summary><div><button class="text-tool" @click="emit('openDocument',doc.id)">Preview</button><button class="text-tool" :disabled="!rowDirty(doc)||localBusy" @click="saveRow(doc)">Save row</button><label>Position<input v-model.number="moveTargets[doc.id]" type="number" min="1" :max="documents.length"/></label><button class="text-tool" :disabled="!!dirtyRows.length" @click="moveDocument(doc)">Move</button><label>Hierarchy<select v-model="drafts[doc.id].group_role"><option value="member">Member</option><option value="parent">Designated parent</option></select></label></div></details></td><td><input v-model="drafts[doc.id].title" :aria-label="'Title for '+doc.original_name" maxlength="250"/></td><td v-if="!hiddenColumns.includes('File name')" :title="doc.original_name+' · '+sourceTimestamp(doc)">{{doc.original_name}}</td><td><input v-model="drafts[doc.id].document_date" :aria-label="'Date for '+doc.original_name" type="date" @input="drafts[doc.id].date_confirmed=true" :title="dateStatus(doc)"/></td><td><select v-model="drafts[doc.id].kind" :aria-label="'Type for '+doc.original_name"><option v-for="kind in kinds" :value="kind" :key="kind">{{kind}}</option></select></td><td><select v-model.number="drafts[doc.id].part" :aria-label="'Part for '+doc.original_name"><option v-for="part in 4" :value="part" :key="part">{{part}}</option></select></td><td><input v-model="drafts[doc.id].label" :aria-label="'Label for '+doc.original_name" maxlength="60"/></td><td v-if="!hiddenColumns.includes('Group')"><input v-model="drafts[doc.id].group_key" :aria-label="'Group for '+doc.original_name" maxlength="100"/></td><td>{{doc.page_count}}</td><td v-if="!hiddenColumns.includes('OCR')" :title="doc.ocr_status">{{doc.ocr_status==='native_text'?'Text':doc.ocr_status.split('_').join(' ')}}</td><td v-if="!hiddenColumns.includes('Status')">{{rowDirty(doc)?'Unsaved':doc.date_status==='confirmed'?'Reviewed':'Review date'}}</td></tr></tbody>
+  <div class="batch-table-scroll" :inert="localBusy" @scroll.passive="placeOpenRowMenus"><table :class="['batch-table',{'comfortable':!compact}]" :style="{width:`max(100%, ${tableWidth}px)`}"><colgroup><col v-for="column in visibleColumns" :key="column.key" :style="{width:`${columnWidths[column.key]}px`}"/></colgroup>
+   <thead><tr><th v-for="column in visibleColumns" :key="column.key" scope="col" :aria-label="column.key==='select'?'Select rows':column.label" :class="{'batch-frozen':column.key==='select'||column.key==='actions'||column.key==='title'}" :style="column.key==='select'||column.key==='actions'||column.key==='title'?{left:`${frozenLeft(column.key)}px`}:undefined"><span>{{column.key==='select'?'':column.key==='actions'?'↕':column.label}}</span><button v-if="column.key!=='select'&&column.key!=='actions'" class="batch-column-resize" :aria-label="`Resize ${column.label} column`" title="Drag or use arrow keys to resize; double-click to reset" @pointerdown="startResize(column.key,$event)" @keydown="resizeColumnByKey(column.key,$event)" @dblclick="resetColumnWidths"></button></th></tr></thead>
+   <tbody><tr v-for="doc in filtered" :key="doc.id" :class="{'row-selected':selectedSet.has(doc.id),'row-dirty':rowDirty(doc)}" @keydown="escapeCell(doc,$event)"><td class="batch-frozen" :style="{left:`${frozenLeft('select')}px`}"><input type="checkbox" :aria-label="'Select '+doc.title" :checked="selectedSet.has(doc.id)" @change="toggleSelected(doc.id,($event.target as HTMLInputElement).checked)"/></td><td class="batch-frozen" :style="{left:`${frozenLeft('actions')}px`}"><details class="batch-row-menu" @toggle="positionRowMenu"><summary :aria-label="'Actions for '+doc.title">⋮</summary><div class="batch-row-menu-panel"><button class="text-tool" @click="emit('openDocument',doc.id)">Preview</button><button class="text-tool" :disabled="!rowDirty(doc)||localBusy" @click="saveRow(doc)">Save row</button><label>Position<input v-model.number="moveTargets[doc.id]" type="number" min="1" :max="documents.length"/></label><button class="text-tool" :disabled="!!dirtyRows.length" @click="moveDocument(doc)">Move</button><label>Hierarchy<select v-model="drafts[doc.id].group_role"><option value="member">Member</option><option value="parent">Designated parent</option></select></label></div></details></td><td class="batch-frozen" :style="{left:`${frozenLeft('title')}px`}"><input v-model="drafts[doc.id].title" :aria-label="'Title for '+doc.original_name" maxlength="250"/></td><td v-if="!hiddenColumns.includes('File name')" :title="doc.original_name+' · '+sourceTimestamp(doc)">{{doc.original_name}}</td><td><input v-model="drafts[doc.id].document_date" :aria-label="'Date for '+doc.original_name" type="date" @input="drafts[doc.id].date_confirmed=true" :title="dateStatus(doc)"/></td><td><select v-model="drafts[doc.id].kind" :aria-label="'Type for '+doc.original_name"><option v-for="kind in kinds" :value="kind" :key="kind">{{kind}}</option></select></td><td><select v-model.number="drafts[doc.id].part" :aria-label="'Part for '+doc.original_name"><option v-for="part in parts" :value="part" :key="part">{{part}}</option></select></td><td><input v-model="drafts[doc.id].label" :aria-label="'Label for '+doc.original_name" maxlength="60"/></td><td v-if="!hiddenColumns.includes('Group')"><input v-model="drafts[doc.id].group_key" :aria-label="'Group for '+doc.original_name" maxlength="100"/></td><td>{{doc.page_count}}</td><td v-if="!hiddenColumns.includes('OCR')" :title="doc.ocr_status">{{doc.ocr_status==='native_text'?'Text':doc.ocr_status.split('_').join(' ')}}</td><td v-if="!hiddenColumns.includes('Status')">{{rowDirty(doc)?'Unsaved':doc.date_status==='confirmed'?'Reviewed':'Review date'}}</td></tr></tbody>
   </table><p v-if="!filtered.length" class="review-empty">No documents match this filter. Your selection is unchanged.</p></div>
-  <footer class="batch-savebar"><span :class="dirtyRows.length ? 'unsaved' : 'saved'">{{dirtyRows.length ? `${dirtyRows.length} unsaved changes` : 'All changes saved'}}</span><small>Tab moves cells · Enter edits · Escape cancels row</small><button class="membership-button quiet" :disabled="!dirtyRows.length||localBusy" @click="discard">Discard changes</button><button class="membership-button primary" :disabled="!dirtyRows.length||busy||localBusy" @click="save">{{localBusy?'Saving…':'Save changes'}}</button></footer>
+  <footer class="batch-savebar"><span :class="dirtyRows.length ? 'unsaved' : 'saved'">{{dirtyRows.length ? `${dirtyRows.length} unsaved changes` : 'All changes saved'}}</span><small>Tab moves between fields · Escape reverts the current row</small><button class="membership-button quiet" :disabled="!dirtyRows.length||localBusy" @click="discard">Discard changes</button><button class="membership-button primary" :disabled="!dirtyRows.length||busy||localBusy" @click="save">{{localBusy?'Saving…':'Save changes'}}</button></footer>
  </section>
  </div>
 </template>

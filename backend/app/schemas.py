@@ -30,6 +30,16 @@ class MatterCreate(BaseModel):
     case_number: str = Field(default='', max_length=100)
     max_pages_per_volume: int = Field(default=300, ge=2, le=2000)
     keep_groups_intact: bool = True
+    parts: list[int] = Field(default_factory=lambda: [1, 2, 3, 4], min_length=1, max_length=50)
+    next_part: int = Field(default=5, ge=2, le=100)
+
+    @model_validator(mode='after')
+    def valid_parts(self):
+        if (any(type(part) is not int or part < 1 or part > 99 for part in self.parts)
+                or self.parts != sorted(set(self.parts))
+                or self.next_part <= self.parts[-1]):
+            raise ValueError('Parts must be unique ordered numbers below the next Part number')
+        return self
 
 
 class MatterPatch(BaseModel):
@@ -60,7 +70,7 @@ class DocumentPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=250)
     notes: str | None = Field(default=None, max_length=2000)
     kind: DocKind | None = None
-    part: int | None = Field(default=None, ge=1, le=4)
+    part: int | None = Field(default=None, ge=1, le=99)
     label: str | None = Field(default=None, max_length=60)
     label_status: LabelStatus | None = None
     label_source: LabelSource | None = None
@@ -120,7 +130,7 @@ class BatchDocumentPatch(BaseModel):
     model_config = ConfigDict(extra='forbid')
     ids: list[str] = Field(min_length=1, max_length=1000)
     kind: DocKind | None = None
-    part: int | None = Field(default=None, ge=1, le=4)
+    part: int | None = Field(default=None, ge=1, le=99)
     group_key: str | None = Field(default=None, max_length=100)
 
     @model_validator(mode='after')
@@ -225,7 +235,7 @@ class MatterValuesUpdate(BaseModel):
 class FilingReviewItem(BaseModel):
     model_config = ConfigDict(extra='forbid')
     title: str = Field(min_length=1, max_length=80)
-    part: int | None = Field(default=None, ge=1, le=4)
+    part: int | None = Field(default=None, ge=1, le=99)
     status: Literal['unreviewed', 'present', 'not_applicable'] = 'unreviewed'
 
     @field_validator('title')

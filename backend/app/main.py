@@ -266,6 +266,24 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         with store.matter_lock(matter_id):
             return store.update_matter(matter_id, changes)
 
+    @app.post('/matters/{matter_id}/parts', status_code=201)
+    def add_matter_part(matter_id: str, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                return store.add_part(matter_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.delete('/matters/{matter_id}/parts/{part}')
+    def remove_matter_part(matter_id: str, part: int, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        try:
+            with store.matter_lock(matter_id):
+                return store.remove_part(matter_id, part)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.delete('/matters/{matter_id}')
     def delete_matter(matter_id: str, _: None = Depends(auth)):
         matter_or_404(matter_id)
@@ -592,7 +610,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             name = Path(filename).name or 'Untitled'
             needs_ocr = await asyncio.to_thread(pdf_has_unsearchable_images, target)
             item = dict(id=doc_id, matter_id=matter_id, title=Path(name).stem[:250],
-                        kind='other', part=1, label='', label_status='unreviewed', bundle_included=int(included),
+                        kind='other', part=store.get_matter(matter_id)['parts'][0], label='', label_status='unreviewed', bundle_included=int(included),
                         label_source='none', group_key='', group_role='member', page_count=pages,
                         document_date='', date_status='unknown', date_source='none', date_note='',
                         source_file_mtime=source_file_mtime,
@@ -674,7 +692,7 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             make_cover_pdf(path, matter)
             copy_file(path, folder / work_rel)
             return store.add_document(dict(id=doc_id, matter_id=matter_id,
-                                           title='Draft matter cover sheet', kind='other', part=1,
+                                           title='Draft matter cover sheet', kind='other', part=matter['parts'][0],
                                            label='', label_status='unreviewed', label_source='none',
                                            group_key='', group_role='member', page_count=1, ocr_status='native_text',
                                            document_date='', date_status='unknown', date_source='none', date_note='',

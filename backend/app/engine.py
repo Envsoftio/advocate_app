@@ -509,7 +509,7 @@ def bundle_preview(store: Store, matter_id: str, max_pages: int,
                 included_documents=len(documents), manual_bookmarks=manual,
                 part_extracts=[{'part': part, 'documents': sum(row['part'] == part for volume in volumes for row in volume['rows']),
                                 'pages': sum(row['total_pages'] for volume in volumes for row in volume['rows'] if row['part'] == part)}
-                               for part in range(1, 5)
+                               for part in sorted({row['part'] for volume in volumes for row in volume['rows']})
                                if settings.get('part_extracts_enabled') and any(
                                    row['part'] == part for volume in volumes for row in volume['rows'])],
                 bates_policy={'enabled': settings.get('bates_enabled', False),
@@ -1169,7 +1169,7 @@ def render_part_extracts(combined_file: Path, rows: list[dict],
     """Optional source-page extracts; destinations originate in the combined map."""
     artifacts = []
     with open_pdf(combined_file) as combined:
-        for part_number in range(1, 5):
+        for part_number in sorted({row['part'] for row in rows}):
             selected = [row for row in rows if row['part'] == part_number]
             if not selected:
                 continue

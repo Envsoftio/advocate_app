@@ -6,7 +6,7 @@ import { friendlyError } from '../lib/format'
 type Item = {title:string; part:number|null; status:'unreviewed'|'present'|'not_applicable'}
 type Review = {court:string; case_type:string; stage:string; source_note:string; items:Item[]}
 const empty = ():Review => ({court:'', case_type:'', stage:'', source_note:'', items:[]})
-const props = defineProps<{matterId:string; refreshKey:number; disabled:boolean}>()
+const props = defineProps<{matterId:string; parts:number[]; refreshKey:number; disabled:boolean}>()
 const emit = defineEmits<{modified:[]}>()
 const draft = ref<Review>(empty())
 const busy = ref(false)
@@ -57,7 +57,7 @@ async function save() {
       <label class="field">Source or reviewer note<input v-model="draft.source_note" maxlength="500" placeholder="Where did this checklist come from?" @input="changed"/></label>
       <div class="filing-review-items"><div v-for="(item,index) in draft.items" :key="index" class="filing-review-item">
         <label class="field">Item {{index+1}}<input v-model="item.title" maxlength="80" placeholder="Document or review item" @input="changed"/></label>
-        <label class="field">Part<select v-model="item.part" @change="changed"><option :value="null">Any Part</option><option v-for="part in 4" :key="part" :value="part">Part {{part}}</option></select></label>
+        <label class="field">Part<select v-model="item.part" @change="changed"><option :value="null">Any Part</option><option v-for="part in parts" :key="part" :value="part">Part {{part}}</option></select></label>
         <label class="field">Review<select v-model="item.status" @change="changed"><option value="unreviewed">To review</option><option value="present">Present, reviewer marked</option><option value="not_applicable">Not applicable, reviewer marked</option></select></label>
         <button class="btn secondary small" :disabled="busy || disabled" :aria-label="'Remove checklist item '+(index+1)" @click="draft.items.splice(index,1); changed()">Remove</button>
       </div></div>

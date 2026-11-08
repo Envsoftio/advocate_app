@@ -7,13 +7,13 @@ async function seed(request:any){const matter=await(await request.post(`${base}/
  const buffer=await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'));
  const docs=[];for(const name of ['Order_12_Jan_2026.pdf','Annexure_A_Agreement.pdf','Written_Submissions_03-04-2026.pdf']){const r=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name,mimeType:'application/pdf',buffer}}});
  expect(r.ok()).toBeTruthy();docs.push((await r.json())[0])}return {matter,docs}}
-async function enter(page:any){page.on('pageerror',(e:Error)=>{throw e});
+async function enter(page:any,expectedCount=3){page.on('pageerror',(e:Error)=>{throw e});
  await page.setViewportSize({width:1440,height:900});
  await page.goto('/');await enterLatestMatter(page);await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();
  await expect(page.locator('.pdf-paper')).toBeVisible();
  await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click();
  await page.getByRole('button',{name:'Sort',exact:true}).click();
- await expect(page.locator('.batch-table tbody tr')).toHaveCount(3);
+ await expect(page.locator('.batch-table tbody tr')).toHaveCount(expectedCount);
  await page.evaluate(()=>document.fonts.ready)}
 async function suggestions(page:any){await page.locator('.batch-tools-menu>summary').click();await page.getByRole('button',{name:'Review title & dates',exact:true}).click();
  await expect(page.locator('.metadata-source-page img')).toBeVisible()}
@@ -24,12 +24,172 @@ async function matrix(page:any,info:any,name:string){for(const size of [{width:1
  await expect(action).toBeInViewport();
  await page.screenshot({path:info.outputPath(`${name}-${size.width}-${theme}-${scale}.png`),animations:'disabled'})}await page.setViewportSize({width:1440,height:900});
  await page.evaluate(()=>{document.documentElement.dataset.theme='light';document.documentElement.dataset.effectiveTheme='light';document.documentElement.style.setProperty('--ui-scale','1');(document.querySelector('.app-shell') as HTMLElement).style.setProperty('--documents-interface-scale','1');document.documentElement.style.zoom='100%'})}
+test('Batch review filters, resizes columns and dismisses menus outside',async({page,request})=>{
+ const {docs}=await seed(request)
+ await enter(page)
+ const register=page.getByRole('region',{name:'Editable document table'})
+ await register.getByLabel(`Select ${docs[0].title}`).check()
+ await register.getByRole('searchbox',{name:'Filter rows'}).fill('Annexure_A')
+ await expect(register.locator('.batch-table tbody tr')).toHaveCount(1)
+ await expect(register.getByText('1 selected',{exact:true})).toHaveAttribute('title','0 visible in this filter')
+ await register.getByRole('button',{name:'Filters'}).click()
+ await register.getByRole('combobox',{name:'Filter by Part'}).selectOption('2')
+ await expect(register.locator('.batch-table tbody tr')).toHaveCount(0)
+ await register.getByRole('combobox',{name:'Filter by Part'}).selectOption('1')
+ await expect(register.locator('.batch-table tbody tr')).toHaveCount(1)
+ await register.getByRole('combobox',{name:'Filter by type'}).selectOption('affidavit')
+ await expect(register.locator('.batch-table tbody tr')).toHaveCount(0)
+ await register.getByRole('combobox',{name:'Filter by type'}).selectOption('')
+ await register.getByRole('combobox',{name:'Filter by status'}).selectOption('needs_ocr')
+ await expect(register.locator('.batch-table tbody tr')).toHaveCount(0)
+ await register.getByRole('combobox',{name:'Filter by status'}).selectOption('needs_review')
+ await expect(register.locator('.batch-table tbody tr')).toHaveCount(1)
+ await register.getByRole('button',{name:'Clear filters'}).click()
+ await expect(register.locator('.batch-table tbody tr')).toHaveCount(3)
+ await register.getByRole('button',{name:'Filters'}).click()
+ await register.getByRole('heading',{name:'Batch review'}).click()
+ await expect(register.locator('#batch-filter-panel')).toHaveCount(0)
+ await register.getByRole('button',{name:'Columns'}).click()
+ await expect(register.locator('#batch-columns-panel')).toBeVisible()
+ await register.getByRole('heading',{name:'Batch review'}).click()
+ await expect(register.locator('#batch-columns-panel')).toHaveCount(0)
+ const titleColumn=register.locator('.batch-table th').filter({hasText:'Title'})
+ const before=(await titleColumn.boundingBox())!.width
+ const handle=register.getByRole('button',{name:'Resize Title column'})
+ const bounds=(await handle.boundingBox())!
+ await page.mouse.move(bounds.x+bounds.width/2,bounds.y+bounds.height/2)
+ await page.mouse.down();await page.mouse.move(bounds.x+bounds.width/2+90,bounds.y+bounds.height/2,{steps:5});await page.mouse.up()
+ await expect.poll(async()=>(await titleColumn.boundingBox())!.width).toBeGreaterThan(before+80)
+ await handle.focus();await page.keyboard.press('ArrowLeft')
+ await expect.poll(async()=>(await titleColumn.boundingBox())!.width).toBeLessThan(before+80)
+ const after=(await titleColumn.boundingBox())!.width
+ await page.reload();await enterLatestMatter(page)
+ await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click()
+ await page.getByRole('button',{name:'Sort',exact:true}).click()
+ await expect.poll(async()=>(await page.locator('.batch-table th').filter({hasText:'Title'}).boundingBox())!.width).toBeGreaterThan(after-2)
+ await page.locator('.batch-row-menu summary').first().click()
+ await expect(page.locator('.batch-row-menu[open]')).toHaveCount(1)
+ await page.getByRole('heading',{name:'Batch review'}).click()
+ await expect(page.locator('.batch-row-menu[open]')).toHaveCount(0)
+})
+test('Batch review OCR filter finds an image-only source',async({page,request})=>{
+ const {matter}=await seed(request)
+ const buffer=await readFile(resolve(import.meta.dirname,'../../samples/04_scanned_annexure.jpg'))
+ const upload=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:'Synthetic_scan.jpg',mimeType:'image/jpeg',buffer}}})
+ expect(upload.ok()).toBeTruthy()
+ const scan=(await upload.json())[0]
+ expect(scan.ocr_status).toBe('needs_ocr')
+ await enter(page,4)
+ await page.getByRole('button',{name:'Filters'}).click()
+ await page.getByRole('combobox',{name:'Filter by status'}).selectOption('needs_ocr')
+ await expect(page.locator('.batch-table tbody tr')).toHaveCount(1)
+ await expect(page.locator('.batch-table tbody tr').first()).toContainText('Synthetic_scan.jpg')
+})
+test('Batch review explains and applies the two selected-row controls',async({page,request})=>{
+ const {matter,docs}=await seed(request)
+ await enter(page)
+ const register=page.getByRole('region',{name:'Editable document table'})
+ const part=register.getByRole('combobox',{name:'Set selected Part'})
+ const type=register.getByRole('combobox',{name:'Set selected document type'})
+ const apply=register.locator('.batch-apply-action')
+ await expect(part).toBeDisabled();await expect(type).toBeDisabled()
+ await expect(apply).toHaveText('Select rows first')
+ await register.getByLabel(`Select ${docs[0].title}`).check()
+ await register.getByLabel(`Select ${docs[1].title}`).check()
+ await expect(part).toBeEnabled();await expect(type).toBeEnabled()
+ await part.selectOption('2');await type.selectOption('annexure')
+ await expect(apply).toHaveText('Apply to 2 selected')
+ await apply.click()
+ await expect(register.getByText('Updated 2 selected document(s) in one undoable action.')).toBeVisible()
+ const saved=await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json()
+ expect(saved.slice(0,2).every((doc:any)=>doc.part===2&&doc.kind==='annexure')).toBe(true)
+ expect(saved[2].part).toBe(1);expect(saved[2].kind).toBe('other')
+ await expect(part).toHaveValue('');await expect(type).toHaveValue('')
+ await expect(apply).toBeDisabled()
+ const title=register.getByLabel(`Title for ${docs[0].original_name}`)
+ await title.fill('Temporary title');await title.press('Escape')
+ await expect(title).toHaveValue(docs[0].title)
+ await register.locator('.batch-tools-menu>summary').click()
+ await register.getByRole('button',{name:'More tools'}).click()
+ await register.getByRole('button',{name:'Preview order',exact:true}).click()
+ await expect(register.getByRole('dialog',{name:'Sort preview'})).toBeVisible()
+ await register.getByRole('heading',{name:'Batch review'}).click()
+ await expect(register.locator('.batch-advanced')).toHaveCount(0)
+ await expect(register.getByRole('dialog',{name:'Sort preview'})).toHaveCount(0)
+})
+test('Batch review manages matter Parts without losing document assignments',async({page,request},info)=>{
+ const {matter,docs}=await seed(request)
+ await enter(page)
+ const register=page.getByRole('region',{name:'Editable document table'})
+ await register.getByRole('button',{name:'Manage Parts'}).click()
+ const manager=page.getByRole('dialog',{name:'Manage Parts'})
+ await expect(manager).toBeVisible()
+ await expect(manager.getByText('Part 1',{exact:true})).toBeVisible()
+ await expect(manager.getByRole('button',{name:'Remove Part 1'})).toBeDisabled()
+ await manager.getByRole('button',{name:'Add Part 5'}).click()
+ await expect(manager.getByText('Part 5',{exact:true})).toBeVisible()
+ await page.screenshot({path:info.outputPath('manage-parts-1440-light.png'),animations:'disabled'})
+ await page.setViewportSize({width:1024,height:768})
+ await page.evaluate(()=>{document.documentElement.dataset.theme='dark';document.documentElement.dataset.effectiveTheme='dark';document.documentElement.style.zoom='125%'})
+ await expect(manager).toBeInViewport()
+ await expect(manager.getByRole('button',{name:'Add Part 6'})).toBeInViewport()
+ await page.screenshot({path:info.outputPath('manage-parts-1024-dark-125.png'),animations:'disabled'})
+ await page.setViewportSize({width:1440,height:900})
+ await page.evaluate(()=>{document.documentElement.dataset.theme='light';document.documentElement.dataset.effectiveTheme='light';document.documentElement.style.zoom='100%'})
+ await manager.getByRole('button',{name:'Close Manage Parts'}).click()
+ await register.getByLabel(`Select ${docs[0].title}`).check()
+ await register.getByRole('combobox',{name:'Set selected Part'}).selectOption('5')
+ await register.locator('.batch-apply-action').click()
+ await expect.poll(async()=>{const saved=await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json();return saved[0].part}).toBe(5)
+ await register.getByRole('button',{name:'Manage Parts'}).click()
+ await expect(manager.getByRole('button',{name:'Remove Part 5'})).toBeDisabled()
+ await manager.getByRole('button',{name:'Close Manage Parts'}).click()
+ await register.getByRole('combobox',{name:'Set selected Part'}).selectOption('1')
+ await register.locator('.batch-apply-action').click()
+ await register.getByRole('button',{name:'Manage Parts'}).click()
+ await manager.getByRole('button',{name:'Remove Part 5'}).click()
+ await expect(manager.getByText('Part 5',{exact:true})).toHaveCount(0)
+ await manager.getByRole('button',{name:'Add Part 6'}).click()
+ await expect(manager.getByText('Part 6',{exact:true})).toBeVisible()
+ await manager.getByRole('button',{name:'Close Manage Parts'}).click()
+ await expect(register.getByRole('combobox',{name:'Set selected Part'}).locator('option[value="6"]')).toHaveCount(1)
+ await expect(register.getByRole('combobox',{name:'Set selected Part'}).locator('option[value="5"]')).toHaveCount(0)
+})
+test('Batch review remains usable with 38 real synthetic documents across theme and scale',async({page,request},info)=>{
+ test.setTimeout(180000)
+ const {matter}=await seed(request)
+ const buffer=await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))
+ for(let start=4;start<=38;start+=5){
+  const uploads=await Promise.all(Array.from({length:Math.min(5,39-start)},(_,offset)=>request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{files:{name:`Synthetic_record_${String(start+offset).padStart(2,'0')}.pdf`,mimeType:'application/pdf',buffer}}})))
+  expect(uploads.every((response:any)=>response.ok())).toBe(true)
+ }
+ await enter(page,38)
+ await matrix(page,info,'06A')
+ const scroller=page.locator('.batch-table-scroll')
+ await page.setViewportSize({width:1024,height:768})
+ await page.evaluate(()=>{document.documentElement.dataset.theme='dark';document.documentElement.dataset.effectiveTheme='dark';document.documentElement.style.setProperty('--ui-scale','1.25');(document.querySelector('.app-shell') as HTMLElement).style.setProperty('--documents-interface-scale','1.25');document.documentElement.style.zoom='125%'})
+ await scroller.evaluate(element=>{element.scrollTop=element.scrollHeight})
+ await expect(page.locator('.batch-table tbody tr').last()).toBeInViewport()
+ await expect(page.getByRole('button',{name:'Save changes',exact:true})).toBeInViewport()
+ expect(await scroller.evaluate(element=>element.scrollWidth>element.clientWidth)).toBe(true)
+ await page.screenshot({path:info.outputPath('06A-dense-38-1024-dark-125-bottom.png'),animations:'disabled'})
+ const frozenTitle=page.locator('.batch-table th').filter({hasText:'Title'})
+ const titleX=(await frozenTitle.boundingBox())!.x
+ await scroller.evaluate(element=>{element.scrollLeft=element.scrollWidth})
+ expect(Math.abs((await frozenTitle.boundingBox())!.x-titleX)).toBeLessThan(2)
+ await expect(page.locator('.batch-table th').filter({hasText:'Status'})).toBeInViewport()
+ await page.screenshot({path:info.outputPath('06A-dense-38-1024-dark-125-right.png'),animations:'disabled'})
+})
 test('06B batch save shows the supplied saved state and persists the reviewed value',async({page,request},info)=>{
  const {matter,docs}=await seed(request)
  await enter(page)
  const geometry=[] as Array<{selector:string,actual:number[],expected:number[]}>
  for(const [selector,x,y,width,height] of [
   ['.batch-review-toolbar',88,220,1328,48],
+  ['.batch-part-select select',236,227,220,34],
+  ['.batch-kind-select',470,227,154,34],
+  ['.batch-columns-trigger',1196,227,112,34],
+  ['.batch-density-trigger',1314,227,92,34],
   ['.batch-table thead',88,284,1328,38],
   ['.batch-table tbody tr:first-child',88,322,1328,38],
   ['.batch-review-heading>.membership-button',1236,140,180,34],
@@ -147,6 +307,10 @@ test('B02C counts, empty filters, late source responses and compact keyboard rev
  await page.keyboard.press('Escape')
  await expect(page.locator('.source-review')).toBeHidden()
  await expect(page.getByRole('button',{name:'Review selected source',exact:true})).toBeFocused()
+ await page.getByRole('button',{name:'Review selected source',exact:true}).click()
+ await expect(page.locator('.source-review')).toBeVisible()
+ await page.mouse.click(250,350)
+ await expect(page.locator('.source-review')).toBeHidden()
 })
 
 test('B02C unselected drafts survive acceptance and empty filters do not save dismissed dates',async({page,request})=>{
