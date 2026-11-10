@@ -58,7 +58,7 @@ test('actual-page crop preview maps rotated drag/numeric selections to saved PDF
   const document = (await uploaded.json())[0]
   const documents = async () => (await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json())[0]
   await page.goto('/');await enterLatestMatter(page)
-  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Rotated Crop Preview'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'E2E Rotated Crop Preview'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', { name: 'Pages', exact: true }).click()
   await page.getByRole('button', { name: 'Page tools', exact: true }).click()

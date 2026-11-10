@@ -46,7 +46,7 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
 `], { input: await response.body(), encoding: 'utf8' })) as string[]
   }
   await page.goto('/');await enterLatestMatter(page)
-  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Visual Page Transfer'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'E2E Visual Page Transfer'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'transfer-target' }).click()
   await closeWorkspaceNavigation(page)

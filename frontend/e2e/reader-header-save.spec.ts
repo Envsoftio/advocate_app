@@ -26,7 +26,7 @@ test('document header Save commits a real tool draft once, without exporting or 
     await save.click()
     await expect.poll(()=>writes).toBe(1)
     await expect(save).toBeDisabled()
-    await expect(page.locator('.preparation-utility').getByRole('button',{name:'Undo last matter change',exact:true})).toBeDisabled()
+    await expect(page.locator('.reader-mode-actions').getByRole('button',{name:'Undo last matter change',exact:true})).toBeDisabled()
     await expect(page.locator('.document-save-state')).toContainText('Saving')
   } finally {release()}
   await expect(page.locator('.document-save-state')).toContainText('Saved locally')

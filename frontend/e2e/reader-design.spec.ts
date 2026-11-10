@@ -32,7 +32,7 @@ sys.stdout.buffer.write(pdf.tobytes())`])
   await page.locator('.page-counter input').fill('14');await page.locator('.page-counter input').press('Enter')
   await expect(page.locator('.pdf-text-layer')).toContainText('ANNEXURE B')
   await expect(page.locator('.docs-panel')).toBeHidden()
-  for(const [selector,y,height] of [['.application-bar',0,32],['.document-header',116,64],['.reader-tool-navigation',180,44],['.read-workspace>.reader-navigation',224,44]] as const){
+  for(const [selector,y,height] of [['.application-bar',0,40],['.document-header',40,64],['.reader-tool-navigation',104,44],['.read-workspace>.reader-navigation',148,44]] as const){
     await expect.poll(async()=>Math.round((await page.locator(selector).boundingBox())!.y)).toBe(y)
     expect(Math.round((await page.locator(selector).boundingBox())!.height)).toBe(height)
   }

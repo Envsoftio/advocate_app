@@ -32,7 +32,7 @@ test('Save copy downloads exact revision bytes without private notes and refuses
   expect(firstBytes).toEqual(original)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/');await enterLatestMatter(page)
-  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Exact Working Save'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'E2E Exact Working Save'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.locator('.doc-item').filter({ hasText: 'save-working-synthetic' }).click()
   await openDocumentActions(page)

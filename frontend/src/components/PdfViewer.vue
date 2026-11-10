@@ -564,10 +564,10 @@ const filteredComments = computed(() => {
 })
 const marksPanelOpen = computed(() => activeTool.value === 'marks')
 const inspectorVisible = computed(() => marksPanelOpen.value ||
-  (editTextMode.value && (pendingMove.value || !!runsError.value || !!editNotice.value)) ||
+  textMode.value || editTextMode.value ||
   redactionOpen.value ||
   (annotationPanelOpen.value && (annotationDraft.kind === 'image' || (!annotationDrawing.value && (!!annotationRegion.value || !!editingAnnotationId.value || !!annotationError.value)))) ||
-  (linkPanelOpen.value && !!linkRegion.value))
+  linkPanelOpen.value)
 const toolHint = computed(() => ({
   'add-text': 'Click where text should appear, type in the box, then choose Apply text.',
   'edit-text': 'Click selectable text to edit it; drag a highlighted run in any direction to preview a move.',
@@ -1796,8 +1796,8 @@ async function applyReplacement() {
           <button v-for="category in (['read','edit','review','pages','ocr','redact'] as const)" :key="category" role="tab" :aria-selected="activeCategory===category" :class="{active:activeCategory===category}" :data-category="category" :id="`pdf-tab-${category}`" :tabindex="activeCategory===category?0:-1" aria-controls="pdf-tool-panel" @keydown="tabKey($event,category)" @click="selectCategory(category)"><component :is="category==='read'?BookOpen:category==='edit'?Pencil:category==='review'?Highlighter:category==='pages'?LayoutGrid:category==='ocr'?ScanText:Shield" :size="15"/>{{category==='read'?'Read':category==='edit'?'Edit':category==='review'?'Annotate':category==='pages'?'Pages':category==='ocr'?'OCR':'Redact'}}</button>
         </div>
         <div class="reader-mode-actions">
-          <button v-if="expanded" class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :aria-description="undoDescription" :disabled="!canUndo || disabled || editing" @click="emit('undo')"><Undo2 :size="16"/></button>
-          <button v-if="expanded" class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :aria-description="redoDescription" :disabled="!canRedo || disabled || editing" @click="emit('redo')"><Redo2 :size="16"/></button>
+          <button class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :aria-description="undoDescription" :disabled="!canUndo || disabled || editing || headerSaving" @click="emit('undo')"><Undo2 :size="16"/></button>
+          <button class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :aria-description="redoDescription" :disabled="!canRedo || disabled || editing || headerSaving" @click="emit('redo')"><Redo2 :size="16"/></button>
           <button class="icon-btn small" :aria-label="focusedReading ? 'Exit focused reading' : 'Focused reading'" :title="focusedReading ? 'Exit focused reading' : 'Focused reading'" @click="toggleFocusedReading"><Maximize2 :size="16"/></button>
           <button class="btn secondary small index-trigger" aria-label="Open bundle index" @click="emit('openBookmarks')">Index &amp; Bookmarks</button>
           <details ref="actionsMenu" class="reader-more" @keydown.esc.stop="actionsMenu?.removeAttribute('open'); actionsMenu?.querySelector('summary')?.focus()"><summary role="button" class="icon-btn small" aria-label="More document actions" title="More document actions"><Ellipsis :size="17"/></summary><div class="reader-more-menu" @click.capture="closeActionMenu" role="tablist" aria-label="Additional PDF tools">
@@ -1814,10 +1814,11 @@ async function applyReplacement() {
       <div v-show="!focusedReading && !preparation && activeCategory!=='read'" id="pdf-tool-panel" class="page-editbar" role="tabpanel" :aria-labelledby="`pdf-tab-${activeCategory}`">
         <div v-if="activeCategory==='ocr'" class="document-actionbar" role="group" aria-label="Document tools"><label for="ocr-language">OCR language</label><select id="ocr-language" v-model="ocrLanguage" :disabled="editing || loading || disabled"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr', ocrLanguage, current-1)"><ScanText :size="15"/> Run {{ocrLanguage==='eng'?'English':ocrLanguage==='hin'?'Hindi':'English + Hindi'}} OCR</button><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocrPage',current-1,ocrLanguage)">OCR current page if unprocessed</button><span>Review recognized text before use.</span></div>
         <div v-if="activeCategory==='edit'" class="editor-tool-group" role="group" aria-label="Edit PDF">
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
+        <button class="text-tool" aria-label="Edit text" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="toggleTool('edit-text')"><Type :size="15"/> Text</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="toggleTool('add-text')"><Type :size="15"/> Add text</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="toggleTool('edit-text')"><Pencil :size="15"/> Edit text</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="redactionOpen" @click="toggleTool('redact')"><Eraser :size="15"/> Redact</button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='image'" @click="openAnnotationTool('image')"><Images :size="15"/> Image</button>
+        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="toggleTool('links')"><Link2 :size="15"/> Link</button>
+        <button class="text-tool" aria-label="Select object" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="activeTool!=='select' && toggleTool(activeTool)"><Pencil :size="15"/> Select object</button>
         </div><div v-if="activeCategory==='review'" class="editor-tool-group" role="group" aria-label="Review PDF">
         <button class="text-tool" :disabled="editing || loading || disabled" title="Private review highlight" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='highlight'" @click="openAnnotationTool('highlight')"><Highlighter :size="15"/> Highlight<span v-if="currentPageAnnotations.some(item=>item.kind==='highlight')" class="page-bookmark-count">{{currentPageAnnotations.filter(item=>item.kind==='highlight').length}}</span></button>
         <button class="text-tool" disabled title="Underline is planned for Phase 03B"><Minus :size="15"/> Underline</button>
@@ -1877,7 +1878,7 @@ async function applyReplacement() {
         <button class="icon-btn small" :class="{active:commentsOpen}" :aria-label="`Comments (${documentComments.length})`" title="Comments" @click="openReadPanel('comments',$event)"><MessageSquare :size="16"/></button>
         <button v-if="pageBookmarks.length" class="icon-btn small" :aria-label="`Page ${current} bookmarks${pageBookmarks.some(item=>!item.resolved)?' need review':''}`" @click="openReadPanel('page-bookmarks',$event)"><BookOpen :size="16"/></button>
       </div>
-      <PdfThumbnailRail v-if="(preparation && focusedReading && total > 0 && readPanel!=='search') || (!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading && (expanded || activeTool==='select' || activeCategory==='review'))" :pdf="readerPdf" :count="total" :page="current" :title="document.title" :search="preparation && focusedReading" @search="showFind"
+      <PdfThumbnailRail v-if="(preparation && focusedReading && total > 0 && readPanel!=='search') || (!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading && (expanded || activeTool==='select' || activeCategory==='review' || activeCategory==='edit'))" :pdf="readerPdf" :count="total" :page="current" :title="document.title" :search="preparation && focusedReading" @search="showFind"
         :disabled="disabled || editing || loading" :dragging-page="draggingPage" :drop-target-page="dropTargetPage" @select="navigateToPage($event)" @reorder="reorderThumbnailPage"
         @dragstart="startPageDrag" @dragover="overPage" @drop="dropPage" @dragend="draggingPage=null;dropTargetPage=null"/>
       <aside v-if="readPanel && (!focusedReading || (preparation && readPanel==='search'))" ref="panelElement" id="pdf-read-panel" class="reader-side-panel" :class="{'document-information-panel':readPanel==='information'}" role="region" :aria-label="findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Source PDF outline' : commentsOpen ? 'Private review comments' : `Bookmarks on page ${current}`">
@@ -1919,10 +1920,19 @@ async function applyReplacement() {
         </div>
         <button v-if="pageBookmarksOpen || outlineOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
       </aside>
-      <aside v-if="inspectorVisible" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen}" aria-label="PDF editing controls">
-        <div class="viewer-tool-inspector-heading"><strong>{{annotationPanelOpen && editingAnnotationId ? 'Highlight & comment' : toolTitle}}</strong><button class="icon-btn small" aria-label="Close PDF tool" title="Close tool" @click="toggleTool(activeTool)"><X :size="16"/></button></div>
+      <aside v-if="inspectorVisible" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen, 'edit-mode-inspector':activeCategory==='edit'}" aria-label="PDF editing controls">
+        <div class="viewer-tool-inspector-heading"><strong>{{annotationPanelOpen && editingAnnotationId ? annotationKindLabel(annotationDraft.kind) : toolTitle}}</strong><button class="icon-btn small" aria-label="Close PDF tool" title="Close tool" @click="toggleTool(activeTool)"><X :size="16"/></button></div>
+      <div v-if="textMode" class="edit-context-panel" role="region" aria-label="New text properties">
+        <strong>{{placement ? 'Text placement' : 'Ready to place'}}</strong>
+        <p>Click the page, then type. The original text beneath an added object is retained.</p>
+        <label>Font family<input value="Helvetica · built-in PDF font" readonly aria-label="Font family"/></label>
+        <label>Size<input v-model.number="overlaySize" type="number" min="6" max="36" :disabled="editing || disabled" aria-label="Text size in points"/> pt</label>
+        <p class="edit-context-limit">Printable ASCII · 6–36 pt. Review line breaks in the saved PDF.</p>
+        <button class="btn secondary small" :disabled="editing" @click="toggleTool('add-text')">Cancel placement</button>
+      </div>
       <Transition name="soft"><div v-if="editTextMode" class="text-overlay-panel" aria-label="Edit existing text">
-        <strong>Edit selectable text</strong>
+        <strong>{{selectedRun ? 'Selected text' : 'Select text'}}</strong>
+        <p v-if="selectedRun" class="edit-selected-excerpt">{{selectedRun.text}}</p>
         <p>Click text on the page to change its words. Drag highlighted text anywhere in a clear area of this page to move it. Review the position before applying.</p>
         <p>Scanned text needs OCR and review before editing. Redact creates a movable mark; only a generated Save copy or bundle removes covered content.</p>
         <p v-if="replacementEngine==='pdfium-trial'">The whole detected paragraph is selected. This mode changes all of its lines; if the page is unsupported, the working PDF is left unchanged.</p>
@@ -1962,7 +1972,7 @@ async function applyReplacement() {
         <p v-if="annotationError" class="error-msg" role="alert">{{annotationError}}</p><p v-if="annotationNotice" class="review-tool-notice" role="status">{{annotationNotice}}</p>
         <div v-if="currentPageAnnotations.length" class="page-annotation-list"><div v-for="item in currentPageAnnotations" :key="item.id" :class="['page-annotation-row',{unresolved:!item.resolved}]"><component :is="item.kind==='image'?Images:item.kind==='highlight'?Highlighter:item.kind==='comment'?MessageSquare:item.kind==='draw'?Pencil:item.kind==='box'?Square:item.kind==='ellipse'?Circle:item.kind==='line'?Minus:item.kind==='arrow'?ArrowUpRight:item.kind==='check'?Check:item.kind==='date'?CalendarDays:item.kind==='text'?Type:item.kind==='redaction'?Eraser:X" :size="15"/><span><strong>{{annotationKindLabel(item.kind)}}</strong><small>{{item.resolved ? (item.body && item.kind!=='draw'?item.body:item.output_scope==='pdf'?'Included in Save copy and new bundles':'Private review mark') : 'Needs review after a revision change'}}</small></span><button class="icon-btn small" :aria-label="`Edit ${item.kind}`" :disabled="annotationBusy || !item.resolved" @click="editPageAnnotation(item)"><Pencil :size="14"/></button><button class="icon-btn small danger" :aria-label="`Remove ${item.kind}`" :disabled="annotationBusy" @click="removePageAnnotation(item)"><Trash2 :size="14"/></button></div></div>
       </div></Transition>
-      <Transition name="soft"><div v-if="linkPanelOpen" class="review-link-panel" aria-label="Reviewed PDF links">
+      <Transition name="soft"><div v-if="linkPanelOpen" class="review-link-panel" role="region" aria-label="Reviewed PDF links">
         <div class="review-tool-heading"><strong>Reviewed link</strong><span>Drag a rectangle on this page, then choose its destination. Imported PDF actions remain excluded.</span></div>
         <div class="review-link-grid">
           <label>Readable label<input v-model="linkDraft.title" maxlength="200" :disabled="linksBusy || disabled" placeholder="Open supporting passage"/></label>

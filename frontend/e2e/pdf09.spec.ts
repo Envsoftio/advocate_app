@@ -26,7 +26,7 @@ with pymupdf.open(sys.argv[1]) as pdf:
     const create = page.getByRole('dialog', { name: 'Create matter' })
     await create.getByLabel('Matter name').fill('PDF-09 Browser Synthetic')
     await create.getByRole('button', { name: 'Create matter' }).click()
-    await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'PDF-09 Browser Synthetic'})).toBeVisible()
+    await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'PDF-09 Browser Synthetic'})).toBeVisible()
     await page.getByRole('button', {name:'Import documents',exact:true}).click()
 
     await page.getByLabel('Choose import files').setInputFiles(locked)

@@ -54,6 +54,7 @@ test('matter and document tabs keep their selection, reader position and unsaved
   await expect(page.locator('.reader-document strong')).toHaveText('bravo-tabs')
   await openWorkspaceNavigation(page)
   await openNamedMatter(page,'E2E UX01 Second Matter')
+  await openWorkspaces(page)
   await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select')).toHaveText('E2E UX01 Second Matter')
   await openWorkspaces(page)
   await page.locator('.open-workspace-tabs .open-workspace-tab').filter({hasText:'alpha-tabs'})

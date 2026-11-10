@@ -246,3 +246,38 @@ body:has(.design-shell) {min-width:0;height:calc(100dvh / var(--ui-scale));overf
 
 .design-shell .documents-workspace .read-workspace .virtual-thumbnail-rail .thumbnail-button {height:180px;min-height:180px;padding:10px 12px 8px}
 .design-shell .read-workspace .thumbnail-rail-heading .thumbnail-hint {align-self:center;position:static;line-height:20px;font-size:13px;color:var(--cb-text)}
+
+/* ED02–ED06: edit tools share the supplied 44 px row and a contextual right panel. */
+.design-shell .read-workspace>.page-editbar:has([aria-label="Edit PDF"]) {height:44px;min-height:44px;padding:5px 16px;background:var(--cb-surface)}
+.design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"] {width:100%;gap:6px}
+.design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"]>.text-tool {height:34px;min-height:34px;min-width:0;flex-direction:row;justify-content:center;gap:7px;padding:0 12px;border:1px solid var(--cb-control-border);border-radius:8px;font-size:13px;font-weight:600;color:var(--cb-text);background:var(--cb-surface);box-shadow:none}
+.design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"]>.text-tool[aria-pressed="true"] {background:var(--cb-selected);border-color:var(--cb-link);color:var(--cb-link)}
+.design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector) {grid-template-columns:232px minmax(0,1fr) 292px}
+.design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector)>.viewer-tool-inspector {position:static;grid-column:3;grid-row:1/-1;width:292px;max-height:none;border:0;border-radius:0;border-left:1px solid var(--cb-border);box-shadow:none}
+.design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector)>.viewer-page-column {grid-column:2;grid-row:1/-1}
+.design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector)>.reader-panel-tabs {grid-column:1}
+.design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector)>.virtual-thumbnail-rail {width:232px}
+.edit-context-panel {display:flex;flex-direction:column;gap:14px;min-height:350px;padding:16px 20px;color:var(--cb-text);font-size:13px}
+.edit-context-panel>strong {font-size:15px}
+.edit-context-panel>p {margin:0;line-height:1.4}
+.edit-context-panel>label {display:block;font-size:12px;font-weight:600}
+.edit-context-panel input {display:block;width:100%;margin-top:7px;padding:8px 10px;border:1px solid var(--cb-control-border);border-radius:7px;background:var(--cb-surface);color:var(--cb-text);font:inherit}
+.edit-context-panel input[readonly] {background:var(--cb-surface2)}
+.edit-context-panel .edit-context-limit {color:var(--cb-muted);font-size:11px}
+.edit-context-panel>.btn {margin-top:auto}
+.edit-mode-inspector .text-overlay-panel {padding:16px 20px;background:var(--cb-surface);color:var(--cb-text);font-size:12px}
+.edit-mode-inspector .edit-selected-excerpt {padding:10px;border:1px solid var(--cb-control-border);border-radius:7px;background:var(--cb-surface2);overflow-wrap:anywhere}
+.edit-mode-inspector .review-link-grid {grid-template-columns:minmax(0,1fr)}
+.edit-mode-inspector .review-link-uri {grid-column:auto}
+@media (min-width:1101px) {
+  .design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"]) {position:relative}
+  .design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"])>.reader-navigation {position:absolute;top:108px;right:270px;z-index:3;display:flex;width:auto;height:44px;min-height:44px;padding:5px 0;border:0;background:transparent;overflow:visible}
+  .design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"])>.reader-navigation>:nth-child(n+4):not(.zoom-select) {display:none}
+  .design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"])>.reader-navigation .reader-view-menu {display:none}
+}
+@media (max-width:900px) {
+  .design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"] {min-width:max-content}
+  .design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector) {grid-template-columns:160px minmax(0,1fr) 240px}
+  .design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector)>.viewer-tool-inspector {width:240px}
+  .design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector)>.virtual-thumbnail-rail {width:160px}
+}

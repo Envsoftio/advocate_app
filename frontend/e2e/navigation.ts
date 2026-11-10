@@ -35,6 +35,8 @@ export async function openReaderView(page:Page) {
 }
 export async function openWorkspaces(page:Page) {
   await closeWorkspaceNavigation(page)
+  const menu=page.getByRole('button',{name:'Open workspaces',exact:true})
+  if(await menu.isVisible() && await menu.getAttribute('aria-expanded')!=='true')await menu.click()
   await expect(page.locator('.open-workspace-tabs')).toBeVisible()
 }
 
@@ -123,7 +125,9 @@ export async function enterLatestMatter(page:Page) {
 }
 export async function openNamedMatter(page:Page,name:string) {
   await closeWorkspaceNavigation(page)
-  await page.locator('.workspace-home-tab').click()
+  const allMatters=page.locator('.matter-rail').getByRole('button',{name:'All matters',exact:true})
+  if(await allMatters.isVisible())await allMatters.click()
+  else await page.locator('.workspace-home-tab').click()
   await expect(page.locator('.matter-home')).toBeVisible()
   await page.locator('.matter-home-card').filter({hasText:name}).click()
   await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click()

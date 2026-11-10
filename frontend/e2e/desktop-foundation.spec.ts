@@ -22,7 +22,7 @@ test('storage, idle autosave, Office downloads and print copy use one completed 
   const documentId = (await uploaded.json())[0].id as string
 
   await page.goto('/');await enterLatestMatter(page)
-  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Desktop Foundation'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'E2E Desktop Foundation'})).toBeVisible()
   await page.getByRole('button', {name:'Overview', exact:true}).click()
   await page.getByRole('button',{name:'Matter details',exact:true}).click()
   await expect(page.getByRole('region', {name:'Desktop file tools'})).toContainText('PDF tools & print')

@@ -47,7 +47,7 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
   }
   await page.setViewportSize({width:1440,height:900})
   await page.goto('/');await enterLatestMatter(page)
-  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Page Organizer'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'E2E Page Organizer'})).toBeVisible()
   await closeWorkspaceNavigation(page)
   await page.getByRole('tab', { name: 'Pages', exact: true }).click()
   await page.getByRole('button', { name: 'Organize pages', exact: true }).click()

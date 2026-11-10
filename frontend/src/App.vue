@@ -473,6 +473,7 @@ function toggleEditorExpanded() {
 }
 
 const documentTableOpen = ref(false);
+const editorScreen = computed(() => activeView.value === 'documents' && !preparationVisible.value && !documentTableOpen.value && !membershipOpen.value && !!selectedDoc.value);
 const partManagerOpen = ref(false);
 const documentTablePanel = ref<InstanceType<typeof DocumentTable>|null>(null);
 const tableDirty = ref(false);
@@ -2978,7 +2979,7 @@ watch(sidebarCollapsed, (collapsed) => {
       </div>
     </section>
   </main>
-  <div v-else class="app-shell design-shell" :data-batch="documentTableOpen" :data-finding="!!preflightContext && activeView==='documents'" :data-preparation="preparationVisible || documentTableOpen || buildShell" :data-nav-collapsed="sidebarCollapsed" :data-flow="activeView==='matters'||activeView==='overview'||activeView==='import'" :data-build="expandedBuildShell" :data-membership="membershipOpen" :data-membership-collapsed="membershipCollapsed" :data-compact-preparation="compactDocuments" :data-engine-unavailable="engineBlocked" :data-editor-expanded="editorExpanded" :data-documents="activeView === 'documents'" :style="{ '--documents-interface-scale': uiScale / 100 }">
+  <div v-else class="app-shell design-shell" :data-batch="documentTableOpen" :data-finding="!!preflightContext && activeView==='documents'" :data-preparation="preparationVisible || documentTableOpen || buildShell" :data-nav-collapsed="sidebarCollapsed" :data-editor-screen="editorScreen" :data-flow="activeView==='matters'||activeView==='overview'||activeView==='import'" :data-build="expandedBuildShell" :data-membership="membershipOpen" :data-membership-collapsed="membershipCollapsed" :data-compact-preparation="compactDocuments" :data-engine-unavailable="engineBlocked" :data-editor-expanded="editorExpanded" :data-documents="activeView === 'documents'" :style="{ '--documents-interface-scale': uiScale / 100 }">
     <a class="skip-link" href="#main-content" @click.prevent="focusMain"
       >Skip to main content</a
     >
@@ -3027,7 +3028,7 @@ watch(sidebarCollapsed, (collapsed) => {
       }"
     >
       <nav
-        v-show="true"
+        v-show="!editorScreen || tabsMenuOpen"
         class="open-workspace-tabs"
         aria-label="Open matter and document tabs"
         @keydown.esc="tabsMenuOpen=false"

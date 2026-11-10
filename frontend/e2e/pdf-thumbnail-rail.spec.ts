@@ -29,7 +29,7 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
   }
   await page.setViewportSize({width:1440,height:1000})
   await page.goto('/');await enterLatestMatter(page)
-  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Virtual Thumbnail Rail'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'E2E Virtual Thumbnail Rail'})).toBeVisible()
   await openDocumentBrowser(page)
   await page.locator(`.doc-item[data-document-id="${documents.get(1000)}"]`).click()
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)

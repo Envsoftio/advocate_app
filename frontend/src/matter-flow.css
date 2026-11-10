@@ -248,6 +248,28 @@
 .import-progress progress::-moz-progress-bar {background:var(--cb-accent);border-radius:3px}
 .import-progress p {position:absolute;left:24px;right:24px;top:95px;height:20px;margin:0}
 .import-workspace[data-started=true] .flow-section-heading {margin-bottom:21px}
+
+/* FLOW / 03 restores the supplied editor chrome while keeping open tabs in
+   the application-bar workspace menu. Other MatterDraft workspaces retain FLOW / 01. */
+:root .app-shell.design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) {--workspace-rail-width:64px;grid-template-columns:64px minmax(0,1fr);grid-template-rows:40px minmax(0,1fr) 28px}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .application-bar {height:40px}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .application-matter {display:flex;flex:1;max-width:520px}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .application-local {margin-left:auto}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .app-main {padding-top:0}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .preparation-utility {display:none}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .matter-rail {margin-top:0;padding:76px 10px 12px;align-items:center;gap:10px}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .matter-rail .rail-context {display:none}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .matter-rail button {width:44px;height:38px;min-height:38px;flex:0 0 38px;justify-content:center;padding:0;font-size:0}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .matter-rail button span {display:none}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .matter-rail .rail-bottom {width:44px}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .open-workspace-tabs {position:fixed;top:40px;left:188px;display:flex;flex-direction:column;align-items:stretch;width:min(440px,calc(100vw - 204px));height:auto;max-height:360px;padding:8px;background:var(--cb-surface);border:1px solid var(--cb-control-border);border-radius:0 0 8px 8px;box-shadow:0 12px 30px #0002;overflow:auto;z-index:46}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .open-workspace-tab {width:100%;flex:0 0 40px}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .workspace-home-tab {flex:0 0 40px;width:100%}
+:root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .workspace-new-tab {align-self:flex-start}
+@media(max-width:700px) {
+  :root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .application-matter {max-width:200px}
+  :root .design-shell[data-editor-screen=true]:not([data-editor-expanded=true]) .open-workspace-tabs {left:64px;width:calc(100vw - 80px)}
+}
 .import-workspace[data-started=true] .import-table th {height:38px}
 .import-workspace[data-started=true] .import-table td {height:47px}
 .import-workspace[data-started=true] .flow-footer {min-height:45px;padding-top:10px}

@@ -76,7 +76,7 @@ test('generated PDFs above 25 MiB use bounded ranges, cancel cleanly, retry and 
   })
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/');await enterLatestMatter(page)
-  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'E2E Large Generated Reader'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'E2E Large Generated Reader'})).toBeVisible()
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click()
   const review = page.getByRole('button', { name: 'Review combined.pdf', exact: true })
   const dialog = page.getByRole('dialog', { name: 'Review generated PDF' })

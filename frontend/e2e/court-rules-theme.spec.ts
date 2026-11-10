@@ -6,6 +6,7 @@ test('court rules identifies applied checks and keeps dark theme reference text 
   await page.goto('/');await enterLatestMatter(page)
   await openWorkspaceNavigation(page)
   await page.locator('.workspace-drawer').getByRole('button', { name: 'New matter' }).click()
+  await page.getByRole('dialog', { name: 'Create matter' }).getByText('Preparation settings').click()
   await expect(page.getByRole('combobox', { name: 'Court profile' })).toHaveValue('general-demo')
   await page.getByRole('dialog', { name: 'Create matter' }).getByRole('button', { name: 'Cancel' }).click()
   await openWorkspaceNavigation(page)

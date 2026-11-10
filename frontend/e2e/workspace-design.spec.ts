@@ -63,6 +63,6 @@ test('matter home leads to overview and focused PDF editing', async ({ page, req
     await page.getByRole('button',{name:'Close workspace navigation',exact:true}).click()
     await expect(page.locator('.workspace-drawer')).toBeHidden()
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
-    await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select')).toContainText('01_petition')
+    await expect(page.locator('.reader-document strong')).toContainText('01_petition')
   }
 })

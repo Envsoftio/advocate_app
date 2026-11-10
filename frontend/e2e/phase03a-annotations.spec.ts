@@ -15,7 +15,7 @@ test('03A highlight and comment Save, retry, reload and source navigation',async
   }})).json()
   await page.setViewportSize({width:1440,height:900})
   await page.goto('/');await enterLatestMatter(page)
-  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'Synthetic 03A review'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'Synthetic 03A review'})).toBeVisible()
   await expect(page.locator('.pdf-text-layer')).toContainText('DRAFT PETITION')
   await page.getByRole('tab',{name:'Annotate'}).click()
   await page.getByRole('button',{name:'Highlight',exact:true}).click()
@@ -112,7 +112,7 @@ test('03A placement stays on rotated source page at 125% zoom',async({page,reque
   const revision=(await rotated.json()).revision as number
   await page.setViewportSize({width:1440,height:900})
   await page.goto('/');await enterLatestMatter(page)
-  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select').filter({hasText:'Synthetic 03A rotated'})).toBeVisible()
+  await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'Synthetic 03A rotated'})).toBeVisible()
   await expect(page.locator('.pdf-text-layer')).toContainText('DRAFT PETITION')
   await page.getByRole('tab',{name:'Annotate'}).click()
   await page.getByRole('button',{name:'Next page'}).click()
