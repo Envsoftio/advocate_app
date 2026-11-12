@@ -38,6 +38,7 @@ def test_image_original_returns_image_not_converted_pdf(client, auth, matter):
     doc = response.json()[0]
     info = client.get(f'/documents/{doc["id"]}/original-info',headers=auth).json()
     assert info['media_type'] == 'image/png' and info['page_count'] is None
+    assert info['imported_at'] == doc['created_at']
     image = client.get(f'/documents/{doc["id"]}/original',headers=auth)
     assert image.content == data and image.headers['content-type']=='image/png'
     assert client.get(f'/documents/{doc["id"]}/pdf',headers=auth).content.startswith(b'%PDF')

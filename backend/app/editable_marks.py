@@ -79,13 +79,21 @@ def draw_pdf_mark(page: pymupdf.Page, item: dict) -> None:
             page.draw_line(p, q, color=color, width=stroke, overlay=True)
     elif kind in ('check', 'cross', 'date', 'text'):
         label = {'check': 'v', 'cross': 'X'}.get(kind, item['body'])
-        size = min(36, max(6, min(box.height / max(1, len(label.splitlines())) * .45,
-                               box.width / max(1, max(map(len, label.splitlines()))) * 1.6)))
+        style = json.loads(item.get('text_style_json') or '{}') if kind == 'text' else {}
+        size = float(style['font_size']) if style else min(36, max(6,
+            min(box.height / max(1, len(label.splitlines())) * .45,
+                box.width / max(1, max(map(len, label.splitlines()))) * 1.6)))
+        family = style.get('font_family', 'helv')
+        font = {'helv': ('helv', 'hebo'), 'tiro': ('tiro', 'tibo'),
+                'cour': ('cour', 'cobo')}[family][bool(style.get('bold', False))]
+        align = {'left': 0, 'center': 1, 'right': 2, 'justify': 3}[style.get('alignment', 'left')]
         while size >= 6:
-            if page.insert_textbox(box, label, fontsize=size, fontname='helv',
+            if page.insert_textbox(box, label, fontsize=size, fontname=font,
                     color=(0, 0, 0) if kind == 'text' else color,
-                    rotate=page.rotation, overlay=True) >= 0:
+                    align=align, rotate=page.rotation, overlay=True) >= 0:
                 break
+            if style:
+                raise ProcessingError('Added text does not fit the selected size and box; enlarge it or reduce the font size')
             size -= 1
         else:
             raise ProcessingError(f'{kind.title()} mark does not fit its selected area')

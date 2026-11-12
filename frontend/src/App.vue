@@ -222,9 +222,11 @@ function askTabDiscard(message: string, discardAll = false, canSave = true): Pro
       focusReturn: document.activeElement as HTMLElement | null,
     };
     void nextTick(() =>
-      document
-        .querySelector<HTMLButtonElement>(".tab-discard-dialog button")
-        ?.focus(),
+      document.querySelector<HTMLButtonElement>(
+        activeView.value === 'documents' && pdfViewer.value?.hasPendingDraft()
+          ? '.tab-discard-dialog .btn.primary'
+          : '.tab-discard-dialog button',
+      )?.focus(),
     );
   });
 }
@@ -317,6 +319,7 @@ const history = ref({
   redo_count: 0,
   undo_label: null as string | null,
   redo_label: null as string | null,
+  recent_actions: [] as Array<{label:string,applied:boolean}>,
 });
 const undoDescription = computed(() =>
   history.value.undo_label
@@ -516,6 +519,10 @@ async function openDocumentSearch() {
 }
 watch(documentsWorkspace, restoreDocumentSearchFocus, {flush:'post'});
 const activeView = ref<View>("matters");
+const editorDiscardDialog = computed(() => activeView.value === 'documents' &&
+  !!selectedDoc.value && !!pdfViewer.value?.hasPendingDraft() &&
+  !documentDirty.value && !settingsDirty.value && !formattingDirty.value &&
+  !tableDirty.value && !membershipDirty.value && !variantDirty.value && !supplementDirty.value);
 async function focusMain() {
   await nextTick();
   const regions = document.querySelectorAll<HTMLElement>("#main-content");
@@ -3101,7 +3108,7 @@ watch(sidebarCollapsed, (collapsed) => {
       >
         <section
           class="vault-card tab-discard-dialog"
-          :class="{'batch-review-guard':documentTableOpen && tableDirty}"
+          :class="{'batch-review-guard':documentTableOpen && tableDirty,'flow03-save-dialog':editorDiscardDialog}"
           @keydown.tab="trapNavigationFocus"
           role="alertdialog"
           aria-modal="true"
@@ -3109,21 +3116,21 @@ watch(sidebarCollapsed, (collapsed) => {
           aria-describedby="tab-discard-message"
         >
           <Info v-if="documentTableOpen && tableDirty" class="batch-review-guard-icon" :size="24" aria-hidden="true"/>
-          <h2 id="tab-discard-title">{{documentTableOpen && tableDirty ? 'Save changes before leaving?' : 'Unsaved work in this tab'}}</h2>
-          <p id="tab-discard-message">{{documentTableOpen && tableDirty ? `${documentTablePanel?.pendingCount() || 1} metadata ${documentTablePanel?.pendingCount() === 1 ? 'edit has' : 'edits have'} not been saved. Save ${documentTablePanel?.pendingCount() === 1 ? 'it' : 'them'} to this matter, discard ${documentTablePanel?.pendingCount() === 1 ? 'it' : 'them'}, or stay in batch review.` : tabDiscardRequest.message}}</p>
+          <h2 id="tab-discard-title">{{documentTableOpen && tableDirty ? 'Save changes before leaving?' : editorDiscardDialog ? `Save changes to ${selectedDoc?.title}?` : 'Unsaved work in this tab'}}</h2>
+          <p id="tab-discard-message">{{documentTableOpen && tableDirty ? `${documentTablePanel?.pendingCount() || 1} metadata ${documentTablePanel?.pendingCount() === 1 ? 'edit has' : 'edits have'} not been saved. Save ${documentTablePanel?.pendingCount() === 1 ? 'it' : 'them'} to this matter, discard ${documentTablePanel?.pendingCount() === 1 ? 'it' : 'them'}, or stay in batch review.` : editorDiscardDialog ? 'You have an unfinished change in this working copy. Save it before leaving this document. Saving updates the working revision and may make generated bundles stale. Discard removes only this unfinished change; the imported original stays preserved.' : tabDiscardRequest.message}}</p>
           <p v-if="navigationError" role="alert" class="error-msg">{{navigationError}}</p>
           <p v-if="!tabDiscardRequest.canSave" class="hint">Activate each inactive tab to save its retained draft before closing these tabs.</p>
           <div class="tab-discard-actions">
             <button class="btn secondary" :aria-label="documentTableOpen && tableDirty ? 'Keep editing' : undefined" :disabled="navigationSaving" @click="answerTabDiscard(false)">
-              {{documentTableOpen && tableDirty ? 'Cancel' : 'Keep editing'}}</button
+              {{documentTableOpen && tableDirty || editorDiscardDialog ? 'Cancel' : 'Keep editing'}}</button
             ><button class="btn danger" :aria-label="documentTableOpen && tableDirty ? 'Discard changes' : undefined" :disabled="navigationSaving" @click="answerTabDiscard(true)">
-              {{documentTableOpen && tableDirty ? 'Discard' : 'Discard changes'}}
-            </button><button class="btn primary" :disabled="engineBlocked || navigationSaving || busy || !tabDiscardRequest.canSave" @click="saveBeforeNavigation">{{navigationSaving ? 'Saving…' : 'Save changes'}}</button>
+              {{documentTableOpen && tableDirty || editorDiscardDialog ? 'Discard' : 'Discard changes'}}
+            </button><button class="btn primary" :disabled="engineBlocked || navigationSaving || busy || !tabDiscardRequest.canSave" @click="saveBeforeNavigation">{{navigationSaving ? 'Saving…' : editorDiscardDialog ? 'Save' : 'Save changes'}}</button>
           </div>
         </section>
       </div>
       <BundleMembership v-if="membershipOpen && currentMatterId" ref="membershipPanel" :matter-id="currentMatterId" :blocked="engineBlocked || busy || isJobActive" @dirty="membershipDirty=$event" @applied="membershipApplied" @close="leaveMembership" @open="openMembershipDocument" @retry="retryEngine" @review="reviewRecoveredState" />
-      <EngineNotice v-if="!membershipOpen" @retry="retryEngine" @review="reviewRecoveredState" />
+      <EngineNotice v-if="!membershipOpen && !editorScreen" @retry="retryEngine" @review="reviewRecoveredState" />
 
       <FindingReviewPanel v-if="preflightContext && activeView === 'documents' && currentMatterId === preflightContext.matterId" :matter-id="currentMatterId" :finding="preflightContext.finding" :changed="preflightContext.finding.target_revision !== undefined && selectedDoc?.revision !== preflightContext.finding.target_revision" @return="returnToPreflight" @tools="pageToolsOpen=true"/>
 
@@ -3596,6 +3603,7 @@ watch(sidebarCollapsed, (collapsed) => {
                   :can-redo="history.can_redo"
                   :undo-label="history.undo_label"
                   :redo-label="history.redo_label"
+                  :recent-actions="history.recent_actions"
                   :details-open="detailsOpen"
                   :details-dirty="documentDirty"
                   :bookmark-refresh-key="previewRefreshKey"
@@ -3606,7 +3614,8 @@ watch(sidebarCollapsed, (collapsed) => {
                   @open-editor="openEditor"
                   @show-document-list="preparationListOpen=!preparationListOpen; compactDocuments && preparationListOpen && (detailsOpen=false)"
                   @save-details="saveDocument()"
-                  @retry-reader="retryWorkingReader"
+                  @retry-reader="engineBlocked ? retryEngine() : retryWorkingReader()"
+                  @review-engine="reviewRecoveredState"
                   @modified="refreshDocument"
                   @undo="traverseHistory('undo')"
                   @redo="traverseHistory('redo')"
@@ -4313,6 +4322,7 @@ watch(sidebarCollapsed, (collapsed) => {
       :filename="reviewingPdf.filename"
       :original-id="reviewingPdf.originalId"
       :in-preparation="preparationVisible && !!reviewingPdf.originalId"
+      :working-page-count="selectedDoc?.page_count"
       :artifact-options="selectedDoc ? artifactOptions : undefined"
       :manifest="exportsList.find(item=>item.id===reviewingPdf!.exportId)"
       @source="openGeneratedSource"

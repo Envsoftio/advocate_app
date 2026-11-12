@@ -222,6 +222,34 @@ body:has(.design-shell) {min-width:0;height:calc(100dvh / var(--ui-scale));overf
 .artifact-info-panel h3 {font-size:16px;margin:0 0 24px}.artifact-info-panel h4 {color:var(--cb-muted);margin:24px 0 8px;font-weight:400}
 .artifact-info-panel code {display:block;overflow-wrap:anywhere;font-size:11px;margin-bottom:24px}
 .artifact-info-panel>.btn {margin-top:24px}
+.design-shell .export-review:has(.artifact-modebar) .artifact-navigation {flex-basis:232px;width:232px}
+.design-shell .export-review:has(.artifact-modebar) .artifact-navigation:has(.original-panel-tabs) {display:flex;flex-direction:column}
+.design-shell .export-review:has(.artifact-modebar) .virtual-thumbnail-rail {width:232px;height:auto;flex:1;min-height:0;margin-top:7px;padding:0 32px}
+.original-panel-tabs {display:flex;align-items:center;justify-content:space-between;flex:0 0 48px;height:48px;padding:0 12px;border-bottom:1px solid var(--cb-border)}
+.original-panel-tabs button {display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:0;border-radius:6px;background:transparent;color:var(--cb-muted);cursor:pointer}
+.original-panel-tabs button.active {background:var(--cb-selected);color:var(--cb-link)}
+.design-shell .export-review:has(.artifact-modebar) .virtual-thumbnail-rail .thumbnail-rail-window {margin-top:10px}
+.design-shell .export-review:has(.artifact-modebar) .virtual-thumbnail-rail .thumbnail-button {left:14px;width:144px}
+.original-source-panel {flex:1;min-height:0;overflow:auto;padding:14px 16px;font-size:13px}
+.original-source-panel h3 {margin:0 0 16px;font-size:13px}
+.original-source-panel button {display:block;width:100%;padding:8px;border:0;border-bottom:1px solid var(--cb-border);background:transparent;color:var(--cb-text);text-align:left;cursor:pointer}
+.design-shell .export-review:has(.artifact-modebar) .artifact-info-panel {flex-basis:292px;width:292px;order:3}
+.design-shell .export-review:has(.artifact-modebar) .artifact-info-panel>h3 {border-bottom:1px solid var(--cb-border);padding-bottom:18px;margin-bottom:18px}
+.design-shell .export-review:has(.artifact-modebar) .artifact-info-panel>p:first-of-type {display:inline-flex;background:var(--cb-surface2);border-radius:13px;padding:5px 12px;font-size:12px;font-weight:600;margin:0 0 24px}
+.design-shell .export-review:has(.artifact-modebar) .artifact-info-panel>.btn {width:100%;justify-content:center}
+.design-shell .export-review:has(.artifact-modebar) .artifact-info-panel.original-info>h3 {padding-bottom:31px}
+.artifact-info-panel.original-info .original-source-heading {margin:4px 0 24px;color:var(--cb-text);font-size:14px;font-weight:700}
+.artifact-info-panel.original-info .artifact-filename {display:block;max-width:235px;line-height:1.35}
+.artifact-info-panel.original-info .artifact-filename+h4 {margin-top:68px}
+.artifact-info-panel.original-info>.btn {margin-top:39px}
+.artifact-info-panel.original-info .original-integrity-details {margin:24px 0;color:var(--cb-muted)}
+.artifact-info-panel.original-info .original-integrity-details code {margin:12px 0}
+.export-review-document {position:relative}
+.original-reader-banner {position:absolute;top:10px;left:18px;z-index:5;display:flex;align-items:center;gap:8px;width:min(718px,calc(100% - 36px));height:34px;box-sizing:border-box;padding:0 12px;border:1px solid var(--cb-border);border-radius:7px;background:var(--cb-surface);color:var(--cb-text);font-size:13px;pointer-events:none}
+.original-reader-banner svg {color:var(--cb-link)}
+.original-versions-note {margin-top:24px;padding:12px;border-radius:8px;background:var(--cb-infoBg);color:var(--cb-text-onPale);font-size:13px;line-height:1.4}
+.original-versions-note>strong {display:block;color:var(--cb-link);margin-bottom:8px}
+.original-versions-note>p {margin:0}
 @media(max-width:900px){.artifact-header>.artifact-readonly,.artifact-modebar>.artifact-readonly {display:none}.artifact-modebar {gap:4px}.artifact-modebar>.text-tool {padding:5px}.artifact-info-panel {flex-basis:240px;width:240px}}
 
 .sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
@@ -248,10 +276,10 @@ body:has(.design-shell) {min-width:0;height:calc(100dvh / var(--ui-scale));overf
 .design-shell .read-workspace .thumbnail-rail-heading .thumbnail-hint {align-self:center;position:static;line-height:20px;font-size:13px;color:var(--cb-text)}
 
 /* ED02–ED06: edit tools share the supplied 44 px row and a contextual right panel. */
-.design-shell .read-workspace>.page-editbar:has([aria-label="Edit PDF"]) {height:44px;min-height:44px;padding:5px 16px;background:var(--cb-surface)}
-.design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"] {width:100%;gap:6px}
-.design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"]>.text-tool {height:34px;min-height:34px;min-width:0;flex-direction:row;justify-content:center;gap:7px;padding:0 12px;border:1px solid var(--cb-control-border);border-radius:8px;font-size:13px;font-weight:600;color:var(--cb-text);background:var(--cb-surface);box-shadow:none}
-.design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"]>.text-tool[aria-pressed="true"] {background:var(--cb-selected);border-color:var(--cb-link);color:var(--cb-link)}
+.design-shell .read-workspace>.page-editbar:has([aria-label="Edit PDF"],[aria-label="PDF history tools"]) {height:44px;min-height:44px;padding:5px 16px;background:var(--cb-surface)}
+.design-shell .read-workspace .editor-tool-group:is([aria-label="Edit PDF"],[aria-label="PDF history tools"]) {width:100%;gap:6px}
+.design-shell .read-workspace .editor-tool-group:is([aria-label="Edit PDF"],[aria-label="PDF history tools"])>.text-tool {height:34px;min-height:34px;min-width:0;flex-direction:row;justify-content:center;gap:7px;padding:0 12px;border:1px solid var(--cb-control-border);border-radius:8px;font-size:13px;font-weight:600;color:var(--cb-text);background:var(--cb-surface);box-shadow:none}
+.design-shell .read-workspace .editor-tool-group:is([aria-label="Edit PDF"],[aria-label="PDF history tools"])>.text-tool[aria-pressed="true"] {background:var(--cb-selected);border-color:var(--cb-link);color:var(--cb-link)}
 .design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector) {grid-template-columns:232px minmax(0,1fr) 292px}
 .design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector)>.viewer-tool-inspector {position:static;grid-column:3;grid-row:1/-1;width:292px;max-height:none;border:0;border-radius:0;border-left:1px solid var(--cb-border);box-shadow:none}
 .design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector)>.viewer-page-column {grid-column:2;grid-row:1/-1}
@@ -262,19 +290,68 @@ body:has(.design-shell) {min-width:0;height:calc(100dvh / var(--ui-scale));overf
 .edit-context-panel>p {margin:0;line-height:1.4}
 .edit-context-panel>label {display:block;font-size:12px;font-weight:600}
 .edit-context-panel input {display:block;width:100%;margin-top:7px;padding:8px 10px;border:1px solid var(--cb-control-border);border-radius:7px;background:var(--cb-surface);color:var(--cb-text);font:inherit}
+.edit-context-panel select {display:block;width:100%;margin-top:7px;padding:8px 10px;border:1px solid var(--cb-control-border);border-radius:7px;background:var(--cb-surface);color:var(--cb-text);font:inherit}
 .edit-context-panel input[readonly] {background:var(--cb-surface2)}
 .edit-context-panel .edit-context-limit {color:var(--cb-muted);font-size:11px}
 .edit-context-panel>.btn {margin-top:auto}
+
+/* FLOW / 03: contextual recovery and history use the same dock as editing. */
+.flow03-inspector-content {display:flex;flex-direction:column;gap:14px;padding:20px 16px;min-height:calc(100% - 56px);font-size:13px;color:var(--cb-text)}
+.flow03-inspector-content h3 {font-size:15px;line-height:1.35;margin:6px 0 0}
+.flow03-inspector-content h4 {font-size:12px;color:var(--cb-muted);margin:18px 0 0}
+.flow03-inspector-content p {line-height:1.45;margin:0}
+.flow03-inspector-content ul {margin:0;padding-left:23px;display:grid;gap:12px}
+.flow03-diagnostics {display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0;padding:12px;background:var(--cb-surface2);border-radius:8px;overflow-wrap:anywhere}
+.flow03-diagnostics dt {color:var(--cb-muted)}
+.flow03-diagnostics dd {margin:0;font-weight:600}
+.flow03-inspector-content .btn {width:100%;justify-content:center;min-height:34px}
+.flow03-status {display:inline-flex;align-items:center;align-self:flex-start;min-height:26px;padding:4px 11px;border-radius:13px;font-size:12px;font-weight:600}
+.flow03-status.danger {color:var(--cb-status-danger-text);background:var(--cb-dangerBg)}
+.flow03-status.warning {color:var(--cb-status-warning-text);background:var(--cb-warningBg)}
+.flow03-notice {margin-top:auto!important;padding:12px;border-radius:8px;background:var(--cb-infoBg);color:var(--cb-text-onPale);line-height:1.45}
+.flow03-history ol {list-style:none;padding:0;margin:12px 0;display:grid;gap:0}
+.flow03-history li {padding:13px 10px 13px 27px;min-height:68px;border-bottom:1px solid var(--cb-border);position:relative;display:flex;flex-direction:column;gap:5px}
+.flow03-history li::before {content:'';position:absolute;left:8px;top:20px;width:8px;height:8px;border-radius:50%;background:var(--cb-link)}
+.flow03-history li span {font-size:12px;color:var(--cb-muted)}
+.flow03-history-actions {display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:auto}
+.flow03-text-object {display:flex;flex-direction:column;gap:17px;padding:20px;min-height:calc(100% - 56px);font-size:12px;overflow:auto}
+.flow03-text-object label {display:flex;flex-direction:column;gap:7px;font-weight:600}
+.flow03-text-object :is(input,select,textarea) {width:100%;min-width:0;min-height:34px;padding:7px 10px;border:1px solid var(--cb-control-border);border-radius:7px;background:var(--cb-surface);color:var(--cb-text);font:inherit;font-weight:500}
+.flow03-text-object textarea {resize:vertical;line-height:1.4}
+.flow03-text-object input[readonly] {background:var(--cb-surface2)}
+.flow03-text-fields {display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.flow03-text-fields label>span {display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.flow03-text-object fieldset {border:0;padding:0;margin:0}
+.flow03-text-object legend {font-weight:600;margin-bottom:8px}
+.flow03-align-actions {display:flex;gap:10px}
+.flow03-align-actions>button {border:1px solid var(--cb-control-border);border-radius:7px;min-width:32px}
+.flow03-align-actions>button[aria-pressed="true"] {background:var(--cb-selected);border-color:var(--cb-link);color:var(--cb-link)}
+.flow03-object-label {margin-top:12px;border-top:1px solid var(--cb-border);padding-top:18px;letter-spacing:.08em;color:var(--cb-muted)}
+.flow03-edit-object-text {font-size:12px;color:var(--cb-link)}
+.flow03-edit-object-text summary {cursor:pointer;padding:6px 0}
+.flow03-edit-object-text label {margin-top:8px;color:var(--cb-text)}
+.flow03-text-object>.btn {margin-top:auto;min-height:34px}
+.flow03-text-object>p:last-child {color:var(--cb-muted);line-height:1.4;margin:0}
+.flow03-engine-banner {position:relative;z-index:2;display:flex;flex-direction:column;gap:7px;margin:16px;border:1px solid var(--cb-control-border);border-left:4px solid var(--cb-status-warning-icon);border-radius:8px;background:var(--cb-surface);padding:14px 18px;font-size:13px;box-shadow:0 3px 12px #13243b16}
+.flow03-engine-banner span {color:var(--cb-text-onCanvas)}
+.design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"]>.text-tool:has(.lucide-undo-2) {margin-left:auto}
+.design-shell .tab-discard-dialog.flow03-save-dialog {width:620px;max-width:calc(100vw - 32px);min-height:310px;padding:24px;border-radius:12px}
+.design-shell .tab-discard-dialog.flow03-save-dialog h2 {font-size:19px;line-height:1.3;margin:0 0 30px}
+.design-shell .tab-discard-dialog.flow03-save-dialog #tab-discard-message {font-size:13px;line-height:1.55;max-width:550px}
+.design-shell .tab-discard-dialog.flow03-save-dialog .tab-discard-actions {margin-top:34px}
+.design-shell .tab-discard-dialog.flow03-save-dialog .tab-discard-actions>.btn {min-width:86px;min-height:34px}
 .edit-mode-inspector .text-overlay-panel {padding:16px 20px;background:var(--cb-surface);color:var(--cb-text);font-size:12px}
 .edit-mode-inspector .edit-selected-excerpt {padding:10px;border:1px solid var(--cb-control-border);border-radius:7px;background:var(--cb-surface2);overflow-wrap:anywhere}
 .edit-mode-inspector .review-link-grid {grid-template-columns:minmax(0,1fr)}
 .edit-mode-inspector .review-link-uri {grid-column:auto}
 @media (min-width:1101px) {
-  .design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"]) {position:relative}
-  .design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"])>.reader-navigation {position:absolute;top:108px;right:270px;z-index:3;display:flex;width:auto;height:44px;min-height:44px;padding:5px 0;border:0;background:transparent;overflow:visible}
-  .design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"])>.reader-navigation>:nth-child(n+4):not(.zoom-select) {display:none}
-  .design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"])>.reader-navigation .reader-view-menu {display:none}
+  .design-shell .read-workspace:has(.editor-tool-group:is([aria-label="Edit PDF"],[aria-label="PDF history tools"])) {position:relative}
+  .design-shell .read-workspace:has(.editor-tool-group:is([aria-label="Edit PDF"],[aria-label="PDF history tools"]))>.reader-navigation {position:absolute;top:108px;right:270px;z-index:3;display:flex;width:auto;height:44px;min-height:44px;padding:5px 0;border:0;background:transparent;overflow:visible}
+  .design-shell .read-workspace:has(.editor-tool-group:is([aria-label="Edit PDF"],[aria-label="PDF history tools"]))>.reader-navigation>:nth-child(n+4):not(.zoom-select) {display:none}
+  .design-shell .read-workspace:has(.editor-tool-group:is([aria-label="Edit PDF"],[aria-label="PDF history tools"]))>.reader-navigation .reader-view-menu {display:none}
 }
+.design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"]) .viewer-page-column {position:relative}
+.design-shell .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"]) .viewer-page-column>.pdf-tool-hint {position:absolute;top:8px;left:16px;z-index:4;width:min(720px,calc(100% - 32px));min-height:34px;border:1px solid var(--cb-border);border-radius:7px;background:var(--cb-surface);padding:5px 10px;box-shadow:0 1px 3px #13243b12}
 @media (max-width:900px) {
   .design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"] {min-width:max-content}
   .design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(>.viewer-tool-inspector.edit-mode-inspector) {grid-template-columns:160px minmax(0,1fr) 240px}

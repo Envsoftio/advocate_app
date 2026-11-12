@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 26:
+            if version > 27:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -391,6 +391,11 @@ class Store:
                 if 'next_part' not in columns:
                     con.execute('ALTER TABLE matters ADD COLUMN next_part INTEGER NOT NULL DEFAULT 5')
                 con.execute('PRAGMA user_version=26')
+            if version < 27:
+                columns = {row['name'] for row in con.execute('PRAGMA table_info(page_annotations)')}
+                if 'text_style_json' not in columns:
+                    con.execute("ALTER TABLE page_annotations ADD COLUMN text_style_json TEXT NOT NULL DEFAULT '{}'")
+                con.execute('PRAGMA user_version=27')
 
     def get_ocr_page_review(self, doc_id: str, revision: int, page_index: int) -> dict | None:
         with self.connect() as con:
@@ -1077,13 +1082,13 @@ class Store:
         return ('id', 'document_id', 'page_index', 'target_revision', 'kind',
                 'rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color',
                 'asset_relpath', 'asset_mime', 'position', 'output_scope',
-                'created_at', 'updated_at')
+                'created_at', 'updated_at', 'text_style_json')
 
     @classmethod
     def _raw_page_annotations(cls, con, matter_id: str) -> list[dict]:
         fields = cls._annotation_fields()
         rows = con.execute('''SELECT id,document_id,page_index,target_revision,kind,
-            rect_x,rect_y,rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope,created_at,updated_at
+            rect_x,rect_y,rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope,created_at,updated_at,text_style_json
             FROM page_annotations WHERE matter_id=? ORDER BY position''', (matter_id,)).fetchall()
         return [{key: row[key] for key in fields} for row in rows]
 
@@ -1097,6 +1102,7 @@ class Store:
         fields = self._annotation_fields()
         for row in rows:
             item = {key: row[key] for key in fields}
+            item['text_style'] = json.loads(item['text_style_json'] or '{}')
             item['resolved'] = bool(row['current_revision'] == row['target_revision'] and
                                     row['document_archived_at'] is None and
                                     row['current_page_count'] is not None and
@@ -1116,9 +1122,10 @@ class Store:
         for entry in entries:
             con.execute('''INSERT INTO page_annotations
                 (id,matter_id,document_id,page_index,target_revision,kind,rect_x,rect_y,
-                 rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (entry['id'], matter_id, *(entry.get(key) for key in fields[1:])))
+                 rect_width,rect_height,body,color,asset_relpath,asset_mime,position,output_scope,created_at,updated_at,text_style_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (entry['id'], matter_id, *(entry.get(key, '{}') if key == 'text_style_json'
+                                       else entry.get(key) for key in fields[1:])))
 
     @staticmethod
     def _validate_annotation_document(con, matter_id: str, entry: dict,
@@ -1138,7 +1145,8 @@ class Store:
                            (entry['id'],)).fetchone():
                 raise ValueError('Annotation ID already exists')
             now = utcnow()
-            entry = dict(entry, position=len(before), created_at=now, updated_at=now)
+            entry = dict(entry, position=len(before), created_at=now, updated_at=now,
+                         text_style_json=entry.get('text_style_json', '{}'))
             self._write_page_annotations(con, matter_id, [entry])
             after = before + [entry]
             self._record_edit(con, matter_id, 'page_annotations', {'entries': before},
@@ -1160,7 +1168,7 @@ class Store:
             self._validate_annotation_document(con, matter_id, merged)
             if merged['kind'] == 'comment' and not merged['body'].strip():
                 raise ValueError('Comments require visible note text')
-            tracked = ('rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color', 'output_scope')
+            tracked = ('rect_x', 'rect_y', 'rect_width', 'rect_height', 'body', 'color', 'output_scope', 'text_style_json')
             if all(current[key] == merged[key] for key in tracked):
                 return self.list_page_annotations(matter_id)
             now = utcnow()
@@ -1674,8 +1682,12 @@ class Store:
                 WHERE matter_id=? AND applied=1 ORDER BY id DESC LIMIT 1''', (matter_id,)).fetchone()
             redo_row = con.execute('''SELECT kind,after_json FROM edit_history
                 WHERE matter_id=? AND applied=0 ORDER BY id ASC LIMIT 1''', (matter_id,)).fetchone()
+            recent_rows = con.execute('''SELECT kind,after_json,applied FROM edit_history
+                WHERE matter_id=? ORDER BY id DESC LIMIT 8''', (matter_id,)).fetchall()
         return {'can_undo': bool(undo), 'can_redo': bool(redo), 'undo_count': undo, 'redo_count': redo,
-                'undo_label': label(undo_row), 'redo_label': label(redo_row)}
+                'undo_label': label(undo_row), 'redo_label': label(redo_row),
+                'recent_actions': [{'label': label(row), 'applied': bool(row['applied'])}
+                                   for row in recent_rows]}
 
     def traverse_history(self, matter_id: str, redo: bool = False) -> dict:
         with self.connect() as con:

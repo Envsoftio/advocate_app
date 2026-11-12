@@ -97,6 +97,8 @@ export interface PageAnnotation {
   rect_width: number
   rect_height: number
   body: string
+  text_style_json: string
+  text_style: {font_family:'helv'|'tiro'|'cour',font_size:number,bold:boolean,alignment:'left'|'center'|'right'|'justify'} | Record<string,never>
   color: 'yellow' | 'green' | 'blue' | 'pink'
   asset_relpath: string | null
   asset_mime: string | null

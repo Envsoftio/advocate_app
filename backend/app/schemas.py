@@ -678,6 +678,14 @@ def valid_draw_body(body: str) -> bool:
                     for value in point) for point in points))
 
 
+class TextMarkStyle(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    font_family: Literal['helv', 'tiro', 'cour'] = 'helv'
+    font_size: float = Field(default=12, ge=6, le=36)
+    bold: bool = False
+    alignment: Literal['left', 'center', 'right', 'justify'] = 'left'
+
+
 class PageAnnotationCreate(BaseModel):
     """An editable page mark anchored to one exact working revision."""
     model_config = ConfigDict(extra='forbid')
@@ -691,6 +699,7 @@ class PageAnnotationCreate(BaseModel):
     body: str = Field(default='', max_length=4000)
     color: AnnotationColor = 'yellow'
     output_scope: Literal['private', 'pdf'] = 'private'
+    text_style: TextMarkStyle | None = None
 
     @model_validator(mode='after')
     def validate_annotation(self):
@@ -705,6 +714,8 @@ class PageAnnotationCreate(BaseModel):
         if self.kind == 'text' and (not self.body.strip() or any(
                 ord(char) < 32 and char != '\n' or ord(char) > 126 for char in self.body)):
             raise ValueError('Text marks require printable ASCII text')
+        if self.kind != 'text' and self.text_style is not None:
+            raise ValueError('Text style applies only to added text')
         if self.kind == 'redaction' and (self.output_scope != 'pdf' or self.body):
             raise ValueError('Redaction marks require PDF output scope and no text')
         if self.kind in ('highlight', 'comment') and self.output_scope != 'private':
@@ -722,6 +733,7 @@ class PageAnnotationUpdate(BaseModel):
     body: str = Field(default='', max_length=4000)
     color: AnnotationColor = 'yellow'
     output_scope: Literal['private', 'pdf'] | None = None
+    text_style: TextMarkStyle | None = None
 
     @model_validator(mode='after')
     def validate_region(self):

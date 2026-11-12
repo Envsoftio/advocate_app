@@ -112,8 +112,12 @@ def test_undo_redo_page_metadata_order_and_branch(client, auth, matter, make_pdf
                 json={'ids': [second['id'], first['id']]})
     ordered = client.get(base, headers=auth).json()
     assert ordered['undo_count'] == 5 and ordered['undo_label'] == 'Document order'
+    assert [entry['label'] for entry in ordered['recent_actions'][:3]] == [
+        'Document order', 'Document details', 'Working PDF edit']
+    assert all(entry['applied'] for entry in ordered['recent_actions'])
     undone_order = client.post(base + '/undo', headers=auth).json()
     assert undone_order['redo_count'] == 1
+    assert undone_order['recent_actions'][0] == {'label': 'Document order', 'applied': False}
     assert undone_order['undo_label'] == 'Document details'
     assert undone_order['redo_label'] == 'Document order'
     assert [d['id'] for d in client.get(f'/matters/{matter["id"]}/documents', headers=auth).json()] == [first['id'], second['id']]

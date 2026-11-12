@@ -965,6 +965,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         if payload.expected_revision != doc['revision']:
             raise HTTPException(status_code=409, detail='Document changed; reload and draw the annotation again')
         entry = payload.model_dump(exclude={'expected_revision'})
+        style = entry.pop('text_style', None)
+        if style is not None:
+            entry['text_style_json'] = json.dumps(style, sort_keys=True)
         entry.update(id=new_id(), document_id=doc_id,
                      target_revision=payload.expected_revision,
                      asset_relpath=None, asset_mime=None)
@@ -1034,6 +1037,11 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         if payload.expected_revision != annotation['target_revision'] or doc['revision'] != payload.expected_revision:
             raise HTTPException(status_code=409, detail='Document changed; this annotation needs review')
         changes = payload.model_dump(exclude={'expected_revision'}, exclude_none=True)
+        style = changes.pop('text_style', None)
+        if style is not None:
+            if annotation['kind'] != 'text':
+                raise HTTPException(status_code=422, detail='Text style applies only to added text')
+            changes['text_style_json'] = json.dumps(style, sort_keys=True)
         scope = changes.get('output_scope', annotation['output_scope'])
         if annotation['kind'] in ('highlight', 'comment') and scope != 'private':
             raise HTTPException(status_code=422, detail='Review highlights and comments must remain private')
@@ -1157,7 +1165,8 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 pages = None if protected else pdf.page_count
         return {'document_id': doc_id, 'artifact': 'original', 'read_only': True,
                 'sha256': doc['source_sha256'], 'filename': doc['original_name'],
-                'media_type': mime, 'page_count': pages, 'password_protected': protected}
+                'media_type': mime, 'page_count': pages, 'password_protected': protected,
+                'imported_at': doc['created_at']}
 
     @app.api_route('/documents/{doc_id}/original', methods=['GET', 'HEAD'])
     def read_original(doc_id: str, request: Request, _: None = Depends(auth)):

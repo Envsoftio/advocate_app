@@ -416,3 +416,36 @@ def test_missing_image_overlay_asset_is_a_preflight_error(client, auth, matter, 
         client.post(f'/matters/{matter["id"]}/build', headers=auth).json()['id'])
     assert job['status'] == 'failed'
     assert 'Preflight failed' in job['error']
+
+
+def test_added_text_style_geometry_and_export_are_revision_safe(client, auth, matter, make_pdf):
+    doc = upload(client, auth, matter, make_pdf, name='styled-text.pdf', pages=1)
+    base = f'/documents/{doc["id"]}'
+    style = {'font_family': 'tiro', 'font_size': 16, 'bold': True, 'alignment': 'center'}
+    created = client.post(base + '/annotations', headers=auth, json={
+        'kind': 'text', 'page_index': 0, 'expected_revision': doc['revision'],
+        'rect_x': .1, 'rect_y': .2, 'rect_width': .6, 'rect_height': .12,
+        'body': 'STYLED TEXT', 'color': 'blue', 'output_scope': 'pdf',
+        'text_style': style})
+    assert created.status_code == 201, created.text
+    item = created.json()[0]
+    assert item['text_style'] == style
+    updated = client.patch(f'/annotations/{item["id"]}', headers=auth, json={
+        'expected_revision': doc['revision'], 'rect_x': .2, 'rect_y': .25,
+        'rect_width': .6, 'rect_height': .12, 'body': 'STYLED TEXT',
+        'color': 'blue', 'text_style': style})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()[0]['rect_x'] == .2
+    rendered = client.get(base + f'/pdf?revision={doc["revision"]}&editable=true', headers=auth)
+    assert rendered.status_code == 200, rendered.text
+    with pymupdf.open(stream=rendered.content, filetype='pdf') as pdf:
+        spans = [span for block in pdf[0].get_text('dict')['blocks'] if 'lines' in block
+                 for line in block['lines'] for span in line['spans']
+                 if 'STYLED TEXT' in span['text']]
+        assert len(spans) == 1
+        assert spans[0]['size'] == pytest.approx(16, abs=.1)
+        assert 'Bold' in spans[0]['font']
+    assert client.post(f'/matters/{matter["id"]}/history/undo', headers=auth).status_code == 200
+    assert client.post(f'/matters/{matter["id"]}/history/redo', headers=auth).status_code == 200
+    assert next(x for x in client.get(f'/matters/{matter["id"]}/annotations', headers=auth).json()
+                if x['id'] == item['id'])['text_style'] == style
