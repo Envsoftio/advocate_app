@@ -93,6 +93,7 @@ const outlineError = ref('')
 const outlineLoading = ref(false)
 const commentsOpen = panelFlag('comments')
 const commentQuery = ref('')
+const viewedCommentId = ref<string | null>(null)
 const pageBookmarksOpen = panelFlag('page-bookmarks')
 const organizerOpen = ref(false)
 const workingSaveBusy = ref(false)
@@ -267,6 +268,7 @@ type EditorCategory = 'read' | 'edit' | 'review' | 'stamps' | 'pages' | 'output'
 const activeCategory = ref<EditorCategory>('read')
 watch(()=>props.preparation,preparing=>{
   viewRotation.value=0
+  viewedCommentId.value=null
   if(preparing) { selectCategory('read');readPanel.value=null;focusedReading.value=false }
 })
 const findOpen = panelFlag('search')
@@ -365,6 +367,7 @@ const linksBusy = ref(false)
 const linkError = ref('')
 const linkNotice = ref('')
 const linkDraft = reactive({title:'',kind:'internal' as 'internal'|'external',target_document_id:'',target_page:1,uri:''})
+const editingLinkId = ref<string | null>(null)
 const currentPageLinks = computed(() => reviewedLinks.value.filter(item =>
   item.source_document_id === props.document?.id && item.source_page_index === current.value - 1))
 type SelectedOverlay = {kind:'annotation'|'link',id:string}
@@ -461,8 +464,13 @@ function clearOverlaySelection() {
   overlayDrag=null
   overlayResize=null
 }
+function closeSelectedProperties() {
+  clearOverlaySelection()
+  if (editingAnnotationId.value) { resetAnnotationDraft(); activeTool.value='select' }
+  if (editingLinkId.value) { editingLinkId.value=null; linkRegion.value=null; activeTool.value='select' }
+}
 function beginOverlayDrag(event:PointerEvent,kind:SelectedOverlay['kind'],item:PageAnnotation|ReviewedLink) {
-  if (event.button!==0 || props.disabled || editing.value || !pageReady.value || !item.resolved) return
+  if (event.button!==0 || props.preparation || props.disabled || editing.value || !pageReady.value || !item.resolved) return
   event.stopPropagation()
   selectedOverlay.value={kind,id:item.id}
   overlayOffset.value={x:0,y:0}
@@ -538,6 +546,7 @@ async function persistOverlayRect(kind:SelectedOverlay['kind'],item:PageAnnotati
         rect_width:rect.width,rect_height:rect.height,
         body:(item as PageAnnotation).body,color:(item as PageAnnotation).color,
       })
+      if (editingAnnotationId.value===item.id) annotationRegion.value={...rect}
     } else {
       linksBusy.value=true
       const existing=await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`)
@@ -548,6 +557,7 @@ async function persistOverlayRect(kind:SelectedOverlay['kind'],item:PageAnnotati
           rect_width:rect.width,rect_height:rect.height,
         }:linkPayload(entry)),
       })
+      if (editingLinkId.value===item.id) linkRegion.value={...rect}
     }
     emit('modified')
   } catch (err) {emit('error',friendlyError(err))}
@@ -555,7 +565,7 @@ async function persistOverlayRect(kind:SelectedOverlay['kind'],item:PageAnnotati
 }
 async function deleteSelectedOverlay() {
   const selected=selectedOverlay.value
-  if (!selected || props.disabled || editing.value || annotationBusy.value || linksBusy.value) return
+  if (!selected || props.preparation || props.disabled || editing.value || annotationBusy.value || linksBusy.value) return
   const annotation=selected.kind==='annotation'?pageAnnotations.value.find(item=>item.id===selected.id):null
   const link=selected.kind==='link'?reviewedLinks.value.find(item=>item.id===selected.id):null
   if (!annotation && !link) {clearOverlaySelection();return}
@@ -623,6 +633,22 @@ watch(pageAnnotations, entries => {
 const currentPageAnnotations = computed(() => pageAnnotations.value.filter(item =>
   item.document_id === props.document?.id && item.page_index === current.value - 1))
 const documentComments = computed(()=>pageAnnotations.value.filter(item=>item.document_id===props.document?.id && item.kind==='comment'))
+const viewedComment = computed(() => documentComments.value.find(item=>item.id===viewedCommentId.value) || null)
+const viewedCommentStyle = computed(() => {
+  const item=viewedComment.value
+  if (!item) return {}
+  return {
+    left:`clamp(8px, ${(item.rect_x+item.rect_width/2)*100}%, calc(100% - 288px))`,
+    ...(item.rect_y>.55
+      ? {bottom:`calc(${(1-item.rect_y)*100}% + 12px)`}
+      : {top:`calc(${(item.rect_y+item.rect_height)*100}% + 12px)`}),
+  }
+})
+function closeViewedComment() {
+  viewerElement.value?.querySelector<HTMLElement>('.pdf-review-comment.selected')?.focus({preventScroll:true})
+  viewedCommentId.value=null
+  clearOverlaySelection()
+}
 const filteredComments = computed(() => {
   const query = commentQuery.value.trim().toLocaleLowerCase()
   return documentComments.value.filter(item => !query ||
@@ -630,12 +656,20 @@ const filteredComments = computed(() => {
     .sort((a,b) => a.page_index - b.page_index)
 })
 const marksPanelOpen = computed(() => activeTool.value === 'marks')
+const linkDirty = computed(() => {
+  const item=reviewedLinks.value.find(entry=>entry.id===editingLinkId.value)
+  const region=linkRegion.value
+  return !!(item && region && (item.title!==linkDraft.title || item.kind!==linkDraft.kind ||
+    (item.target_document_id || '')!==linkDraft.target_document_id ||
+    (item.target_page_index === null ? 1 : item.target_page_index+1)!==linkDraft.target_page ||
+    item.uri!==linkDraft.uri || item.rect_x!==region.x || item.rect_y!==region.y ||
+    item.rect_width!==region.width || item.rect_height!==region.height))
+})
 const inspectorVisible = computed(() => marksPanelOpen.value ||
-  !!selectedTextAnnotation.value ||
+  (!props.preparation && !!selectedTextAnnotation.value) ||
   (!props.preparation && engineBlocked.value && engineInspectorOpen.value) || historyOpen.value ||
   textMode.value || editTextMode.value ||
-  redactionOpen.value ||
-  (annotationPanelOpen.value && (annotationDraft.kind === 'image' || (!annotationDrawing.value && (!!annotationRegion.value || !!editingAnnotationId.value || !!annotationError.value)))) ||
+  redactionOpen.value || annotationPanelOpen.value ||
   linkPanelOpen.value)
 const toolHint = computed(() => ({
   'add-text': 'Click where text should appear, type in the box, then choose Apply text.',
@@ -701,7 +735,8 @@ const pageReady = computed(() => !loading.value && !switchingPage.value &&
   displayedPage.value === current.value && displayedRevision.value === props.document?.revision &&
   activeDocumentId === props.document?.id)
 function closeDraftWithEscape(event: KeyboardEvent) {
-  if (focusedReading.value) void toggleFocusedReading()
+  if (viewedCommentId.value) { viewedCommentId.value=null; clearOverlaySelection() }
+  else if (focusedReading.value) void toggleFocusedReading()
   else if (readPanel.value) void closeReadPanel()
   else if (selectedOverlay.value) clearOverlaySelection()
   else if (selectedRun.value) cancelReplacement()
@@ -730,7 +765,7 @@ function handleViewerKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') { closeDraftWithEscape(event); return }
   if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
       (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]'))) return
-  if ((event.key==='Delete' || event.key==='Backspace') && selectedOverlay.value) {
+  if ((event.key==='Delete' || event.key==='Backspace') && selectedOverlay.value && !props.preparation) {
     event.preventDefault()
     event.stopPropagation()
     void deleteSelectedOverlay()
@@ -767,6 +802,7 @@ function selectCategory(category: EditorCategory) {
 function showFind(event?: Event) { void openReadPanel('search',event) }
 async function openReviewComment(item:PageAnnotation) {
   if (!navigateToPage(item.page_index+1)) return
+  if (props.preparation) { viewedCommentId.value=item.id; readPanel.value=null; return }
   commentsOpen.value=false
   activeCategory.value='review'
   await nextTick()
@@ -789,6 +825,7 @@ function toggleTool(tool: EditorTool) {
   paragraphPreviewSequence++
   cancelMove()
   linkRegion.value = null
+  editingLinkId.value = null
   redactionRegion.value = null
   resetAnnotationDraft()
   if (activeTool.value === 'links' && props.document)
@@ -959,6 +996,7 @@ watch(() => props.document?.id, () => {
   outlineOpen.value = false
   commentsOpen.value = false
   commentQuery.value = ''
+  viewedCommentId.value = null
 })
 watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}|${props.bookmarkRefreshKey || 0}`, async () => {
   const sequence = ++bookmarkLoadSequence
@@ -996,7 +1034,7 @@ watch(() => [props.document?.matter_id || '', props.bookmarkRefreshKey || 0] as 
 }, {immediate:true})
 watch(() => [marksPanelOpen.value, props.document?.id, props.document?.revision, current.value,
   JSON.stringify(markSettings)] as const, () => scheduleMarkPreview())
-watch(current, () => { bookmarkOpen.value = false; pageBookmarksOpen.value = false; bookmarkError.value = ''; bookmarkNotice.value = '' })
+watch(current, () => { bookmarkOpen.value = false; pageBookmarksOpen.value = false; viewedCommentId.value=null; bookmarkError.value = ''; bookmarkNotice.value = '' })
 watch(current, () => { linkRegion.value = null; linkDrawing.value = false; linkError.value = ''; linkNotice.value = ''; resetAnnotationDraft(false) })
 watch([current, () => props.document?.id, () => props.document?.revision], () => {
   redactionRegion.value = null; redactionError.value = ''
@@ -1026,7 +1064,7 @@ function hasPendingAnnotationDraft() {
 function hasPendingDraft() {
   return !!(marksDirty.value || textObjectDirty.value || overlayText.value.trim() || placement.value || replacement.value.trim() ||
     pendingMove.value || redactionRegion.value || hasPendingAnnotationDraft() ||
-    linkRegion.value || (bookmarkOpen.value && bookmarkTitle.value.trim()))
+    (editingLinkId.value ? linkDirty.value : !!linkRegion.value) || (bookmarkOpen.value && bookmarkTitle.value.trim()))
 }
 function discardPendingDraft() {
   clearOverlaySelection()
@@ -1034,7 +1072,7 @@ function discardPendingDraft() {
   overlayText.value=''; placement.value=null; replacement.value=''; selectedRun.value=null
   cancelMove(); redactionRegion.value=null; annotationRegion.value=null
   annotationImage.value=null; annotationDraft.body=''; editingAnnotationId.value=null
-  linkRegion.value=null; bookmarkTitle.value=''
+  linkRegion.value=null; editingLinkId.value=null; bookmarkTitle.value=''
   if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value)
   annotationPreviewUrl.value=''
 }
@@ -1047,7 +1085,7 @@ async function savePendingDraft() {
   else if (selectedRun.value && replacement.value.trim() && !pendingMove.value) await applyReplacement()
   else if (redactionRegion.value) await applyRedaction()
   else if (hasPendingAnnotationDraft() && (annotationRegion.value || editingAnnotationId.value)) await savePageAnnotation()
-  else if (linkRegion.value) await saveReviewedLink()
+  else if (linkRegion.value && (!editingLinkId.value || linkDirty.value)) await saveReviewedLink()
   else if (bookmarkOpen.value && bookmarkTitle.value.trim()) await addPageBookmark()
   return !hasPendingDraft()
 }
@@ -1375,6 +1413,10 @@ function chooseAnnotationImage(event: Event) {
 }
 function editPageAnnotation(item: PageAnnotation) {
   if (!item.resolved) { annotationError.value = 'This annotation needs review because the document revision changed.'; return }
+  readPanel.value = null
+  historyOpen.value = false
+  activeCategory.value = item.kind==='image' || ['check','cross','date'].includes(item.kind) ? 'stamps'
+    : item.kind==='redaction' ? 'redact' : 'review'
   activeTool.value = 'notes'
   editingAnnotationId.value = item.id
   annotationDraft.kind = item.kind
@@ -1458,16 +1500,24 @@ async function saveReviewedLink() {
       if (!Number.isInteger(linkDraft.target_page) || linkDraft.target_page < 1 || linkDraft.target_page > target.page_count)
         throw new Error(`Choose target page 1 to ${target.page_count}.`)
     }
+    const wasEditing=!!editingLinkId.value
     const entries = existing.map(linkPayload)
-    entries.push({id:crypto.randomUUID().replace(/-/g,''),title:linkDraft.title.trim(),
+    const entry = {id:editingLinkId.value || crypto.randomUUID().replace(/-/g,''),title:linkDraft.title.trim(),
       source_document_id:doc.id,source_page_index:current.value-1,source_revision:doc.revision,
       rect_x:region.x,rect_y:region.y,rect_width:region.width,rect_height:region.height,
       kind:linkDraft.kind,target_document_id:target?.id || null,
       target_page_index:target ? linkDraft.target_page-1 : null,
       target_revision:target?.revision || null,
-      uri:linkDraft.kind === 'external' ? linkDraft.uri.trim() : ''})
+      uri:linkDraft.kind === 'external' ? linkDraft.uri.trim() : ''}
+    if (editingLinkId.value) {
+      const index=entries.findIndex(item=>item.id===editingLinkId.value)
+      if (index<0) throw new Error('The selected link no longer exists. Select it again.')
+      entries[index]=entry
+    } else entries.push(entry)
     reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`, 'PUT', {entries})
     linkRegion.value = null
+    editingLinkId.value = null
+    if (wasEditing) { activeTool.value='select'; clearOverlaySelection() }
     linkDraft.title = ''; linkDraft.uri = ''
     linkNotice.value = 'Reviewed link saved. It will export only while its revision-anchored endpoints resolve.'
     emit('modified')
@@ -1494,11 +1544,53 @@ function followReviewedLink(item: ReviewedLink) {
 }
 function clickOverlay(kind:SelectedOverlay['kind'],item:PageAnnotation|ReviewedLink) {
   if (suppressOverlayClick) {suppressOverlayClick=false;return}
+  if (!props.preparation && !props.disabled &&
+      ((editingAnnotationId.value!==item.id && hasPendingAnnotationDraft()) ||
+       (editingLinkId.value && editingLinkId.value!==item.id && linkDirty.value) ||
+       (linkRegion.value && !editingLinkId.value))) {
+    if (!window.confirm('Discard the unfinished properties and select another element?')) {
+      selectedOverlay.value=editingAnnotationId.value ? {kind:'annotation',id:editingAnnotationId.value}
+        : editingLinkId.value ? {kind:'link',id:editingLinkId.value} : null
+      return
+    }
+    resetAnnotationDraft()
+    editingLinkId.value=null
+    linkRegion.value=null
+  }
   selectedOverlay.value={kind,id:item.id}
-  if (kind==='annotation' && activeTool.value==='notes') editPageAnnotation(item as PageAnnotation)
+  if (props.preparation || props.disabled) {
+    if (kind==='annotation' && (item as PageAnnotation).kind==='comment') {
+      viewedCommentId.value=viewedCommentId.value===item.id ? null : item.id
+      selectedOverlay.value=viewedCommentId.value ? {kind,id:item.id} : null
+      if (props.preparation) readPanel.value=null
+    } else viewedCommentId.value=null
+    return
+  }
+  if (kind==='annotation') {
+    const annotation=item as PageAnnotation
+    editingLinkId.value=null
+    linkRegion.value=null
+    if (annotation.kind==='text') { resetAnnotationDraft(); readPanel.value=null; activeCategory.value='edit'; activeTool.value='select'; return }
+    editPageAnnotation(annotation)
+    return
+  }
+  const link=item as ReviewedLink
+  resetAnnotationDraft()
+  readPanel.value=null
+  historyOpen.value=false
+  activeCategory.value='edit'
+  activeTool.value='links'
+  editingLinkId.value=link.id
+  linkDraft.title=link.title
+  linkDraft.kind=link.kind
+  linkDraft.target_document_id=link.target_document_id || ''
+  linkDraft.target_page=(link.target_page_index ?? 0)+1
+  linkDraft.uri=link.uri
+  linkRegion.value={x:link.rect_x,y:link.rect_y,width:link.rect_width,height:link.rect_height}
 }
 function clickPageSurface(event:MouseEvent) {
   clearOverlaySelection()
+  viewedCommentId.value=null
   choosePlacement(event)
 }
 
@@ -1938,7 +2030,7 @@ async function applyReplacement() {
         <button class="text-tool danger" :disabled="editing || loading || disabled || total<=1" :title="total<=1 ? 'A PDF must keep at least one page' : `Delete page ${current} from the editable copy`" @click="deleteCurrent"><Trash2 :size="16"/> Delete page {{current}}</button>
         </div>
       </div>
-      <div v-if="selectedOverlayItem && !selectedTextAnnotation" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="clearOverlaySelection"><X :size="14"/></button></div>
+      <div v-if="!preparation && selectedOverlayItem && !selectedTextAnnotation" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="closeSelectedProperties"><X :size="14"/></button></div>
       <p v-if="activeCategory==='pages'" class="page-action-guidance">Changes here affect the editable copy; the imported original stays unchanged. Drag page thumbnails to reorder, or use Organize pages for arrow controls.</p>
       <div v-if="bookmarkOpen" class="page-bookmark-editor" aria-label="Bookmark current page">
         <strong>Bookmark {{document.title}}, page {{current}}</strong>
@@ -1990,6 +2082,7 @@ async function applyReplacement() {
         </dl>
         <p v-if="outlineOpen" class="reader-side-panel-intro">Navigation embedded in the source PDF. It does not change the bundle index.</p>
         <p v-if="commentsOpen" class="reader-side-panel-intro">Private review notes, omitted from Save copy and bundles.</p>
+        <div v-if="commentsOpen && viewedComment" class="reader-bookmark-row" role="note" aria-label="Selected comment"><strong>Comment on source page {{viewedComment.page_index+1}}</strong><span>{{viewedComment.body}}</span><small>{{annotationTime(viewedComment)}}</small></div>
         <p v-if="pageBookmarksOpen" class="reader-side-panel-intro">Manual bookmarks for this source page. Check their bundle destinations under Index & bookmarks.</p>
         <label v-if="commentsOpen && documentComments.length" class="reader-comment-search"><Search :size="15" aria-hidden="true"/><input v-model="commentQuery" type="search" aria-label="Search private comments" placeholder="Search comments or page"/></label>
         <div v-if="commentsOpen && commentQuery.trim()" class="reader-filter-count">{{filteredComments.length}} of {{documentComments.length}} comments</div>
@@ -1999,7 +2092,7 @@ async function applyReplacement() {
             <p v-if="bookmarksLoading" role="status">Loading manual bookmarks…</p><p v-else-if="bookmarksError" role="alert">{{bookmarksError}}</p><p v-else-if="!documentBookmarks.length">No manual bookmarks for this document.</p>
             <button v-for="item in documentBookmarks" :key="item.id" class="text-tool" :disabled="!item.resolved || item.target_revision!==document.revision || item.page_index>=total" @click="navigateToPage(item.page_index+1)">{{item.title}} · Source {{item.page_index+1}}<small v-if="!item.resolved || item.target_revision!==document.revision"> · Needs review</small></button>
           </template>
-          <template v-if="commentsOpen"><p v-if="!documentComments.length">No private comments in this document.</p><p v-else-if="!filteredComments.length">No matching comments.</p><button v-for="item in filteredComments" :key="item.id" class="text-tool reader-comment-entry" :class="{selected:item.page_index===current-1}" :title="item.body" @click="openReviewComment(item)"><span class="reader-comment-entry-head"><MessageSquare :size="14"/> Source {{item.page_index+1}} <small>{{item.resolved?'Current':'Needs review'}}</small></span><span>{{item.body}}</span><small>{{annotationTime(item)}}</small></button></template>
+          <template v-if="commentsOpen"><p v-if="!documentComments.length">No private comments in this document.</p><p v-else-if="!filteredComments.length">No matching comments.</p><button v-for="item in filteredComments" :key="item.id" class="text-tool reader-comment-entry" :class="{selected:item.id===viewedCommentId || item.page_index===current-1}" :title="item.body" @click="openReviewComment(item)"><span class="reader-comment-entry-head"><MessageSquare :size="14"/> Source {{item.page_index+1}} <small>{{item.resolved?'Current':'Needs review'}}</small></span><span>{{item.body}}</span><small>{{annotationTime(item)}}</small></button></template>
           <template v-if="pageBookmarksOpen"><div v-for="item in pageBookmarks" :key="item.id" class="reader-bookmark-row"><strong>{{item.title}}</strong><span v-if="!item.resolved">Needs review after a source revision or page change</span><span v-else>Destination currently linked</span></div></template>
         </div>
         <button v-if="pageBookmarksOpen || outlineOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
@@ -2083,7 +2176,7 @@ async function applyReplacement() {
       </div></Transition>
       <Transition name="soft"><div v-if="annotationPanelOpen" class="page-annotation-panel" aria-label="Private page marks and image overlays">
         <p v-if="editingAnnotationId && pageAnnotations.find(item=>item.id===editingAnnotationId)" class="annotation-record-time">Saved {{annotationTime(pageAnnotations.find(item=>item.id===editingAnnotationId)!)}} · Author not recorded</p>
-        <div class="review-tool-heading"><strong>{{annotationKindLabel(annotationDraft.kind)}}</strong><span>{{annotationDraft.kind==='image'?'Choose a PNG or JPEG, then drag its size and position on the page.':'Drag a region on the page. Each saved mark remains independently selectable, movable and removable.'}}</span></div>
+        <div class="review-tool-heading"><strong>{{annotationKindLabel(annotationDraft.kind)}}</strong><span>{{editingAnnotationId ? 'Review this mark’s properties. Drag it on the page to move or resize it.' : annotationDraft.kind==='image' ? 'Choose a PNG or JPEG, then drag its size and position on the page.' : 'Drag a region on the page. Each saved mark remains independently selectable, movable and removable.'}}</span></div>
         <p class="annotation-scope-note">{{annotationOutputScope==='private'?'This private review mark is omitted from Save copy and filing bundles.':'This editable mark is included in Save copy and new bundle exports.'}}</p>
         <div class="annotation-form-grid">
           <label v-if="annotationDraft.kind==='image' && !editingAnnotationId">PNG or JPEG<input ref="annotationFileInput" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" :disabled="annotationBusy || disabled" @change="chooseAnnotationImage"/></label>
@@ -2098,7 +2191,7 @@ async function applyReplacement() {
         <div v-if="currentPageAnnotations.length" class="page-annotation-list"><div v-for="item in currentPageAnnotations" :key="item.id" :class="['page-annotation-row',{unresolved:!item.resolved}]"><component :is="item.kind==='image'?Images:item.kind==='highlight'?Highlighter:item.kind==='comment'?MessageSquare:item.kind==='draw'?Pencil:item.kind==='box'?Square:item.kind==='ellipse'?Circle:item.kind==='line'?Minus:item.kind==='arrow'?ArrowUpRight:item.kind==='check'?Check:item.kind==='date'?CalendarDays:item.kind==='text'?Type:item.kind==='redaction'?Eraser:X" :size="15"/><span><strong>{{annotationKindLabel(item.kind)}}</strong><small>{{item.resolved ? (item.body && item.kind!=='draw'?item.body:item.output_scope==='pdf'?'Included in Save copy and new bundles':'Private review mark') : 'Needs review after a revision change'}}</small></span><button class="icon-btn small" :aria-label="`Edit ${item.kind}`" :disabled="annotationBusy || !item.resolved" @click="editPageAnnotation(item)"><Pencil :size="14"/></button><button class="icon-btn small danger" :aria-label="`Remove ${item.kind}`" :disabled="annotationBusy" @click="removePageAnnotation(item)"><Trash2 :size="14"/></button></div></div>
       </div></Transition>
       <Transition name="soft"><div v-if="linkPanelOpen" class="review-link-panel" role="region" aria-label="Reviewed PDF links">
-        <div class="review-tool-heading"><strong>Reviewed link</strong><span>Drag a rectangle on this page, then choose its destination. Imported PDF actions remain excluded.</span></div>
+        <div class="review-tool-heading"><strong>Reviewed link</strong><span>{{editingLinkId ? 'Update the selected link and its destination.' : 'Drag a rectangle on this page, then choose its destination. Imported PDF actions remain excluded.'}}</span></div>
         <div class="review-link-grid">
           <label>Readable label<input v-model="linkDraft.title" maxlength="200" :disabled="linksBusy || disabled" placeholder="Open supporting passage"/></label>
           <label>Destination<select v-model="linkDraft.kind" :disabled="linksBusy || disabled"><option value="internal">Matter document page</option><option value="external">Web or email address</option></select></label>
@@ -2108,7 +2201,7 @@ async function applyReplacement() {
           </template>
           <label v-else class="review-link-uri">HTTPS, HTTP or mailto address<input v-model="linkDraft.uri" maxlength="2000" :disabled="linksBusy || disabled" placeholder="https://example.org/source"/></label>
         </div>
-        <div class="page-tool-actions"><span>{{linkRegion ? `${Math.round(linkRegion.width*100)}% × ${Math.round(linkRegion.height*100)}% region selected` : 'Drag a link region on the page'}}</span><button class="btn secondary small" :disabled="linksBusy || disabled || !linkRegion || !linkDraft.title.trim() || (linkDraft.kind==='internal' ? !linkDraft.target_document_id : !linkDraft.uri.trim())" @click="saveReviewedLink">{{linksBusy?'Saving…':'Save reviewed link'}}</button></div>
+        <div class="page-tool-actions"><span>{{linkRegion ? `${Math.round(linkRegion.width*100)}% × ${Math.round(linkRegion.height*100)}% region selected` : 'Drag a link region on the page'}}</span><button class="btn secondary small" :disabled="linksBusy || disabled || !linkRegion || (editingLinkId && !linkDirty) || !linkDraft.title.trim() || (linkDraft.kind==='internal' ? !linkDraft.target_document_id : !linkDraft.uri.trim())" @click="saveReviewedLink">{{linksBusy?'Saving…':editingLinkId?'Update link':'Save reviewed link'}}</button></div>
         <p v-if="linkError" class="error-msg" role="alert">{{linkError}}</p><p v-if="linkNotice" class="review-tool-notice" role="status">{{linkNotice}}</p>
         <div v-if="currentPageLinks.length" class="reviewed-link-list"><div v-for="item in currentPageLinks" :key="item.id" :class="['reviewed-link-row',{unresolved:!item.resolved}]"><button class="reviewed-link-open" :disabled="!item.resolved" @click="followReviewedLink(item)"><ExternalLink v-if="item.kind==='external'" :size="14"/><Link2 v-else :size="14"/><span><strong>{{item.title}}</strong><small>{{item.resolved ? (item.kind==='external' ? item.uri : 'Matter page target') : 'Needs review after a revision change'}}</small></span></button><button class="icon-btn small danger" aria-label="Remove reviewed link" :disabled="linksBusy" @click="removeReviewedLink(item.id)"><Trash2 :size="14"/></button></div></div>
       </div></Transition>
@@ -2156,14 +2249,19 @@ async function applyReplacement() {
           <template v-for="item in currentPageAnnotations" :key="item.id">
             <img v-if="item.kind==='image' && item.resolved && annotationImageUrls[item.id]" :class="['pdf-image-overlay',{selected:overlaySelected('annotation',item.id)}]" :src="annotationImageUrls[item.id]" :alt="item.body || 'User-added image overlay'" role="button" tabindex="0" :aria-label="item.body || 'Select image overlay; drag to move or press Delete to remove'" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...overlayStyle('annotation',item.id)}" @pointerdown.stop="beginOverlayDrag($event,'annotation',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('annotation',item)" @keydown.enter.stop.prevent="clickOverlay('annotation',item)" @keydown.space.stop.prevent="clickOverlay('annotation',item)"/>
             <button v-else-if="item.kind==='highlight'" type="button" :class="['pdf-review-highlight',item.color,{unresolved:!item.resolved,selected:overlaySelected('annotation',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...overlayStyle('annotation',item.id)}" :title="item.body || 'Private highlight'" :aria-label="'Select highlight; drag to move or press Delete to remove'" :aria-pressed="overlaySelected('annotation',item.id)" @pointerdown.stop="beginOverlayDrag($event,'annotation',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('annotation',item)"></button>
-            <button v-else-if="item.kind==='comment'" type="button" :class="['pdf-review-comment',item.color,{unresolved:!item.resolved,selected:overlaySelected('annotation',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...overlayStyle('annotation',item.id)}" :title="item.body" :aria-label="'Select comment; drag to move or press Delete to remove'" :aria-pressed="overlaySelected('annotation',item.id)" @pointerdown.stop="beginOverlayDrag($event,'annotation',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('annotation',item)"><MessageSquare :size="Math.max(12,Math.min(22,item.rect_width*pageZoom*300))"/></button>
+            <button v-else-if="item.kind==='comment'" type="button" :class="['pdf-review-comment',item.color,{unresolved:!item.resolved,selected:overlaySelected('annotation',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...overlayStyle('annotation',item.id)}" :title="preparation ? undefined : item.body" :aria-label="preparation ? 'Show comment' : 'Select comment; drag to move or press Delete to remove'" :aria-expanded="preparation ? viewedCommentId===item.id : undefined" :aria-controls="preparation && viewedCommentId===item.id ? 'pdf-comment-popover' : undefined" :aria-pressed="overlaySelected('annotation',item.id)" @pointerdown.stop="beginOverlayDrag($event,'annotation',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('annotation',item)"><MessageSquare :size="Math.max(12,Math.min(22,item.rect_width*pageZoom*300))"/></button>
             <button v-else-if="item.kind!=='image'" type="button" :class="['pdf-review-shape',item.kind,item.color,{unresolved:!item.resolved,selected:overlaySelected('annotation',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...(item.kind==='text'?textOverlayStyle(item):{}),...overlayStyle('annotation',item.id)}" :aria-label="`Select ${annotationKindLabel(item.kind)}; drag to move or press Delete to remove`" :aria-pressed="overlaySelected('annotation',item.id)" @pointerdown.stop="beginOverlayDrag($event,'annotation',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('annotation',item)">
               <svg v-if="['draw','box','ellipse','line','arrow'].includes(item.kind)" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline v-if="item.kind==='draw'" :points="drawPolyline(item.body)"/><rect v-else-if="item.kind==='box'" x="3" y="3" width="94" height="94" rx="1"/><ellipse v-else-if="item.kind==='ellipse'" cx="50" cy="50" rx="47" ry="47"/><line v-else x1="4" y1="96" x2="96" y2="4"/><polyline v-if="item.kind==='arrow'" points="68,4 96,4 96,32"/></svg>
               <span v-else :style="item.kind==='text'?textOverlayStyle(item):undefined">{{item.kind==='check'?'✓':item.kind==='cross'?'✕':item.body}}</span>
             </button>
             <button v-else-if="item.kind==='image'" type="button" :class="['pdf-stale-image-overlay',{selected:overlaySelected('annotation',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`}" title="Image overlay needs review after a revision change" @pointerdown.stop @click.stop="clickOverlay('annotation',item)">Image needs review</button>
           </template>
-          <button v-if="selectedOverlayItem?.resolved" type="button" class="pdf-overlay-size-handle" :style="{left:`${(selectedOverlayItem.rect_x+(overlayResizeSize?.width ?? selectedOverlayItem.rect_width)+overlayOffset.x)*100}%`,top:`${(selectedOverlayItem.rect_y+(overlayResizeSize?.height ?? selectedOverlayItem.rect_height)+overlayOffset.y)*100}%`}" :aria-label="`Resize selected ${selectedOverlayLabel}`" @pointerdown.stop="beginOverlayResize" @pointermove.stop="updateOverlayResize" @pointerup.stop="finishOverlayResize" @pointercancel.stop="finishOverlayResize" @click.stop></button>
+          <div v-if="preparation && viewedComment && viewedComment.page_index===current-1" id="pdf-comment-popover" class="pdf-comment-popover" :style="viewedCommentStyle" role="dialog" aria-label="Comment" @click.stop @pointerdown.stop>
+            <div class="pdf-comment-popover-heading"><span><MessageSquare :size="15" aria-hidden="true"/> Comment · Source {{current}}</span><button type="button" class="icon-btn small" aria-label="Close comment" @click="closeViewedComment"><X :size="15"/></button></div>
+            <p class="pdf-comment-popover-body">{{viewedComment.body}}</p>
+            <span class="pdf-comment-popover-meta">{{annotationTime(viewedComment)}} · Private review note</span>
+          </div>
+          <button v-if="!preparation && selectedOverlayItem?.resolved" type="button" class="pdf-overlay-size-handle" :style="{left:`${(selectedOverlayItem.rect_x+(overlayResizeSize?.width ?? selectedOverlayItem.rect_width)+overlayOffset.x)*100}%`,top:`${(selectedOverlayItem.rect_y+(overlayResizeSize?.height ?? selectedOverlayItem.rect_height)+overlayOffset.y)*100}%`}" :aria-label="`Resize selected ${selectedOverlayLabel}`" @pointerdown.stop="beginOverlayResize" @pointermove.stop="updateOverlayResize" @pointerup.stop="finishOverlayResize" @pointercancel.stop="finishOverlayResize" @click.stop></button>
           <span v-if="annotationPanelOpen && annotationRegion && annotationDraft.kind!=='draw'" class="pdf-annotation-region" :style="{left:`${annotationRegion.x*100}%`,top:`${annotationRegion.y*100}%`,width:`${annotationRegion.width*100}%`,height:`${annotationRegion.height*100}%`}" aria-hidden="true"></span>
           <svg v-if="annotationPanelOpen && annotationDraft.kind==='draw' && annotationDrawing && annotationDrawPoints.length" :class="['pdf-draw-live',annotationDraft.color]" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"><polyline :points="annotationDrawPoints.map(point=>`${point.x*1000},${point.y*1000}`).join(' ')"/></svg>
           <span v-if="annotationPanelOpen && annotationDraft.kind==='draw' && annotationRegion && !annotationDrawing" :class="['pdf-review-shape','draft','draw',annotationDraft.color]" :style="{left:`${annotationRegion.x*100}%`,top:`${annotationRegion.y*100}%`,width:`${annotationRegion.width*100}%`,height:`${annotationRegion.height*100}%`}" aria-hidden="true"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline :points="drawPolyline(annotationDraft.body)"/></svg></span>

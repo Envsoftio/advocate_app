@@ -1,8 +1,89 @@
 import { enterLatestMatter } from './navigation'
-import { closeWorkspaceNavigation, openDocumentActions } from './navigation'
+import { closeWorkspaceNavigation, openDocumentActions, openWorkspaceNavigation } from './navigation'
 import {expect,test} from '@playwright/test'
 import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
+
+test('clicking a saved comment opens its editor properties and on-page read popover',async({page,request})=>{
+  await page.setViewportSize({width:1440,height:900})
+  const matter=await (await request.post(`${base}/matters`,{headers,data:{name:'E2E Comment Properties',court_profile:'general-demo'}})).json()
+  const uploaded=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{
+    files:{name:'01_petition.pdf',mimeType:'application/pdf',buffer:await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))},
+  }})
+  expect(uploaded.ok()).toBe(true)
+  const document=(await uploaded.json())[0]
+  const created=await request.post(`${base}/documents/${document.id}/annotations`,{headers,data:{
+    kind:'comment',page_index:0,expected_revision:document.revision,rect_x:.15,rect_y:.2,
+    rect_width:.06,rect_height:.04,body:'Check this date',color:'yellow',output_scope:'private',
+  }})
+  expect(created.ok()).toBe(true)
+  const box=await request.post(`${base}/documents/${document.id}/annotations`,{headers,data:{
+    kind:'box',page_index:0,expected_revision:document.revision,rect_x:.4,rect_y:.3,
+    rect_width:.15,rect_height:.08,body:'',color:'green',output_scope:'pdf',
+  }})
+  expect(box.ok()).toBe(true)
+  const link=await request.put(`${base}/matters/${matter.id}/links`,{headers,data:{entries:[{
+    id:'f1b2c3d4e5f60718293a4b5c6d7e8f90',title:'Source link',source_document_id:document.id,
+    source_page_index:0,source_revision:document.revision,rect_x:.5,rect_y:.45,
+    rect_width:.18,rect_height:.05,kind:'external',target_document_id:null,
+    target_page_index:null,target_revision:null,uri:'https://example.com',
+  }]}})
+  expect(link.ok()).toBe(true)
+  await page.goto('/');await enterLatestMatter(page)
+  const comment=page.locator('.pdf-review-comment')
+  await expect(comment).toBeVisible()
+  await comment.click()
+  const inspector=page.getByLabel('PDF editing controls')
+  await expect(inspector.getByRole('textbox',{name:'Comment text'})).toHaveValue('Check this date')
+  await page.screenshot({path:test.info().outputPath('comment-editor-properties.png'),animations:'disabled'})
+  await inspector.getByRole('textbox',{name:'Comment text'}).fill('Check this date again')
+  await inspector.getByRole('button',{name:'Update mark'}).click()
+  await expect.poll(async()=>{
+    const marks=await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json()
+    return marks[0]?.body
+  }).toBe('Check this date again')
+  await page.locator('.pdf-review-shape.box:not(.draft)').click()
+  await expect(inspector.getByText('Box',{exact:true}).first()).toBeVisible()
+  await page.locator('.pdf-reviewed-link').click()
+  await expect(inspector.getByRole('textbox',{name:'Readable label'})).toHaveValue('Source link')
+  await inspector.getByRole('textbox',{name:'Readable label'}).fill('Updated source link')
+  await inspector.getByRole('button',{name:'Update link'}).click()
+  await expect.poll(async()=>{
+    const links=await (await request.get(`${base}/matters/${matter.id}/links`,{headers})).json()
+    return links[0]?.title
+  }).toBe('Updated source link')
+  await page.setViewportSize({width:1024,height:768})
+  await comment.click()
+  await expect(inspector.getByRole('textbox',{name:'Comment text'})).toHaveValue('Check this date again')
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true)
+  await page.screenshot({path:test.info().outputPath('comment-editor-compact.png'),animations:'disabled'})
+  await page.getByRole('button',{name:'Browse documents'}).click()
+  const paperWidth=(await page.locator('.pdf-paper').boundingBox())?.width
+  await comment.click()
+  const popover=page.getByRole('dialog',{name:'Comment'})
+  await expect(popover).toContainText('Check this date again')
+  await expect(page.locator('.reader-side-panel')).toHaveCount(0)
+  expect((await page.locator('.pdf-paper').boundingBox())?.width).toBe(paperWidth)
+  await expect(page.getByRole('textbox',{name:'Comment text'})).toHaveCount(0)
+  await openWorkspaceNavigation(page)
+  await page.getByRole('combobox',{name:'Theme'}).selectOption('dark')
+  await closeWorkspaceNavigation(page)
+  await expect(popover).toContainText('Check this date again')
+  await page.screenshot({path:test.info().outputPath('comment-document-popover-dark.png'),animations:'disabled'})
+  await comment.click()
+  await expect(popover).toHaveCount(0)
+  await comment.click()
+  await page.keyboard.press('Escape')
+  await expect(popover).toHaveCount(0)
+  await comment.click()
+  const paper=await page.locator('.pdf-paper').boundingBox()
+  expect(paper).toBeTruthy()
+  await page.mouse.click(paper!.x+30,paper!.y+30)
+  await expect(popover).toHaveCount(0)
+  await comment.click()
+  await popover.getByRole('button',{name:'Close comment'}).click()
+  await expect(popover).toHaveCount(0)
+})
 
 const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`
 const headers={Authorization:'Bearer e2e-isolated-token'}
@@ -129,9 +210,17 @@ test('Annotate and Stamps retain independent editable marks',async({page,request
   await page.mouse.move(paper!.x+180,paper!.y+115,{steps:5})
   await page.mouse.up()
   await expect(page.getByText('This editable mark is included in Save copy and new bundle exports.')).toBeVisible()
+  const boxPageColumn=page.locator('.viewer-page-column')
+  const beforeAddMark=await boxPageColumn.boundingBox()
+  expect(beforeAddMark).toBeTruthy()
   await page.getByRole('button',{name:'Add mark'}).click()
   const box=page.locator('.pdf-review-shape.box:not(.draft)')
   await expect(box).toBeVisible()
+  await expect(page.locator('.viewer-tool-inspector')).toBeVisible()
+  const afterAddMark=await boxPageColumn.boundingBox()
+  expect(afterAddMark).toBeTruthy()
+  expect(Math.abs(afterAddMark!.x-beforeAddMark!.x)).toBeLessThan(1)
+  expect(Math.abs(afterAddMark!.width-beforeAddMark!.width)).toBeLessThan(1)
   const boxWidth=(await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json())[0].rect_width as number
   await box.click()
   await settledSurface(page)

@@ -19,6 +19,8 @@ test('03A highlight and comment Save, retry, reload and source navigation',async
   await expect(page.locator('.pdf-text-layer')).toContainText('DRAFT PETITION')
   await page.getByRole('tab',{name:'Annotate'}).click()
   await page.getByRole('button',{name:'Highlight',exact:true}).click()
+  const inspector=page.locator('.viewer-tool-inspector')
+  await expect(inspector).toBeVisible()
   await page.getByRole('combobox',{name:'Zoom'}).selectOption('100')
   await page.screenshot({path:test.info().outputPath('ED07-runtime.png')})
   const draw=async(x:number,y:number,w:number,h:number)=>{
@@ -33,11 +35,20 @@ test('03A highlight and comment Save, retry, reload and source navigation',async
     await page.mouse.up()
   }
   await draw(90,125,155,25)
+  const pageColumn=page.locator('.viewer-page-column')
+  const beforeSave=await pageColumn.boundingBox()
+  expect(beforeSave).toBeTruthy()
   await page.getByRole('textbox',{name:'Optional highlight note'}).fill('Review this passage')
   await expect(page.locator('.document-save-state')).toContainText('Unsaved changes')
   await page.getByRole('button',{name:'Save',exact:true}).click()
   await expect(page.locator('.pdf-review-highlight')).toHaveCount(1)
   await expect(page.locator('.document-save-state')).toContainText('Saved locally')
+  await expect(inspector).toBeVisible()
+  await expect.poll(async()=>{
+    const after=await pageColumn.boundingBox()
+    return !!after && Math.abs(after.x-beforeSave!.x)<1 && Math.abs(after.width-beforeSave!.width)<1
+  }).toBe(true)
+  await page.screenshot({path:test.info().outputPath('highlight-inspector-after-save.png'),animations:'disabled'})
 
   await page.getByRole('button',{name:'Comment',exact:true}).click()
   await draw(270,125,45,26)
@@ -51,6 +62,7 @@ test('03A highlight and comment Save, retry, reload and source navigation',async
   await page.unroute(`**/documents/${doc.id}/annotations`)
   await page.getByRole('button',{name:'Save',exact:true}).click()
   await expect(page.locator('.pdf-review-comment')).toHaveCount(1)
+  await expect(inspector).toBeVisible()
   const saved=await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json()
   expect(saved.map((item:{kind:string})=>item.kind).sort()).toEqual(['comment','highlight'])
   for(const item of saved) {

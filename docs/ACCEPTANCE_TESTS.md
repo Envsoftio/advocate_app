@@ -1173,3 +1173,39 @@ These screens are **not 100% pixel identical** to the design fixtures. MatterDra
 - The matching Apple Silicon PyInstaller sidecar was rebuilt from this backend source. `cd frontend && npm run tauri:build -- --bundles app` passed with the final frontend source, producing the unsigned **73.07 MiB** MatterDraft Studio app. `git diff --check` passed.
 
 Literal 100% fidelity is **not established**: only ED31 has a supplied raster, and five screens have resolved JSON only. ED30 diagnostics remain inline; ED26 represents the actual pending draft instead of the example's three uncommitted actions; ED27 shows real matter-history labels. Native WebView interaction, OS Save/export, Windows and Intel Mac were not exercised.
+
+## DY. Saved PDF element selection — 12 November 2026
+
+[Certain] Clicking a saved comment, shape, image/stamp, redaction, text object or reviewed link in the open editor now selects its existing properties in the right inspector. Saved reviewed links populate their label and destination fields for updates. In the Documents preparation view, clicking a comment displays its text in the read panel and does not open editing controls. Preparation no longer offers drag, resize or Delete for selected overlays. Dragging a selected mark keeps the open property form in sync with the saved position.
+
+- Configured backend: `cd backend && .venv312/bin/python -m pytest -q` — **337 passed**, six existing dependency warnings. No backend code changed.
+- Frontend production/type build passed; `npm run test` passed **48/48**. `git diff --check` passed.
+- Isolated synthetic Chrome `pdf-overlay-selection.spec.ts` passed **3/3**, including saved comment editing, box selection, reviewed-link update, drag/resize/Delete regression, and independent Annotate/Stamps controls. The comment selection case passed again **1/1** at 1024 × 768 with no horizontal page overflow. Its 1440 × 900 editor and 1024 × 768 compact screenshots, plus the Documents comment view, were inspected. The paper raster and live values differ from the supplied design fixture.
+- Native WebView interaction, OS Save/export dialogs, Windows and Intel Mac were not exercised for this UI change.
+
+## DZ. Comment display in Documents view — 12 November 2026
+
+[Certain] Selecting a saved comment in the non-editing Documents view now opens a small read-only card beside its page marker. It no longer opens the left Comments panel or reduces the PDF width. The card uses the active theme, limits long text with internal scrolling, and closes on a second marker click, Escape, a page click, page/document change, or its close button. The open editor still selects the comment in the right properties inspector.
+
+- Configured backend: `cd backend && .venv312/bin/python -m pytest -q` — **337 passed**, six existing dependency warnings. No backend code changed.
+- `cd frontend && npm run build && npm run test` — production/type build passed and **48/48** unit tests passed. The existing Vite large-chunk advisory remains.
+- Synthetic Chrome `pdf-overlay-selection.spec.ts`: final combined run passed **3/3**, covering the comment card's close paths, unchanged PDF width, saved-mark editing and drag/delete regressions. Earlier runs exposed a test click intercepted by the selectable PDF text layer and one transient local engine disconnect; the corrected case passed alone and the full suite passed on rerun. A 1024 × 768 dark screenshot was inspected against the user-provided screenshot; the comment appears beside its marker without the left panel. The live PDF and note contents differ from the user's image.
+- `git diff --check` passed. Native WebView and other target-device checks were not repeated for this frontend interaction.
+
+## EA. Stable annotation inspector after Save — 12 November 2026
+
+[Certain] The editor's right annotation inspector now remains open while an annotation tool is active, including immediately after a highlight, comment, drawing or shape is saved. Clearing the placed mark's draft no longer removes the inspector or expands the PDF column. Selecting a different tool or closing the inspector still changes the layout by explicit user action.
+
+- Configured backend: `cd backend && .venv312/bin/python -m pytest -q` — **337 passed**, six existing dependency warnings. No backend code changed.
+- `cd frontend && npm run build && npm run test` — production/type build passed and **48/48** unit tests passed; the existing Vite large-chunk advisory remains.
+- Synthetic Chrome annotation and overlay suites passed **5/5** together. The highlight header Save and Box **Add mark** cases assert that the inspector remains visible and the PDF column's x-position and width change by less than **1 px** after saving; the comment inspector is also checked after Save. The 1440 × 900 saved-highlight screenshot and 1024 × 768 dark comment-inspector screenshot were inspected. The synthetic PDF content differs from the supplied design fixture.
+- `git diff --check` passed. Native WebView interaction and OS Save/export were not exercised for this frontend change.
+
+## EB. Right inspector fit in the PDF editor — 13 November 2026
+
+[Certain] The annotation inspector inherited absolute positioning from the legacy floating tool panel even while the redesigned reader placed it in the right grid column. At 1024 × 768 and 125% interface size, its rendered bottom extended about 193 px below the editor and its left edge overlapped the PDF column by about 15 px. The inspector is now a docked grid item with its own vertical scroll area; it aligns exactly with the PDF column and the editor's right, top and bottom edges. This addresses the cropped dark Highlight panel shown by the user. At compact widths and high interface scale, the remaining PDF area is narrow; the selected page is still accessible through its existing zoom and scroll controls.
+
+- Configured backend: `cd backend && .venv312/bin/python -m pytest -q` — **337 passed**, six existing dependency warnings. No backend code changed.
+- `cd frontend && npm run build && npm run test` — production/type build passed and **48/48** unit tests passed; the existing Vite large-chunk advisory remains.
+- Synthetic Chrome `annotation-panel-fit.spec.ts` passed a **16-state** matrix at 1440, 1024, 900 and 768 px with 90/100/110/125% interface scales. Every panel stayed within the editor grid, met the PDF column without overlap, had no horizontal content overflow, and kept **Update mark** reachable by scrolling at 1024 × 768/125%. The 1024 × 768 dark screenshot was inspected against the user's cropped screenshot. The five affected annotation/overlay browser journeys passed together (**5/5**) after the CSS correction.
+- `git diff --check` passed. Native WebView interaction, OS Save/export dialogs and other target devices were not exercised for this layout correction.
