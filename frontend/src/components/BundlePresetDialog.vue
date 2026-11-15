@@ -18,7 +18,7 @@ onMounted(()=>{returnFocus=document.activeElement as HTMLElement;dialog.value?.s
 onBeforeUnmount(()=>{alive=false;dialog.value?.close();void nextTick(()=>returnFocus?.isConnected&&returnFocus.focus())})
 </script>
 <template>
-<dialog ref="dialog" class="bundle-preset-dialog" aria-labelledby="preset-title" @cancel.prevent="close">
+<dialog v-dismiss-outside ref="dialog" class="bundle-preset-dialog" aria-labelledby="preset-title" @cancel.prevent="close">
  <header><h2 id="preset-title">Bundle presets</h2><button class="icon-btn" aria-label="Close presets" :disabled="busy" @click="close"><X :size="18"/></button><p>Choose reusable settings, or save this bundle’s layout as a new preset.</p></header>
  <div class="preset-dialog-grid">
   <aside class="structure-card preset-list"><h3>Saved presets</h3><p v-if="loading" role="status">Loading local presets…</p><p v-else-if="!presets.length">No saved presets yet. Name the current layout to save your first version.</p><label v-for="preset in presets" :key="preset.id" :class="{selected:selectedId===preset.id}"><input v-model="selectedId" type="radio" name="bundle-preset" :value="preset.id" :disabled="busy"/><span><strong>{{preset.name}}</strong><small>Version {{preset.version}} · {{preset.settings.output_marks.front_matter==='cover_index'?'Cover + linked index':'Linked index'}}<br>{{preset.settings.max_pages_per_volume}} pages per volume</small></span></label><p class="preset-local-count">{{presets.length}} local preset versions<br>No source files or party details are stored.</p><button class="membership-button quiet" disabled title="Audience variants are outside B02A">Manage variants · unavailable</button></aside>

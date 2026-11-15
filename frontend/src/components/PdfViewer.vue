@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppPopover from './ui/AppPopover.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowLeft, Save, Shield, PanelLeft, CheckCircle2, Ellipsis, Maximize2, Minimize2, Archive, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, FilePlus2, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare, Eraser, Undo2, Redo2, X, Search, Square, Circle, Minus, ArrowUpRight, Check, CalendarDays, Printer, BookOpen, Info, Focus, AlignLeft, AlignCenter, AlignRight, AlignJustify } from 'lucide-vue-next'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
@@ -28,13 +29,7 @@ const panelElement = ref<HTMLElement | null>(null)
 const viewerElement = ref<HTMLElement | null>(null)
 let panelTrigger: HTMLElement | null = null
 const focusedReading = ref(false)
-const actionsMenu = ref<HTMLDetailsElement|null>(null)
 const headerSaving = ref(false)
-function closeActionMenu(event:Event) {
-  if (!(event.target as HTMLElement).closest('button')) return
-  actionsMenu.value?.removeAttribute('open')
-  actionsMenu.value?.querySelector<HTMLElement>('summary')?.focus({preventScroll:true})
-}
 async function saveHeaderDraft() {
   if (headerSaving.value) return
   headerSaving.value = true
@@ -190,8 +185,8 @@ function tabKey(event:KeyboardEvent, category:EditorCategory) {
   ;(event.currentTarget as HTMLElement).parentElement?.querySelector<HTMLButtonElement>(`[data-category="${categories[index]}"]`)?.focus()
 }
 
-const props = defineProps<{ preparation?:boolean, artifactOptions?: Array<{value:string,label:string}>, expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], ocrJob?: Job | null, busy?: boolean, disabled?: boolean, canUndo?: boolean, canRedo?: boolean, undoLabel?: string | null, redoLabel?: string | null, recentActions?: Array<{label:string,applied:boolean}>, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number, revision?:number} }>()
-const emit = defineEmits<{ openEditor:[], showDocumentList:[], browseDocuments: [], saveDetails: [], retryReader: [], reviewEngine: [], artifact: [value:string], toggleExpanded: [], toggleFocus: [], modified: [], undo: [], redo: [], error: [message: string], pageTools: [task?:'insert'|'crop'|'extract',pages?:number[],side?:'before'|'after'], reviewPageMap:[], toggleDetails: [], openBookmarks: [], ocr: [language: 'eng' | 'hin' | 'eng+hin', pageIndex:number], ocrPage: [pageIndex:number,language:'eng'|'hin'|'eng+hin'], ocrRerun:[pageIndex:number,language:'eng'|'hin'|'eng+hin'], cancelOcr: [], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string], printWorking: [request:{documentId:string,revision:number,title:string,acknowledged:boolean}] }>()
+const props = defineProps<{ staleBuild?: {id:string; revision?:number}, findingContext?:string, preparation?:boolean, artifactOptions?: Array<{value:string,label:string}>, expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], ocrJob?: Job | null, busy?: boolean, disabled?: boolean, canUndo?: boolean, canRedo?: boolean, undoLabel?: string | null, redoLabel?: string | null, recentActions?: Array<{label:string,applied:boolean}>, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number, revision?:number} }>()
+const emit = defineEmits<{ rebuild:[], reviewPrevious:[], openEditor:[], showDocumentList:[], browseDocuments: [], saveDetails: [], retryReader: [], reviewEngine: [], artifact: [value:string], toggleExpanded: [], toggleFocus: [], modified: [], undo: [], redo: [], error: [message: string], pageTools: [task?:'insert'|'crop'|'extract',pages?:number[],side?:'before'|'after'], reviewPageMap:[], toggleDetails: [], openBookmarks: [], ocr: [language: 'eng' | 'hin' | 'eng+hin', pageIndex:number], ocrPage: [pageIndex:number,language:'eng'|'hin'|'eng+hin'], ocrRerun:[pageIndex:number,language:'eng'|'hin'|'eng+hin'], cancelOcr: [], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string], printWorking: [request:{documentId:string,revision:number,title:string,acknowledged:boolean}] }>()
 const undoDescription = computed(() => props.undoLabel
   ? `Undo: ${props.undoLabel}. Applies to the last change anywhere in this matter.`
   : 'Undo last matter change. No change available.')
@@ -647,6 +642,11 @@ const viewedCommentStyle = computed(() => {
       : {top:`calc(${(item.rect_y+item.rect_height)*100}% + 12px)`}),
   }
 })
+function dismissReadComment(event:PointerEvent){
+ if(viewedCommentId.value && !(event.target as Element)?.closest('.pdf-comment-popover,.pdf-review-comment'))closeViewedComment()
+}
+onMounted(()=>window.document.addEventListener('pointerdown',dismissReadComment,true))
+onBeforeUnmount(()=>window.document.removeEventListener('pointerdown',dismissReadComment,true))
 function closeViewedComment() {
   viewerElement.value?.querySelector<HTMLElement>('.pdf-review-comment.selected')?.focus({preventScroll:true})
   viewedCommentId.value=null
@@ -669,6 +669,7 @@ const linkDirty = computed(() => {
     item.rect_width!==region.width || item.rect_height!==region.height))
 })
 const objectSelectionOpen = computed(() => !props.preparation && activeCategory.value==='edit' && activeTool.value==='select' && !selectedTextAnnotation.value && !historyOpen.value && !readPanel.value)
+const bundleImpactVisible = computed(() => !!props.staleBuild && !props.preparation && !props.findingContext && !focusedReading.value && activeCategory.value==='read' && !readPanel.value && !inspectorVisible.value)
 const inspectorVisible = computed(() => objectSelectionOpen.value || marksPanelOpen.value ||
   (!props.preparation && activeCategory.value === 'ocr') ||
   (!props.preparation && !!selectedTextAnnotation.value) ||
@@ -1986,15 +1987,15 @@ async function applyReplacement() {
           <button class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :aria-description="redoDescription" :disabled="!canRedo || disabled || editing || headerSaving" @click="emit('redo')"><Redo2 :size="16"/></button>
           <button class="icon-btn small" :aria-label="focusedReading ? 'Exit focused reading' : 'Focused reading'" :title="focusedReading ? 'Exit focused reading' : 'Focused reading'" @click="toggleFocusedReading"><Maximize2 :size="16"/></button>
           <button class="btn secondary small index-trigger" aria-label="Open bundle index" @click="emit('openBookmarks')">Index &amp; Bookmarks</button>
-          <details ref="actionsMenu" class="reader-more" @keydown.esc.stop="actionsMenu?.removeAttribute('open'); actionsMenu?.querySelector('summary')?.focus()"><summary role="button" class="icon-btn small" aria-label="More document actions" title="More document actions"><Ellipsis :size="17"/></summary><div class="reader-more-menu" @click.capture="closeActionMenu" role="tablist" aria-label="Additional PDF tools">
-            <button class="text-tool" role="tab" :aria-selected="activeCategory==='stamps'" data-category="stamps" id="pdf-tab-stamps" @click="selectCategory('stamps')"><Stamp :size="15"/> Stamps</button>
-            <button class="text-tool" role="tab" :aria-selected="activeCategory==='output'" data-category="output" id="pdf-tab-output" @click="selectCategory('output')"><FilePenLine :size="15"/> Output</button>
+          <AppPopover class="reader-more" label="Additional PDF tools" close-on-select><template #trigger><button type="button" class="icon-btn small" aria-label="More document actions" title="More document actions"><Ellipsis :size="17"/></button></template>
+            <div class="popup-tabs" role="tablist" aria-label="Additional PDF tools"><button class="text-tool" role="tab" :aria-selected="activeCategory==='stamps'" data-category="stamps" id="pdf-tab-stamps" @click="selectCategory('stamps')"><Stamp :size="15"/> Stamps</button>
+            <button class="text-tool" role="tab" :aria-selected="activeCategory==='output'" data-category="output" id="pdf-tab-output" @click="selectCategory('output')"><FilePenLine :size="15"/> Output</button></div>
             <button class="text-tool" aria-label="Save working copy" :disabled="workingSaveBusy || disabled || editing || loading" @click="saveWorkingCopy"><Save :size="15"/> {{workingSaveBusy ? 'Saving…' : 'Save copy'}}</button>
             <button class="text-tool" aria-label="Print working copy" :disabled="disabled || editing || loading" @click="printWorkingCopy"><Printer :size="15"/> Print</button>
             <button class="text-tool" :disabled="editing || loading || disabled" aria-label="Archive document" @click="emit('archiveDocument')"><Archive :size="15"/> Archive document</button>
             <button class="text-tool" aria-label="Document details" :aria-expanded="!!detailsOpen" aria-controls="document-details-panel" @click="emit('toggleDetails')"><PanelRightOpen :size="15"/> Details</button>
             <button class="text-tool" :aria-label="expanded ? 'Exit full screen' : 'Full screen'" @click="toggleExpandedView"><Maximize2 :size="15"/> {{expanded ? 'Exit expanded editor' : 'Expand editor'}}</button>
-          </div></details>
+          </AppPopover>
         </div>
       </div>
       <div v-show="!focusedReading && !preparation && activeCategory!=='read'" id="pdf-tool-panel" class="page-editbar" role="tabpanel" :aria-labelledby="`pdf-tab-${activeCategory}`">
@@ -2018,14 +2019,14 @@ async function applyReplacement() {
         <button class="text-tool" :disabled="editing || loading || disabled" title="Private review comment" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='comment'" @click="openAnnotationTool('comment')"><MessageSquare :size="15"/> Comment</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='draw'" @click="openAnnotationTool('draw')"><Pencil :size="15"/> Draw</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='box'" @click="openAnnotationTool('box')"><Square :size="15"/> Box</button>
-        <details class="annotation-more"><summary role="button" class="text-tool" aria-label="More annotation tools"><Ellipsis :size="15"/> More</summary><div class="annotation-more-menu">
+        <AppPopover class="annotation-more" label="More annotation tools" close-on-select><template #trigger><button type="button" class="text-tool" aria-label="More annotation tools"><Ellipsis :size="15"/> More</button></template>
           <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
           <button class="text-tool" :disabled="editing || loading || disabled" :aria-expanded="bookmarkOpen" @click="bookmarkOpen=!bookmarkOpen;bookmarkTitle=document?.title+' — page '+current;bookmarkError=''"><BookMarked :size="15"/> Bookmark page</button>
           <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='ellipse'" @click="openAnnotationTool('ellipse')"><Circle :size="15"/> Ellipse</button>
           <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='line'" @click="openAnnotationTool('line')"><Minus :size="15"/> Line</button>
           <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='arrow'" @click="openAnnotationTool('arrow')"><ArrowUpRight :size="15"/> Arrow</button>
           <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="toggleTool('links')"><Link2 :size="15"/> Links</button>
-        </div></details>
+        </AppPopover>
         </div><div v-if="activeCategory==='stamps'" class="editor-tool-group" role="group" aria-label="Visual stamps">
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
         <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='image'" @click="openAnnotationTool('image')"><Images :size="15"/> Image / stamp</button>
@@ -2062,7 +2063,10 @@ async function applyReplacement() {
       <section v-else-if="activeOcrJob" class="preparation-ocr-banner processing" role="status" aria-label="OCR processing"><div><strong>OCR — {{document.original_name}}</strong><span>{{activeOcrJob.message}} · {{activeOcrJob.progress}}%</span><progress :value="activeOcrJob.progress" max="100">{{activeOcrJob.progress}}%</progress><span>{{ocrElapsed ? `Elapsed ${ocrElapsed} · ` : ''}}Running locally · You can browse other documents.</span></div><button class="btn secondary small" :disabled="activeOcrJob.status==='queued' && activeOcrJob.message==='Cancelling'" @click="emit('cancelOcr')">Cancel OCR</button></section>
       <section v-else-if="needsOcrReview" class="preparation-ocr-banner review" role="status" aria-label="OCR review recommended"><div><strong>{{ocrReview?.accepted_at ? 'OCR page review accepted' : 'OCR completed · review recommended'}}</strong><span>{{ocrReview?.available ? (ocrReview.regions.length ? `${ocrReview.regions.length} low-confidence ${ocrReview.regions.length===1?'word needs':'words need'} attention on this page. Compare recognized text with the scan.` : 'No low-confidence words detected on this page. Compare recognized text with the scan.') : 'Compare recognized text against the scanned page before relying on it. Recognition accuracy has not been verified.'}}</span></div><button class="btn primary small" :disabled="!ocrReview || ocrReviewBusy || !!ocrReview.accepted_at" @click="acceptOcrReview">{{ocrReview?.accepted_at ? 'Review accepted' : 'Accept review'}}</button></section>
       <aside v-if="needsOcrReview && !focusedReading" class="ocr-confidence-inspector" aria-label="OCR confidence inspector"><strong><ScanText :size="16"/> {{ocrReview?.confidence===null || !ocrReview?.available ? 'Recognition confidence unavailable' : `Recognition confidence · ${Math.round(ocrReview.confidence)}%`}}</strong><p v-if="ocrReview?.regions.length">Recognized: “{{ocrReview.regions[0].text}}”<br/>Compare with the scan before use.</p><p v-else>{{ocrReview?.message || 'Checking OCR confidence…'}}</p><button class="btn secondary small" :disabled="!ocrReview?.can_rerun || !!ocrReview?.accepted_at || disabled" @click="emit('ocrRerun',current-1,ocrReview!.language)">Rerun this page</button><p v-if="ocrReviewError" role="alert" class="error-msg">{{ocrReviewError}}</p></aside>
-      <div class="viewer-edit-workspace" :class="{'has-tool-inspector':inspectorVisible,'expanded-pages':expanded,'has-read-panel':!!readPanel && !focusedReading, 'has-document-information':readPanel==='information' && !focusedReading}">
+      <div v-if="focusedReading" class="review-context-banner focus-context">Focused reading · Escape restores your panels</div>
+      <div v-else-if="findingContext" class="review-context-banner">Opened from Preflight · {{findingContext}}</div>
+      <div v-else-if="bundleImpactVisible" class="review-context-banner stale-context" role="status">This change affects the current generated bundle. Rebuild will be required for the bundle to include it.</div>
+      <div class="viewer-edit-workspace" :class="{'has-tool-inspector':(inspectorVisible && !focusedReading) || bundleImpactVisible,'expanded-pages':expanded,'has-read-panel':!!readPanel && !focusedReading, 'has-document-information':readPanel==='information' && !focusedReading}">
       <div v-show="!focusedReading && !preparation" class="reader-panel-tabs" aria-label="Reader panels">
         <button class="icon-btn small" :class="{active:thumbnailsVisible}" :aria-label="thumbnailsVisible?'Hide thumbnails':'Show thumbnails'" title="Pages" @click="toggleThumbnails"><PanelLeft :size="16"/></button>
         <button class="icon-btn small" :class="{active:findOpen}" aria-label="Search panel" title="Search" @click="showFind"><Search :size="16"/></button>
@@ -2117,7 +2121,22 @@ async function applyReplacement() {
         </div>
         <button v-if="pageBookmarksOpen || outlineOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
       </aside>
-      <aside v-if="inspectorVisible" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen, 'edit-mode-inspector':activeCategory==='edit' || historyOpen || engineBlocked}" :aria-label="engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : 'PDF editing controls'">
+      <aside v-if="bundleImpactVisible" class="viewer-tool-inspector bundle-impact-panel" aria-label="Bundle impact">
+        <div class="viewer-tool-inspector-heading"><strong>Bundle impact</strong></div>
+        <div class="pdf-editor-inspector-content">
+          <span class="pdf-editor-status warning">Previous bundle · Stale</span>
+          <h3>Working copy saved</h3><p>{{document.title}} · Revision {{document.revision}}<br/>{{document.page_count}} source pages</p>
+          <h3>Changes since build {{staleBuild!.id.slice(0,8)}}</h3>
+          <p v-if="staleBuild!.revision">Source at build · Revision {{staleBuild!.revision}}</p>
+          <p>Current preparation differs from this generated bundle. Rebuild to include the changes.</p>
+          <p>Imported originals and the previous output remain preserved.</p>
+          <div class="finding-recheck"><strong>Page mapping pending</strong><p>Review the current page map before the next build. Previous output keeps its frozen page numbers.</p></div>
+          <button class="btn primary" @click="emit('rebuild')">Rebuild bundle</button>
+          <button class="btn secondary" @click="emit('reviewPageMap')">Review page map</button>
+          <button class="text-tool" @click="emit('reviewPrevious')">View previous output</button>
+        </div>
+      </aside>
+      <aside v-if="inspectorVisible && !focusedReading" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen, 'edit-mode-inspector':activeCategory==='edit' || historyOpen || engineBlocked}" :aria-label="engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : 'PDF editing controls'">
         <div class="viewer-tool-inspector-heading"><strong>{{engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : activeCategory==='ocr' ? 'OCR review' : objectSelectionOpen ? 'Document contents' : selectedTextAnnotation ? 'Text' : annotationPanelOpen && editingAnnotationId ? annotationKindLabel(annotationDraft.kind) : toolTitle}}</strong><button class="icon-btn small" :aria-label="engineBlocked || historyOpen ? 'Collapse inspector' : selectedTextAnnotation ? 'Close text properties' : 'Close PDF tool'" :title="engineBlocked || historyOpen ? 'Collapse inspector' : 'Close tool'" @click="engineBlocked ? engineInspectorOpen=false : historyOpen ? historyOpen=false : activeCategory==='ocr' || objectSelectionOpen ? selectCategory('read') : selectedTextAnnotation ? clearOverlaySelection() : toggleTool(activeTool)"><X :size="16"/></button></div>
       <div v-if="activeCategory==='ocr' && !engineBlocked" class="pdf-editor-inspector-content" role="region" aria-label="OCR processing and review">
         <span class="pdf-editor-status warning">{{activeOcrJob ? 'Processing locally' : needsOcrReview ? 'Review recommended' : 'Recognition options'}}</span>

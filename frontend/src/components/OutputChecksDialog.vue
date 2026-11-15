@@ -36,7 +36,7 @@ onMounted(()=>{focus=document.activeElement as HTMLElement;dialog.value?.showMod
 onBeforeUnmount(()=>{outputCheckContexts.set(contextKey,{file:file.value,runId:runId.value,findingId});dialog.value?.close();void nextTick(()=>focus?.isConnected&&focus.focus())})
 </script>
 <template>
- <dialog ref="dialog" class="output-checks-dialog" aria-labelledby="output-checks-title" @cancel.prevent="emit('close')">
+ <dialog v-dismiss-outside ref="dialog" class="output-checks-dialog" aria-labelledby="output-checks-title" @cancel.prevent="emit('close')">
   <header><h2 id="output-checks-title">Output checks · build {{artifact.id.slice(0,8)}}</h2><button class="icon-btn" aria-label="Close output checks" @click="emit('close')"><X :size="18"/></button></header>
   <p class="output-checks-intro">These results belong to the saved output files. Human review is tracked separately.</p>
   <div class="output-checks-body">

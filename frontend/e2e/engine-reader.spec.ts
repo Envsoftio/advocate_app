@@ -56,7 +56,7 @@ test('02C loaded search, reader and unsaved details survive disconnect; retry ne
   await expect(page.getByRole('button',{name:'Save working copy'})).toBeEnabled()
   await disconnect(page)
   await expect(page.getByRole('region',{name:'Engine recovery'})).toContainText('Connection interrupted')
-  await page.locator('.reader-more summary').click()
+  await page.locator('.reader-more>button').click()
   await page.getByRole('button',{name:'Show thumbnails'}).click()
   await page.screenshot({path:'../docs/ui-evidence/flow03/ED30-engine-offline-1440.png'})
   await page.getByRole('button',{name:'Search panel'}).click()
@@ -199,7 +199,7 @@ test('02C engine recovery retains the exact Preflight source and return context'
   await expect(page.locator('.engine-notice')).toHaveCount(0)
   await expect(context).toContainText('Revision 1')
   await expect(page.getByRole('spinbutton',{name:'Go to page'})).toHaveValue('2')
-  await page.getByRole('button',{name:'Return to Preflight',exact:true}).click()
+  await context.getByRole('button',{name:'Return to Preflight',exact:true}).click()
   await expect(finding.getByRole('button',{name:'Review source 2'})).toBeFocused()
 })
 

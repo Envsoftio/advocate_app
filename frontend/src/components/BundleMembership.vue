@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ToggleGroupItem } from 'reka-ui'
+import AppChoiceGroup from './ui/AppChoiceGroup.vue'
 import {computed, onMounted, onBeforeUnmount, ref, watch} from 'vue'
 import {Info} from 'lucide-vue-next'
 import EngineNotice from './EngineNotice.vue'
@@ -52,15 +54,17 @@ defineExpose({apply,discard,hasPendingDraft:()=>dirty.value,isSaving:()=>saving.
    <button v-if="dirty" class="membership-return membership-cancel" :disabled="saving" @click="emit('close')">Cancel changes</button>
    <p aria-live="polite">{{documents.length}} matter documents · {{included.length}} included / {{pages}} source pages · {{documents.length-included.length}} reference-only / {{referencePages}} source pages</p>
   </header>
+  <AppChoiceGroup v-model="filter">
   <div class="membership-filters" aria-label="Membership filters">
-   <button class="membership-button quiet" :class="{primary:filter==='all'}" :aria-pressed="filter==='all'" @click="filter='all'">All documents · {{documents.length}}</button>
-   <button class="membership-button quiet" :class="{primary:filter==='included'}" :aria-pressed="filter==='included'" @click="filter='included'">Included · {{included.length}}</button>
-   <button class="membership-button quiet" :class="{primary:filter==='reference'}" :aria-pressed="filter==='reference'" @click="filter='reference'">Reference only · {{documents.length-included.length}}</button>
+   <ToggleGroupItem as-child value="all"><button class="membership-button quiet" :class="{primary:filter==='all'}">All documents · {{documents.length}}</button></ToggleGroupItem>
+   <ToggleGroupItem as-child value="included"><button class="membership-button quiet" :class="{primary:filter==='included'}">Included · {{included.length}}</button></ToggleGroupItem>
+   <ToggleGroupItem as-child value="reference"><button class="membership-button quiet" :class="{primary:filter==='reference'}">Reference only · {{documents.length-included.length}}</button></ToggleGroupItem>
    <span class="membership-secondary-actions">
     <button class="membership-button secondary" disabled title="Reviewed title and date suggestions are not implemented in this phase">Title &amp; date suggestions</button>
     <button class="membership-button secondary" disabled title="This matter currently has one primary bundle; variant review is a later phase">Review variants</button>
    </span>
   </div>
+  </AppChoiceGroup>
   <div v-if="error" class="membership-message error" role="alert">{{error}} Your selection has been retained. <button v-if="stale || !state" class="membership-button secondary" :disabled="saving||blocked" @click="load">{{stale?'Discard draft and reload':'Retry loading'}}</button></div>
   <div v-if="loading" class="membership-message" role="status">Loading bundle membership…</div>
   <section v-else-if="state" class="membership-card" aria-label="Bundle membership selection">

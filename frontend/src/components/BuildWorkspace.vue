@@ -806,7 +806,7 @@ onBeforeUnmount(() => {
       "
     />
     <slot v-if="optionsOpen" name="processing" :close="closeOptions" />
-    <dialog
+    <dialog v-dismiss-outside
       ref="toolDialog"
       class="build-tool-dialog"
       :aria-label="tool"

@@ -28,6 +28,20 @@ test('BU05 reference geometry, membership apply/discard/failure/stale and caller
   const box=(await page.locator(selector).boundingBox())!;expect(Math.round(box.x)).toBe(x);expect(Math.round(box.y)).toBe(y);expect(Math.round(box.width)).toBe(width)
  }
  await page.screenshot({path:info.outputPath('BU05-1440-light.png'),animations:'disabled'})
+ // Reka supplies roving focus; activation stays explicit and cannot clear a filter.
+ const all=panel.getByRole('button',{name:/All documents ·/})
+ const includedFilter=panel.getByRole('button',{name:/^Included ·/})
+ const reference=panel.getByRole('button',{name:/Reference only ·/})
+ await all.focus();await page.keyboard.press('ArrowRight');await expect(includedFilter).toBeFocused()
+ await expect(all).toHaveAttribute('aria-pressed','true')
+ await page.keyboard.press('Enter');await expect(includedFilter).toHaveAttribute('aria-pressed','true')
+ await expect(panel.locator('tbody tr')).toHaveCount(8)
+ await page.keyboard.press('End');await expect(reference).toBeFocused()
+ await page.keyboard.press('Space');await expect(panel.locator('tbody tr')).toHaveCount(2)
+ await page.keyboard.press('Space');await expect(reference).toHaveAttribute('aria-pressed','true')
+ await page.keyboard.press('ArrowRight');await expect(all).toBeFocused()
+ await page.keyboard.press('Enter');await expect(panel.locator('tbody tr')).toHaveCount(10)
+
  const first=panel.getByRole('checkbox',{name:`Include ${docs[0].title}`,exact:true});await first.uncheck()
  await expect(panel).toContainText('7 included')
  await page.getByRole('button',{name:'Return to caller'}).click()

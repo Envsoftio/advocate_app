@@ -22,16 +22,16 @@ export async function closeDocumentBrowser(page:Page) {
 export async function openDocumentActions(page:Page) {
   await closeWorkspaceNavigation(page)
   const menu=page.locator('.reader-more')
-  if(await menu.getAttribute('open')===null)await menu.locator('summary').click()
+  if(await menu.locator('button').first().getAttribute('aria-expanded')!=='true')await menu.locator('button').first().click()
 }
 export async function closeDocumentActions(page:Page) {
   const menu=page.locator('.reader-more')
-  if(await menu.getAttribute('open')!==null)await menu.locator('summary').click()
+  if(await menu.locator('button').first().getAttribute('aria-expanded')==='true')await menu.locator('button').first().click()
 }
 export async function openReaderView(page:Page) {
   await closeWorkspaceNavigation(page)
   const menu=page.locator('.reader-view-menu').filter({visible:true}).first()
-  if(await menu.getAttribute('open')===null)await menu.locator('summary').click()
+  if(await menu.locator('button').first().getAttribute('aria-expanded')!=='true')await menu.locator('button').first().click()
 }
 export async function openWorkspaces(page:Page) {
   await closeWorkspaceNavigation(page)

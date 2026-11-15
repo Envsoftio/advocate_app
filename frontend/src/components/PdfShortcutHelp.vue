@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-defineProps<{editingTools?:boolean}>()
+defineProps<{editingTools?:boolean;hideTrigger?:boolean}>()
 const dialog=ref<HTMLDialogElement|null>(null)
 const opener=ref<HTMLButtonElement|null>(null)
-function close(){dialog.value?.close();opener.value?.focus()}
+let returnFocus:HTMLElement|null=null
+function open(target:HTMLElement|null=opener.value){returnFocus=target;dialog.value?.showModal()}
+function close(){dialog.value?.close();returnFocus?.focus()}
+defineExpose({open})
 </script>
 <template>
-  <button ref="opener" class="text-tool" type="button" aria-label="PDF keyboard shortcuts" @click="dialog?.showModal()">Shortcuts</button>
-  <dialog ref="dialog" class="pdf-shortcut-dialog" aria-label="PDF keyboard shortcuts" @cancel.prevent="close" @keydown.stop @click="($event.target===dialog)&&close()">
+  <button v-if="!hideTrigger" ref="opener" class="text-tool" type="button" aria-label="PDF keyboard shortcuts" @click="open()">Shortcuts</button>
+  <dialog v-dismiss-outside ref="dialog" class="pdf-shortcut-dialog" aria-label="PDF keyboard shortcuts" @cancel.prevent="close" @keydown.stop>
     <header><h2>PDF keyboard shortcuts</h2><button class="btn secondary small" autofocus @click="close">Close shortcuts</button></header>
     <dl>
       <dt>Ctrl / ⌘ F</dt><dd>Find text in this PDF</dd>

@@ -52,8 +52,16 @@ test('B01C new design, exact findings, persisted review, measured output and rel
  await expect(panel).toContainText('Source 2 · Revision 1');await expect(page.getByRole('spinbutton',{name:'Go to page'})).toHaveValue('2')
  await panel.getByLabel('Review note').fill('Synthetic intentional blank page')
  await matrix(page,info,'ED34-finding')
+ const savedReview=page.waitForResponse(r=>r.request().method()==='PUT' && r.url().includes('/validation/findings/'))
  await panel.getByRole('button',{name:'Keep page & return'}).click()
+ const savedResponse=await savedReview
+ expect((await(await request.get(savedResponse.url(),{headers})).json()).review.note).toBe('Synthetic intentional blank page')
  await expect(preflight.getByLabel('Show',{exact:true})).toHaveValue('warning');await expect(preflight.getByRole('button',{name:'Review source 2'})).toBeFocused()
+ await preflight.getByRole('button',{name:'Review source 2'}).click()
+ await expect(panel.getByLabel('Review note')).toHaveValue('') // Recheck creates a new run; the note remains on its historical finding.
+ await page.locator('.application-status').getByRole('button',{name:'Return to Preflight',exact:true}).click()
+ await expect(preflight.getByLabel('Show',{exact:true})).toHaveValue('warning')
+ await expect(preflight.getByRole('button',{name:'Review source 2'})).toBeFocused()
  await page.locator('.matter-rail').getByRole('button',{name:'Build bundle',exact:true}).click()
  const workspace=page.locator('.build-workspace');await expect(workspace.getByRole('button',{name:'View output checks'})).toBeVisible()
  await workspace.getByRole('button',{name:'View output checks'}).click()

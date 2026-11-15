@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { ArrowLeft, ChevronLeft, ChevronRight, Scan, MoveHorizontal, File, Rows2 } from 'lucide-vue-next'
+import { ToggleGroupItem } from 'reka-ui'
+import AppChoiceGroup from './ui/AppChoiceGroup.vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { ArrowLeft, ChevronLeft, ChevronRight, Scan, MoveHorizontal, File, Rows2, ChevronDown, Keyboard } from 'lucide-vue-next'
 import { nextZoom, type ReaderMode } from '../lib/pdfReader'
+import AppPopover from './ui/AppPopover.vue'
 import PdfShortcutHelp from './PdfShortcutHelp.vue'
 const props = defineProps<{compact?:boolean,page:number,count:number,zoom:string,scale:number,mode:ReaderMode,busy?:boolean,canBack?:boolean,pageLabel?:string,editingTools?:boolean}>()
 const emit = defineEmits<{'update:page':[number], 'update:zoom':[string], 'update:mode':[ReaderMode], back:[]}>()
+const viewOpen=ref(false),viewPopover=ref<InstanceType<typeof AppPopover>|null>(null),shortcuts=ref<InstanceType<typeof PdfShortcutHelp>|null>(null)
+async function showShortcuts(){viewOpen.value=false;await nextTick();shortcuts.value?.open(viewPopover.value?.trigger()??null)}
 const percent = computed(() => Math.round(props.scale * 72 / 96 * 100))
 const pageDraft=ref(String(props.page))
 const enteringPage=ref(false)
@@ -34,9 +39,18 @@ function jump(event:Event) {
     <button class="icon-btn small" aria-label="Fit width" title="Fit width" @click="emit('update:zoom','fit-width')"><MoveHorizontal :size="16"/></button>
     <button class="icon-btn small" aria-label="Fit page" title="Fit page" @click="emit('update:zoom','fit-page')"><Scan :size="16"/></button>
 
-    <div v-if="!compact" class="reader-mode-switch" role="group" aria-label="Page display"><button class="btn secondary small" :class="{active:mode==='single'}" :aria-pressed="mode==='single'" @click="emit('update:mode','single')"><File :size="15"/> Single page</button><button class="btn secondary small" :class="{active:mode==='continuous'}" :aria-pressed="mode==='continuous'" @click="emit('update:mode','continuous')"><Rows2 :size="15"/> Continuous</button></div>
+    <AppChoiceGroup v-if="!compact" :model-value="mode" @update:model-value="emit('update:mode',$event)">
+      <div class="reader-mode-switch" role="group" aria-label="Page display"><ToggleGroupItem as-child value="single"><button class="btn secondary small" :class="{active:mode==='single'}"><File :size="15"/> Single page</button></ToggleGroupItem><ToggleGroupItem as-child value="continuous"><button class="btn secondary small" :class="{active:mode==='continuous'}"><Rows2 :size="15"/> Continuous</button></ToggleGroupItem></div>
+    </AppChoiceGroup>
     <slot name="actions"/>
-    <details class="reader-view-menu" @keydown.esc.stop.prevent="($event.currentTarget as HTMLDetailsElement).open=false; ($event.currentTarget as HTMLElement).querySelector('summary')?.focus()"><summary role="button" aria-label="View options">View</summary><div class="reader-view-options" @change="($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"><label>Reading mode     <select class="reading-mode-select" :value="mode" aria-label="Reading mode" @change="emit('update:mode',($event.target as HTMLSelectElement).value as ReaderMode)"><option value="single">Single page</option><option value="continuous">Continuous</option></select></label>    <button class="icon-btn small" aria-label="Back to previous reading position" title="Back to previous reading position" :disabled="!canBack || busy" @click="emit('back')"><ArrowLeft :size="16"/></button><PdfShortcutHelp :editing-tools="editingTools"/></div></details>
+    <AppPopover ref="viewPopover" v-model:open="viewOpen" class="reader-view-menu" label="View options" close-on-select>
+     <template #trigger><button type="button" class="reader-view-trigger" aria-label="View options"><ChevronDown :size="15"/>View</button></template>
+     <label>Reading mode<select class="reading-mode-select" :value="mode" aria-label="Reading mode" @change="emit('update:mode',($event.target as HTMLSelectElement).value as ReaderMode);viewOpen=false"><option value="single">Single page</option><option value="continuous">Continuous</option></select></label>
+     <div class="popup-divider"/>
+     <button type="button" aria-label="Back to previous reading position" :disabled="!canBack || busy" @click="emit('back')"><ArrowLeft :size="16"/>Previous reading position</button>
+     <button type="button" aria-label="PDF keyboard shortcuts" @click="showShortcuts"><Keyboard :size="16"/>Shortcuts</button>
+    </AppPopover>
+    <PdfShortcutHelp ref="shortcuts" hide-trigger :editing-tools="editingTools"/>
   </div>
 </template>
 <style scoped>

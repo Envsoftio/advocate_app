@@ -393,7 +393,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <dialog ref="dialog" class="page-organizer" aria-label="Organize pages" aria-describedby="organizer-description" @keydown.stop @cancel.prevent="requestClose">
+    <dialog v-dismiss-outside ref="dialog" class="page-organizer" aria-label="Organize pages" aria-describedby="organizer-description" @keydown.stop @cancel.prevent="requestClose">
       <header class="organizer-heading">
         <div><h2 id="organizer-title">{{currentDocument.original_name}}</h2><p class="organizer-document">Revision {{currentDocument.revision}} · {{selected.size}} {{selected.size===1?'page':'pages'}} selected · Imported original preserved</p></div>
         <button class="icon-btn" aria-label="Close page organizer" :disabled="working" @click="requestClose"><X :size="20"/></button>

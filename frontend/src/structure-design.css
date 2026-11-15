@@ -982,3 +982,39 @@
 .bookmark-hierarchy>summary{cursor:pointer;color:var(--cb-link)}
 .bookmark-hierarchy label{margin-top:12px}
 .destination-preview .placement-paper{height:464px;margin-top:28px}
+
+/* FLOW / 07: shared 11A/11B/11C table and recovery states. */
+.bundle-structure[data-mode="map"] .structure-tabs>.structure-cover-action{margin-left:auto}
+.bundle-structure[data-mode="map"] .structure-tabs>.structure-membership{margin-left:0;min-width:0}
+.bundle-structure[data-mode="map"] .structure-tabs>.membership-button{min-width:0}
+.structure-order .index-order-panel{display:flex;flex-direction:column;min-height:100%}
+.structure-order .index-order-list{flex:1}
+.index-order-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--cb-border);padding:8px 12px;color:var(--cb-muted);font-size:12px}
+.structure-map .page-map{display:flex;flex-direction:column;box-sizing:border-box;padding:16px 17px;min-height:100%}
+.structure-map .page-map>header{flex-shrink:0;min-height:64px}
+.structure-map .page-map th{height:38px;box-sizing:border-box;padding:8px 12px}
+.structure-map .page-map td{height:39px;box-sizing:border-box;padding:5px 12px}
+.structure-map .page-map-scroll{flex:1;min-height:180px}
+.structure-map .page-map footer{border-top:1px solid var(--cb-border);padding-top:12px;margin-top:24px}
+.structure-map .page-map footer p{margin:8px 0 0}
+.map-unresolved{background:var(--cb-warningBg);color:var(--cb-text-onPale);border-radius:8px;padding:12px;margin-top:20px}
+.map-unresolved>strong{display:flex;align-items:center;gap:10px}
+.map-unresolved p{font-size:12px;line-height:20px;margin:8px 0 12px;color:var(--cb-text-onPale)}
+.map-unresolved>div{display:flex;flex-wrap:wrap;gap:8px}
+.map-unresolved label{margin-top:12px;color:var(--cb-text-onPale)}
+.map-unresolved-target{color:var(--cb-text)}
+.bundle-structure :focus-visible{outline:2px solid var(--cb-focus);outline-offset:3px}
+@media(max-width:1199px){
+ .bundle-structure[data-mode="map"] .structure-tabs>.structure-cover-action{margin-left:0}
+ .structure-map .page-map>header{min-height:90px}
+ .structure-heading{flex-wrap:wrap}
+ .structure-heading>div{flex:1;min-width:220px}
+ .structure-map .page-map-scroll{flex:none}
+ .bookmark-editor{display:block}
+ .bookmark-editor .destination-preview{padding-bottom:20px}
+}
+/* Shared dark-shell text rules must not override ink on this pale warning. */
+:root .design-shell .map-unresolved>strong,
+:root .design-shell .map-unresolved>strong>svg,
+:root .design-shell .map-unresolved>p,
+:root .design-shell .map-unresolved>label{color:var(--cb-text-onPale)!important}

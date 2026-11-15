@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppPopover from './ui/AppPopover.vue'
 import { computed, ref, watch } from 'vue'
 import { ChevronDown, ChevronRight, FileText, GripVertical, ListFilter, Search, ArrowDownWideNarrow, PanelLeftClose, Plus, Ellipsis } from 'lucide-vue-next'
 import { VueDraggable } from 'vue-draggable-plus'
@@ -53,7 +54,7 @@ function reorder(value:number,ordered:MatterDocument[]){
       <p v-if="!documents.length" class="navigator-empty">Import a PDF or image to start preparing this matter.</p>
       <p v-else-if="!groups.some(group=>group.documents.length)" class="navigator-empty">No matching documents.</p>
     </div>
-    <div class="navigator-actions"><button class="text-tool" :disabled="busy" @click="emit('import')"><Plus :size="15"/> Import documents</button><details><summary class="icon-btn small" role="button" aria-label="More document list actions"><Ellipsis :size="17"/></summary><div class="navigator-menu" @click="($event.currentTarget as HTMLElement).closest('details')?.removeAttribute('open')"><button @click="emit('table')">Open table</button><button :disabled="busy" @click="emit('manageParts')">Manage Parts</button><button :disabled="busy" @click="emit('cover')">Generate draft cover</button><button @click="emit('searchPages')">Search page text / archived files</button></div></details></div>
+    <div class="navigator-actions"><button class="text-tool" :disabled="busy" @click="emit('import')"><Plus :size="15"/> Import documents</button><AppPopover label="Document list actions" close-on-select><template #trigger><button type="button" class="icon-btn small" aria-label="More document list actions"><Ellipsis :size="17"/></button></template><button @click="emit('table')">Open table</button><button :disabled="busy" @click="emit('manageParts')">Manage Parts</button><button :disabled="busy" @click="emit('cover')">Generate draft cover</button><button @click="emit('searchPages')">Search page text / archived files</button></AppPopover></div>
     <footer>{{documents.length}} documents · {{totalPages}} source pages</footer>
   </section>
 </template>

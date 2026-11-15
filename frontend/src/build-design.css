@@ -280,3 +280,52 @@
  .build-workspace[data-screen=settings] .build-setting-row>.membership-button {max-width:100%;width:100%}
  .build-workspace[data-screen=settings] .build-features>span {overflow-wrap:anywhere}
 }
+
+/* ED32 retains the immutable artifact reader and exposes its frozen context. */
+.design-shell .generated-review .artifact-info-panel {overflow-wrap:anywhere}
+.design-shell .generated-review .artifact-info-panel h4 {margin-top:24px}
+.design-shell .generated-review .artifact-info-panel p {line-height:20px}
+.design-shell .generated-review .artifact-info-panel .btn {margin-top:12px;white-space:normal}
+.design-shell .generated-review .export-review-document>.review-context-banner {margin:12px 16px 0;flex-shrink:0}
+
+/* FLOW / 06 ED32 editor entry; Build workspace keeps its 18A composition. */
+.design-shell .export-review.generated-review.editor-artifact-review[open] {inset:40px 0 28px var(--workspace-rail-width,64px);height:calc(100dvh / var(--ui-scale) - 68px);grid-template-columns:200px minmax(0,1fr);grid-template-rows:64px 44px 44px minmax(0,1fr) auto}
+.design-shell .editor-artifact-review:has(.artifact-info-panel) {grid-template-columns:200px minmax(0,1fr) 292px!important}
+.design-shell .editor-artifact-review .generated-header {grid-column:1 / -1;grid-row:1;border-bottom:1px solid var(--cb-border)}
+.design-shell .editor-artifact-review>.artifact-modebar {grid-column:1 / -1;grid-row:2;display:flex;align-items:center;gap:16px;padding:0 20px;border-bottom:1px solid var(--cb-border)}
+.design-shell .editor-artifact-review>.reader-navigation {grid-column:1 / -1;grid-row:3}
+.design-shell .editor-artifact-review .artifact-navigation {grid-row:4;grid-column:1;width:200px}
+.design-shell .editor-artifact-review .artifact-info-panel {grid-row:4;grid-column:3;width:292px}
+.design-shell .editor-artifact-review>.generated-page-context {display:none}
+.design-shell .editor-artifact-review .generated-stale-bar {grid-column:1 / -1}
+.design-shell .editor-artifact-review.artifact-focused {grid-template-columns:0 minmax(0,1fr)}
+@media(max-width:1100px){
+ .design-shell .editor-artifact-review:has(.artifact-info-panel) {grid-template-columns:160px minmax(0,1fr) 240px!important}
+ .design-shell .editor-artifact-review .artifact-navigation {width:160px}
+ .design-shell .editor-artifact-review .artifact-info-panel {width:240px}
+ .design-shell .editor-artifact-review>.artifact-modebar {gap:8px;overflow:auto}
+}
+@media(max-width:850px){
+ .design-shell .export-review.generated-review.editor-artifact-review[open],.design-shell .editor-artifact-review:has(.artifact-info-panel) {grid-template-columns:minmax(0,1fr)!important}
+ .design-shell .editor-artifact-review .export-review-document {grid-column:1}
+ .design-shell .editor-artifact-review .artifact-navigation,.design-shell .editor-artifact-review .artifact-info-panel {grid-column:1;width:220px}
+}
+.design-shell .editor-artifact-review .generated-version {box-sizing:border-box;height:24px;min-height:24px;max-height:24px;padding:0 8px;line-height:22px}
+/* Override the older compact 18A overlay rules for the editor's docked panels. */
+.design-shell .generated-review.editor-artifact-review .export-review-document {grid-column:2}
+.design-shell .generated-review.editor-artifact-review .artifact-navigation {grid-column:1;max-width:none;box-shadow:none}
+.design-shell .generated-review.editor-artifact-review .artifact-info-panel {grid-column:3;max-width:none;box-shadow:none;width:292px}
+.design-shell .generated-review.editor-artifact-review:has(.export-review-content:not(.navigation-open)):has(.artifact-info-panel) {grid-template-columns:0 minmax(0,1fr) 292px!important}
+.design-shell .generated-review.editor-artifact-review:has(.export-review-content:not(.navigation-open)):not(:has(.artifact-info-panel)) {grid-template-columns:0 minmax(0,1fr)!important}
+.design-shell .generated-review .artifact-info-panel .finding-recheck,
+.design-shell .generated-review .artifact-info-panel .finding-recheck p,
+.design-shell .generated-review .artifact-info-panel .finding-recheck strong {color:var(--cb-status-warning-text)}
+@media(min-width:851px) and (max-width:1100px){
+ .design-shell .generated-review.editor-artifact-review .artifact-info-panel {width:240px}
+ .design-shell .generated-review.editor-artifact-review:has(.export-review-content:not(.navigation-open)):has(.artifact-info-panel) {grid-template-columns:0 minmax(0,1fr) 240px!important}
+}
+@media(max-width:850px){
+ .design-shell .generated-review.editor-artifact-review .export-review-document {grid-column:1}
+ .design-shell .generated-review.editor-artifact-review .artifact-info-panel {grid-column:1;width:min(240px,78%);box-shadow:-12px 0 24px #0002}
+ .design-shell .generated-review.editor-artifact-review:has(.export-review-content:not(.navigation-open)):has(.artifact-info-panel) {grid-template-columns:minmax(0,1fr)!important}
+}

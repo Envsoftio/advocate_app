@@ -29,7 +29,7 @@ onMounted(()=>{returnFocus=document.activeElement as HTMLElement;dialog.value?.s
 onBeforeUnmount(()=>{dialog.value?.close();void nextTick(()=>returnFocus?.isConnected&&returnFocus.focus())})
 </script>
 <template>
- <dialog ref="dialog" class="bundle-export-dialog" aria-labelledby="bundle-export-title" @cancel.prevent="close">
+ <dialog v-dismiss-outside ref="dialog" class="bundle-export-dialog" aria-labelledby="bundle-export-title" @cancel.prevent="close">
   <header><h2 id="bundle-export-title">Export bundle files</h2><button class="icon-btn" :disabled="pending" aria-label="Close export" @click="close"><X :size="18"/></button></header>
   <div class="build-badges"><span>Build {{artifact.id.slice(0,8)}} · {{artifact.stale?'Stale':'Saved'}}</span><span class="warning">{{qa?.can_release?'Human review recorded':'Human review pending'}}</span></div>
   <label>Destination<div class="export-destination">{{inTauri()?'Choose a location in the system Save dialog':'Browser downloads · location managed by your browser'}}</div></label>

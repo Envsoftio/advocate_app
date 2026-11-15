@@ -15,7 +15,7 @@ async function enter(page:any,expectedCount=3){page.on('pageerror',(e:Error)=>{t
  await page.getByRole('button',{name:'Sort',exact:true}).click();
  await expect(page.locator('.batch-table tbody tr')).toHaveCount(expectedCount);
  await page.evaluate(()=>document.fonts.ready)}
-async function suggestions(page:any){await page.locator('.batch-tools-menu>summary').click();await page.getByRole('button',{name:'Review title & dates',exact:true}).click();
+async function suggestions(page:any){await page.locator('.batch-tools-menu>button').click();await page.getByRole('button',{name:'Review title & dates',exact:true}).click();
  await expect(page.locator('.metadata-source-page img')).toBeVisible()}
 async function matrix(page:any,info:any,name:string){for(const size of [{width:1440,height:900},{width:1024,height:768}])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){await page.setViewportSize(size);
  await page.evaluate(({theme,scale})=>{document.documentElement.dataset.theme=theme;document.documentElement.dataset.effectiveTheme=theme;document.documentElement.style.setProperty('--ui-scale',String(scale/100));(document.querySelector('.app-shell') as HTMLElement).style.setProperty('--documents-interface-scale',String(scale/100));document.documentElement.style.zoom=scale+'%'},{theme,scale});
@@ -33,26 +33,26 @@ test('Batch review filters, resizes columns and dismisses menus outside',async({
  await expect(register.locator('.batch-table tbody tr')).toHaveCount(1)
  await expect(register.getByText('1 selected',{exact:true})).toHaveAttribute('title','0 visible in this filter')
  await register.getByRole('button',{name:'Filters'}).click()
- await register.getByRole('combobox',{name:'Filter by Part'}).selectOption('2')
+ await page.getByRole('combobox',{name:'Filter by Part'}).selectOption('2')
  await expect(register.locator('.batch-table tbody tr')).toHaveCount(0)
- await register.getByRole('combobox',{name:'Filter by Part'}).selectOption('1')
+ await page.getByRole('combobox',{name:'Filter by Part'}).selectOption('1')
  await expect(register.locator('.batch-table tbody tr')).toHaveCount(1)
- await register.getByRole('combobox',{name:'Filter by type'}).selectOption('affidavit')
+ await page.getByRole('combobox',{name:'Filter by type'}).selectOption('affidavit')
  await expect(register.locator('.batch-table tbody tr')).toHaveCount(0)
- await register.getByRole('combobox',{name:'Filter by type'}).selectOption('')
- await register.getByRole('combobox',{name:'Filter by status'}).selectOption('needs_ocr')
+ await page.getByRole('combobox',{name:'Filter by type'}).selectOption('')
+ await page.getByRole('combobox',{name:'Filter by status'}).selectOption('needs_ocr')
  await expect(register.locator('.batch-table tbody tr')).toHaveCount(0)
- await register.getByRole('combobox',{name:'Filter by status'}).selectOption('needs_review')
+ await page.getByRole('combobox',{name:'Filter by status'}).selectOption('needs_review')
  await expect(register.locator('.batch-table tbody tr')).toHaveCount(1)
- await register.getByRole('button',{name:'Clear filters'}).click()
+ await page.getByRole('button',{name:'Clear filters'}).click()
  await expect(register.locator('.batch-table tbody tr')).toHaveCount(3)
  await register.getByRole('button',{name:'Filters'}).click()
  await register.getByRole('heading',{name:'Batch review'}).click()
- await expect(register.locator('#batch-filter-panel')).toHaveCount(0)
+ await expect(page.locator('.app-popover.batch-filter-panel')).toHaveCount(0)
  await register.getByRole('button',{name:'Columns'}).click()
- await expect(register.locator('#batch-columns-panel')).toBeVisible()
+ await expect(page.locator('.app-popover.batch-columns')).toBeVisible()
  await register.getByRole('heading',{name:'Batch review'}).click()
- await expect(register.locator('#batch-columns-panel')).toHaveCount(0)
+ await expect(page.locator('.app-popover.batch-columns')).toHaveCount(0)
  const titleColumn=register.locator('.batch-table th').filter({hasText:'Title'})
  const before=(await titleColumn.boundingBox())!.width
  const handle=register.getByRole('button',{name:'Resize Title column'})
@@ -67,10 +67,10 @@ test('Batch review filters, resizes columns and dismisses menus outside',async({
  await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click()
  await page.getByRole('button',{name:'Sort',exact:true}).click()
  await expect.poll(async()=>(await page.locator('.batch-table th').filter({hasText:'Title'}).boundingBox())!.width).toBeGreaterThan(after-2)
- await page.locator('.batch-row-menu summary').first().click()
- await expect(page.locator('.batch-row-menu[open]')).toHaveCount(1)
+ await page.locator('.batch-row-menu>button').first().click()
+ await expect(page.locator('.batch-row-menu:has(>button[aria-expanded="true"])')).toHaveCount(1)
  await page.getByRole('heading',{name:'Batch review'}).click()
- await expect(page.locator('.batch-row-menu[open]')).toHaveCount(0)
+ await expect(page.locator('.batch-row-menu:has(>button[aria-expanded="true"])')).toHaveCount(0)
 })
 test('Batch review OCR filter finds an image-only source',async({page,request})=>{
  const {matter}=await seed(request)
@@ -109,8 +109,8 @@ test('Batch review explains and applies the two selected-row controls',async({pa
  const title=register.getByLabel(`Title for ${docs[0].original_name}`)
  await title.fill('Temporary title');await title.press('Escape')
  await expect(title).toHaveValue(docs[0].title)
- await register.locator('.batch-tools-menu>summary').click()
- await register.getByRole('button',{name:'More tools'}).click()
+ await register.locator('.batch-tools-menu>button').click()
+ await page.getByRole('button',{name:'More tools'}).click()
  await register.getByRole('button',{name:'Preview order',exact:true}).click()
  await expect(register.getByRole('dialog',{name:'Sort preview'})).toBeVisible()
  await register.getByRole('heading',{name:'Batch review'}).click()
@@ -237,7 +237,7 @@ test('B02C new batch and suggestion layouts, explicit one-field acceptance and p
  expect((await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json())[0].document_date).toBe(docs[0].document_date);
  await page.getByRole('button',{name:'Back to batch review',exact:true}).click();
  await expect(page.getByLabel(`Title for ${docs[0].original_name}`,{exact:true})).toHaveValue('Reviewed order title');
- await expect(page.locator('.batch-tools-menu')).not.toHaveAttribute('open');
+ await expect(page.locator('.batch-tools-menu>button')).toHaveAttribute('aria-expanded','false');
  await page.reload();await enterLatestMatter(page);
  await page.locator('.matter-rail').getByRole('button',{name:'Documents',exact:true}).click();
  await page.getByRole('button',{name:'Sort',exact:true}).click();
@@ -283,6 +283,14 @@ test('B02C counts, empty filters, late source responses and compact keyboard rev
  await enter(page)
  await suggestions(page)
  await expect(page.getByRole('button',{name:'All suggestions · 6',exact:true})).toBeVisible()
+ const allFilter=page.getByRole('button',{name:'All suggestions · 6',exact:true})
+ await allFilter.focus();await page.keyboard.press('End')
+ await expect(page.getByRole('button',{name:/Uncertain date ·/})).toBeFocused()
+ await page.keyboard.press('Space');await expect(page.locator('.suggestion-table tbody tr')).toHaveCount(2)
+ await page.keyboard.press('Space');await expect(page.getByRole('button',{name:/Uncertain date ·/})).toHaveAttribute('aria-pressed','true')
+ await page.keyboard.press('Home');await expect(allFilter).toBeFocused()
+ await page.keyboard.press('Enter')
+
  await page.getByRole('button',{name:/Uncertain date ·/}).click()
  await expect(page.locator('.suggestion-table tbody tr')).toHaveCount(2)
  await page.getByRole('button',{name:'All suggestions · 6',exact:true}).click()

@@ -65,3 +65,9 @@
 @media(max-width:850px){.preflight-summary {height:auto}.output-checks-dialog {height:calc(100dvh / var(--ui-scale) - 40px)}.finding-review-panel {top:auto}}
 
 .preflight-findings [data-severity=info] svg {color:var(--cb-muted)}
+
+/* ED34 docks beside the canvas, leaving the document header full width. */
+.design-shell[data-finding=true] .read-workspace {margin-right:0}
+.design-shell[data-finding=true] .read-workspace:not(.focused-reading)>.viewer-edit-workspace {margin-right:292px}
+@media(max-width:1100px){.design-shell[data-finding=true] .read-workspace:not(.focused-reading)>.viewer-edit-workspace {margin-right:240px}}
+@media(max-width:850px){.design-shell[data-finding=true] .read-workspace:not(.focused-reading)>.viewer-edit-workspace {margin-right:0}}

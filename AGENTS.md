@@ -15,3 +15,5 @@
 - For new implementation tickets, carry authorized work through implementation, verification and handoff in one pass; do not stop after scaffolding. Mark a ticket complete only when its stated acceptance checks pass.
 
 - UI work must use the supplied scoped design as the layout source. Preserve capabilities and data, not the legacy layout. Verify rendered screenshots against the reference viewport before marking a UI task complete; do not defer visual fidelity to later feature tasks. See `docs/DESIGN_PHASE02D_UI_CORRECTION.md`.
+
+- Prefer unstyled Reka UI primitives for suitable shared interactions. Reuse `components/ui` wrappers and `as-child` to retain the supplied layout, existing DOM styling hooks, tokens, fonts and spacing. Preserve required selections, workflow guards and native control behavior; do not add a theme/reset or replace native controls solely for library coverage. Verify keyboard behavior and rendered light/dark layouts after adoption.

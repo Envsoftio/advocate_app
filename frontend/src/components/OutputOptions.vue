@@ -25,7 +25,7 @@ defineExpose({saveDraft,discard})
 </script>
 <template>
  <Teleport to="body">
- <dialog ref="dialog" class="output-options" aria-labelledby="output-options-title" @cancel.prevent="close" @keydown="keydown">
+ <dialog v-dismiss-outside ref="dialog" class="output-options" aria-labelledby="output-options-title" @cancel.prevent="close" @keydown="keydown">
   <header><h2 id="output-options-title">Output options</h2><button class="icon-btn" aria-label="Close output options" :disabled="saving" @click="close"><X :size="16"/></button></header>
   <p class="output-intro">Choose processing for the next generated bundle. Imported originals stay preserved.</p>
   <div class="output-scroll">

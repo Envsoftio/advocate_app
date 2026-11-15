@@ -68,6 +68,8 @@ test('clicking a saved comment opens its editor properties and on-page read popo
   await openWorkspaceNavigation(page)
   await page.getByRole('combobox',{name:'Theme'}).selectOption('dark')
   await closeWorkspaceNavigation(page)
+  await expect(popover).toBeHidden()
+  await comment.click()
   await expect(popover).toContainText('Check this date again')
   await page.screenshot({path:test.info().outputPath('comment-document-popover-dark.png'),animations:'disabled'})
   await comment.click()

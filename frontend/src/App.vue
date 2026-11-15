@@ -749,8 +749,9 @@ async function returnToPreflight() {
   tab.view = context.outputBuildId ? 'build' : 'validation';
   await activateTab(tab);
   if (activeTabId.value !== tab.id) return;
-  pendingFindingFocusId = context.focusId;
   await validate();
+  if (activeTabId.value !== tab.id || currentMatterId.value !== context.matterId) return;
+  pendingFindingFocusId = context.focusId;
   if(context.outputBuildId) {
     // Source edits cannot repair an immutable output. Recheck its actual bytes,
     // retaining the originating historical run/selection for review.
@@ -903,7 +904,9 @@ function openExports() {
 }
 let pendingFindingFocusId: string | null = null;
 function restoreFindingFocus() {
-  if (!pendingFindingFocusId || activeView.value !== 'validation') return;
+  if (!pendingFindingFocusId || activeView.value !== 'validation' || checksLoading.value) return;
+  // An outgoing/entering workspace can still contain a soon-to-be-replaced row.
+  if (document.querySelector('.section-enter-active, .section-leave-active')) return;
   const entry = document.getElementById(pendingFindingFocusId);
   if (entry) { entry.focus(); pendingFindingFocusId = null; }
   else {
@@ -3589,6 +3592,10 @@ watch(sidebarCollapsed, (collapsed) => {
                 <PdfViewer
                   ref="pdfViewer"
                   :key="currentMatterId || 'none'"
+                  :stale-build="activeExport?.stale ? {id:activeExport.id,revision:activeExport.input_revisions?.find(item=>item.document_id===selectedDoc?.id)?.revision} : undefined"
+                  :finding-context="preflightContext && selectedDoc ? `${selectedDoc.title} · Source ${(preflightContext.finding.page_index ?? 0)+1} / ${selectedDoc.page_count}` : undefined"
+                  @rebuild="showView('build')"
+                  @review-previous="activeExport && reviewGeneratedPdf(activeExport.id,'combined.pdf')"
                   :preparation="preparationVisible"
                   :expanded="editorExpanded"
                   @toggle-expanded="toggleEditorExpanded"
@@ -3870,7 +3877,7 @@ watch(sidebarCollapsed, (collapsed) => {
               :matter-id="currentMatterId!" :documents="docs" :refresh-key="previewRefreshKey" :initial-mode="structureMode" :build-origin="!!buildStructureOrigin" @return-build="returnToBuildSettings" :bookmark-preset="bookmarkPreset"
               :disabled="engineBlocked || busy || isJobActive || documentDirty || settingsDirty"
               @dirty-changed="formattingDirty=$event" @modified="structureModified" @membership="openMembership"
-              @build="showView('build')" @policy="openStructurePolicy" @variants="showView('variants')">
+              @build="showView('build')" @preflight="showView('validation')" @policy="openStructurePolicy" @variants="showView('variants')">
               <template #order>              <section
                 v-if="docs.length"
                 class="panel index-order-panel"
@@ -3925,9 +3932,10 @@ watch(sidebarCollapsed, (collapsed) => {
                     ><span>{{ doc.page_count }}</span></div>
                   </div></VueDraggable
                 >
+                <footer class="index-order-footer"><button class="membership-button quiet" :disabled="engineBlocked||busy||isJobActive||documentDirty||settingsDirty||formattingDirty" @click="openPartManager">Manage Parts</button><span>{{includedDocuments.length}} included</span></footer>
               </section>
 </template>
-              <template #map="{recalculateKey}">              <BundlePreview
+              <template #map="{recalculateKey,reviewBookmark,stateChanged}">              <BundlePreview
                   :inputs-pending="engineBlocked || busy || isJobActive || checksLoading || documentDirty || settingsDirty || formattingDirty"
                 :matter-id="currentMatterId!"
                 :documents="docs" :recalculate-key="recalculateKey"
@@ -3935,7 +3943,7 @@ watch(sidebarCollapsed, (collapsed) => {
                 :keep-groups="matterEditor.keep_groups_intact"
                 :refresh-key="previewRefreshKey"
                 @open-document="openPreviewDocument"
-                @bookmark-document="prepareIndexBookmark"
+                @bookmark-document="prepareIndexBookmark" @review-bookmark="reviewBookmark" @state-changed="stateChanged"
               />
 </template>
               <template #import>              <IndexImport
@@ -4261,7 +4269,7 @@ watch(sidebarCollapsed, (collapsed) => {
       </Transition>
     </div>
     <div v-if="matterDetailsOpen && currentMatter" class="modal-backdrop" @click.self="matterDetailsOpen=false"><section class="modal-card matter-details-dialog" role="dialog" aria-modal="true" aria-label="Matter details" @keydown.tab="trapNavigationFocus" @keydown.esc="matterDetailsOpen=false"><header class="modal-head"><h2>Matter details</h2><button class="icon-btn" aria-label="Close matter details" @click="matterDetailsOpen=false"><X :size="18"/></button></header><dl class="overview-context"><dt>Matter</dt><dd>{{currentMatter.name}}</dd><dt>Court / forum</dt><dd>{{currentMatter.court_forum||'Not entered'}}</dd><dt>Case number</dt><dd>{{currentMatter.case_number||'Not entered'}}</dd><dt>Client / party reference</dt><dd>{{currentMatter.client_reference||'Not entered'}}</dd><dt>Internal reference</dt><dd>{{currentMatter.internal_reference||'Not entered'}}</dd><dt>Notes</dt><dd>{{currentMatter.notes||'Not entered'}}</dd><dt>Petitioner</dt><dd>{{currentMatter.petitioner||'Not entered'}}</dd><dt>Respondent</dt><dd>{{currentMatter.respondent||'Not entered'}}</dd><dt>Advocate</dt><dd>{{currentMatter.advocate||'Not entered'}}</dd><dt>Court profile</dt><dd>{{selectedProfile?.name}}</dd></dl><section aria-label="Desktop file tools" class="workspace-actions"><button class="btn secondary" @click="matterDetailsOpen=false;showPreparation()">PDF tools &amp; print</button><button class="btn secondary" @click="matterDetailsOpen=false;showView('storage')">Local storage</button><button class="btn secondary" @click="matterDetailsOpen=false;openExports()">Office exports</button><button class="btn secondary" :disabled="busy" @click="backupCurrentMatter">Back up matter</button><button class="btn secondary" :disabled="busy" @click="matterDetailsOpen=false;removeMatter()">Archive matter</button><button class="btn secondary" :disabled="busy" @click="confirmDiscardDrafts() && loadMatterResources()">Refresh</button></section></section></div>
-    <footer class="application-status"><button v-if="matterContext && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="variantContext||supplementContext||inclusionSummary">{{variantContext?'Variant membership':supplementContext?'Supplement membership':'Bundle membership'}}</button><span v-if="variantContext">{{variantContext}}</span><span v-if="supplementContext">{{supplementContext}}</span><span v-if="matterContext" class="membership-status-step">{{activeView==='import'||activeView==='overview'&&!docs.length?'01 / 06 · Add documents':activeView==='overview'||activeView==='documents'?'02 / 06 · Review documents':activeView==='index'||activeView==='variants'?'03 / 06 · Prepare index':activeView==='validation'?'04 / 06 · Technical checks':activeView==='build'?'05 / 06 · Build and review':'06 / 06 · Saved packages'}}</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="matterContext" class="text-tool" @click="membershipOpen ? leaveMembership() : showPreparation()">{{membershipOpen ? 'Return to caller' : 'Back to preparation'}}</button></footer>
+    <footer class="application-status"><button v-if="matterContext && !membershipOpen" class="membership-status-entry" @click="openMembership" :title="variantContext||supplementContext||inclusionSummary">{{variantContext?'Variant membership':supplementContext?'Supplement membership':'Bundle membership'}}</button><span v-if="variantContext">{{variantContext}}</span><span v-if="supplementContext">{{supplementContext}}</span><span v-if="matterContext" class="membership-status-step">{{activeView==='import'||activeView==='overview'&&!docs.length?'01 / 06 · Add documents':activeView==='overview'||activeView==='documents'?'02 / 06 · Review documents':activeView==='index'||activeView==='variants'?'03 / 06 · Prepare index':activeView==='validation'?'04 / 06 · Technical checks':activeView==='build'?'05 / 06 · Build and review':'06 / 06 · Saved packages'}}</span><span><HardDrive :size="13"/> {{engineBlocked ? 'Engine disconnected' : membershipOpen ? 'On this computer' : 'Processing locally'}}</span><span v-if="selectedDoc && activeView==='documents' && !membershipOpen"><template v-if="reviewingPdf">{{reviewingPdf.originalId ? 'Imported original preserved · Read only' : 'Generated output · Read only'}}</template><template v-else>Working revision {{selectedDoc.revision}} · {{selectedDoc.page_count}} source pages</template></span><button v-if="matterContext" class="text-tool" @click="membershipOpen ? leaveMembership() : preflightContext && activeView==='documents' ? returnToPreflight() : showPreparation()">{{membershipOpen ? 'Return to caller' : preflightContext && activeView==='documents' ? 'Return to Preflight' : 'Back to preparation'}}</button></footer>
     <div v-if="ocrOptionsOpen && selectedDoc" class="flow02-modal-scrim" @keydown.esc.stop.prevent="closeOcrOptions">
       <section ref="ocrOptionsPanel" class="flow02-ocr-options" role="dialog" aria-modal="true" aria-label="OCR options" @keydown.tab="trapNavigationFocus">
         <header><h2>Run OCR</h2><p>{{selectedDoc.original_name}} · {{selectedDoc.page_count}} source {{selectedDoc.page_count===1?'page':'pages'}}</p></header>
@@ -4271,14 +4279,13 @@ watch(sidebarCollapsed, (collapsed) => {
         <footer><button class="btn secondary" @click="closeOcrOptions">Cancel</button><button class="btn primary" :disabled="engineBlocked || isJobActive" @click="startOcrOptions">Start OCR</button></footer>
       </section>
     </div>
-    <dialog
+    <dialog v-dismiss-outside
       v-if="selectedDoc && pageToolsOpen"
       ref="pageToolsDialog"
       class="page-tools-dialog"
       aria-labelledby="page-tools-title"
       @keydown.stop
       @close="pageToolsOpen = false"
-      @click.self="pageToolsOpen = false"
     >
       <div class="page-tools-dialog-head">
         <div>
@@ -4318,6 +4325,7 @@ watch(sidebarCollapsed, (collapsed) => {
     <ExportPdfReview
       v-if="reviewingPdf && currentMatterId"
       :matter-id="currentMatterId"
+      :editor-review="activeView==='documents' && !preparationVisible"
       :export-id="reviewingPdf.exportId"
       :filename="reviewingPdf.filename"
       :original-id="reviewingPdf.originalId"

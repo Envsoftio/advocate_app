@@ -64,7 +64,7 @@ test('JSON preparation matches 05A and preserves document context in the editor'
  const saved=(await(await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json()).find((d:any)=>d.id===documents[1].id);expect(saved.source_sha256).toBe(documents[1].source_sha256);expect(saved.notes).toBe('Synthetic source checked against the working copy.')
  await nav.getByRole('button',{name:'Sort',exact:true}).click()
  await expect(page.getByRole('region',{name:'Editable document table'}).getByRole('textbox',{name:/^Title for Affidavit/})).toHaveValue('Reviewed synthetic affidavit')
- await page.locator('.batch-tools-menu>summary').click()
+ await page.locator('.batch-tools-menu>button').click()
  await page.getByRole('button',{name:'Close table',exact:true}).click()
  await expect(page.getByRole('button',{name:'Open editor',exact:true})).toBeVisible()
  for(const width of [1440,1024])for(const theme of ['light','dark'])for(const scale of [90,100,110,125]){

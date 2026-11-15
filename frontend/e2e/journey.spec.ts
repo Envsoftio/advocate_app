@@ -305,8 +305,8 @@ test('document table preserves explicit selection and previews batch ordering be
   await expect(register.getByText('2 selected', { exact: true })).toBeVisible()
   await register.getByRole('searchbox', { name: 'Filter rows' }).fill('impugned')
   await expect(register.getByText('2 selected', {exact:true})).toHaveAttribute('title','1 visible in this filter')
-  await register.locator('.batch-tools-menu>summary').click()
-  await register.getByRole('button',{name:'More tools',exact:true}).click()
+  await register.locator('.batch-tools-menu>button').click()
+  await page.getByRole('button',{name:'More tools',exact:true}).click()
 
   await register.getByRole('combobox', { name: 'Set selected document type',exact:true }).selectOption('annexure')
   await register.getByRole('combobox', { name: 'Set selected Part',exact:true }).selectOption('2')
@@ -325,8 +325,8 @@ test('document table preserves explicit selection and previews batch ordering be
     doc.kind === 'other' && doc.part === 1 && doc.group_key === '')).toBeTruthy()
 
   await register.getByRole('searchbox', { name: 'Filter rows' }).fill('')
-  await register.locator('.batch-tools-menu>summary').click()
-  await register.getByRole('button',{name:'More tools',exact:true}).click()
+  await register.locator('.batch-tools-menu>button').click()
+  await page.getByRole('button',{name:'More tools',exact:true}).click()
   await register.getByRole('combobox', { name: 'Order method' }).selectOption('filename')
   await register.getByRole('button', { name: 'Preview order', exact: true }).click()
   const preview = register.getByRole('dialog', { name: 'Sort preview' })
@@ -343,14 +343,14 @@ test('document table preserves explicit selection and previews batch ordering be
   expect(sorted.map((doc:{original_name:string}) => doc.original_name)).toEqual([
     '01_petition.pdf', '02_impugned_order.pdf', '03_affidavit.pdf'])
 
-  await register.locator('.batch-tools-menu>summary').click()
-  await register.getByRole('button',{name:'More tools',exact:true}).click()
+  await register.locator('.batch-tools-menu>button').click()
+  await page.getByRole('button',{name:'More tools',exact:true}).click()
   const petitionRow = register.locator('tr', { hasText: '01_petition.pdf' })
   await petitionRow.locator('input[type="date"]').fill('2026-10-16')
   const dateSaved = page.waitForResponse(response => response.url().includes('/metadata-review') &&
     response.request().method() === 'PUT')
-  await petitionRow.locator('summary').click()
-  await petitionRow.getByRole('button', { name: 'Save row' }).click()
+  await petitionRow.locator('.batch-row-menu>button').click()
+  await page.locator('.app-popover').getByRole('button', { name: 'Save row' }).click()
   expect((await dateSaved).ok()).toBeTruthy()
   const dated = await (await request.get(`${backend}/matters/${matterId}/documents`, { headers })).json()
   const petition = dated.find((doc:{original_name:string}) => doc.original_name === '01_petition.pdf')
@@ -380,15 +380,15 @@ test('label proposal preview cancels cleanly and applies one undoable grouped ma
   await page.getByRole('button', { name: 'Open table' }).click()
   const register = page.getByRole('region', { name: 'Editable document table' })
   const designatedParent = register.locator('tr', { hasText: '02_impugned_order.pdf' })
-  await designatedParent.locator('summary').click()
-  await designatedParent.getByRole('combobox', { name: 'Hierarchy',exact:true })
+  await designatedParent.locator('.batch-row-menu>button').click()
+  await page.locator('.app-popover').getByRole('combobox', { name: 'Hierarchy',exact:true })
     .selectOption('parent')
-  await designatedParent.getByRole('button', { name: 'Save row' }).click()
+  await page.locator('.app-popover').getByRole('button', { name: 'Save row' }).click()
   await expect(register.locator('.batch-savebar .saved')).toHaveText('All changes saved')
   await expect(page.locator('.design-shell>.toast.success')).toContainText('Changes saved locally')
   await register.getByRole('checkbox', { name: 'Select all filtered documents' }).check()
-  await register.locator('.batch-tools-menu>summary').click()
-  await register.getByRole('button',{name:'More tools',exact:true}).click()
+  await register.locator('.batch-tools-menu>button').click()
+  await page.getByRole('button',{name:'More tools',exact:true}).click()
   await register.getByRole('combobox', { name: 'Method', exact: true }).selectOption('grouped_suffix')
   await register.getByRole('combobox', { name: 'Suffix style' }).selectOption('upper_alpha')
   await register.getByRole('textbox', { name: 'Separator' }).fill('.')
@@ -566,6 +566,8 @@ test('manual bookmark survives reload and shows revision review', async ({ page,
 })
 
 test('index preview updates with draft volume cap and opens the source document', async ({ page, request }) => {
+  const pageErrors:string[]=[]
+  page.on('pageerror',error=>pageErrors.push(error.message))
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Index Preview', court_profile: 'general-demo', max_pages_per_volume: 10,
   } })
@@ -622,8 +624,13 @@ test('index preview updates with draft volume cap and opens the source document'
   await openReaderView(page)
   await review.getByRole('combobox',{name:'Reading mode'}).selectOption('continuous')
   await expect(review.locator('.canvas-scroll')).toHaveClass(/continuous-reader/)
+  await openReaderView(page)
+  await expect(review.locator('.app-popover')).toBeVisible()
+  const menuBounds=(await review.locator('.app-popover').boundingBox())!,reviewBounds=(await review.boundingBox())!
+  expect(menuBounds.x).toBeGreaterThanOrEqual(reviewBounds.x);expect(menuBounds.y+menuBounds.height).toBeLessThanOrEqual(reviewBounds.y+reviewBounds.height)
   await review.getByRole('button', { name: 'Close review' }).click()
   await expect(review).toBeHidden()
+  expect(pageErrors).toEqual([])
 })
 
 test('bookmark the current PDF page while preparing a matter', async ({ page, request }) => {
@@ -1314,12 +1321,12 @@ test('reviewed link and output-mark preview persist through the matter workspace
   await expect(paper).toBeVisible()
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
   // Wait for the paper's actionability after opening a tool changes panel width.
-  await paper.click({trial:true,position:{x:90,y:12}})
+  await paper.click({trial:true,position:{x:90,y:130}})
   const bounds = await paper.boundingBox()
   expect(bounds).toBeTruthy()
-  await page.mouse.move(bounds!.x + 90, bounds!.y + 12)
+  await page.mouse.move(bounds!.x + 90, bounds!.y + 130)
   await page.mouse.down()
-  await page.mouse.move(bounds!.x + 230, bounds!.y + 47, {steps:5})
+  await page.mouse.move(bounds!.x + 230, bounds!.y + 165, {steps:5})
   await page.mouse.up()
   await page.getByRole('textbox', {name:'Readable label'}).fill('Open supporting order')
   await page.getByRole('combobox', {name:'Target document'}).selectOption(documents[1].id)
@@ -1348,6 +1355,7 @@ test('reviewed link and output-mark preview persist through the matter workspace
 })
 
 test('appearance persists and keyboard search respects text editing', async ({ page, request }) => {
+  await page.setViewportSize({width:1440,height:900})
   const created = await request.post(`${backend}/matters`, { headers, data: {
     name: 'E2E Appearance Matter', court_profile: 'delhi-hc-illustrative',
     case_type: 'Synthetic demonstration', max_pages_per_volume: 10,
@@ -1926,6 +1934,8 @@ test('portable matter backup restores a separate local copy', async ({ page, req
 })
 
 test('archived document and matter remain recoverable', async ({ page, request }) => {
+  const pageErrors:string[]=[]
+  page.on('pageerror',error=>pageErrors.push(error.message))
   for (let index = 0; index < 30; index++) {
     const extra = await request.post(`${backend}/matters`, { headers, data: {
       name: `Archive sidebar fixture ${index}`, court_profile: 'general-demo',
@@ -1962,6 +1972,7 @@ test('archived document and matter remain recoverable', async ({ page, request }
   await page.getByRole('button',{name:'Restore E2E Archive Matter',exact:true}).click()
   await expect(page.locator('.open-workspace-tab.active .open-workspace-tab-select:visible, .application-matter:visible').filter({hasText:'E2E Archive Matter'})).toBeVisible()
   await expect(page.locator('.doc-item')).toHaveCount(1)
+  expect(pageErrors).toEqual([])
 })
 
 test('undo and redo metadata persist across browser reload', async ({ page, request }) => {

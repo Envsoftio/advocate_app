@@ -1,3 +1,4 @@
+import { dismissOutside } from './lib/dialogDismiss'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
@@ -14,7 +15,7 @@ import './structure-design.css'
 import './supplement-design.css'
 
 if ('__TAURI_INTERNALS__' in window && /Macintosh/.test(navigator.userAgent)) installNativeFrameFallback(window)
-createApp(App).use(createPinia()).mount('#app')
+createApp(App).use(createPinia()).directive('dismiss-outside',dismissOutside).mount('#app')
 
 import "./metadata-design.css"
 
@@ -23,3 +24,5 @@ import './output-options.css'
 import './volume-planning.css'
 
 import './matter-flow.css'
+
+import './popovers.css'
