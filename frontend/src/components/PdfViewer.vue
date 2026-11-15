@@ -665,7 +665,8 @@ const linkDirty = computed(() => {
     item.uri!==linkDraft.uri || item.rect_x!==region.x || item.rect_y!==region.y ||
     item.rect_width!==region.width || item.rect_height!==region.height))
 })
-const inspectorVisible = computed(() => marksPanelOpen.value ||
+const objectSelectionOpen = computed(() => !props.preparation && activeCategory.value==='edit' && activeTool.value==='select' && !selectedTextAnnotation.value && !historyOpen.value && !readPanel.value)
+const inspectorVisible = computed(() => objectSelectionOpen.value || marksPanelOpen.value ||
   (!props.preparation && !!selectedTextAnnotation.value) ||
   (!props.preparation && engineBlocked.value && engineInspectorOpen.value) || historyOpen.value ||
   textMode.value || editTextMode.value ||
@@ -1406,6 +1407,17 @@ function resetAnnotationDraft(clearKind = true) {
   editingAnnotationId.value = null
   annotationError.value = ''
 }
+function setImageGeometry(field:'x'|'y'|'width'|'height', event:Event) {
+  const region=annotationRegion.value
+  if (!region) return
+  const input=event.target as HTMLInputElement
+  const extent=field==='x'||field==='width'?pageSizePt.value.width:pageSizePt.value.height
+  const value=Number(input.value)/extent
+  if (!Number.isFinite(value) || !input.value) return
+  const maximum=field==='x'?1-region.width:field==='y'?1-region.height:field==='width'?1-region.x:1-region.y
+  region[field]=Math.min(maximum,Math.max(field==='width'||field==='height'?1/extent:0,value))
+  input.value=String(Math.round(region[field]*extent))
+}
 function chooseAnnotationImage(event: Event) {
   if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value)
   annotationImage.value = (event.target as HTMLInputElement).files?.[0] || null
@@ -1415,7 +1427,7 @@ function editPageAnnotation(item: PageAnnotation) {
   if (!item.resolved) { annotationError.value = 'This annotation needs review because the document revision changed.'; return }
   readPanel.value = null
   historyOpen.value = false
-  activeCategory.value = item.kind==='image' || ['check','cross','date'].includes(item.kind) ? 'stamps'
+  activeCategory.value = item.kind==='image' ? 'edit' : ['check','cross','date'].includes(item.kind) ? 'stamps'
     : item.kind==='redaction' ? 'redact' : 'review'
   activeTool.value = 'notes'
   editingAnnotationId.value = item.id
@@ -2030,7 +2042,7 @@ async function applyReplacement() {
         <button class="text-tool danger" :disabled="editing || loading || disabled || total<=1" :title="total<=1 ? 'A PDF must keep at least one page' : `Delete page ${current} from the editable copy`" @click="deleteCurrent"><Trash2 :size="16"/> Delete page {{current}}</button>
         </div>
       </div>
-      <div v-if="!preparation && selectedOverlayItem && !selectedTextAnnotation" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="closeSelectedProperties"><X :size="14"/></button></div>
+      <div v-if="!preparation && activeCategory!=='edit' && selectedOverlayItem && !selectedTextAnnotation" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="closeSelectedProperties"><X :size="14"/></button></div>
       <p v-if="activeCategory==='pages'" class="page-action-guidance">Changes here affect the editable copy; the imported original stays unchanged. Drag page thumbnails to reorder, or use Organize pages for arrow controls.</p>
       <div v-if="bookmarkOpen" class="page-bookmark-editor" aria-label="Bookmark current page">
         <strong>Bookmark {{document.title}}, page {{current}}</strong>
@@ -2080,6 +2092,10 @@ async function applyReplacement() {
           <dt>OCR processing</dt><dd>{{document.ocr_status}}<small>OCR text is not legally verified. Search checks text available in this PDF.</small></dd>
           <dt>Source SHA-256</dt><dd class="source-hash">{{document.source_sha256 || 'Unavailable'}}</dd>
         </dl>
+        <div v-if="readPanel==='information'" class="flow03-information-actions">
+          <button class="btn secondary small" :disabled="editing || loading || disabled" @click="emit('artifact','original')"><BookOpen :size="15"/> View imported original</button>
+          <button class="btn secondary small" @click="openReadPanel('comments',$event)"><MessageSquare :size="15"/> Open comments</button>
+        </div>
         <p v-if="outlineOpen" class="reader-side-panel-intro">Navigation embedded in the source PDF. It does not change the bundle index.</p>
         <p v-if="commentsOpen" class="reader-side-panel-intro">Private review notes, omitted from Save copy and bundles.</p>
         <div v-if="commentsOpen && viewedComment" class="reader-bookmark-row" role="note" aria-label="Selected comment"><strong>Comment on source page {{viewedComment.page_index+1}}</strong><span>{{viewedComment.body}}</span><small>{{annotationTime(viewedComment)}}</small></div>
@@ -2098,8 +2114,16 @@ async function applyReplacement() {
         <button v-if="pageBookmarksOpen || outlineOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
       </aside>
       <aside v-if="inspectorVisible" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen, 'edit-mode-inspector':activeCategory==='edit' || historyOpen || engineBlocked}" :aria-label="engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : 'PDF editing controls'">
-        <div class="viewer-tool-inspector-heading"><strong>{{engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : selectedTextAnnotation ? 'Text' : annotationPanelOpen && editingAnnotationId ? annotationKindLabel(annotationDraft.kind) : toolTitle}}</strong><button class="icon-btn small" :aria-label="engineBlocked || historyOpen ? 'Collapse inspector' : selectedTextAnnotation ? 'Close text properties' : 'Close PDF tool'" :title="engineBlocked || historyOpen ? 'Collapse inspector' : 'Close tool'" @click="engineBlocked ? engineInspectorOpen=false : historyOpen ? historyOpen=false : selectedTextAnnotation ? clearOverlaySelection() : toggleTool(activeTool)"><X :size="16"/></button></div>
-      <div v-if="engineBlocked" class="flow03-inspector-content" role="region" aria-label="Engine recovery">
+        <div class="viewer-tool-inspector-heading"><strong>{{engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : objectSelectionOpen ? 'Document contents' : selectedTextAnnotation ? 'Text' : annotationPanelOpen && editingAnnotationId ? annotationKindLabel(annotationDraft.kind) : toolTitle}}</strong><button class="icon-btn small" :aria-label="engineBlocked || historyOpen ? 'Collapse inspector' : selectedTextAnnotation ? 'Close text properties' : 'Close PDF tool'" :title="engineBlocked || historyOpen ? 'Collapse inspector' : 'Close tool'" @click="engineBlocked ? engineInspectorOpen=false : historyOpen ? historyOpen=false : objectSelectionOpen ? selectCategory('read') : selectedTextAnnotation ? clearOverlaySelection() : toggleTool(activeTool)"><X :size="16"/></button></div>
+      <div v-if="activeCategory==='edit' && selectedOverlayItem && !selectedTextAnnotation" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="closeSelectedProperties"><X :size="14"/></button></div>
+      <div v-if="objectSelectionOpen && !engineBlocked" class="flow03-inspector-content flow03-object-picker" role="region" aria-label="Select a PDF object">
+        <h3>Select an object</h3><p>Click an added text object, image or link on the page to see its properties.</p>
+        <button class="flow03-object-choice" :disabled="disabled || loading" @click="toggleTool('edit-text')"><Type :size="18"/><span><strong>Text</strong><small>Edit an available text block</small></span></button>
+        <button class="flow03-object-choice" :disabled="disabled || loading" @click="openAnnotationTool('image')"><Images :size="18"/><span><strong>Image</strong><small>Add an image, or select one to resize</small></span></button>
+        <button class="flow03-object-choice" :disabled="disabled || loading" @click="toggleTool('links')"><Link2 :size="18"/><span><strong>Link</strong><small>Page destination or URL</small></span></button>
+        <p class="flow03-notice"><strong>Working copy only</strong><br/>The imported original remains preserved.</p>
+      </div>
+      <div v-else-if="engineBlocked" class="flow03-inspector-content" role="region" aria-label="Engine recovery">
         <span class="flow03-status danger">{{engineState==='changed'?'Review required':'Engine offline'}}</span>
         <h3>{{engineState==='changed'?'Saved inputs changed':'Connection interrupted'}}</h3><p>{{engineState==='changed'?'Review the latest saved state before editing. Retained drafts stay in this window.':'The local processing engine is not responding.'}}</p>
         <button v-if="engineState==='changed'" class="btn primary small" @click="emit('reviewEngine')">Review latest state</button>
@@ -2112,7 +2136,8 @@ async function applyReplacement() {
       </div>
       <div v-else-if="historyOpen" class="flow03-inspector-content flow03-history" role="region" aria-label="Working history">
         <h3>Working session</h3><p>Most recent action first · matter history</p>
-        <ol v-if="recentActions?.length"><li v-for="(action,index) in recentActions" :key="index"><strong>{{action.label}}</strong><span>{{action.applied ? index===0 && canUndo ? 'Most recent · Undo available' : 'Saved action' : 'Undone · Redo available'}}</span></li></ol>
+        <div v-if="canRedo" class="flow03-undo-outcome" role="status"><strong>Undo applied</strong><span>{{redoLabel || 'Last action'}} · Redo available</span><small>The previous working state is restored. Imported originals remain unchanged.</small></div>
+        <ol v-if="recentActions?.length"><li v-for="(action,index) in recentActions" :key="index" :class="{undone:!action.applied}"><strong>{{action.label}}</strong><span>{{action.applied ? index===0 && canUndo ? 'Most recent · Undo available' : 'Saved action' : 'Undone · Redo available'}}</span></li></ol>
         <p v-else>No actions in this matter yet.</p>
         <div class="flow03-history-actions"><button class="btn secondary small" :disabled="!canUndo || disabled || editing" @click="emit('undo')">Undo</button><button class="btn secondary small" :disabled="!canRedo || disabled || editing" @click="emit('redo')">Redo</button></div>
         <p class="flow03-notice">Session history<br/>A new edit clears the redo branch. Earlier exports remain unchanged.</p>
@@ -2176,6 +2201,12 @@ async function applyReplacement() {
       </div></Transition>
       <Transition name="soft"><div v-if="annotationPanelOpen" class="page-annotation-panel" aria-label="Private page marks and image overlays">
         <p v-if="editingAnnotationId && pageAnnotations.find(item=>item.id===editingAnnotationId)" class="annotation-record-time">Saved {{annotationTime(pageAnnotations.find(item=>item.id===editingAnnotationId)!)}} · Author not recorded</p>
+        <div v-if="annotationDraft.kind==='image' && editingAnnotationId && annotationRegion" class="flow03-image-properties" role="region" aria-label="Image properties">
+          <img v-if="annotationImageUrls[editingAnnotationId]" :src="annotationImageUrls[editingAnnotationId]" alt="Selected image preview"/>
+          <strong>OBJECT</strong>
+          <div class="flow03-image-fields"><label v-for="field in (['x','y','width','height'] as const)" :key="field">{{field==='x'?'X position':field==='y'?'Y position':field==='width'?'Width':'Height'}}<span><input type="number" :aria-label="`Image ${field} in points`" :value="Math.round(annotationRegion[field]*(field==='x'||field==='width'?pageSizePt.width:pageSizePt.height))" :min="field==='width'||field==='height'?1:0" :disabled="annotationBusy || disabled" @change="setImageGeometry(field,$event)"/> pt</span></label></div>
+          <p>Drag the image or its handles on the page. Update mark saves the position and size.</p>
+        </div>
         <div class="review-tool-heading"><strong>{{annotationKindLabel(annotationDraft.kind)}}</strong><span>{{editingAnnotationId ? 'Review this mark’s properties. Drag it on the page to move or resize it.' : annotationDraft.kind==='image' ? 'Choose a PNG or JPEG, then drag its size and position on the page.' : 'Drag a region on the page. Each saved mark remains independently selectable, movable and removable.'}}</span></div>
         <p class="annotation-scope-note">{{annotationOutputScope==='private'?'This private review mark is omitted from Save copy and filing bundles.':'This editable mark is included in Save copy and new bundle exports.'}}</p>
         <div class="annotation-form-grid">
