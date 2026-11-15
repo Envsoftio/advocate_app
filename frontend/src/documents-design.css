@@ -243,7 +243,7 @@
   height: 34px;
   padding-left: 10px;
 }
-.navigator-filters select {
+.navigator-filters :is(select, :where(.app-select-trigger)) {
   border: 0;
   background: transparent;
   font: inherit;
@@ -534,7 +534,7 @@
   .documents-workspace.preparation-workspace
   .inspector-content
   .field
-  select {
+  :is(select, :where(.app-select-trigger)) {
   min-height: 36px;
   height: 36px;
   font-size: 13px;
@@ -844,7 +844,7 @@
 .flow02-ocr-options .field {
   margin: 0;
 }
-.flow02-ocr-options .field select {
+.flow02-ocr-options .field :is(select, :where(.app-select-trigger)) {
   height: 36px;
 }
 .flow02-ocr-options fieldset {
@@ -1050,7 +1050,11 @@
 .design-shell .preparation-original > .artifact-header {
   padding-left: 20px;
 }
-.design-shell .preparation-original > .artifact-header .artifact-title select {
+.design-shell
+  .preparation-original
+  > .artifact-header
+  .artifact-title
+  :is(select, :where(.app-select-trigger)) {
   background: var(--cb-selected);
   color: var(--cb-link);
 }
@@ -1323,10 +1327,10 @@
   cursor: pointer;
 }
 
-.navigator-filters select {
+.navigator-filters :is(select, :where(.app-select-trigger)) {
   height: 32px;
   min-height: 32px;
 }
-:root[data-effective-theme] .navigator-filters select {
+:root[data-effective-theme] .navigator-filters :is(select, :where(.app-select-trigger)) {
   background: transparent;
 }

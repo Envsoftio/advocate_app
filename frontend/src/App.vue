@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppSelect from './components/ui/AppSelect.vue';
+import AppDateInput from './components/ui/AppDateInput.vue';
 import matterDraftLogo from './assets/matterdraft-logo.svg';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import {
@@ -404,6 +406,12 @@ let detailsTrigger: HTMLElement | null = null;
 async function toggleDocumentDetails() {
   if (detailsOpen.value) return closeDocumentDetails();
   detailsTrigger = document.activeElement as HTMLElement | null;
+  const menu = detailsTrigger?.closest<HTMLElement>('.app-popover');
+  if (menu?.id)
+    detailsTrigger =
+      documentsWorkspace.value?.querySelector<HTMLElement>(
+        `[aria-controls="${CSS.escape(menu.id)}"]`,
+      ) ?? detailsTrigger;
   detailsOpen.value = true;
   if (preparationVisible.value && compactDocuments.value) preparationListOpen.value = false;
   await nextTick();
@@ -1757,7 +1765,7 @@ function onKeydown(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null;
   const editingField =
     target?.isContentEditable ||
-    !!target?.closest('input, textarea, select, [contenteditable="true"]');
+    !!target?.closest('input, textarea, select, [role="combobox"], [contenteditable="true"]');
   if (event.key === 'Escape' && editorExpanded.value && !pageToolsOpen.value && !editingField) {
     toggleEditorExpanded();
     return;
@@ -2667,7 +2675,9 @@ function openOcrOptions(language: 'eng' | 'hin' | 'eng+hin', pageIndex: number) 
   ocrOptionsDocument.value = { id: selectedDoc.value.id, revision: selectedDoc.value.revision };
   ocrOptionsTrigger = document.activeElement as HTMLElement | null;
   ocrOptionsOpen.value = true;
-  void nextTick(() => ocrOptionsPanel.value?.querySelector<HTMLElement>('select')?.focus());
+  void nextTick(() =>
+    ocrOptionsPanel.value?.querySelector<HTMLElement>('[role=combobox]')?.focus(),
+  );
 }
 function closeOcrOptions() {
   ocrOptionsOpen.value = false;
@@ -3578,17 +3588,14 @@ watch(sidebarCollapsed, (collapsed) => {
       >
       <div class="appearance-controls"
         ><label
-          >Theme<select v-model="theme" aria-label="Theme"
-            ><option value="system">System</option
-            ><option value="light">Light</option
-            ><option value="dark">Dark</option></select
+          >Theme<AppSelect v-model="theme" aria-label="Theme"
+            ><option value="system">System</option><option value="light">Light</option
+            ><option value="dark">Dark</option></AppSelect
           ></label
         ><label
-          >Interface size<select v-model.number="uiScale" aria-label="Interface size"
-            ><option :value="90">90%</option
-            ><option :value="100">100%</option
-            ><option :value="110">110%</option
-            ><option :value="125">125%</option></select
+          >Interface size<AppSelect v-model.number="uiScale" aria-label="Interface size"
+            ><option :value="90">90%</option><option :value="100">100%</option
+            ><option :value="110">110%</option><option :value="125">125%</option></AppSelect
           ></label
         ></div
       >
@@ -4458,10 +4465,9 @@ watch(sidebarCollapsed, (collapsed) => {
                       }}<input v-model="docEditor.title" aria-label="Display title" maxlength="250"
                     /></label>
                     <label class="field"
-                      >Document date<input
+                      >Document date<AppDateInput
                         v-model="docEditor.document_date"
-                        type="date"
-                        @input="docEditor.date_confirmed = true"
+                        @input="docEditor.date_confirmed = !!docEditor.document_date"
                       /><span
                         v-if="
                           !preparationVisible &&
@@ -4489,19 +4495,19 @@ watch(sidebarCollapsed, (collapsed) => {
                       ></label
                     >
                     <label class="field"
-                      >Document type<select v-model="docEditor.kind">
+                      >Document type<AppSelect v-model="docEditor.kind">
                         <option v-for="kind in documentKindOptions" :key="kind" :value="kind">
                           {{ kind[0].toUpperCase() + kind.slice(1) }}
                         </option>
-                      </select></label
+                      </AppSelect></label
                     >
                     <div class="field-row" :class="{ 'preparation-field-row': preparationVisible }">
                       <label class="field"
-                        >Part<select v-model.number="docEditor.part">
+                        >Part<AppSelect v-model.number="docEditor.part">
                           <option v-for="part in currentMatter.parts" :key="part" :value="part">
                             Part {{ part }}
                           </option>
-                        </select></label
+                        </AppSelect></label
                       ><label class="field"
                         >{{ preparationVisible ? 'Label / Group' : 'Label'
                         }}<input
@@ -4571,7 +4577,7 @@ watch(sidebarCollapsed, (collapsed) => {
                       </div>
                       <label class="field"
                         >Visible/scanned signature review
-                        <select v-model="docEditor.visible_signature_status">
+                        <AppSelect v-model="docEditor.visible_signature_status">
                           <option value="unreviewed">Not reviewed</option>
                           <option value="present">
                             Visible or scanned signature appears present
@@ -4579,7 +4585,7 @@ watch(sidebarCollapsed, (collapsed) => {
                           <option value="absent">
                             No visible or scanned signature found in review
                           </option>
-                        </select>
+                        </AppSelect>
                         <span class="hint"
                           >This is a reviewer classification only. It is separate from PDF
                           certificate indicators and does not verify a signature.</span
@@ -5296,10 +5302,9 @@ watch(sidebarCollapsed, (collapsed) => {
           ></header
         >
         <label class="field"
-          >Recognition language<select v-model="ocrOptionsLanguage"
-            ><option value="eng">English</option
-            ><option value="hin">Hindi</option
-            ><option value="eng+hin">English + Hindi</option></select
+          >Recognition language<AppSelect v-model="ocrOptionsLanguage"
+            ><option value="eng">English</option><option value="hin">Hindi</option
+            ><option value="eng+hin">English + Hindi</option></AppSelect
           ></label
         >
         <fieldset
@@ -5435,17 +5440,17 @@ watch(sidebarCollapsed, (collapsed) => {
             >Pages<input v-model="printPages" aria-label="Print pages" placeholder="all or 1,3-5"
           /></label>
           <label
-            >Paper<select v-model="printOrientation" aria-label="Print paper orientation">
+            >Paper<AppSelect v-model="printOrientation" aria-label="Print paper orientation">
               <option value="source">Source page size</option>
               <option value="portrait">A4 portrait</option>
               <option value="landscape">A4 landscape</option>
-            </select></label
+            </AppSelect></label
           >
           <label
-            >Scaling<select v-model="printScale" aria-label="Print scaling">
+            >Scaling<AppSelect v-model="printScale" aria-label="Print scaling">
               <option value="fit">Fit to paper</option>
               <option value="actual">Actual PDF size, centered</option>
-            </select></label
+            </AppSelect></label
           >
           <button class="btn secondary" type="submit" :disabled="printBusy">
             {{ printBusy ? 'Preparing…' : 'Prepare print copy' }}

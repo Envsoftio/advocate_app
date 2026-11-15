@@ -1,3 +1,5 @@
+import { selectOption, expectValue } from './select';
+import { fillDate, expectDate } from './date-field';
 import { enterLatestMatter } from './navigation';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -110,16 +112,16 @@ test('Batch review filters, resizes columns and dismisses menus outside', async 
     '0 visible in this filter',
   );
   await register.getByRole('button', { name: 'Filters' }).click();
-  await page.getByRole('combobox', { name: 'Filter by Part' }).selectOption('2');
+  await selectOption(page.getByRole('combobox', { name: 'Filter by Part' }), '2');
   await expect(register.locator('.batch-table tbody tr')).toHaveCount(0);
-  await page.getByRole('combobox', { name: 'Filter by Part' }).selectOption('1');
+  await selectOption(page.getByRole('combobox', { name: 'Filter by Part' }), '1');
   await expect(register.locator('.batch-table tbody tr')).toHaveCount(1);
-  await page.getByRole('combobox', { name: 'Filter by type' }).selectOption('affidavit');
+  await selectOption(page.getByRole('combobox', { name: 'Filter by type' }), 'affidavit');
   await expect(register.locator('.batch-table tbody tr')).toHaveCount(0);
-  await page.getByRole('combobox', { name: 'Filter by type' }).selectOption('');
-  await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('needs_ocr');
+  await selectOption(page.getByRole('combobox', { name: 'Filter by type' }), '');
+  await selectOption(page.getByRole('combobox', { name: 'Filter by status' }), 'needs_ocr');
   await expect(register.locator('.batch-table tbody tr')).toHaveCount(0);
-  await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('needs_review');
+  await selectOption(page.getByRole('combobox', { name: 'Filter by status' }), 'needs_review');
   await expect(register.locator('.batch-table tbody tr')).toHaveCount(1);
   await page.getByRole('button', { name: 'Clear filters' }).click();
   await expect(register.locator('.batch-table tbody tr')).toHaveCount(3);
@@ -179,7 +181,7 @@ test('Batch review OCR filter finds an image-only source', async ({ page, reques
   expect(scan.ocr_status).toBe('needs_ocr');
   await enter(page, 4);
   await page.getByRole('button', { name: 'Filters' }).click();
-  await page.getByRole('combobox', { name: 'Filter by status' }).selectOption('needs_ocr');
+  await selectOption(page.getByRole('combobox', { name: 'Filter by status' }), 'needs_ocr');
   await expect(page.locator('.batch-table tbody tr')).toHaveCount(1);
   await expect(page.locator('.batch-table tbody tr').first()).toContainText('Synthetic_scan.jpg');
 });
@@ -200,8 +202,8 @@ test('Batch review explains and applies the two selected-row controls', async ({
   await register.getByLabel(`Select ${docs[1].title}`).check();
   await expect(part).toBeEnabled();
   await expect(type).toBeEnabled();
-  await part.selectOption('2');
-  await type.selectOption('annexure');
+  await selectOption(part, '2');
+  await selectOption(type, 'annexure');
   await expect(apply).toHaveText('Apply to 2 selected');
   await apply.click();
   await expect(
@@ -215,13 +217,13 @@ test('Batch review explains and applies the two selected-row controls', async ({
   );
   expect(saved[2].part).toBe(1);
   expect(saved[2].kind).toBe('other');
-  await expect(part).toHaveValue('');
-  await expect(type).toHaveValue('');
+  await expectValue(part, '');
+  await expectValue(type, '');
   await expect(apply).toBeDisabled();
   const title = register.getByLabel(`Title for ${docs[0].original_name}`);
   await title.fill('Temporary title');
   await title.press('Escape');
-  await expect(title).toHaveValue(docs[0].title);
+  await expectValue(title, docs[0].title);
   await register.locator('.batch-tools-menu>button').click();
   await page.getByRole('button', { name: 'More tools' }).click();
   await register.getByRole('button', { name: 'Preview order', exact: true }).click();
@@ -268,7 +270,7 @@ test('Batch review manages matter Parts without losing document assignments', as
   });
   await manager.getByRole('button', { name: 'Close Manage Parts' }).click();
   await register.getByLabel(`Select ${docs[0].title}`).check();
-  await register.getByRole('combobox', { name: 'Set selected Part' }).selectOption('5');
+  await selectOption(register.getByRole('combobox', { name: 'Set selected Part' }), '5');
   await register.locator('.batch-apply-action').click();
   await expect
     .poll(async () => {
@@ -281,7 +283,7 @@ test('Batch review manages matter Parts without losing document assignments', as
   await register.getByRole('button', { name: 'Manage Parts' }).click();
   await expect(manager.getByRole('button', { name: 'Remove Part 5' })).toBeDisabled();
   await manager.getByRole('button', { name: 'Close Manage Parts' }).click();
-  await register.getByRole('combobox', { name: 'Set selected Part' }).selectOption('1');
+  await selectOption(register.getByRole('combobox', { name: 'Set selected Part' }), '1');
   await register.locator('.batch-apply-action').click();
   await register.getByRole('button', { name: 'Manage Parts' }).click();
   await manager.getByRole('button', { name: 'Remove Part 5' }).click();
@@ -289,12 +291,10 @@ test('Batch review manages matter Parts without losing document assignments', as
   await manager.getByRole('button', { name: 'Add Part 6' }).click();
   await expect(manager.getByText('Part 6', { exact: true })).toBeVisible();
   await manager.getByRole('button', { name: 'Close Manage Parts' }).click();
-  await expect(
-    register.getByRole('combobox', { name: 'Set selected Part' }).locator('option[value="6"]'),
-  ).toHaveCount(1);
-  await expect(
-    register.getByRole('combobox', { name: 'Set selected Part' }).locator('option[value="5"]'),
-  ).toHaveCount(0);
+  await register.getByRole('combobox', { name: 'Set selected Part' }).click();
+  await expect(page.getByRole('option').filter({ hasText: /^Part 6$/ })).toHaveCount(1);
+  await expect(page.getByRole('option').filter({ hasText: /^Part 5$/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
 });
 test('Batch review remains usable with 38 real synthetic documents across theme and scale', async ({
   page,
@@ -367,7 +367,7 @@ test('06B batch save shows the supplied saved state and persists the reviewed va
   const geometry = [] as Array<{ selector: string; actual: number[]; expected: number[] }>;
   for (const [selector, x, y, width, height] of [
     ['.batch-review-toolbar', 88, 220, 1328, 48],
-    ['.batch-part-select select', 236, 227, 220, 34],
+    ['.batch-part-select .app-select-trigger', 236, 227, 220, 34],
     ['.batch-kind-select', 470, 227, 154, 34],
     ['.batch-columns-trigger', 1196, 227, 112, 34],
     ['.batch-density-trigger', 1314, 227, 92, 34],
@@ -441,6 +441,12 @@ test('B02C new batch and suggestion layouts, explicit one-field acceptance and p
     expect(Math.round(b.width)).toBe(width);
     expect(Math.round(b.height)).toBe(586);
   }
+  await page.getByRole('button', { name: 'Choose date to save', exact: true }).click();
+  const dateCalendar = page.locator('.app-date-popover');
+  await expect(dateCalendar).toBeVisible();
+  await dateCalendar.locator('[data-value="2026-01-13"]').click();
+  await expectDate(page.getByLabel('Date to save', { exact: true }), '2026-01-13');
+  await expect(page.getByLabel('Accept suggested date', { exact: true })).not.toBeChecked();
   await page.getByLabel('Title to save', { exact: true }).fill('Reviewed order title');
   await page.getByLabel('Accept suggested title', { exact: true }).check();
   await expect(
@@ -463,7 +469,8 @@ test('B02C new batch and suggestion layouts, explicit one-field acceptance and p
       .document_date,
   ).toBe(docs[0].document_date);
   await page.getByRole('button', { name: 'Back to batch review', exact: true }).click();
-  await expect(page.getByLabel(`Title for ${docs[0].original_name}`, { exact: true })).toHaveValue(
+  await expectValue(
+    page.getByLabel(`Title for ${docs[0].original_name}`, { exact: true }),
     'Reviewed order title',
   );
   await expect(page.locator('.batch-tools-menu>button')).toHaveAttribute('aria-expanded', 'false');
@@ -474,7 +481,8 @@ test('B02C new batch and suggestion layouts, explicit one-field acceptance and p
     .getByRole('button', { name: 'Documents', exact: true })
     .click();
   await page.getByRole('button', { name: 'Sort', exact: true }).click();
-  await expect(page.getByLabel(`Title for ${docs[0].original_name}`, { exact: true })).toHaveValue(
+  await expectValue(
+    page.getByLabel(`Title for ${docs[0].original_name}`, { exact: true }),
     'Reviewed order title',
   );
 });
@@ -492,7 +500,7 @@ test('B02C failure retry stale rejection and Save Discard Keep editing guards', 
     .click();
   const guard = page.getByRole('alertdialog');
   await guard.getByRole('button', { name: 'Keep editing', exact: true }).click();
-  await expect(title).toHaveValue('Batch draft');
+  await expectValue(title, 'Batch draft');
   await page
     .locator('.matter-rail')
     .getByRole('button', { name: 'Build bundle', exact: true })
@@ -516,9 +524,7 @@ test('B02C failure retry stale rejection and Save Discard Keep editing guards', 
   );
   await page.getByRole('button', { name: 'Accept 1 suggestions', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('Synthetic accept failure');
-  await expect(page.getByLabel('Title to save', { exact: true })).toHaveValue(
-    'Retained retry draft',
-  );
+  await expectValue(page.getByLabel('Title to save', { exact: true }), 'Retained retry draft');
   await page.unroute('**/metadata-suggestions/accept');
   await page.getByRole('button', { name: 'Retry', exact: true }).click();
   await expect(
@@ -532,13 +538,13 @@ test('B02C failure retry stale rejection and Save Discard Keep editing guards', 
   });
   await page.getByRole('button', { name: 'Accept 1 suggestions', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('stale');
-  await expect(page.getByLabel('Title to save', { exact: true })).toHaveValue('Stale draft');
+  await expectValue(page.getByLabel('Title to save', { exact: true }), 'Stale draft');
   await page.getByRole('button', { name: 'Back to batch review', exact: true }).click();
   await guard.getByRole('button', { name: 'Keep editing', exact: true }).click();
-  await expect(page.getByLabel('Title to save', { exact: true })).toHaveValue('Stale draft');
+  await expectValue(page.getByLabel('Title to save', { exact: true }), 'Stale draft');
   await page.getByRole('button', { name: 'Back to batch review', exact: true }).click();
   await guard.getByRole('button', { name: 'Discard changes', exact: true }).click();
-  await expect(title).toHaveValue('Concurrent confirmed title');
+  await expectValue(title, 'Concurrent confirmed title');
 });
 
 test('B02C counts, empty filters, late source responses and compact keyboard review', async ({
@@ -608,7 +614,10 @@ test('B02C counts, empty filters, late source responses and compact keyboard rev
   await page.getByRole('button', { name: 'Review selected source', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('.source-review')).toBeVisible();
-  await page.getByLabel('Date to save', { exact: true }).focus();
+  await page
+    .getByLabel('Date to save', { exact: true })
+    .locator('[data-reka-date-field-segment=day]')
+    .focus();
   await expect(page.getByLabel('Date to save', { exact: true })).toBeInViewport();
   await page.screenshot({ path: info.outputPath('06D-compact-source-keyboard.png') });
   await page.keyboard.press('Escape');
@@ -629,14 +638,14 @@ test('B02C unselected drafts survive acceptance and empty filters do not save di
   const { matter, docs } = await seed(request);
   await enter(page);
   await suggestions(page);
-  await page.getByLabel('Date to save', { exact: true }).fill('2026-09-17');
+  await fillDate(page.getByLabel('Date to save', { exact: true }), '2026-09-17');
   await page.getByLabel('Title to save', { exact: true }).fill('Only title accepted');
   await page.getByLabel('Accept suggested title', { exact: true }).check();
   await page.getByRole('button', { name: 'Accept 1 suggestions', exact: true }).click();
   await expect(
     page.getByRole('status').filter({ hasText: 'Selected fields accepted' }),
   ).toBeVisible();
-  await expect(page.getByLabel('Date to save', { exact: true })).toHaveValue('2026-09-17');
+  await expectDate(page.getByLabel('Date to save', { exact: true }), '2026-09-17');
   expect(
     (await (await request.get(`${base}/matters/${matter.id}/documents`, { headers })).json())[0]
       .document_date,

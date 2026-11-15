@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { GripVertical, Bookmark as BookmarkIcon, Plus } from 'lucide-vue-next';
 import { VueDraggable, type SortableEvent } from 'vue-draggable-plus';
@@ -400,7 +401,7 @@ onBeforeUnmount(() => {
               aria-label="Bookmark label"
               maxlength="200" /></label
           ><label
-            >Target document<select
+            >Target document<AppSelect
               aria-label="Target document"
               :value="entry.document_id"
               @change="chooseDocument(($event.target as HTMLSelectElement).value)"
@@ -412,7 +413,7 @@ onBeforeUnmount(() => {
                 :value="d.id"
                 :disabled="!d.bundle_included"
                 >{{ d.title }}{{ d.bundle_included ? '' : ' (reference only)' }}</option
-              ></select
+              ></AppSelect
             ></label
           ><label
             >Source document page<input
@@ -435,11 +436,11 @@ onBeforeUnmount(() => {
             @toggle="hierarchyOpen = ($event.target as HTMLDetailsElement).open"
             ><summary>Hierarchy &amp; deletion</summary
             ><label
-              >Parent bookmark<select aria-label="Parent bookmark" v-model="entry.parent_id"
+              >Parent bookmark<AppSelect aria-label="Parent bookmark" v-model="entry.parent_id"
                 ><option :value="null">Top level</option
                 ><option v-for="b in parents" :key="b.id" :value="b.id">{{
                   b.title
-                }}</option></select
+                }}</option></AppSelect
               ></label
             ><button ref="removeButton" class="text-tool bookmark-remove" @click="remove"
               >Delete selected bookmark</button

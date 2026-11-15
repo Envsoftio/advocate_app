@@ -1,3 +1,4 @@
+import { expectValue, selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import { openDocumentActions, openDocumentBrowser } from './navigation';
 import { expect, test } from '@playwright/test';
@@ -95,7 +96,7 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
     const jumpStart = performance.now();
     await jump.fill(String(count));
     await jump.press('Enter');
-    await expect(jump).toHaveValue(String(count));
+    await expectValue(jump, String(count));
     await expect(
       page.locator(`.reader-page-frame[data-reader-page="${count}"] .pdf-paper`),
     ).toBeVisible();
@@ -118,7 +119,7 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
     }
     const oldWidth = (await page.locator('.pdf-paper').boundingBox())!.width;
     const zoomStart = performance.now();
-    await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('125');
+    await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '125');
     await expect
       .poll(async () =>
         Math.abs((await page.locator('.pdf-paper').boundingBox())!.width - oldWidth),
@@ -178,7 +179,7 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
       jsHeapUsedBytes: memory.usedSize,
       jsHeapTotalBytes: memory.totalSize,
     });
-    await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('fit-width');
+    await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), 'fit-width');
   }
   console.log(`PDF_READER_DEVELOPER_HOST_METRICS ${JSON.stringify(metrics)}`);
   await test.info().attach('reader-developer-host-metrics.json', {
@@ -195,13 +196,13 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
   });
   await rail.locator('[data-thumbnail-page="1000"]').focus();
   await page.keyboard.press('Home');
-  await expect(jump).toHaveValue('1');
+  await expectValue(jump, '1');
   await expect(rail.locator('[data-thumbnail-page="1"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  await expect(jump).toHaveValue('2');
+  await expectValue(jump, '2');
   await expect(rail.locator('[data-thumbnail-page="2"]')).toBeFocused();
   await page.keyboard.press('End');
-  await expect(jump).toHaveValue('1000');
+  await expectValue(jump, '1000');
   await expect(rail.locator('[data-thumbnail-page="1000"]')).toBeFocused();
   await expect(rail.locator('canvas:not([data-rendered="true"])')).toHaveCount(0);
   await page.screenshot({
@@ -213,7 +214,7 @@ test('full-screen thumbnail rail stays bounded through 10, 100 and 1000 pages, k
     element.scrollTop = 500 * 176;
   });
   await expect.poll(() => rail.locator('.thumbnail-button[tabindex="0"]').count()).toBe(1);
-  await expect(jump).toHaveValue('1000');
+  await expectValue(jump, '1000');
   expect(await rail.locator('.thumbnail-button').count()).toBeLessThan(20);
   await jump.fill('1');
   await jump.press('Enter');
@@ -240,11 +241,11 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf: print(j
   await rail.locator('[data-thumbnail-page="1"]').focus();
   await page.keyboard.press('Alt+ArrowDown');
   await expect.poll(firstPages).toEqual(['Rail page 2', 'Rail page 1', 'Rail page 3']);
-  await expect(jump).toHaveValue('2');
+  await expectValue(jump, '2');
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/);
   await expect(rail.locator('[data-thumbnail-page="2"]')).toBeFocused();
   await rail.locator('[data-thumbnail-page="2"]').dragTo(rail.locator('[data-thumbnail-page="1"]'));
   await expect.poll(firstPages).toEqual(['Rail page 1', 'Rail page 2', 'Rail page 3']);
-  await expect(jump).toHaveValue('1');
+  await expectValue(jump, '1');
   expect(errors).toEqual([]);
 });

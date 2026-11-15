@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { openNamedMatter } from './navigation';
 import { enterLatestMatter } from './navigation';
 import {
@@ -112,7 +113,7 @@ test('02C loaded search, reader and unsaved details survive disconnect; retry ne
   const query = page.getByRole('searchbox', { name: 'Find text in this PDF' });
   await query.fill('evidence');
   await expect(page.locator('.pdf-findbar')).toContainText('4 matches');
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   const reader = await page.locator('.shared-reader-viewport').elementHandle();
   // Browser internet hints alone must not disable a reachable local engine.
   await page.evaluate(() => window.dispatchEvent(new Event('offline')));
@@ -126,7 +127,7 @@ test('02C loaded search, reader and unsaved details survive disconnect; retry ne
   await page.getByRole('button', { name: 'Show thumbnails' }).click();
   await page.screenshot({ path: '../docs/ui-evidence/flow03/ED30-engine-offline-1440.png' });
   await page.getByRole('button', { name: 'Search panel' }).click();
-  await expect(query).toHaveValue('evidence');
+  await expectValue(query, 'evidence');
   await query.fill('Recovery');
   await expect(page.locator('.pdf-findbar')).toContainText('4 matches');
   await openDocumentActions(page);
@@ -146,12 +147,12 @@ test('02C loaded search, reader and unsaved details survive disconnect; retry ne
   });
   await page.getByRole('button', { name: 'Retry connection', exact: true }).click();
   await expect(page.locator('.engine-notice')).toHaveCount(0);
-  await expect(title).toHaveValue('Retained disconnected draft');
+  await expectValue(title, 'Retained disconnected draft');
   await expect(page.locator('.metadata-status')).toContainText('use Save');
   await page.waitForTimeout(1800);
   expect(writes).toBe(0);
   expect(await reader!.evaluate((el) => el.isConnected)).toBe(true);
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('100');
+  await expectValue(page.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   const docs = await (
     await request.get(`${base}/matters/${matter.id}/documents`, { headers })
   ).json();
@@ -204,14 +205,14 @@ test('02C stale recovery keeps the PDF draft and old revision until explicit rev
   await expect(page.getByRole('region', { name: 'Engine recovery' })).toContainText(
     'Saved inputs changed',
   );
-  await expect(draft).toHaveValue('Do not replay this edit');
+  await expectValue(draft, 'Do not replay this edit');
   await expect(page.locator('.application-status')).toContainText('Working revision 1');
   await page.getByRole('button', { name: 'Review latest state' }).click();
   const guard = page.getByRole('alertdialog', { name: /Save changes to recovery/ });
   await expect(guard.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
   await guard.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('button', { name: 'Review latest state' })).toBeFocused();
-  await expect(draft).toHaveValue('Do not replay this edit');
+  await expectValue(draft, 'Do not replay this edit');
   await page.getByRole('button', { name: 'Review latest state' }).click();
   await guard.getByRole('button', { name: 'Discard' }).click();
   await expect(page.locator('.application-status')).toContainText('Working revision 2');
@@ -224,11 +225,11 @@ test('02C uncached original pages report unavailable without changing artifact o
   request,
 }) => {
   await fixture(page, request, true);
-  await page.getByRole('combobox', { name: 'Document version' }).selectOption('original');
+  await selectOption(page.getByRole('combobox', { name: 'Document version' }), 'original');
   const review = page.getByRole('dialog', { name: 'Review imported original' });
   await expect(review.locator('.pdf-text-layer')).toContainText('Recovery evidence page 1');
   await disconnect(page);
-  await expect(review.getByRole('combobox', { name: 'Document version' })).toHaveValue('original');
+  await expectValue(review.getByRole('combobox', { name: 'Document version' }), 'original');
   await review.getByRole('spinbutton', { name: 'Original source page number' }).fill('12');
   await review.getByRole('spinbutton', { name: 'Original source page number' }).press('Enter');
   await expect(review.getByRole('alert')).toContainText('unavailable');
@@ -242,7 +243,7 @@ test('02C uncached original pages report unavailable without changing artifact o
   await expect(review.getByRole('button', { name: 'Pages', exact: true })).toBeFocused();
   await review.getByRole('button', { name: 'Retry review' }).click();
   await expect(review.locator('.pdf-text-layer')).toContainText('Recovery evidence page 12');
-  await expect(review.getByRole('searchbox')).toHaveValue('evidence');
+  await expectValue(review.getByRole('searchbox'), 'evidence');
   await expect(review.getByRole('tab', { name: 'Edit' })).toHaveCount(0);
 });
 
@@ -279,14 +280,15 @@ for (const viewport of [
         await expect(selector).toBeEnabled();
         await selector.focus();
         await expect(selector).toBeFocused();
-        await selector.selectOption('original');
+        await selectOption(selector, 'original');
         for (const artifact of ['original', `export:${job.id}:combined.pdf`]) {
           const review = page.locator('dialog.export-review');
-          await review.getByRole('combobox', { name: 'Document version' }).selectOption(artifact);
+          await selectOption(review.getByRole('combobox', { name: 'Document version' }), artifact);
           await expect(review.locator('.pdf-text-layer')).not.toBeEmpty();
-          await review
-            .getByRole('combobox', { name: 'Zoom', exact: true })
-            .selectOption('fit-width');
+          await selectOption(
+            review.getByRole('combobox', { name: 'Zoom', exact: true }),
+            'fit-width',
+          );
           const pageInput = review.locator('.page-counter input');
           await pageInput.fill('3');
           await pageInput.press('Enter');
@@ -314,12 +316,10 @@ for (const viewport of [
           await paper(review);
           await page.keyboard.press('Escape');
           await expect(focus).toBeFocused();
-          await expect(input).toHaveValue('evidence');
-          await expect(pageInput).toHaveValue('3');
+          await expectValue(input, 'evidence');
+          await expectValue(pageInput, '3');
           expect(await viewer!.evaluate((el) => el.isConnected)).toBe(true);
-          await expect(review.getByRole('combobox', { name: 'Document version' })).toHaveValue(
-            artifact,
-          );
+          await expectValue(review.getByRole('combobox', { name: 'Document version' }), artifact);
           await expect(review.getByRole('tab', { name: 'Edit' })).toHaveCount(0);
           await review.getByRole('button', { name: 'Close review' }).focus();
           await page.keyboard.press('Shift+Tab');
@@ -349,7 +349,7 @@ test('02C engine recovery retains the exact Preflight source and return context'
   await page.getByRole('button', { name: /Preflight checks/ }).click();
   const finding = page.locator('.preflight-finding').filter({ hasText: 'recovery, page 2' });
   await finding.getByRole('button', { name: 'Review source 2' }).click();
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue('2');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '2');
   const context = page.locator('.finding-review-panel');
   await expect(context).toContainText('Revision 1');
   await disconnect(page);
@@ -358,7 +358,7 @@ test('02C engine recovery retains the exact Preflight source and return context'
   await page.getByRole('button', { name: 'Retry connection' }).click();
   await expect(page.locator('.engine-notice')).toHaveCount(0);
   await expect(context).toContainText('Revision 1');
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue('2');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '2');
   await context.getByRole('button', { name: 'Return to Preflight', exact: true }).click();
   await expect(finding.getByRole('button', { name: 'Review source 2' })).toBeFocused();
 });
@@ -378,7 +378,7 @@ test('02C compact dark disconnection leaves usable PDF space and reading control
   await page.reload();
   await enterLatestMatter(page);
   await expect(page.locator('.pdf-text-layer')).toContainText('Recovery evidence page 1');
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('fit-width');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), 'fit-width');
   await disconnect(page);
   await paper(page.locator('.preview-panel'));
   await page.getByRole('button', { name: 'Search', exact: true }).click();

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import PdfPageSurface from './PdfPageSurface.vue';
 import { pdfDocumentSource } from '../lib/api';
@@ -247,13 +248,13 @@ onBeforeUnmount(() => {
     <header class="crop-preview-header">
       <label
         >Preview source page
-        <select
+        <AppSelect
           v-model.number="pageNumber"
           :disabled="disabled || !pages.length"
           aria-label="Preview crop on source page"
         >
           <option v-for="page in pages" :key="page" :value="page">Page {{ page }}</option>
-        </select>
+        </AppSelect>
       </label>
       <span
         >{{ pages.length }} selected {{ pages.length === 1 ? 'page' : 'pages' }} · revision
@@ -340,7 +341,7 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--text);
 }
-.crop-preview-header select {
+.crop-preview-header :is(select, :where(.app-select-trigger)) {
   min-height: 36px;
   padding: 5px 9px;
   border: 1px solid var(--border);

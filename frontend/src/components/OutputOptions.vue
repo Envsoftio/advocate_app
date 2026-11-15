@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Info, X } from 'lucide-vue-next';
 import { api } from '../lib/api';
@@ -150,14 +151,14 @@ defineExpose({ saveDraft, discard });
         <div v-if="marks" class="output-columns">
           <fieldset class="output-controls" :disabled="saving || disabled || loading">
             <label class="output-field"
-              >Page quality<select
+              >Page quality<AppSelect
                 aria-label="Page quality"
                 v-model="marks.processing_quality"
                 aria-describedby="quality-note"
                 ><option value="original">Original quality</option
                 ><option value="lossless">Lossless optimization · no image reduction</option
                 ><option value="balanced">Balanced images · 240 dpi / JPEG 85</option
-                ><option value="small">Smaller images · 150 dpi / JPEG 70</option></select
+                ><option value="small">Smaller images · 150 dpi / JPEG 70</option></AppSelect
               ></label
             >
             <p id="quality-note" class="output-caption quality-note">{{
@@ -183,12 +184,12 @@ defineExpose({ saveDraft, discard });
               source attachments and actions <small>Always omitted</small></label
             >
             <label class="output-field print-field"
-              >Print layout<select
+              >Print layout<AppSelect
                 aria-label="Print layout"
                 v-model="marks.print_layout"
                 aria-describedby="print-note"
                 ><option value="screen">Screen output · no added blank pages</option
-                ><option disabled>Double-sided document starts · unavailable</option></select
+                ><option disabled>Double-sided document starts · unavailable</option></AppSelect
               ></label
             >
             <h3 class="office-title">Office review drafts</h3>

@@ -256,7 +256,7 @@
 .workspace-settings .appearance-controls label {
   color: var(--cb-text);
 }
-.workspace-settings .appearance-controls select {
+.workspace-settings .appearance-controls :is(select, :where(.app-select-trigger)) {
   color: var(--cb-text);
   background: var(--cb-surface);
   border: 1px solid var(--cb-control-border);
@@ -443,7 +443,7 @@
   padding: 0;
   color: var(--cb-text);
 }
-:root .matter-filters select {
+:root .matter-filters :is(select, :where(.app-select-trigger)) {
   height: 34px;
   min-height: 34px;
   max-width: 138px;
@@ -1059,7 +1059,7 @@
 }
 .new-matter-form input,
 .new-matter-form textarea,
-.new-matter-form select {
+.new-matter-form :is(select, :where(.app-select-trigger)) {
   display: block;
   width: 100%;
   min-height: 36px;
@@ -1072,13 +1072,13 @@
   font-size: 13px;
 }
 :root .new-matter-form input,
-:root .new-matter-form select {
+:root .new-matter-form :is(select, :where(.app-select-trigger)) {
   height: 36px !important;
   min-height: 36px !important;
 }
 .new-matter-form input:focus-visible,
 .new-matter-form textarea:focus-visible,
-.new-matter-form select:focus-visible {
+.new-matter-form :is(select, :where(.app-select-trigger)):focus-visible {
   outline: 2px solid var(--cb-focus);
   outline-offset: 1px;
 }
@@ -1362,7 +1362,7 @@
 .import-table th {
   height: 36px;
 }
-:root .matter-filters select {
+:root .matter-filters :is(select, :where(.app-select-trigger)) {
   border: 1px solid var(--cb-control-border);
   border-radius: 6px;
   background: var(--cb-surface);

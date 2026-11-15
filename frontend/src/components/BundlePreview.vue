@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { CheckCircle2, TriangleAlert, RefreshCw } from 'lucide-vue-next';
 import type { ManualBookmark, MatterDocument } from '../lib/types';
@@ -289,10 +290,12 @@ watch(
     >
       <strong><TriangleAlert :size="16" />Bookmark destination unresolved</strong>
       <label v-if="unresolved.length > 1"
-        >Bookmark to review<select
+        >Bookmark to review<AppSelect
           :value="unresolvedEntry.id"
           @change="unresolvedSelection = ($event.target as HTMLSelectElement).value"
-          ><option v-for="b in unresolved" :key="b.id" :value="b.id">{{ b.title }}</option></select
+          ><option v-for="b in unresolved" :key="b.id" :value="b.id">{{
+            b.title
+          }}</option></AppSelect
         ></label
       >
       <p

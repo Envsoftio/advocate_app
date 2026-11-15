@@ -1,3 +1,4 @@
+import { selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect } from '@playwright/test';
 import { readFile, mkdir } from 'node:fs/promises';
@@ -81,7 +82,7 @@ test('B04C creates, reviews, builds and reopens an independent audience artifact
   await expect(w.getByRole('button', { name: 'Review membership' })).toBeFocused();
   await expect(w).toContainText('2 included documents');
   await w.getByRole('button', { name: 'Review settings' }).click();
-  await w.getByLabel('Front matter').selectOption('cover_index');
+  await selectOption(w.getByLabel('Front matter'), 'cover_index');
   await w.getByRole('button', { name: 'Apply settings' }).click();
   await expect(w.getByRole('button', { name: 'Review settings' })).toBeFocused();
   const saved = (await (await request.get(root + '/variants', { headers })).json()).plans[0];
@@ -122,7 +123,7 @@ test('B04C creates, reviews, builds and reopens an independent audience artifact
   await w.getByRole('button', { name: 'Export / Save' }).click();
   const exportDialog = page.getByRole('dialog', { name: 'Export bundle files' });
   await expect(exportDialog).toBeVisible();
-  await exportDialog.getByLabel('File name').selectOption('combined.pdf');
+  await selectOption(exportDialog.getByLabel('File name'), 'combined.pdf');
   const downloadPromise = page.waitForEvent('download');
   await exportDialog.getByRole('button', { name: 'Export files' }).click();
   const downloaded = await downloadPromise,
@@ -272,8 +273,8 @@ test('B04C BU11 reference composition, keyboard and responsive appearance', asyn
       for (const scale of [90, 100, 110, 125]) {
         await page.setViewportSize(size);
         await openWorkspaceNavigation(page);
-        await page.getByLabel('Theme', { exact: true }).selectOption(theme);
-        await page.getByLabel('Interface size', { exact: true }).selectOption(String(scale));
+        await selectOption(page.getByLabel('Theme', { exact: true }), theme);
+        await selectOption(page.getByLabel('Interface size', { exact: true }), String(scale));
         await closeWorkspaceNavigation(page);
         await page.locator('.workspace-page').evaluate((el) => (el.scrollTop = 0));
         await expect(w.locator('.variant-create-button')).toBeVisible();

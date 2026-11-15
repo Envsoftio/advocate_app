@@ -35,8 +35,8 @@ export default defineConfig({
   use: {
     actionTimeout: 15_000,
     baseURL: `http://127.0.0.1:${vitePort}`,
-    browserName: 'chromium',
-    channel: 'chrome',
+    browserName: process.env.MATTERDRAFT_E2E_BROWSER === 'webkit' ? 'webkit' : 'chromium',
+    channel: process.env.MATTERDRAFT_E2E_BROWSER === 'webkit' ? undefined : 'chrome',
     acceptDownloads: true,
     screenshot: 'only-on-failure',
   },

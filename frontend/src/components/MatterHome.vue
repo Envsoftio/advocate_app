@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, ref, watch, onUnmounted } from 'vue';
 import {
   ChevronRight,
@@ -101,19 +102,17 @@ defineExpose({ focusSearch, focusActivity });
           v-model="query"
           aria-label="Search matters"
           placeholder="Search matters, references or parties" /></label
-      ><select v-model="scope" aria-label="Filter matters"
+      ><AppSelect v-model="scope" aria-label="Filter matters"
         ><option value="active">All matters</option
-        ><option value="archived">Archived matters</option></select
-      ><select v-model="status" aria-label="Filter by package status"
-        ><option value="all">All statuses</option
-        ><option>Not built</option
-        ><option>Current</option
-        ><option>Stale</option></select
+        ><option value="archived">Archived matters</option></AppSelect
+      ><AppSelect v-model="status" aria-label="Filter by package status"
+        ><option value="all">All statuses</option><option>Not built</option><option>Current</option
+        ><option>Stale</option></AppSelect
       ><span class="matter-count"
         >{{ visible.length }} {{ visible.length === 1 ? 'matter' : 'matters' }}</span
-      ><select v-model="sort" aria-label="Sort matters"
+      ><AppSelect v-model="sort" aria-label="Sort matters"
         ><option value="recent">Recently modified</option
-        ><option value="name">Matter name</option></select
+        ><option value="name">Matter name</option></AppSelect
       ><button class="btn secondary" :aria-pressed="!compact" @click="compact = false"
         ><List :size="15" />List</button
       ><button class="btn quiet" :aria-pressed="compact" @click="compact = true"

@@ -1,3 +1,4 @@
+import { expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect } from '@playwright/test';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -342,7 +343,7 @@ test('B03B real measured exception, reviewed limit, stale response and conflict'
   });
   await w.getByRole('button', { name: 'Save choices', exact: true }).click();
   await expect(w.getByRole('alert')).toContainText('Matter changed');
-  await expect(w.getByLabel('Maximum pages per volume', { exact: true })).toHaveValue('10');
+  await expectValue(w.getByLabel('Maximum pages per volume', { exact: true }), '10');
   await w.getByRole('button', { name: 'Reload saved settings' }).click();
   await page
     .getByRole('dialog', { name: 'Unsaved volume choices' })

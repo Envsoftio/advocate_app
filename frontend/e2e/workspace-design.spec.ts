@@ -1,3 +1,4 @@
+import { expectValue, selectOption } from './select';
 import {
   closeWorkspaceNavigation,
   openDocumentBrowser,
@@ -72,7 +73,7 @@ test('matter home leads to overview and focused PDF editing', async ({ page, req
   );
   await expect(page.locator('.zoom-select')).toHaveCSS('height', '34px');
   await page.getByRole('button', { name: 'Next page', exact: true }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await expect(page.locator('.thumbnail-rail canvas[data-page="2"]')).toHaveAttribute(
     'data-rendered',
     'true',
@@ -93,9 +94,10 @@ test('matter home leads to overview and focused PDF editing', async ({ page, req
   for (const width of [1440, 900, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await openWorkspaceNavigation(page);
-    await page
-      .getByRole('combobox', { name: 'Interface size' })
-      .selectOption(width === 1440 ? '125' : '100');
+    await selectOption(
+      page.getByRole('combobox', { name: 'Interface size' }),
+      width === 1440 ? '125' : '100',
+    );
     await page.getByRole('button', { name: 'Close workspace navigation', exact: true }).click();
     await expect(page.locator('.workspace-drawer')).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(

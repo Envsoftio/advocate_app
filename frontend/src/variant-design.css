@@ -118,7 +118,7 @@
 .variant-workspace td button:focus-visible,
 .variant-workspace button:focus-visible,
 .variant-workspace input:focus-visible,
-.variant-workspace select:focus-visible {
+.variant-workspace :is(select, :where(.app-select-trigger)):focus-visible {
   outline: 2px solid var(--cb-focus);
   outline-offset: 2px;
 }
@@ -177,9 +177,9 @@
   margin-top: 16px;
 }
 .variant-create input:not([type='checkbox']),
-.variant-create select,
+.variant-create :is(select, :where(.app-select-trigger)),
 .variant-settings-fields input:not([type='checkbox']),
-.variant-settings-fields select {
+.variant-settings-fields :is(select, :where(.app-select-trigger)) {
   display: block;
   width: 100%;
   height: 36px;

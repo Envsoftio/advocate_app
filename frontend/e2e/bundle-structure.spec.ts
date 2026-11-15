@@ -1,3 +1,4 @@
+import { expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -153,7 +154,7 @@ test('B02A new BU01/BU02 design, persisted overrides, real preview and cancel', 
   await matrix(page, info, 'BU02');
   await workspace.getByLabel('Bundle title', { exact: true }).fill('UNSAVED TITLE');
   await workspace.getByRole('button', { name: 'Cancel changes' }).click();
-  await expect(workspace.getByLabel('Bundle title', { exact: true })).toHaveValue('HEARING BUNDLE');
+  await expectValue(workspace.getByLabel('Bundle title', { exact: true }), 'HEARING BUNDLE');
   await workspace.getByLabel('Date', { exact: true }).uncheck();
   await workspace.getByRole('button', { name: 'Apply settings', exact: true }).click();
   await expect(workspace).toContainText('1 field override(s)');
@@ -203,7 +204,7 @@ test('B02A failed saves keep drafts, stale preview is ignored, navigation saves 
   await workspace.getByLabel('Bundle title', { exact: true }).fill('RETRY TITLE');
   await workspace.getByRole('button', { name: 'Apply settings', exact: true }).click();
   await expect(workspace.getByRole('alert')).toContainText('Synthetic save failure');
-  await expect(workspace.getByLabel('Bundle title', { exact: true })).toHaveValue('RETRY TITLE');
+  await expectValue(workspace.getByLabel('Bundle title', { exact: true }), 'RETRY TITLE');
   await page.unroute('**/bundle-settings');
   await workspace.getByRole('button', { name: 'Retry settings', exact: true }).click();
   await expect(workspace).toContainText('Settings applied');

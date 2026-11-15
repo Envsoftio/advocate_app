@@ -1,3 +1,4 @@
+import { expectValue, selectOption } from './select';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -78,11 +79,11 @@ test('FLOW07 unresolved destinations, exact bookmark repair, guarded removal and
     expect(Math.round(b.width)).toBe(width);
   }
   await expect(workspace.locator('.structure-heading')).not.toContainText('Recalculating');
-  await expect(warning.getByLabel('Bookmark to review')).toHaveValue(records[1].id);
+  await expectValue(warning.getByLabel('Bookmark to review'), records[1].id);
   await page.screenshot({ path: info.outputPath('11B-unresolved.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 1024, height: 768 });
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption('dark');
+  await selectOption(page.getByRole('combobox', { name: 'Theme', exact: true }), 'dark');
   await closeWorkspaceNavigation(page);
   await expect(warning.locator('>strong')).toHaveCSS('color', 'rgb(23, 38, 58)');
   await expect(warning.locator('>p')).toHaveCSS('color', 'rgb(23, 38, 58)');
@@ -92,7 +93,7 @@ test('FLOW07 unresolved destinations, exact bookmark repair, guarded removal and
   await page.screenshot({ path: info.outputPath('11B-1024-dark.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 1440, height: 900 });
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption('light');
+  await selectOption(page.getByRole('combobox', { name: 'Theme', exact: true }), 'light');
   await closeWorkspaceNavigation(page);
   await workspace.evaluate((el) => {
     let p: HTMLElement | null = el as HTMLElement;
@@ -101,12 +102,10 @@ test('FLOW07 unresolved destinations, exact bookmark repair, guarded removal and
       p = p.parentElement;
     }
   });
-  await warning.getByLabel('Bookmark to review').selectOption(records[2].id);
+  await selectOption(warning.getByLabel('Bookmark to review'), records[2].id);
   await warning.getByRole('button', { name: 'Select destination', exact: true }).click();
-  await expect(workspace.getByLabel('Bookmark label', { exact: true })).toHaveValue(
-    'Reviewed Order',
-  );
-  await expect(workspace.getByLabel('Target document', { exact: true })).toHaveValue(docs[2].id);
+  await expectValue(workspace.getByLabel('Bookmark label', { exact: true }), 'Reviewed Order');
+  await expectValue(workspace.getByLabel('Target document', { exact: true }), docs[2].id);
   await workspace.getByLabel('Source document page', { exact: true }).fill('1');
   await expect(workspace.locator('.placement-paper img')).toBeVisible();
   await workspace.getByRole('button', { name: 'Save bookmark', exact: true }).click();
@@ -170,8 +169,8 @@ test('FLOW07 unresolved destinations, exact bookmark repair, guarded removal and
       for (const scale of [100, 125]) {
         await page.setViewportSize({ width, height: width === 1440 ? 900 : 768 });
         await openWorkspaceNavigation(page);
-        await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption(theme);
-        await page.getByRole('combobox', { name: 'Interface size' }).selectOption(String(scale));
+        await selectOption(page.getByRole('combobox', { name: 'Theme', exact: true }), theme);
+        await selectOption(page.getByRole('combobox', { name: 'Interface size' }), String(scale));
         await closeWorkspaceNavigation(page);
         for (const state of ['map', 'bookmarks']) {
           await workspace

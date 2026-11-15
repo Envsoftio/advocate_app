@@ -1,3 +1,4 @@
+import { expectValue } from './select';
 import { expect, test } from '@playwright/test';
 
 test.skip(
@@ -43,7 +44,7 @@ test('sets up and unlocks the protected synthetic workspace', async ({ page, req
   );
   await page.getByRole('button', { name: 'Show New password' }).click();
   await expect(page.getByLabel('New password', { exact: true })).toHaveAttribute('type', 'text');
-  await expect(page.getByLabel('New password', { exact: true })).toHaveValue('ab1234');
+  await expectValue(page.getByLabel('New password', { exact: true }), 'ab1234');
   await expect(page.getByLabel('Confirm password', { exact: true })).toHaveAttribute(
     'type',
     'password',

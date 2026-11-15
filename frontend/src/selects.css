@@ -1,0 +1,86 @@
+/* Component defaults precede the existing screen rules, which retain trigger geometry. */
+.app-select-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  text-align: left;
+  gap: 6px;
+  padding: 7px 28px 7px 10px;
+  padding-right: 28px !important;
+  border: 1px solid var(--cb-control-border);
+  border-radius: var(--cb-radius-input);
+  background: var(--cb-surface);
+  color: var(--cb-text);
+  font: inherit;
+  cursor: pointer;
+}
+.app-select-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.app-select-trigger .app-select-chevron {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: inherit;
+  pointer-events: none;
+}
+.app-select-trigger:focus-visible {
+  outline: 2px solid var(--cb-focus);
+  outline-offset: 1px;
+}
+.app-select-trigger:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.app-select-content {
+  z-index: 170;
+  min-width: var(--reka-select-trigger-width);
+  max-width: min(480px, var(--reka-select-content-available-width));
+  max-height: min(320px, var(--reka-select-content-available-height));
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--cb-control-border);
+  border-radius: 8px;
+  background: var(--cb-surface);
+  color: var(--cb-text);
+  box-shadow: 0 12px 32px #0003;
+  font:
+    13px/20px var(--cb-font-ui),
+    sans-serif;
+}
+.app-select-viewport {
+  max-height: inherit;
+}
+.app-select-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 30px 6px 10px;
+  border-radius: 4px;
+  outline: none;
+  cursor: default;
+  overflow-wrap: anywhere;
+  user-select: none;
+}
+.app-select-item[data-highlighted] {
+  background: var(--cb-selected);
+  color: var(--cb-text);
+}
+.app-select-item[data-state='checked'] {
+  font-weight: 600;
+}
+.app-select-item[data-disabled] {
+  color: var(--cb-subtle);
+  opacity: 0.6;
+}
+.app-select-check {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  color: var(--cb-accent);
+}

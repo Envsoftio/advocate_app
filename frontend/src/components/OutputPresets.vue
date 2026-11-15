@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, ref, watch } from 'vue';
 import { api } from '../lib/api';
 import { differences, displaySetting, presetMarks } from '../lib/bundleSettings';
@@ -250,10 +251,10 @@ defineExpose({ discard, saveDraft });
                 :disabled="!marks.bates_enabled"
             /></label>
             <label
-              >Placement<select v-model="marks.bates_position" :disabled="!marks.bates_enabled"
+              >Placement<AppSelect v-model="marks.bates_position" :disabled="!marks.bates_enabled"
                 ><option v-for="item in positions" :key="item[0]" :value="item[0]">{{
                   item[1]
-                }}</option></select
+                }}</option></AppSelect
               ></label
             >
             <label
@@ -297,10 +298,10 @@ defineExpose({ discard, saveDraft });
             annexure. Confirmed register labels are required for marked output.</p
           >
           <label
-            >Default for annexures<select v-model="marks.annexure_mode"
+            >Default for annexures<AppSelect v-model="marks.annexure_mode"
               ><option value="none">No added mark</option
               ><option value="label_stamp">Label stamp</option
-              ><option value="separator">Separator sheet</option></select
+              ><option value="separator">Separator sheet</option></AppSelect
             ></label
           >
           <template
@@ -310,16 +311,16 @@ defineExpose({ discard, saveDraft });
             "
           >
             <label
-              >Stamp pages<select v-model="marks.annexure_stamp_scope"
+              >Stamp pages<AppSelect v-model="marks.annexure_stamp_scope"
                 ><option value="first">First page only</option
-                ><option value="all">Every source page</option></select
+                ><option value="all">Every source page</option></AppSelect
               ></label
             >
             <label
-              >Stamp position<select v-model="marks.annexure_stamp_position"
+              >Stamp position<AppSelect v-model="marks.annexure_stamp_position"
                 ><option v-for="item in positions" :key="item[0]" :value="item[0]">{{
                   item[1]
-                }}</option></select
+                }}</option></AppSelect
               ></label
             >
             <label
@@ -337,14 +338,14 @@ defineExpose({ discard, saveDraft });
                 <small v-if="document.label_status !== 'confirmed'"
                   >Needs confirmed label for marked output</small
                 ></span
-              ><select
+              ><AppSelect
                 :aria-label="'Output treatment for ' + document.title"
                 :value="marks.annexure_overrides[document.id] || 'inherit'"
                 @change="setOverride(document.id, ($event.target as HTMLSelectElement).value)"
                 ><option value="inherit">Matter default</option
                 ><option value="none">No added mark</option
                 ><option value="label_stamp">Label stamp</option
-                ><option value="separator">Separator sheet</option></select
+                ><option value="separator">Separator sheet</option></AppSelect
               ><button class="text-tool" @click="emit('openDocument', document.id)"
                 >Preview page</button
               ></div

@@ -1,3 +1,4 @@
+import { selectOption } from './select';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -157,8 +158,8 @@ test('FLOW 01: one sidebar, real queue, processing, review and persistent collap
   for (const theme of ['dark', 'light'])
     for (const scale of ['100', '125']) {
       await page.getByRole('button', { name: 'Workspace settings', exact: true }).click();
-      await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption(theme);
-      await page.getByRole('combobox', { name: 'Interface size' }).selectOption(scale);
+      await selectOption(page.getByRole('combobox', { name: 'Theme', exact: true }), theme);
+      await selectOption(page.getByRole('combobox', { name: 'Interface size' }), scale);
       await page.getByRole('button', { name: 'Close workspace navigation' }).click();
       for (const width of [1440, 1024]) {
         await page.setViewportSize({ width, height: 900 });

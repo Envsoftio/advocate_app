@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   Info,
@@ -515,10 +516,10 @@ defineExpose({
               placeholder="e.g. Focused extracts"
               @keydown.enter.prevent="create" /></label
           ><label
-            >Start from<select v-model="baselineId"
+            >Start from<AppSelect v-model="baselineId"
               ><option v-for="option in baselineOptions" :key="option.id" :value="option.id">{{
                 option.label
-              }}</option></select
+              }}</option></AppSelect
             ></label
           ><label class="variant-checkbox"
             ><input v-model="copySettings" type="checkbox" /> Copy membership and settings</label
@@ -598,21 +599,20 @@ defineExpose({
               ><input v-model="draftSettings.keep_groups_intact" type="checkbox" /> Keep groups
               together</label
             ><label
-              >Front matter<select v-model="draftSettings.output_marks.front_matter"
+              >Front matter<AppSelect v-model="draftSettings.output_marks.front_matter"
                 ><option value="index_only">Index only</option
-                ><option value="cover_index">Cover and index</option></select
+                ><option value="cover_index">Cover and index</option></AppSelect
               ></label
             ><label
-              >Index density<select v-model="draftSettings.output_marks.index_style"
-                ><option value="compact">Compact</option
-                ><option value="readable">Readable</option
-                ><option value="review">Review</option></select
+              >Index density<AppSelect v-model="draftSettings.output_marks.index_style"
+                ><option value="compact">Compact</option><option value="readable">Readable</option
+                ><option value="review">Review</option></AppSelect
               ></label
             ><label
-              >Numbering style<select v-model="draftSettings.output_marks.numbering_style"
+              >Numbering style<AppSelect v-model="draftSettings.output_marks.numbering_style"
                 ><option value="arabic">Arabic</option
                 ><option value="roman_lower">Roman lower</option
-                ><option value="roman_upper">Roman upper</option></select
+                ><option value="roman_upper">Roman upper</option></AppSelect
               ></label
             ><label
               >Numbering start<input

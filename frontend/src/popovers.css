@@ -66,7 +66,7 @@
   color: var(--cb-text);
   font-size: 12px;
 }
-.app-popover select,
+.app-popover :is(select, :where(.app-select-trigger)),
 .app-popover input:not([type='checkbox']) {
   min-width: 0;
   max-width: 100%;
@@ -78,7 +78,7 @@
   color: var(--cb-text);
   font: inherit;
 }
-.app-popover select {
+.app-popover :is(select, :where(.app-select-trigger)) {
   flex: 1;
 }
 .app-popover > strong {

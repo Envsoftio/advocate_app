@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import {
   FilePlus2,
@@ -567,13 +568,13 @@ function applyTask() {
         <div class="task-fields">
           <label v-if="needsSource" class="field"
             >Source document
-            <select v-model="sourceId" :disabled="disabled || working"
+            <AppSelect v-model="sourceId" :disabled="disabled || working"
               ><option value="">Choose a document to copy from</option
               ><option v-for="item in documents" :key="item.id" :value="item.id"
                 >{{ item.title }} ({{ item.page_count }} pages){{
                   item.id === document.id ? ' · current document' : ''
                 }}</option
-              ></select
+              ></AppSelect
             >
           </label>
           <label v-if="task === 'insert' || task === 'replace'" class="field"
@@ -587,9 +588,9 @@ function applyTask() {
           >
           <template v-if="task === 'insert'">
             <label class="field"
-              >Where to add pages<select v-model="insertionSide" :disabled="disabled || working"
+              >Where to add pages<AppSelect v-model="insertionSide" :disabled="disabled || working"
                 ><option value="before">Before a page</option
-                ><option value="after">After a page</option></select
+                ><option value="after">After a page</option></AppSelect
               ></label
             >
             <label v-if="insertionSide === 'before'" class="field"
@@ -667,12 +668,12 @@ function applyTask() {
           >
           <template v-if="task === 'compress'"
             ><label class="field"
-              >Compression quality<select
+              >Compression quality<AppSelect
                 v-model="compressionPreset"
                 :disabled="disabled || working"
                 ><option value="lossless">Keep image quality — lossless cleanup</option
                 ><option value="balanced">Balanced — smaller scans, some quality loss</option
-                ><option value="small">Smallest — more quality loss</option></select
+                ><option value="small">Smallest — more quality loss</option></AppSelect
               ></label
             ><p class="task-guidance"
               >Balanced uses 240 DPI / JPEG quality 85; Smallest uses 150 DPI / quality 70. Small

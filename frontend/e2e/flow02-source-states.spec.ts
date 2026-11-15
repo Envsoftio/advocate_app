@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -47,7 +48,7 @@ test('FLOW / 02 source, OCR and focus states use real document and job data', as
     .toBe(88);
   await page.screenshot({ path: info.outputPath('07A-1440-light.png'), animations: 'disabled' });
 
-  await page.getByRole('combobox', { name: 'Document version' }).selectOption('original');
+  await selectOption(page.getByRole('combobox', { name: 'Document version' }), 'original');
   const original = page.getByRole('dialog', { name: 'Review imported original' });
   await expect(original).toBeVisible();
   await expect(original).toContainText('Read only');
@@ -175,7 +176,7 @@ test('FLOW / 02 unsaved batch state keeps its draft and destination', async ({
     .locator('.matter-rail')
     .getByRole('button', { name: 'Documents', exact: true })
     .click();
-  await page.getByRole('combobox', { name: 'Document version' }).selectOption('original');
+  await selectOption(page.getByRole('combobox', { name: 'Document version' }), 'original');
   const original = page.getByRole('dialog', { name: 'Review imported original' });
   await expect(original.getByRole('button', { name: 'Search artifact' })).toBeVisible();
   await expect.poll(async () => Math.round((await original.boundingBox())!.x)).toBe(344);
@@ -210,7 +211,7 @@ test('FLOW / 02 unsaved batch state keeps its draft and destination', async ({
   await expect(guard).toContainText('1 metadata edit has not been saved');
   await page.screenshot({ path: info.outputPath('06C-1440-light.png'), animations: 'disabled' });
   await guard.getByRole('button', { name: 'Keep editing' }).click();
-  await expect(title).toHaveValue('Unsaved synthetic title');
+  await expectValue(title, 'Unsaved synthetic title');
   await page
     .locator('.matter-rail')
     .getByRole('button', { name: 'Build bundle', exact: true })

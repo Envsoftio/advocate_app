@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { ref, watch } from 'vue';
 import { api } from '../lib/api';
 import { friendlyError } from '../lib/format';
@@ -137,18 +138,18 @@ async function save() {
               @input="changed"
           /></label>
           <label class="field"
-            >Part<select v-model="item.part" @change="changed"
+            >Part<AppSelect v-model="item.part" @change="changed"
               ><option :value="null">Any Part</option
               ><option v-for="part in parts" :key="part" :value="part"
                 >Part {{ part }}</option
-              ></select
+              ></AppSelect
             ></label
           >
           <label class="field"
-            >Review<select v-model="item.status" @change="changed"
+            >Review<AppSelect v-model="item.status" @change="changed"
               ><option value="unreviewed">To review</option
               ><option value="present">Present, reviewer marked</option
-              ><option value="not_applicable">Not applicable, reviewer marked</option></select
+              ><option value="not_applicable">Not applicable, reviewer marked</option></AppSelect
             ></label
           >
           <button

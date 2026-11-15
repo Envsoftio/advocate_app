@@ -1,3 +1,4 @@
+import { selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect, type Page } from '@playwright/test';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -52,8 +53,8 @@ async function enter(page: Page) {
 }
 async function appearance(page: Page, theme: string, scale: number) {
   await openWorkspaceNavigation(page);
-  await page.getByLabel('Theme', { exact: true }).selectOption(theme);
-  await page.getByLabel('Interface size', { exact: true }).selectOption(String(scale));
+  await selectOption(page.getByLabel('Theme', { exact: true }), theme);
+  await selectOption(page.getByLabel('Interface size', { exact: true }), String(scale));
   await closeWorkspaceNavigation(page);
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', theme);
 }
@@ -151,7 +152,7 @@ test('B03C live summaries, options persistence and shared workspace routes', asy
   await expect(w.locator('.build-summary')).toContainText('No optional volume byte limit');
   await w.getByRole('button', { name: 'Output options', exact: true }).click();
   const d = page.getByRole('dialog', { name: 'Output options', exact: true });
-  await d.getByLabel('Page quality', { exact: true }).selectOption('lossless');
+  await selectOption(d.getByLabel('Page quality', { exact: true }), 'lossless');
   await d.getByLabel('XLSX', { exact: true }).check();
   await d.getByRole('button', { name: 'Apply options', exact: true }).click();
   await expect(w).toContainText('Lossless optimization');

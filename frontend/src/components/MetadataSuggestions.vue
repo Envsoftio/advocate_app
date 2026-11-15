@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppDateInput from './ui/AppDateInput.vue';
 import { ToggleGroupItem } from 'reka-ui';
 import AppChoiceGroup from './ui/AppChoiceGroup.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
@@ -371,9 +372,15 @@ void load();
                 :disabled="saving || (r.field === 'document_date' && !r.available)"
               />Accept suggested {{ r.field === 'title' ? 'title' : 'date' }}</label
             ><label class="review-value"
-              >{{ r.field === 'title' ? 'Title' : 'Date' }} to save<input
+              >{{ r.field === 'title' ? 'Title' : 'Date' }} to save<AppDateInput
+                v-if="r.field === 'document_date'"
                 v-model="drafts[key(r)].value"
-                :type="r.field === 'title' ? 'text' : 'date'"
+                label="Date to save"
+                :disabled="saving"
+                :aria-invalid="drafts[key(r)].selected && !valid(r)" /><input
+                v-else
+                v-model="drafts[key(r)].value"
+                type="text"
                 :maxlength="r.field === 'title' ? 250 : 10"
                 :disabled="saving"
                 :aria-invalid="drafts[key(r)].selected && !valid(r)" /></label

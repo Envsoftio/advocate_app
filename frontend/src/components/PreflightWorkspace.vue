@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, ref } from 'vue';
 import { Info, TriangleAlert, CircleX } from 'lucide-vue-next';
 import type { Check } from '../lib/types';
@@ -75,14 +76,13 @@ const sections = computed(() =>
     <div class="preflight-findings"
       ><div class="preflight-filter"
         ><label
-          >Show<select
+          >Show<AppSelect
             aria-label="Show"
             :value="filter"
             @change="emit('update:filter', ($event.target as HTMLSelectElement).value)"
-            ><option value="all">All findings</option
-            ><option value="error">Errors</option
+            ><option value="all">All findings</option><option value="error">Errors</option
             ><option value="warning">Warnings</option
-            ><option value="info">Technical notes</option></select
+            ><option value="info">Technical notes</option></AppSelect
           ></label
         ><small>Checks describe saved inputs, not generated output.</small></div
       >

@@ -1,3 +1,5 @@
+import { selectOption, expectValue } from './select';
+import { fillDate } from './date-field';
 import { completeQueuedImport, enterLatestMatter } from './navigation';
 import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation';
 import {
@@ -61,7 +63,7 @@ test('court-neutral checklist and reviewed CSV index import persist', async ({ p
     mimeType: 'text/csv',
     buffer: Buffer.from('title,document,page\n"Petition, reviewed",unknown.pdf,2\n'),
   });
-  await importer.getByLabel('Source document').selectOption(doc.id);
+  await selectOption(importer.getByLabel('Source document'), doc.id);
   await importer.getByLabel('Checked target').check();
   await importer.getByRole('button', { name: 'Add 1 reviewed bookmark(s)' }).click();
   await expect(importer.getByText('1 reviewed row(s) added as manual bookmarks.')).toBeVisible();
@@ -79,7 +81,7 @@ test('court-neutral checklist and reviewed CSV index import persist', async ({ p
     mimeType: 'text/csv',
     buffer: Buffer.from('title,document,page\n"Petition, reviewed",unknown.pdf,2\n'),
   });
-  await importer.getByLabel('Source document').selectOption(doc.id);
+  await selectOption(importer.getByLabel('Source document'), doc.id);
   await importer.getByLabel('Checked target').check();
   await importer.getByRole('button', { name: 'Add 1 reviewed bookmark(s)' }).click();
   await expect(importer.getByRole('alert')).toContainText('already exists as a bookmark');
@@ -94,8 +96,8 @@ test('court-neutral checklist and reviewed CSV index import persist', async ({ p
   await checklist.getByLabel('Filing stage').fill('Initial');
   await checklist.getByRole('button', { name: 'Add item' }).click();
   await checklist.getByRole('textbox', { name: 'Item 1' }).fill('Review petition');
-  await checklist.getByLabel('Part').selectOption('1');
-  await checklist.getByRole('combobox', { name: 'Review', exact: true }).selectOption('present');
+  await selectOption(checklist.getByLabel('Part'), '1');
+  await selectOption(checklist.getByRole('combobox', { name: 'Review', exact: true }), 'present');
   await checklist.getByRole('button', { name: 'Save checklist' }).click();
   await expect(checklist.getByText('Review checklist saved.', { exact: false })).toBeVisible();
   const review = await (
@@ -114,7 +116,7 @@ test('court-neutral checklist and reviewed CSV index import persist', async ({ p
   await openBuildTool(page, 'Preview');
   const presets = page.locator('.bundle-structure');
   await presets.locator('.front-settings details>summary').click();
-  await presets.getByRole('combobox', { name: 'Index layout' }).selectOption('readable');
+  await selectOption(presets.getByRole('combobox', { name: 'Index layout' }), 'readable');
   await presets.getByRole('checkbox', { name: 'Also create separate technical Part PDFs' }).check();
   await presets.getByRole('button', { name: 'Apply settings', exact: true }).click();
   await presets.getByRole('button', { name: 'Back to page map', exact: true }).click();
@@ -188,7 +190,7 @@ test('build workspace explains a late addition against a named prior build', asy
     .locator('.matter-rail')
     .getByRole('button', { name: 'Build bundle', exact: true })
     .click();
-  await page.getByRole('combobox', { name: 'Saved build' }).selectOption(priorId);
+  await selectOption(page.getByRole('combobox', { name: 'Saved build' }), priorId);
   await page
     .locator('.build-workspace')
     .getByRole('button', { name: 'Review changes', exact: true })
@@ -271,7 +273,7 @@ test('Bates and annexure policy update the page-map preview and actual-page mark
   await presets.getByRole('spinbutton', { name: 'Start' }).fill('42');
   await presets.getByRole('checkbox', { name: 'Number index pages' }).check();
   await presets.getByRole('checkbox', { name: 'Number separator pages' }).check();
-  await presets.getByRole('combobox', { name: 'Default for annexures' }).selectOption('separator');
+  await selectOption(presets.getByRole('combobox', { name: 'Default for annexures' }), 'separator');
   await expect(
     presets.getByText(
       'Output policy: Bates E2E-000042 at bottom left · Separator before each annexure · 0 document exceptions · Unsaved',
@@ -353,7 +355,7 @@ test('technical output preset is saved and explicitly applied in the build works
   await page.getByRole('button', { name: 'Preview changes', exact: true }).click();
   await page.getByRole('button', { name: 'Save choices', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Save choices', exact: true })).toBeHidden();
-  await expect(page.getByRole('spinbutton', { name: /Maximum pages per volume/ })).toHaveValue('6');
+  await expectValue(page.getByRole('spinbutton', { name: /Maximum pages per volume/ }), '6');
   await openBuildTool(page, 'Presets');
   await presets.getByLabel('E2E chamber technical', { exact: false }).check();
   await presets.getByRole('button', { name: 'Use selected preset' }).click();
@@ -361,9 +363,7 @@ test('technical output preset is saved and explicitly applied in the build works
     'Applied: E2E chamber technical v1',
   );
   await openBuildTool(page);
-  await expect(page.getByRole('spinbutton', { name: /Maximum pages per volume/ })).toHaveValue(
-    '10',
-  );
+  await expectValue(page.getByRole('spinbutton', { name: /Maximum pages per volume/ }), '10');
   const snapshot = await request.get(`${backend}/matters/${matterId}/output-preset`, { headers });
   expect((await snapshot.json()).version).toBe(1);
 });
@@ -400,7 +400,7 @@ test('Hindi OCR selection reaches the local engine', async ({ page, request }) =
   ).toBeVisible();
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'OCR', exact: true }).click();
-  await page.getByRole('combobox', { name: 'OCR language' }).selectOption('eng+hin');
+  await selectOption(page.getByRole('combobox', { name: 'OCR language' }), 'eng+hin');
   const submitted = page.waitForRequest(
     (request) => request.url().endsWith('/ocr') && request.method() === 'POST',
   );
@@ -408,9 +408,7 @@ test('Hindi OCR selection reaches the local engine', async ({ page, request }) =
   await page.getByRole('tab', { name: 'OCR', exact: true }).click();
   await page.getByRole('button', { name: 'Run English + Hindi OCR' }).click();
   const ocrDialog = page.getByRole('dialog', { name: 'OCR options' });
-  await expect(ocrDialog.getByRole('combobox', { name: 'Recognition language' })).toHaveValue(
-    'eng+hin',
-  );
+  await expectValue(ocrDialog.getByRole('combobox', { name: 'Recognition language' }), 'eng+hin');
   await ocrDialog.getByRole('button', { name: 'Start OCR' }).click();
   expect((await submitted).postDataJSON().language).toBe('eng+hin');
 });
@@ -477,9 +475,10 @@ test('visible-signature review warns before a working-copy transformation', asyn
   await openDocumentActions(page);
   const details = page.getByRole('region', { name: 'Document details' });
   await expect(details).toContainText('Visible/scanned signature only');
-  await expect(
+  await expectValue(
     details.getByRole('combobox', { name: 'Visible/scanned signature review' }),
-  ).toHaveValue('present');
+    'present',
+  );
 
   page.once('dialog', (dialog) => void dialog.dismiss());
   await closeWorkspaceNavigation(page);
@@ -567,12 +566,14 @@ test('document table preserves explicit selection and previews batch ordering be
   await register.locator('.batch-tools-menu>button').click();
   await page.getByRole('button', { name: 'More tools', exact: true }).click();
 
-  await register
-    .getByRole('combobox', { name: 'Set selected document type', exact: true })
-    .selectOption('annexure');
-  await register
-    .getByRole('combobox', { name: 'Set selected Part', exact: true })
-    .selectOption('2');
+  await selectOption(
+    register.getByRole('combobox', { name: 'Set selected document type', exact: true }),
+    'annexure',
+  );
+  await selectOption(
+    register.getByRole('combobox', { name: 'Set selected Part', exact: true }),
+    '2',
+  );
   await register.getByRole('checkbox', { name: 'Change selected group' }).check();
   await register.locator('.batch-advanced>label input:not([type=checkbox])').fill('selected-pair');
   await register.locator('.batch-apply-action').click();
@@ -605,7 +606,7 @@ test('document table preserves explicit selection and previews batch ordering be
   await register.getByRole('searchbox', { name: 'Filter rows' }).fill('');
   await register.locator('.batch-tools-menu>button').click();
   await page.getByRole('button', { name: 'More tools', exact: true }).click();
-  await register.getByRole('combobox', { name: 'Order method' }).selectOption('filename');
+  await selectOption(register.getByRole('combobox', { name: 'Order method' }), 'filename');
   await register.getByRole('button', { name: 'Preview order', exact: true }).click();
   const preview = register.getByRole('dialog', { name: 'Sort preview' });
   await expect(preview).toContainText('Proposed filename order');
@@ -633,7 +634,7 @@ test('document table preserves explicit selection and previews batch ordering be
   await register.locator('.batch-tools-menu>button').click();
   await page.getByRole('button', { name: 'More tools', exact: true }).click();
   const petitionRow = register.locator('tr', { hasText: '01_petition.pdf' });
-  await petitionRow.locator('input[type="date"]').fill('2026-10-16');
+  await fillDate(petitionRow.locator('.app-date-field'), '2026-10-16');
   const dateSaved = page.waitForResponse(
     (response) =>
       response.url().includes('/metadata-review') && response.request().method() === 'PUT',
@@ -703,32 +704,36 @@ test('label proposal preview cancels cleanly and applies one undoable grouped ma
   const register = page.getByRole('region', { name: 'Editable document table' });
   const designatedParent = register.locator('tr', { hasText: '02_impugned_order.pdf' });
   await designatedParent.locator('.batch-row-menu>button').click();
-  await page
-    .locator('.app-popover')
-    .getByRole('combobox', { name: 'Hierarchy', exact: true })
-    .selectOption('parent');
+  await selectOption(
+    page.locator('.app-popover').getByRole('combobox', { name: 'Hierarchy', exact: true }),
+    'parent',
+  );
   await page.locator('.app-popover').getByRole('button', { name: 'Save row' }).click();
   await expect(register.locator('.batch-savebar .saved')).toHaveText('All changes saved');
   await expect(page.locator('.design-shell>.toast.success')).toContainText('Changes saved locally');
   await register.getByRole('checkbox', { name: 'Select all filtered documents' }).check();
   await register.locator('.batch-tools-menu>button').click();
   await page.getByRole('button', { name: 'More tools', exact: true }).click();
-  await register
-    .getByRole('combobox', { name: 'Method', exact: true })
-    .selectOption('grouped_suffix');
-  await register.getByRole('combobox', { name: 'Suffix style' }).selectOption('upper_alpha');
+  await selectOption(
+    register.getByRole('combobox', { name: 'Method', exact: true }),
+    'grouped_suffix',
+  );
+  await selectOption(register.getByRole('combobox', { name: 'Suffix style' }), 'upper_alpha');
   await register.getByRole('textbox', { name: 'Separator' }).fill('.');
   await register.getByRole('button', { name: 'Preview label changes' }).click();
   const preview = register.getByRole('dialog', { name: 'Label proposal preview' });
-  await expect(
+  await expectValue(
     preview.getByRole('textbox', { name: 'Proposed label for 01_petition' }),
-  ).toHaveValue('P-1.A');
-  await expect(
+    'P-1.A',
+  );
+  await expectValue(
     preview.getByRole('textbox', { name: 'Proposed label for 02_impugned_order' }),
-  ).toHaveValue('P-1');
-  await expect(
+    'P-1',
+  );
+  await expectValue(
     preview.getByRole('textbox', { name: 'Proposed label for 03_affidavit' }),
-  ).toHaveValue('P-2');
+    'P-2',
+  );
   await preview.getByRole('button', { name: 'Cancel without changes' }).click();
   await expect(preview).toBeHidden();
   let current = await (
@@ -871,7 +876,7 @@ test('compression exposes measured results and retains a usable PDF', async ({ p
       )
       .filter({ hasText: 'E2E Compression' }),
   ).toBeVisible();
-  await expect(page.locator('.page-counter input')).toHaveValue('1');
+  await expectValue(page.locator('.page-counter input'), '1');
   await expect(page.locator('.page-counter')).toContainText('/ 1');
   await expect(page.getByRole('button', { name: 'Go to page 1' })).toBeVisible();
   await expect(page.locator('.thumbnail-button canvas').first()).toHaveAttribute(
@@ -881,16 +886,16 @@ test('compression exposes measured results and retains a usable PDF', async ({ p
   await page.getByRole('button', { name: 'Hide thumbnails' }).click();
   await expect(page.locator('.thumbnail-strip')).toHaveCount(0);
   const preview = page.locator('.pdf-paper');
-  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom' }), '100');
   await expect(page.locator('.pdf-placement-surface')).toHaveAttribute('aria-busy', 'false');
   const originalWidth = await preview.evaluate(
     (node: HTMLCanvasElement) => node.getBoundingClientRect().width,
   );
-  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom' }), '50');
   await expect
     .poll(() => preview.evaluate((node: HTMLCanvasElement) => node.getBoundingClientRect().width))
     .toBeCloseTo(originalWidth / 2, 0);
-  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('25');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom' }), '25');
   await expect
     .poll(() => preview.evaluate((node: HTMLCanvasElement) => node.getBoundingClientRect().width))
     .toBeCloseTo(originalWidth / 4, 0);
@@ -902,7 +907,7 @@ test('compression exposes measured results and retains a usable PDF', async ({ p
   await expect(dialog.getByRole('button', { name: 'Save split ZIP', exact: true })).toBeDisabled();
   await expect(dialog).toContainText('This PDF has only one page.');
   await dialog.getByRole('button', { name: 'Reduce file size', exact: true }).click();
-  await dialog.getByRole('combobox', { name: 'Compression quality' }).selectOption('small');
+  await selectOption(dialog.getByRole('combobox', { name: 'Compression quality' }), 'small');
   await dialog.getByRole('button', { name: 'Compress working PDF' }).click();
   await expect(dialog.getByRole('status')).toContainText('bytes.');
   await expect(dialog.getByRole('status')).toContainText('Completed');
@@ -993,13 +998,14 @@ test('manual bookmark survives reload and shows revision review', async ({ page,
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Bookmarks', exact: true })
     .click();
-  await page.getByRole('combobox', { name: 'Target document' }).selectOption(docId);
+  await selectOption(page.getByRole('combobox', { name: 'Target document' }), docId);
   await page.getByRole('button', { name: 'Save bookmark', exact: true }).click();
   await page
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Bookmarks', exact: true })
     .click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue(
+  await expectValue(
+    page.getByRole('textbox', { name: 'Bookmark label' }),
     'Reviewed synthetic page',
   );
   await page
@@ -1020,7 +1026,8 @@ test('manual bookmark survives reload and shows revision review', async ({ page,
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Bookmarks', exact: true })
     .click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue(
+  await expectValue(
+    page.getByRole('textbox', { name: 'Bookmark label' }),
     'Reviewed synthetic page',
   );
   const rotated = await request.post(`${backend}/documents/${docId}/pages/rotate`, {
@@ -1117,11 +1124,16 @@ test('index preview updates with draft volume cap and opens the source document'
   const indexLink = review.getByRole('button', { name: /Go to PDF page/ }).first();
   await expect(indexLink).toBeVisible();
   await indexLink.click();
-  await expect(review.getByRole('spinbutton', { name: 'PDF page number' })).not.toHaveValue('1');
+  await expectValue(
+    review.getByRole('spinbutton', { name: 'PDF page number' }),
+    '1',
+    undefined,
+    true,
+  );
   await openReaderView(page);
   await review.getByRole('button', { name: 'Back to previous reading position' }).click();
   await review.getByRole('button', { name: 'View options' }).click();
-  await expect(review.getByRole('spinbutton', { name: 'PDF page number' })).toHaveValue('1');
+  await expectValue(review.getByRole('spinbutton', { name: 'PDF page number' }), '1');
   await review.getByRole('button', { name: 'Search artifact' }).click();
   await review.getByRole('searchbox', { name: 'Find text in generated PDF' }).fill('Synthetic');
   await expect(
@@ -1131,9 +1143,14 @@ test('index preview updates with draft volume cap and opens the source document'
   await expect(review.locator('.pdf-search-highlight.is-active').first()).toBeVisible();
   await review.getByRole('searchbox', { name: 'Find text in generated PDF' }).fill('');
   await review.getByRole('button', { name: /02_impugned_order/ }).click();
-  await expect(review.getByRole('spinbutton', { name: 'PDF page number' })).not.toHaveValue('1');
+  await expectValue(
+    review.getByRole('spinbutton', { name: 'PDF page number' }),
+    '1',
+    undefined,
+    true,
+  );
   await openReaderView(page);
-  await review.getByRole('combobox', { name: 'Reading mode' }).selectOption('continuous');
+  await selectOption(review.getByRole('combobox', { name: 'Reading mode' }), 'continuous');
   await expect(review.locator('.canvas-scroll')).toHaveClass(/continuous-reader/);
   await openReaderView(page);
   await expect(review.locator('.app-popover')).toBeVisible();
@@ -1213,7 +1230,7 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
   await page.getByRole('button', { name: 'Document details', exact: true }).click();
   await page.getByRole('button', { name: 'Next page' }).click();
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark');
+  await selectOption(page.getByRole('combobox', { name: 'Theme' }), 'dark');
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'Annotate', exact: true }).click();
   await page.getByRole('button', { name: 'More annotation tools' }).click();
@@ -1273,7 +1290,7 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
     .toBe(2);
   await page.reload();
   await enterLatestMatter(page);
-  await expect(page.getByRole('spinbutton', { name: 'Go to page', exact: true })).toHaveValue('2');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page', exact: true }), '2');
   await page.getByRole('button', { name: /Page 2 bookmarks/ }).click();
   await expect(savedOnPage).toContainText('Reviewed second page');
   await page.getByRole('button', { name: 'Open Index & bookmarks', exact: true }).click();
@@ -1281,9 +1298,7 @@ test('bookmark the current PDF page while preparing a matter', async ({ page, re
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Bookmarks', exact: true })
     .click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue(
-    'Reviewed second page',
-  );
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), 'Reviewed second page');
   await page
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Index & page map', exact: true })
@@ -1324,19 +1339,19 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
     .getByRole('button', { name: 'Bookmarks', exact: true })
     .click();
   await page.getByRole('button', { name: 'Add bookmark', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Target document' }).selectOption(docId);
+  await selectOption(page.getByRole('combobox', { name: 'Target document' }), docId);
   await page.getByRole('textbox', { name: 'Bookmark label' }).fill('First');
   await page.getByRole('button', { name: 'Save bookmark', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('First');
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), 'First');
   await page
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Bookmarks', exact: true })
     .click();
   await page.getByRole('button', { name: 'Add bookmark', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Target document' }).selectOption(docId);
+  await selectOption(page.getByRole('combobox', { name: 'Target document' }), docId);
   await page.getByRole('textbox', { name: 'Bookmark label' }).fill('Second');
   await page.getByRole('button', { name: 'Save bookmark', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Second');
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), 'Second');
   await expect(page.getByRole('button', { name: 'Add bookmark', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: /Reorder bookmark 2:/ }).focus();
   await page.keyboard.press('ArrowUp');
@@ -1345,7 +1360,7 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Bookmarks', exact: true })
     .click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Second');
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), 'Second');
   await page.reload();
   await enterLatestMatter(page);
   await page.getByRole('button', { name: 'Index & bookmarks' }).click();
@@ -1353,7 +1368,7 @@ test('manual bookmark order is keyboard accessible and persists', async ({ page,
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Bookmarks', exact: true })
     .click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('Second');
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), 'Second');
 });
 
 test('dragging document, bookmark and page order updates the shared index plan', async ({
@@ -1395,13 +1410,9 @@ test('dragging document, bookmark and page order updates the shared index plan',
   await expect(preview.locator('tbody tr').first()).toContainText('02_impugned_order');
   await expect(preview).toContainText('Printed volume');
   await preview.getByRole('button', { name: 'Bookmark 02_impugned_order first page' }).click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue(
-    '02_impugned_order',
-  );
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), '02_impugned_order');
   await page.getByRole('button', { name: 'Save bookmark', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue(
-    '02_impugned_order',
-  );
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), '02_impugned_order');
   await page
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Index & page map', exact: true })
@@ -1411,11 +1422,11 @@ test('dragging document, bookmark and page order updates the shared index plan',
   const bookmarks = page
     .getByRole('region', { name: 'Manual bookmarks' })
     .locator('.bookmark-tree-row');
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('01_petition');
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), '01_petition');
   await expect(page.getByRole('button', { name: 'Add bookmark', exact: true })).toBeEnabled();
   await dragWithPointer(page, bookmarks.nth(1).locator('.bookmark-drag-handle'), bookmarks.nth(0));
   await page.getByRole('button', { name: 'Save bookmark', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('01_petition');
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), '01_petition');
   await expect(page.getByRole('button', { name: 'Add bookmark' })).toBeEnabled();
   await page.reload();
   await enterLatestMatter(page);
@@ -1424,7 +1435,7 @@ test('dragging document, bookmark and page order updates the shared index plan',
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Bookmarks', exact: true })
     .click();
-  await expect(page.getByRole('textbox', { name: 'Bookmark label' })).toHaveValue('01_petition');
+  await expectValue(page.getByRole('textbox', { name: 'Bookmark label' }), '01_petition');
   await page
     .locator('.structure-tabs')
     .getByRole('button', { name: 'Index & page map', exact: true })
@@ -1504,7 +1515,7 @@ test('dragging document, bookmark and page order updates the shared index plan',
         ).find((document: { id: string }) => document.id === docId)?.revision,
     )
     .toBe(2);
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await expect(page.locator('.page-counter')).toContainText('/ 3');
 });
 
@@ -1606,7 +1617,8 @@ test('selectable PDF text can be selected and replaced from the preview', async 
   await page.getByRole('tab', { name: 'Edit', exact: true }).click();
   await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   await page.getByRole('button', { name: /Edit text: DRAFT PETITION/ }).click();
-  await expect(page.getByRole('textbox', { name: 'Replacement' })).toHaveValue(
+  await expectValue(
+    page.getByRole('textbox', { name: 'Replacement' }),
     'DRAFT PETITION - EXAMPLE ONLY',
   );
   await expect(page.locator('.pdf-inline-editor')).toBeVisible();
@@ -1649,7 +1661,7 @@ test('selectable PDF text can be selected and replaced from the preview', async 
   await expect(page.locator('.toast.error')).toContainText('No clear room for this replacement');
   expect((await page.locator('.toast.error').boundingBox())!.width).toBeLessThanOrEqual(380);
   await expect(page.locator('.pdf-inline-editor [role="alert"]')).toHaveCount(0);
-  await expect(page.getByRole('textbox', { name: 'Replacement' })).toHaveValue('W'.repeat(200));
+  await expectValue(page.getByRole('textbox', { name: 'Replacement' }), 'W'.repeat(200));
 });
 
 test('Edit text reviews signature risk without a failed request or inline error', async ({
@@ -1767,7 +1779,8 @@ test('PDFium paragraph trial edits a synthetic working revision from the viewer'
   await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   await page.getByRole('button', { name: /Edit text: IN THE COURT/ }).click();
   await page.getByRole('button', { name: 'Edit whole paragraph' }).click();
-  await expect(page.getByRole('textbox', { name: 'Replacement' })).toHaveValue(
+  await expectValue(
+    page.getByRole('textbox', { name: 'Replacement' }),
     'IN THE COURT (DEMONSTRATION)',
   );
   await page
@@ -2004,7 +2017,7 @@ test('redaction mark stays movable and is applied in saved PDF output', async ({
   ).toBeVisible();
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'Redact', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom' }), '50');
   const apply = page.getByRole('button', { name: 'Add redaction mark' });
   await expect(page.getByText('Drag over the content to remove.')).toBeVisible();
   await expect(apply).toBeDisabled();
@@ -2148,7 +2161,7 @@ test('redaction applies to a rotated synthetic scan', async ({ page, request }) 
   ).toBeVisible();
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'Redact', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('50');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom' }), '50');
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-switching/);
   await page.locator('.canvas-scroll').evaluate((element) => {
     element.scrollTop = 0;
@@ -2332,7 +2345,7 @@ test('reviewed link and output-mark preview persist through the matter workspace
   await page.mouse.move(bounds!.x + 230, bounds!.y + 165, { steps: 5 });
   await page.mouse.up();
   await page.getByRole('textbox', { name: 'Readable label' }).fill('Open supporting order');
-  await page.getByRole('combobox', { name: 'Target document' }).selectOption(documents[1].id);
+  await selectOption(page.getByRole('combobox', { name: 'Target document' }), documents[1].id);
   await page.getByRole('button', { name: 'Save reviewed link' }).click();
   await expect(
     page.getByRole('region', { name: 'Reviewed PDF links' }).getByRole('status'),
@@ -2424,9 +2437,9 @@ test('appearance persists and keyboard search respects text editing', async ({ p
         return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
       });
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark');
+  await selectOption(page.getByRole('combobox', { name: 'Theme' }), 'dark');
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Interface size' }).selectOption('125');
+  await selectOption(page.getByRole('combobox', { name: 'Interface size' }), '125');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'dark');
   await expect(page.locator('html')).toHaveCSS('zoom', '1.25');
@@ -2468,12 +2481,15 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await openWorkspaceNavigation(page);
   await page.locator('.workspace-drawer').getByRole('button', { name: 'Court rules' }).click();
   await expect.poll(() => contrast('.guide-card')).toBeGreaterThan(4.5);
-  await expect(page.locator('.party-form select').first()).toHaveCSS('color-scheme', 'dark');
+  await expect(page.locator('.party-form .app-select-trigger').first()).toHaveCSS(
+    'color-scheme',
+    'dark',
+  );
   await page.reload();
   await enterLatestMatter(page);
   await openWorkspaceNavigation(page);
-  await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveValue('dark');
-  await expect(page.getByRole('combobox', { name: 'Interface size' })).toHaveValue('125');
+  await expectValue(page.getByRole('combobox', { name: 'Theme' }), 'dark');
+  await expectValue(page.getByRole('combobox', { name: 'Interface size' }), '125');
   await page.getByRole('button', { name: 'Close workspace navigation', exact: true }).click();
   await expect(page.locator('.pdf-paper')).toBeVisible();
   await page.getByRole('link', { name: 'Skip to main content' }).focus();
@@ -2499,7 +2515,7 @@ test('appearance persists and keyboard search respects text editing', async ({ p
   await expect(page.locator('.workspace-drawer')).toBeHidden();
   await openWorkspaceNavigation(page);
   await page.emulateMedia({ colorScheme: 'dark' });
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('system');
+  await selectOption(page.getByRole('combobox', { name: 'Theme' }), 'system');
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'dark');
   await page.emulateMedia({ colorScheme: 'light' });
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'light');
@@ -2550,7 +2566,7 @@ test('working-copy page tools edit and save synthetic pages', async ({ page, req
     tools.getByRole('button', { name: 'Add selected pages', exact: true }),
   ).toBeDisabled();
   await expect(tools).toContainText('Choose the document to copy pages from.');
-  await tools.getByRole('combobox', { name: 'Source document' }).selectOption({ index: 2 });
+  await selectOption(tools.getByRole('combobox', { name: 'Source document' }), { index: 2 });
   await tools.getByRole('textbox', { name: 'Source pages' }).fill('1');
   await tools.getByRole('textbox', { name: 'Source pages' }).fill('999');
   await expect(
@@ -2561,7 +2577,7 @@ test('working-copy page tools edit and save synthetic pages', async ({ page, req
   await page.screenshot({ path: 'test-results/page-tools-add.png', animations: 'disabled' });
   await tools.getByRole('button', { name: 'Add selected pages' }).click();
   await expect(page.locator('.page-counter')).toContainText('/ 4');
-  await tools.getByRole('combobox', { name: 'Where to add pages' }).selectOption('after');
+  await selectOption(tools.getByRole('combobox', { name: 'Where to add pages' }), 'after');
   await tools.getByRole('spinbutton', { name: 'Insert after page' }).fill('1');
   await tools.getByRole('button', { name: 'Add selected pages' }).click();
   await expect(page.locator('.page-counter')).toContainText('/ 5');
@@ -2751,7 +2767,7 @@ test('visible rotation controls turn the selected PDF page in either direction',
       .filter({ hasText: 'E2E Page Rotation' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Next page' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await expect(page.locator('.page-counter')).toContainText('/ 3');
   const canvas = page.locator('.pdf-paper');
   const ratio = () => canvas.evaluate((node: HTMLCanvasElement) => node.width / node.height);
@@ -2771,7 +2787,7 @@ test('visible rotation controls turn the selected PDF page in either direction',
   await expect
     .poll(() => surface.evaluate((element) => Number(getComputedStyle(element).opacity)))
     .toBeLessThan(0.1);
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await expect(page.locator('.page-counter')).toContainText('/ 3');
   await expect.poll(ratio).toBeCloseTo(1 / originalRatio, 1);
   await expect(surface).not.toHaveClass(/is-rotating/);
@@ -2779,7 +2795,7 @@ test('visible rotation controls turn the selected PDF page in either direction',
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'Pages', exact: true }).click();
   await page.getByRole('button', { name: 'Rotate right' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await expect(page.locator('.page-counter')).toContainText('/ 3');
   await expect.poll(ratio).toBeCloseTo(originalRatio, 1);
   expect(pdfRequests.map((url) => new URL(url).searchParams.get('revision'))).toEqual([
@@ -2843,9 +2859,9 @@ test('page text search opens a result and thumbnails navigate', async ({ page, r
   await expect(page.getByRole('button', { name: /01_petition · page 3/ })).toBeVisible();
   await openDocumentBrowser(page);
   await page.getByRole('button', { name: /01_petition · page 3/ }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('3');
+  await expectValue(page.locator('.page-counter input'), '3');
   await page.getByRole('button', { name: 'Go to page 1' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('1');
+  await expectValue(page.locator('.page-counter input'), '1');
   await expect(page.locator('.page-counter')).toContainText('/ 3');
   await expect(page.locator('.thumbnail-button canvas').first()).toHaveAttribute(
     'data-rendered',
@@ -2901,7 +2917,7 @@ test('PDF editor groups tools and finds text in the current working PDF', async 
   await page.getByRole('searchbox', { name: 'Find text in this PDF' }).fill('page 3/3');
   await expect(page.locator('.pdf-findbar').getByText('1 match', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: /Page 3 ·/ }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('3');
+  await expectValue(page.locator('.page-counter input'), '3');
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'Pages' }).click();
   await expect(page.getByRole('button', { name: 'Rotate right' })).toBeVisible();
@@ -2949,7 +2965,7 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
   await completeQueuedImport(page);
   await expect(page.locator('.doc-item')).toHaveCount(4);
   await includeAllDocuments(page);
-  await expect(page.locator('.page-counter input')).toHaveValue('1');
+  await expectValue(page.locator('.page-counter input'), '1');
   await expect(page.locator('.page-counter')).toContainText('/ 3');
   const canvas = page.locator('.pdf-paper');
   await expect
@@ -2963,16 +2979,16 @@ test('synthetic browser journey, retained export and download bytes', async ({ p
     .poll(() => canvas.evaluate((node: HTMLCanvasElement) => `${node.width}x${node.height}`))
     .not.toBe(before);
   await page.locator('button[title="Move page right"]').click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await expect(page.locator('.page-counter')).toContainText('/ 3');
   page.once('dialog', (dialog) => void dialog.accept());
   await page.locator('button[title^="Delete page"]').click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await expect(page.locator('.page-counter')).toContainText('/ 2');
 
   await openDocumentBrowser(page);
   await page.locator('.doc-item', { hasText: '04_scanned_annexure' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('1');
+  await expectValue(page.locator('.page-counter input'), '1');
   await expect(page.locator('.page-counter')).toContainText('/ 1');
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'OCR', exact: true }).click();
@@ -3091,9 +3107,10 @@ test('Memo of Parties autosaves per matter and reports a failed save', async ({
   await enterLatestMatter(page);
   await openWorkspaceNavigation(page);
   await page.getByRole('button', { name: 'Court rules' }).click();
-  await expect(
+  await expectValue(
     page.locator('.memo-helper').getByRole('textbox', { name: 'Party name' }),
-  ).toHaveValue('Synthetic Saved Party');
+    'Synthetic Saved Party',
+  );
 
   await page.route(`**/matters/${id}/memo-parties`, (route) =>
     route.request().method() === 'PUT' ? route.abort() : route.continue(),
@@ -3115,9 +3132,10 @@ test('Memo of Parties autosaves per matter and reports a failed save', async ({
   await page.unroute(`**/matters/${id}/memo-parties`);
   await page.getByRole('button', { name: 'Retry connection', exact: true }).click();
   await expect(page.locator('.engine-notice')).toHaveCount(0);
-  await expect(
+  await expectValue(
     page.locator('.memo-helper').getByRole('textbox', { name: 'Party name' }),
-  ).toHaveValue('Synthetic Retried Party after disconnect');
+    'Synthetic Retried Party after disconnect',
+  );
   await page.locator('.memo-helper').getByRole('button', { name: 'Retry save' }).click();
   await expect(page.locator('.memo-helper').getByRole('status')).toContainText(
     'Saved to this matter',
@@ -3151,7 +3169,7 @@ test('Memo of Parties Undo flushes a pending edit and reloads saved rows', async
   await expect(helper.getByRole('button', { name: 'Undo matter edit' })).toBeEnabled();
   await name.fill('Synthetic Second');
   await helper.getByRole('button', { name: 'Undo matter edit' }).click();
-  await expect(helper.getByRole('textbox', { name: 'Party name' })).toHaveValue('Synthetic First');
+  await expectValue(helper.getByRole('textbox', { name: 'Party name' }), 'Synthetic First');
   const stored = await request.get(`${backend}/matters/${id}/memo-parties`, { headers });
   expect((await stored.json()).parties[0].name).toBe('Synthetic First');
 });
@@ -3201,7 +3219,8 @@ test('unsaved details are guarded and a failed settings save stops a build', asy
   await expect(page.getByRole('button', { name: 'Rotate left' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Rotate right' })).toBeDisabled();
   await page.getByRole('button', { name: 'Open details' }).click();
-  await expect(page.getByRole('textbox', { name: 'Display title' })).toHaveValue(
+  await expectValue(
+    page.getByRole('textbox', { name: 'Display title' }),
     'Unsaved synthetic title',
   );
   page.once('dialog', (dialog) => void dialog.dismiss());
@@ -3353,9 +3372,10 @@ test('archived document and matter remain recoverable', async ({ page, request }
       .locator('.matter-rail')
       .getByRole('button', { name: 'All matters', exact: true })
       .click();
-  await page
-    .getByRole('combobox', { name: 'Filter matters', exact: true })
-    .selectOption('archived');
+  await selectOption(
+    page.getByRole('combobox', { name: 'Filter matters', exact: true }),
+    'archived',
+  );
   await page.getByRole('button', { name: 'Restore E2E Archive Matter', exact: true }).click();
   await expect(
     page

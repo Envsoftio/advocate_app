@@ -88,7 +88,7 @@
   color: var(--cb-muted);
 }
 .volume-workspace input:not([type='checkbox']),
-.volume-workspace select {
+.volume-workspace :is(select, :where(.app-select-trigger)) {
   height: 36px;
   min-height: 36px;
   width: 100%;
@@ -259,7 +259,7 @@
   margin-top: 32px;
   color: var(--cb-link);
 }
-.affected-name select {
+.affected-name :is(select, :where(.app-select-trigger)) {
   font-size: 16px;
   font-weight: 600;
   margin: 0;
@@ -478,7 +478,7 @@
   scroll-padding: 20px;
 }
 :root .design-shell .volume-workspace input:not([type='checkbox']),
-:root .design-shell .volume-workspace select {
+:root .design-shell .volume-workspace :is(select, :where(.app-select-trigger)) {
   height: 36px !important;
   min-height: 36px !important;
 }

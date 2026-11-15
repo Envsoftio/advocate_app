@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { Info, ChevronDown, AlertTriangle, CircleCheck, FileText } from 'lucide-vue-next';
 import { api } from '../lib/api';
@@ -621,9 +622,9 @@ onBeforeUnmount(() => {
             ><h2>Supplement settings</h2
             ><p>{{ ids.length }} exact source-page identities remain selected.</p
             ><label
-              >Front matter<select v-model="draftSettings.output_marks.front_matter"
+              >Front matter<AppSelect v-model="draftSettings.output_marks.front_matter"
                 ><option value="cover_index">Cover + generated index</option
-                ><option value="index_only">Generated index only</option></select
+                ><option value="index_only">Generated index only</option></AppSelect
               ></label
             ><label
               >Maximum pages per volume<input

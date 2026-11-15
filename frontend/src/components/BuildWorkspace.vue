@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
   Check,
@@ -904,7 +905,7 @@ onBeforeUnmount(() => {
           <section class="build-card generated-files">
             <header>
               <h2>Generated files</h2>
-              <select
+              <AppSelect
                 v-model="selectedId"
                 aria-label="Saved build"
                 @change="!storage && selectBuild()"
@@ -913,7 +914,7 @@ onBeforeUnmount(() => {
                   {{ item.id.slice(0, 8) }} · {{ prettyDate(item.created_at)
                   }}{{ item.stale ? ' · Stale' : '' }}
                 </option>
-              </select>
+              </AppSelect>
             </header>
             <div class="build-files-scroll">
               <table>

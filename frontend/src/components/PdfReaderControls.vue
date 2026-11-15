@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { ToggleGroupItem } from 'reka-ui';
 import AppChoiceGroup from './ui/AppChoiceGroup.vue';
 import { computed, nextTick, ref, watch } from 'vue';
@@ -116,7 +117,7 @@ function jump(event: Event) {
       @click="emit('update:zoom', nextZoom(zoom, scale, -1))"
       >−</button
     >
-    <select
+    <AppSelect
       :value="zoom"
       class="zoom-select"
       aria-label="Zoom"
@@ -128,7 +129,7 @@ function jump(event: Event) {
         :key="pct"
         :value="String(pct)"
         >{{ pct }}%{{ pct === 100 ? ' · Actual size' : '' }}</option
-      ></select
+      ></AppSelect
     >
     <button
       class="icon-btn small"
@@ -185,7 +186,7 @@ function jump(event: Event) {
         ></template
       >
       <label
-        >Reading mode<select
+        >Reading mode<AppSelect
           class="reading-mode-select"
           :value="mode"
           aria-label="Reading mode"
@@ -194,7 +195,7 @@ function jump(event: Event) {
             viewOpen = false;
           "
           ><option value="single">Single page</option
-          ><option value="continuous">Continuous</option></select
+          ><option value="continuous">Continuous</option></AppSelect
         ></label
       >
       <div class="popup-divider" />
@@ -227,7 +228,7 @@ function jump(event: Event) {
 .reader-navigation > * {
   flex-shrink: 0;
 }
-.reader-navigation select {
+.reader-navigation :is(select, :where(.app-select-trigger)) {
   height: 36px;
   min-height: 36px;
   border: 1px solid var(--border);

@@ -1,3 +1,4 @@
+import { selectOption, inputValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { closeWorkspaceNavigation } from './navigation';
 import { expect, test, type Locator } from '@playwright/test';
@@ -122,13 +123,13 @@ test('actual-page crop preview maps rotated drag/numeric selections to saved PDF
     [20, 25, 70, 65],
   ];
   for (let index = 0; index < 4; index++) {
-    await selector.selectOption(String(index + 1));
+    await selectOption(selector, String(index + 1));
     await expect(layer).toHaveAttribute('aria-disabled', 'false');
     const actual = await visibleCrop(layer, keep);
     actual.forEach((value, axis) => expect(value).toBeCloseTo(expected[index][axis], 0));
   }
 
-  await selector.selectOption('2');
+  await selectOption(selector, '2');
   await expect(layer).toHaveAttribute('aria-disabled', 'false');
   await layer.scrollIntoViewIfNeeded();
   const bounds = (await layer.boundingBox())!;
@@ -139,10 +140,10 @@ test('actual-page crop preview maps rotated drag/numeric selections to saved PDF
   });
   await page.mouse.up();
   for (const [name, value] of Object.entries({ left: 15, top: 20, right: 85, bottom: 80 }))
-    expect(Number(await edge(name).inputValue())).toBeCloseTo(value, 0);
+    expect(Number(await inputValue(edge(name)))).toBeCloseTo(value, 0);
   // A cancelled gesture changes neither the crop model nor the working revision.
   const beforeCancel = await Promise.all(
-    ['left', 'top', 'right', 'bottom'].map((name) => edge(name).inputValue()),
+    ['left', 'top', 'right', 'bottom'].map((name) => inputValue(edge(name))),
   );
   await page.mouse.move(bounds.x + bounds.width * 0.05, bounds.y + bounds.height * 0.05);
   await page.mouse.down();
@@ -152,7 +153,7 @@ test('actual-page crop preview maps rotated drag/numeric selections to saved PDF
   await page.keyboard.press('Escape');
   await page.mouse.up();
   expect(
-    await Promise.all(['left', 'top', 'right', 'bottom'].map((name) => edge(name).inputValue())),
+    await Promise.all(['left', 'top', 'right', 'bottom'].map((name) => inputValue(edge(name)))),
   ).toEqual(beforeCancel);
   expect((await documents()).revision).toBe(1);
 

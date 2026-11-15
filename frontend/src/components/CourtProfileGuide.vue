@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { onBeforeUnmount, ref, watch } from 'vue';
 import {
   ArrowRight,
@@ -235,9 +236,8 @@ function downloadReviewCsv() {
       <div v-for="(party, index) in parties" :key="index" class="party-form"
         ><div class="party-number">Party {{ index + 1 }}</div
         ><label
-          >Role<select v-model="party.role" :disabled="!matterId || loading"
-            ><option>Petitioner</option
-            ><option>Respondent</option></select
+          >Role<AppSelect v-model="party.role" :disabled="!matterId || loading"
+            ><option>Petitioner</option><option>Respondent</option></AppSelect
           ></label
         ><label>Party name<input v-model="party.name" :disabled="!matterId || loading" /></label
         ><label
@@ -441,7 +441,7 @@ function downloadReviewCsv() {
   gap: 5px;
 }
 .party-form input,
-.party-form select,
+.party-form :is(select, :where(.app-select-trigger)),
 .party-form textarea {
   font-family: inherit;
   font-size: 13px;

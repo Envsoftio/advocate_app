@@ -1,3 +1,4 @@
+import { selectOption } from './select';
 import { openNamedMatter } from './navigation';
 import { enterLatestMatter } from './navigation';
 import { test, expect } from '@playwright/test';
@@ -177,7 +178,7 @@ test('B01B real failure/retry, persisted output, generated review and matching e
   await capture(page, info, '18A-review');
   await review.getByRole('button', { name: 'Export files', exact: true }).click();
   const exp = page.getByRole('dialog', { name: 'Export bundle files', exact: true });
-  await exp.getByLabel('File name').selectOption('combined.pdf');
+  await selectOption(exp.getByLabel('File name'), 'combined.pdf');
   await capture(page, info, '18B-export');
   const exportPath = `**/matters/${matter.id}/exports/${build.id}/combined.pdf`;
   await page.route(exportPath, (route) =>

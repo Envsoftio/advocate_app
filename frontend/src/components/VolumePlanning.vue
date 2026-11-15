@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { AlertTriangle, FileText, Info } from 'lucide-vue-next';
 import { api } from '../lib/api';
@@ -418,10 +419,10 @@ defineExpose({ saveDraft, discard });
           ><label class="volume-check"
             ><input type="checkbox" checked disabled />Include volume front matter</label
           ><label
-            >Printed numbering<select v-model="settings.output_marks.numbering_restart"
+            >Printed numbering<AppSelect v-model="settings.output_marks.numbering_restart"
               ><option value="volume">Restart in each volume</option
               ><option value="continuous">Continue across volumes</option
-              ><option value="section">Restart in each Part</option></select
+              ><option value="section">Restart in each Part</option></AppSelect
             ></label
           ><p class="volume-mini"
             >Printed numbering is separate from combined PDF positions. Start:
@@ -445,9 +446,9 @@ defineExpose({ saveDraft, discard });
               ><input type="checkbox" v-model="settings.keep_groups_intact" />Keep document groups
               together</label
             ><label
-              >Front matter<select v-model="settings.output_marks.front_matter"
+              >Front matter<AppSelect v-model="settings.output_marks.front_matter"
                 ><option value="index_only">Index in each volume</option
-                ><option value="cover_index">Cover and index in each volume</option></select
+                ><option value="cover_index">Cover and index in each volume</option></AppSelect
               ></label
             ><p>Only explicitly reviewed split exceptions break a document.</p></details
           ></fieldset
@@ -552,13 +553,13 @@ defineExpose({ saveDraft, discard });
           ><section class="affected-document"
             ><h2>{{ measured ? 'Affected artifact / source' : 'Affected document' }}</h2
             ><div class="affected-name"
-              ><FileText :size="28" /><select
+              ><FileText :size="28" /><AppSelect
                 aria-label="Affected document"
                 v-model="selectedId"
                 @change="choice = ''"
                 ><option v-for="d in data?.documents" :key="d.id" :value="d.id">{{
                   d.title
-                }}</option></select
+                }}</option></AppSelect
               ></div
             ><p
               >{{ selected?.page_count ?? 0 }} source pages · working revision

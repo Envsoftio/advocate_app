@@ -21,7 +21,7 @@ body {
 }
 button,
 input,
-select {
+:is(select, :where(.app-select-trigger)) {
   font: inherit;
 }
 button {
@@ -32,7 +32,7 @@ button:disabled {
   opacity: 0.55;
 }
 input:focus,
-select:focus,
+:is(select, :where(.app-select-trigger)):focus,
 button:focus-visible {
   outline: 2px solid #91b8ff;
   outline-offset: 1px;
@@ -867,7 +867,7 @@ a {
   color: #b76b50;
 }
 .field input,
-.field select {
+.field :is(select, :where(.app-select-trigger)) {
   width: 100%;
   border: 1px solid #dde6ef;
   background: #fff;
@@ -879,7 +879,7 @@ a {
   outline: 0;
 }
 .field input:focus,
-.field select:focus {
+.field :is(select, :where(.app-select-trigger)):focus {
   border-color: #79a7dc;
   box-shadow: 0 0 0 3px #7eaade20;
 }
@@ -1473,7 +1473,7 @@ a {
   margin-bottom: 11px;
 }
 .form-grid .field input,
-.form-grid .field select {
+.form-grid .field :is(select, :where(.app-select-trigger)) {
   min-height: 42px;
 }
 .field-error {
@@ -1698,7 +1698,14 @@ a {
 .skip-link:focus {
   transform: none;
 }
-:where(button, input, select, textarea, a, [tabindex]):focus-visible {
+:where(
+  button,
+  input,
+  :is(select, :where(.app-select-trigger)),
+  textarea,
+  a,
+  [tabindex]
+):focus-visible {
   outline: 3px solid #5a99ee;
   outline-offset: 2px;
 }
@@ -1710,7 +1717,7 @@ body {
 }
 :where(
   button,
-  select,
+  :is(select, :where(.app-select-trigger)),
   summary,
   svg,
   .brand-area,
@@ -1758,7 +1765,7 @@ body {
   color: #bdcbe0;
   font-size: 12px;
 }
-.appearance-controls select {
+.appearance-controls :is(select, :where(.app-select-trigger)) {
   width: 100%;
   padding: 5px 7px;
   border: 1px solid #516781;
@@ -1937,7 +1944,8 @@ body {
   ) {
   color: #c4d1e0;
 }
-:root[data-theme='dark'] :where(input:not([type='checkbox']), select, textarea) {
+:root[data-theme='dark']
+  :where(input:not([type='checkbox']), :is(select, :where(.app-select-trigger)), textarea) {
   background: #26364a;
   color: #f3f7fc;
   border-color: #61738d;
@@ -2019,7 +2027,8 @@ body {
     ) {
     color: #c4d1e0;
   }
-  :root[data-theme='system'] :where(input:not([type='checkbox']), select, textarea) {
+  :root[data-theme='system']
+    :where(input:not([type='checkbox']), :is(select, :where(.app-select-trigger)), textarea) {
     background: #26364a;
     color: #f3f7fc;
     border-color: #61738d;
@@ -2168,7 +2177,9 @@ body {
 :root[data-effective-theme='dark'] .sidebar :where(strong, small) {
   color: #dbe9f8;
 }
-:root[data-effective-theme='dark'] .appearance-controls :where(select, option) {
+:root[data-effective-theme='dark']
+  .appearance-controls
+  :where(:is(select, :where(.app-select-trigger)), option) {
   background: #1d3048;
   color: #fff;
 }
@@ -2199,17 +2210,20 @@ body {
   color: #f3f7fc;
   border-color: #61738d;
 }
-:root[data-effective-theme='dark'] .party-form :is(input, select, textarea) {
+:root[data-effective-theme='dark']
+  .party-form
+  :is(input, :is(select, :where(.app-select-trigger)), textarea) {
   background: transparent;
   color: #f3f7fc;
   border-color: #61738d;
 }
-:root[data-effective-theme='dark'] :where(.field select, .zoom-select) {
+:root[data-effective-theme='dark']
+  :where(.field :is(select, :where(.app-select-trigger)), .zoom-select) {
   background: transparent;
   color: #f3f7fc;
   border-color: #61738d;
 }
-:root[data-effective-theme='dark'] select,
+:root[data-effective-theme='dark'] :is(select, :where(.app-select-trigger)),
 :root[data-effective-theme='dark'] option {
   color-scheme: dark;
 }
@@ -2217,15 +2231,15 @@ body {
   background: #1d293a;
   color: #f3f7fc;
 }
-:root[data-effective-theme='light'] select {
+:root[data-effective-theme='light'] :is(select, :where(.app-select-trigger)) {
   color-scheme: light;
 }
-.field :is(input, select),
-.form-grid .field :is(input, select),
+.field :is(input, :is(select, :where(.app-select-trigger))),
+.form-grid .field :is(input, :is(select, :where(.app-select-trigger))),
 .crop-grid input {
   min-height: 44px;
 }
-.party-form :is(input, select) {
+.party-form :is(input, :is(select, :where(.app-select-trigger))) {
   min-height: 40px;
 }
 .page-tools {
@@ -2465,9 +2479,9 @@ body {
   color: var(--muted, #61758d);
 }
 .review-link-grid input,
-.review-link-grid select,
+.review-link-grid :is(select, :where(.app-select-trigger)),
 .output-marks-grid input,
-.output-marks-grid select {
+.output-marks-grid :is(select, :where(.app-select-trigger)) {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--border, #ccd8e6);
@@ -2646,7 +2660,7 @@ body {
   color: var(--muted, #61758d);
 }
 .annotation-form-grid input,
-.annotation-form-grid select,
+.annotation-form-grid :is(select, :where(.app-select-trigger)),
 .annotation-form-grid textarea {
   width: 100%;
   min-width: 0;
@@ -3544,8 +3558,8 @@ body {
   background: var(--panel);
 }
 .manual-bookmark-row input,
-.manual-bookmark-row select,
-.bookmark-create :is(input, select) {
+.manual-bookmark-row :is(select, :where(.app-select-trigger)),
+.bookmark-create :is(input, :is(select, :where(.app-select-trigger))) {
   min-height: 36px;
   padding: 7px 9px;
   border: 1px solid var(--border);
@@ -3601,7 +3615,7 @@ body {
   font-size: 10px;
   font-weight: 700;
 }
-.bookmark-row-actions select {
+.bookmark-row-actions :is(select, :where(.app-select-trigger)) {
   max-width: 155px;
   min-width: 110px;
 }
@@ -3636,7 +3650,7 @@ body {
   gap: 9px;
   align-items: end;
 }
-.bookmark-create-fields :is(input, select) {
+.bookmark-create-fields :is(input, :is(select, :where(.app-select-trigger))) {
   width: 100%;
   min-width: 0;
 }
@@ -4310,10 +4324,10 @@ body {
   color: var(--muted);
 }
 .register-search input,
-.batch-bar :is(input, select),
-.label-proposal-bar :is(input, select),
-.sort-bar select,
-.register-table :is(input:not([type='checkbox']), select),
+.batch-bar :is(input, :is(select, :where(.app-select-trigger))),
+.label-proposal-bar :is(input, :is(select, :where(.app-select-trigger))),
+.sort-bar :is(select, :where(.app-select-trigger)),
+.register-table :is(input:not([type='checkbox']), :is(select, :where(.app-select-trigger))),
 .label-map input {
   min-height: 34px;
   padding: 6px 8px;
@@ -4366,7 +4380,7 @@ body {
   font-size: 10px;
   font-weight: 750;
 }
-.batch-bar select {
+.batch-bar :is(select, :where(.app-select-trigger)) {
   min-width: 105px;
 }
 .batch-group > span {
@@ -4403,7 +4417,7 @@ body {
   font-size: 10px;
   font-weight: 750;
 }
-.label-proposal-bar select {
+.label-proposal-bar :is(select, :where(.app-select-trigger)) {
   max-width: 210px;
 }
 .label-proposal-bar .group-base-choice {
@@ -4519,10 +4533,10 @@ body {
 .group-cell {
   min-width: 145px;
 }
-.group-cell select {
+.group-cell :is(select, :where(.app-select-trigger)) {
   margin-top: 5px;
 }
-.sort-bar select {
+.sort-bar :is(select, :where(.app-select-trigger)) {
   min-width: 180px;
 }
 .sort-preview {
@@ -4673,7 +4687,7 @@ body {
   font-weight: 550;
 }
 .register-table td > input,
-.register-table td > select {
+.register-table td > :is(select, :where(.app-select-trigger)) {
   width: 100%;
   min-width: 90px;
 }
@@ -5327,7 +5341,7 @@ body > .hiddenCanvasElement {
   min-width: 0;
   font-size: 13px;
 }
-.home-search-row select {
+.home-search-row :is(select, :where(.app-select-trigger)) {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
@@ -6466,7 +6480,7 @@ body > .hiddenCanvasElement {
   line-height: 1.5;
 }
 .task-fields input,
-.task-fields select {
+.task-fields :is(select, :where(.app-select-trigger)) {
   min-height: 44px;
 }
 .task-fields .crop-grid {
@@ -6670,7 +6684,7 @@ body > .hiddenCanvasElement {
   input:not([type='checkbox']):not([type='radio']):not([type='file']):not([type='hidden']):not(
     .docs-search input
   ):not(.home-search input),
-:root select {
+:root :is(select, :where(.app-select-trigger)) {
   height: 44px;
   min-height: 44px;
   font-size: 13px;
@@ -6801,7 +6815,7 @@ body > .hiddenCanvasElement {
   gap: 8px;
 }
 .preset-formatting input:not([type='checkbox']),
-.preset-formatting select {
+.preset-formatting :is(select, :where(.app-select-trigger)) {
   min-width: 0;
   width: 100%;
   padding: 8px;
@@ -6897,13 +6911,13 @@ body > .hiddenCanvasElement {
 @media (max-width: 900px) {
   .batch-bar > label,
   .label-proposal-bar > label,
-  .sort-bar > select {
+  .sort-bar > :is(select, :where(.app-select-trigger)) {
     width: 100%;
   }
-  .batch-bar select,
+  .batch-bar :is(select, :where(.app-select-trigger)),
   .batch-group > input,
-  .label-proposal-bar :is(input:not([type='checkbox']), select),
-  .sort-bar select {
+  .label-proposal-bar :is(input:not([type='checkbox']), :is(select, :where(.app-select-trigger))),
+  .sort-bar :is(select, :where(.app-select-trigger)) {
     width: 100%;
     max-width: none;
   }
@@ -7544,7 +7558,7 @@ body > .hiddenCanvasElement {
   color: var(--muted);
 }
 .print-options input,
-.print-options select {
+.print-options :is(select, :where(.app-select-trigger)) {
   min-height: 36px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -7940,12 +7954,12 @@ body > .hiddenCanvasElement {
 :root[data-effective-theme]
   :is(
     .field input,
-    .field select,
+    .field :is(select, :where(.app-select-trigger)),
     .field textarea,
     .docs-search,
     .zoom-select,
-    .document-actionbar select,
-    .reader-navigation select,
+    .document-actionbar :is(select, :where(.app-select-trigger)),
+    .reader-navigation :is(select, :where(.app-select-trigger)),
     .page-counter input
   ) {
   background: var(--cb-surface);
@@ -7965,14 +7979,14 @@ body > .hiddenCanvasElement {
   opacity: 1;
 }
 :root[data-effective-theme] .field input:focus,
-:root[data-effective-theme] .field select:focus {
+:root[data-effective-theme] .field :is(select, :where(.app-select-trigger)):focus {
   border-color: var(--cb-focus);
   box-shadow: none;
 }
-:root[data-effective-theme] :is(input, select, textarea) {
+:root[data-effective-theme] :is(input, :is(select, :where(.app-select-trigger)), textarea) {
   accent-color: var(--cb-accent);
 }
-:root[data-effective-theme] :is(input, select, textarea):focus,
+:root[data-effective-theme] :is(input, :is(select, :where(.app-select-trigger)), textarea):focus,
 :root[data-effective-theme] :is(button, a, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--cb-focus);
   outline-offset: 2px;
@@ -8089,13 +8103,18 @@ body > .hiddenCanvasElement {
 :root[data-effective-theme] :is(.sidebar-toggle, .side-plus) {
   color: var(--cb-nav-icon);
 }
-:root[data-effective-theme] :is(.offline-status, .sidebar-profile, .appearance-controls select) {
+:root[data-effective-theme]
+  :is(
+    .offline-status,
+    .sidebar-profile,
+    .appearance-controls :is(select, :where(.app-select-trigger))
+  ) {
   border-color: var(--cb-nav-border);
 }
 :root[data-effective-theme]
   :is(
     .offline-status,
-    .appearance-controls select,
+    .appearance-controls :is(select, :where(.app-select-trigger)),
     .sidebar-profile-avatar,
     .matter-initial,
     .side-count
@@ -8153,7 +8172,9 @@ body > .hiddenCanvasElement {
   color: var(--cb-status-danger-text);
 }
 /* Existing Documents register uses the same controls and state meanings. */
-:root[data-effective-theme] .document-register :is(input:not([type='checkbox']), select) {
+:root[data-effective-theme]
+  .document-register
+  :is(input:not([type='checkbox']), :is(select, :where(.app-select-trigger))) {
   background: var(--cb-surface);
   color: var(--cb-text);
   border-color: var(--cb-control-border);
@@ -8372,7 +8393,7 @@ body:has(.app-shell[data-documents='true']) {
   flex-shrink: 0;
   white-space: nowrap;
 }
-.documents-workspace .document-actionbar select {
+.documents-workspace .document-actionbar :is(select, :where(.app-select-trigger)) {
   min-height: 32px;
   max-width: 125px;
 }
@@ -8586,7 +8607,7 @@ body:has(.app-shell[data-documents='true']) {
   height: 32px;
   min-height: 32px;
 }
-.documents-workspace .document-actionbar select {
+.documents-workspace .document-actionbar :is(select, :where(.app-select-trigger)) {
   height: 36px;
   padding: 0 8px;
 }
@@ -8822,7 +8843,7 @@ body:has(.app-shell[data-documents='true']) {
   font-size: 12px;
 }
 .artifact-select,
-.artifact-context select {
+.artifact-context :is(select, :where(.app-select-trigger)) {
   max-width: 220px;
   min-width: 0;
   padding: 6px 8px;
@@ -8936,7 +8957,7 @@ body:has(.app-shell[data-documents='true']) {
 .export-review .artifact-context label {
   min-width: 0;
 }
-.export-review .artifact-context select {
+.export-review .artifact-context :is(select, :where(.app-select-trigger)) {
   max-width: 100%;
 }
 .artifact-information {

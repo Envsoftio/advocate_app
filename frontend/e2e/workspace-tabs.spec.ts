@@ -1,3 +1,4 @@
+import { expectValue, selectOption } from './select';
 import { openNamedMatter } from './navigation';
 import { enterLatestMatter } from './navigation';
 import {
@@ -76,8 +77,8 @@ test('matter and document tabs keep their selection, reader position and unsaved
   await expect(page.locator('.reader-document strong')).toHaveText('alpha-tabs');
   await page.getByRole('spinbutton', { name: 'Go to page' }).fill('2');
   await page.getByRole('spinbutton', { name: 'Go to page' }).press('Enter');
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue('2');
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('75');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '2');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '75');
   await openDocumentActions(page);
   await page.getByRole('button', { name: 'Document details', exact: true }).click();
   await page.getByRole('textbox', { name: 'Display title' }).fill('Unsaved alpha title');
@@ -97,19 +98,15 @@ test('matter and document tabs keep their selection, reader position and unsaved
     .locator('.open-workspace-tab-select')
     .click();
   await expect(page.locator('.reader-document strong')).toHaveText('alpha-tabs');
-  await expect(page.getByRole('textbox', { name: 'Display title' })).toHaveValue(
-    'Unsaved alpha title',
-  );
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue('2');
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('75');
+  await expectValue(page.getByRole('textbox', { name: 'Display title' }), 'Unsaved alpha title');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '2');
+  await expectValue(page.getByRole('combobox', { name: 'Zoom', exact: true }), '75');
   await openWorkspaces(page);
   await page.getByRole('button', { name: 'Close alpha-tabs tab' }).click();
   const pdfGuard = page.getByRole('alertdialog');
   await expect(pdfGuard).toBeVisible();
   await pdfGuard.getByRole('button', { name: /^(Cancel|Keep editing)$/ }).click();
-  await expect(page.getByRole('textbox', { name: 'Display title' })).toHaveValue(
-    'Unsaved alpha title',
-  );
+  await expectValue(page.getByRole('textbox', { name: 'Display title' }), 'Unsaved alpha title');
   const firstDocs = await (
     await request.get(`${backend}/matters/${first.id}/documents`, { headers })
   ).json();
@@ -130,9 +127,7 @@ test('matter and document tabs keep their selection, reader position and unsaved
   await expect(editorGuard).toBeVisible();
   await editorGuard.getByRole('button', { name: /^(Cancel|Keep editing)$/ }).click();
   await expect(page.locator('.reader-document strong')).toHaveText('alpha-tabs');
-  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveValue(
-    'Unfinished tab text',
-  );
+  await expectValue(page.getByRole('textbox', { name: /Add text on page/ }), 'Unfinished tab text');
   await openWorkspaces(page);
   await page
     .locator('.open-workspace-tabs .open-workspace-tab')

@@ -4,6 +4,7 @@ import { createPinia } from 'pinia';
 import App from './App.vue';
 import { installNativeFrameFallback } from './lib/nativeAnimationFrames';
 import './design-tokens.css';
+import './selects.css';
 import './styles.css';
 import './reader-design.css';
 import './documents-design.css';

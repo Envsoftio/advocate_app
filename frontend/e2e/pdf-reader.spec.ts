@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import {
   closeDocumentBrowser,
@@ -86,7 +87,7 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
   await openDocumentBrowser(page);
   await page.locator('.doc-item').filter({ hasText: 'reader-long' }).click();
   await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/);
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   await expect
     .poll(async () => (await page.locator('.pdf-paper').boundingBox())?.width || 0)
     .toBeCloseTo((500 * 4) / 3, 0);
@@ -100,13 +101,13 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
   await expect(page.locator('.pdf-findbar')).toContainText('80 matches');
   await expect(page.locator('.pdf-search-highlight')).toHaveCount(2);
   await page.getByRole('button', { name: 'Next search result', exact: true }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('1');
+  await expectValue(page.locator('.page-counter input'), '1');
   await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute(
     'data-pdf-match',
     '1',
   );
   await page.getByRole('button', { name: 'Next search result', exact: true }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await expect(page.locator('.pdf-text-layer')).toHaveAttribute('data-main-rotation', '90');
   await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute(
     'data-pdf-match',
@@ -115,7 +116,7 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
   await page.getByRole('searchbox', { name: 'Find text in this PDF' }).fill('AlphaBeta');
   await expect(page.locator('.pdf-findbar')).toContainText('40 matches');
   await page.getByRole('button', { name: 'Close PDF search' }).click();
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('fit-page');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), 'fit-page');
   await expect
     .poll(async () => {
       const canvas = (await page.locator('.pdf-paper').boundingBox())!,
@@ -124,11 +125,11 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
     })
     .toBeTruthy();
   await openReaderView(page);
-  await page.getByRole('combobox', { name: 'Reading mode' }).selectOption('continuous');
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Reading mode' }), 'continuous');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   await page.getByRole('spinbutton', { name: 'Go to page', exact: true }).fill('30');
   await page.getByRole('spinbutton', { name: 'Go to page', exact: true }).press('Enter');
-  await expect(page.locator('.page-counter input')).toHaveValue('30');
+  await expectValue(page.locator('.page-counter input'), '30');
   await expect(page.locator('[data-reader-page="30"] canvas')).toBeVisible();
   await expect(page.locator('.thumbnail-strip canvas[data-page="30"]')).toHaveAttribute(
     'data-rendered',
@@ -147,7 +148,7 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
       b = element.getBoundingClientRect();
     return (b.top - a.top) / a.height;
   });
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('125');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '125');
   await expect
     .poll(() =>
       page.locator('.canvas-scroll').evaluate((element) => {
@@ -165,18 +166,18 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
   await expect(page.locator('.page-counter')).toContainText('/ 2');
   await openDocumentBrowser(page);
   await page.locator('.doc-item').filter({ hasText: 'reader-long' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('30');
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('125');
+  await expectValue(page.locator('.page-counter input'), '30');
+  await expectValue(page.getByRole('combobox', { name: 'Zoom', exact: true }), '125');
   await openReaderView(page);
-  await expect(page.getByRole('combobox', { name: 'Reading mode' })).toHaveValue('continuous');
+  await expectValue(page.getByRole('combobox', { name: 'Reading mode' }), 'continuous');
   await page.getByRole('button', { name: 'View options' }).click();
   await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click();
   await page.getByRole('button', { name: /Last page · p40/ }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('40');
+  await expectValue(page.locator('.page-counter input'), '40');
   await openReaderView(page);
   await page.getByRole('button', { name: 'Back to previous reading position' }).click();
   await page.getByRole('button', { name: 'View options' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('30');
+  await expectValue(page.locator('.page-counter input'), '30');
   await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click();
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'Edit', exact: true }).click();
@@ -190,7 +191,7 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
   await page.getByRole('searchbox', { name: 'Find text in this PDF' }).fill('Needle');
   await expect(page.locator('.pdf-findbar')).toContainText('80 matches');
   await page.getByLabel('PDF search occurrences').getByRole('button').nth(2).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await page.getByRole('button', { name: 'Close PDF search' }).click();
   await page.getByRole('button', { name: 'Comments (1)', exact: true }).click();
   await expect(page.getByLabel('Private review comments')).not.toContainText(
@@ -200,8 +201,9 @@ test('shared reader keeps numeric zoom, exact matches, continuous reading and do
     .getByLabel('Private review comments')
     .getByRole('button', { name: /Source 2.*Long document review note/ })
     .click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
-  await expect(page.getByRole('textbox', { name: 'Comment text', exact: true })).toHaveValue(
+  await expectValue(page.locator('.page-counter input'), '2');
+  await expectValue(
+    page.getByRole('textbox', { name: 'Comment text', exact: true }),
     'Long document review note',
   );
   await closeWorkspaceNavigation(page);
@@ -272,10 +274,10 @@ test('expanded editor fits saved zoom and keeps many comments out of the canvas'
   await enterLatestMatter(page);
   await openDocumentBrowser(page);
   await page.locator('.doc-item').filter({ hasText: 'compact' }).click();
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('fit-width');
+  await expectValue(page.getByRole('combobox', { name: 'Zoom', exact: true }), 'fit-width');
   await openDocumentActions(page);
   await page.getByRole('button', { name: 'Full screen', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('fit-page');
+  await expectValue(page.getByRole('combobox', { name: 'Zoom', exact: true }), 'fit-page');
   await expect
     .poll(async () => {
       const paper = (await page.locator('.pdf-paper').boundingBox())!;

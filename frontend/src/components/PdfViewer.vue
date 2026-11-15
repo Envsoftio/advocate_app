@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
+import { RovingFocusGroup, RovingFocusItem } from 'reka-ui';
+import AppDateInput from './ui/AppDateInput.vue';
 import AppPopover from './ui/AppPopover.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import {
@@ -1423,7 +1426,7 @@ function handleViewerKeydown(event: KeyboardEvent) {
     event.altKey ||
     event.shiftKey ||
     (event.target instanceof HTMLElement &&
-      event.target.closest('input, textarea, select, [contenteditable="true"]'))
+      event.target.closest('input, textarea, select, [role="combobox"], [contenteditable="true"]'))
   )
     return;
   if (
@@ -3420,7 +3423,7 @@ async function applyReplacement() {
           ><div
             ><strong :title="document.title">{{ document.title }}</strong
             ><div class="document-version-line"
-              ><select
+              ><AppSelect
                 v-if="artifactOptions"
                 class="artifact-select"
                 aria-label="Document version"
@@ -3437,7 +3440,7 @@ async function applyReplacement() {
                   >{{
                     preparation && option.value === 'working' ? 'Working Copy' : option.label
                   }}</option
-                ></select
+                ></AppSelect
               ><span v-else>Working Copy · Editable</span
               ><span class="document-revision"
                 >Revision {{ document.revision }} ·
@@ -3602,25 +3605,31 @@ async function applyReplacement() {
                 title="More document actions"
                 ><Ellipsis :size="17" /></button
             ></template>
-            <div class="popup-tabs" role="tablist" aria-label="Additional PDF tools"
-              ><button
-                class="text-tool"
-                role="tab"
-                :aria-selected="activeCategory === 'stamps'"
-                data-category="stamps"
-                id="pdf-tab-stamps"
-                @click="selectCategory('stamps')"
-                ><Stamp :size="15" /> Stamps</button
-              >
-              <button
-                class="text-tool"
-                role="tab"
-                :aria-selected="activeCategory === 'output'"
-                data-category="output"
-                id="pdf-tab-output"
-                @click="selectCategory('output')"
-                ><FilePenLine :size="15" /> Output</button
-              ></div
+            <RovingFocusGroup as-child orientation="horizontal" loop>
+              <div class="popup-tabs" role="tablist" aria-label="Additional PDF tools"
+                ><RovingFocusItem as-child :active="activeCategory === 'stamps'"
+                  ><button
+                    class="text-tool"
+                    role="tab"
+                    :aria-selected="activeCategory === 'stamps'"
+                    data-category="stamps"
+                    id="pdf-tab-stamps"
+                    @click="selectCategory('stamps')"
+                    ><Stamp :size="15" /> Stamps</button
+                  ></RovingFocusItem
+                >
+                <RovingFocusItem as-child :active="activeCategory === 'output'"
+                  ><button
+                    class="text-tool"
+                    role="tab"
+                    :aria-selected="activeCategory === 'output'"
+                    data-category="output"
+                    id="pdf-tab-output"
+                    @click="selectCategory('output')"
+                    ><FilePenLine :size="15" /> Output</button
+                  ></RovingFocusItem
+                ></div
+              ></RovingFocusGroup
             >
             <button
               class="text-tool"
@@ -3674,13 +3683,12 @@ async function applyReplacement() {
           role="group"
           aria-label="Document tools"
           ><label for="ocr-language">OCR language</label
-          ><select
+          ><AppSelect
             id="ocr-language"
             v-model="ocrLanguage"
             :disabled="editing || loading || disabled"
-            ><option value="eng">English</option
-            ><option value="hin">Hindi</option
-            ><option value="eng+hin">English + Hindi</option></select
+            ><option value="eng">English</option><option value="hin">Hindi</option
+            ><option value="eng+hin">English + Hindi</option></AppSelect
           ><button
             class="text-tool"
             :disabled="editing || loading || disabled"
@@ -4877,12 +4885,12 @@ async function applyReplacement() {
             aria-label="Placed text properties"
           >
             <label
-              >Font family<select
+              >Font family<AppSelect
                 v-model="textObjectDraft.font_family"
                 :disabled="textObjectBusy || disabled"
                 ><option value="helv">Helvetica · built-in PDF font</option
                 ><option value="tiro">Times Roman · built-in PDF font</option
-                ><option value="cour">Courier · built-in PDF font</option></select
+                ><option value="cour">Courier · built-in PDF font</option></AppSelect
               ></label
             >
             <div class="pdf-editor-text-fields"
@@ -4896,9 +4904,11 @@ async function applyReplacement() {
                 />
                 pt</label
               ><label
-                >Weight<select v-model="textObjectDraft.bold" :disabled="textObjectBusy || disabled"
+                >Weight<AppSelect
+                  v-model="textObjectDraft.bold"
+                  :disabled="textObjectBusy || disabled"
                   ><option :value="false">Regular</option
-                  ><option :value="true">Bold</option></select
+                  ><option :value="true">Bold</option></AppSelect
                 ></label
               ></div
             >
@@ -5002,10 +5012,10 @@ async function applyReplacement() {
             <strong>{{ placement ? 'Text placement' : 'Ready to place' }}</strong>
             <p>Click the page, then type. The original text beneath an added object is retained.</p>
             <label
-              >Font family<select v-model="overlayFont" aria-label="Font family"
+              >Font family<AppSelect v-model="overlayFont" aria-label="Font family"
                 ><option value="helv">Helvetica · built-in PDF font</option
                 ><option value="tiro">Times Roman · built-in PDF font</option
-                ><option value="cour">Courier · built-in PDF font</option></select
+                ><option value="cour">Courier · built-in PDF font</option></AppSelect
               ></label
             >
             <label
@@ -5020,17 +5030,16 @@ async function applyReplacement() {
               pt</label
             >
             <label
-              >Weight<select v-model="overlayBold"
+              >Weight<AppSelect v-model="overlayBold"
                 ><option :value="false">Regular</option
-                ><option :value="true">Bold</option></select
+                ><option :value="true">Bold</option></AppSelect
               ></label
             >
             <label
-              >Alignment<select v-model="overlayAlignment"
-                ><option value="left">Left</option
-                ><option value="center">Center</option
+              >Alignment<AppSelect v-model="overlayAlignment"
+                ><option value="left">Left</option><option value="center">Center</option
                 ><option value="right">Right</option
-                ><option value="justify">Justify</option></select
+                ><option value="justify">Justify</option></AppSelect
               ></label
             >
             <p class="edit-context-limit"
@@ -5288,21 +5297,19 @@ async function applyReplacement() {
                   v-if="
                     !['image', 'highlight', 'comment', 'redaction'].includes(annotationDraft.kind)
                   "
-                  >Output<select
+                  >Output<AppSelect
                     v-model="annotationOutputScope"
                     :disabled="annotationBusy || disabled"
                     ><option value="pdf">Include in saved PDF</option
-                    ><option value="private">Private review only</option></select
+                    ><option value="private">Private review only</option></AppSelect
                   ></label
                 >
                 <label v-if="annotationDraft.kind !== 'image'"
-                  >Colour<select
+                  >Colour<AppSelect
                     v-model="annotationDraft.color"
                     :disabled="annotationBusy || disabled"
-                    ><option value="yellow">Yellow</option
-                    ><option value="green">Green</option
-                    ><option value="blue">Blue</option
-                    ><option value="pink">Pink</option></select
+                    ><option value="yellow">Yellow</option><option value="green">Green</option
+                    ><option value="blue">Blue</option><option value="pink">Pink</option></AppSelect
                   ></label
                 >
                 <label
@@ -5318,9 +5325,9 @@ async function applyReplacement() {
                   />
                 </label>
                 <label v-if="annotationDraft.kind === 'date'" class="annotation-note"
-                  >Date shown<input
+                  >Date shown<AppDateInput
                     v-model="annotationDraft.body"
-                    type="date"
+                    label="Date shown"
                     :disabled="annotationBusy || disabled"
                 /></label>
                 <label v-if="annotationDraft.kind === 'text'" class="annotation-note"
@@ -5449,20 +5456,20 @@ async function applyReplacement() {
                     placeholder="Open supporting passage"
                 /></label>
                 <label
-                  >Destination<select v-model="linkDraft.kind" :disabled="linksBusy || disabled"
+                  >Destination<AppSelect v-model="linkDraft.kind" :disabled="linksBusy || disabled"
                     ><option value="internal">Matter document page</option
-                    ><option value="external">Web or email address</option></select
+                    ><option value="external">Web or email address</option></AppSelect
                   ></label
                 >
                 <template v-if="linkDraft.kind === 'internal'">
                   <label
-                    >Target document<select
+                    >Target document<AppSelect
                       v-model="linkDraft.target_document_id"
                       :disabled="linksBusy || disabled"
                       ><option value="">Choose document</option
                       ><option v-for="item in documents || []" :key="item.id" :value="item.id">{{
                         item.title
-                      }}</option></select
+                      }}</option></AppSelect
                     ></label
                   >
                   <label
@@ -5573,12 +5580,12 @@ async function applyReplacement() {
                     :disabled="!markSettings.watermark_enabled"
                 /></label>
                 <label
-                  >Watermark position<select
+                  >Watermark position<AppSelect
                     v-model="markSettings.watermark_position"
                     :disabled="!markSettings.watermark_enabled"
                     ><option v-for="item in markPositions" :key="item[0]" :value="item[0]">{{
                       item[1]
-                    }}</option></select
+                    }}</option></AppSelect
                   ></label
                 >
                 <label
@@ -5611,20 +5618,20 @@ async function applyReplacement() {
                     placeholder="Asia/Kolkata"
                 /></label>
                 <label
-                  >Format<select
+                  >Format<AppSelect
                     v-model="markSettings.timestamp_format"
                     :disabled="!markSettings.timestamp_enabled"
                     ><option value="date">Date</option
-                    ><option value="datetime">Date, time and zone</option></select
+                    ><option value="datetime">Date, time and zone</option></AppSelect
                   ></label
                 >
                 <label
-                  >Timestamp position<select
+                  >Timestamp position<AppSelect
                     v-model="markSettings.timestamp_position"
                     :disabled="!markSettings.timestamp_enabled"
                     ><option v-for="item in markPositions" :key="item[0]" :value="item[0]">{{
                       item[1]
-                    }}</option></select
+                    }}</option></AppSelect
                   ></label
                 >
                 <label

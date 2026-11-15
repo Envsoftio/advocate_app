@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
+import { RovingFocusGroup, RovingFocusItem } from 'reka-ui';
 import {
   ArrowLeft,
   BookOpen,
@@ -239,7 +241,7 @@ function keyboard(event: KeyboardEvent) {
   }
   const formField =
     event.target instanceof HTMLElement &&
-    !!event.target.closest('input,textarea,select,[contenteditable="true"]');
+    !!event.target.closest('input,textarea,select,[role="combobox"],[contenteditable="true"]');
   if ((event.ctrlKey || event.metaKey) && !event.altKey) {
     if (event.key.toLowerCase() === 'f') {
       event.preventDefault();
@@ -421,7 +423,7 @@ onBeforeUnmount(() => {
         ><p
           ><span>Generated Output</span> Build {{ exportId.slice(0, 8) }} ·
           {{ stale ? 'Stale' : 'Saved' }} · Read only</p
-        ><select
+        ><AppSelect
           v-if="artifactOptions"
           class="generated-version"
           aria-label="Document version"
@@ -429,7 +431,7 @@ onBeforeUnmount(() => {
           @change="emit('artifact', ($event.target as HTMLSelectElement).value)"
           ><option v-for="option in artifactOptions" :key="option.value" :value="option.value">{{
             option.label
-          }}</option></select
+          }}</option></AppSelect
         ></div
       ><button class="membership-button quiet" @click="emit('checks')">Output checks</button
       ><button class="membership-button primary" @click="emit('export')">{{
@@ -443,14 +445,14 @@ onBeforeUnmount(() => {
         ><ArrowLeft :size="16" /> Documents</button
       ><div class="artifact-title"
         ><h2 :title="filename">{{ filename }}</h2
-        ><select
+        ><AppSelect
           v-if="artifactOptions"
           aria-label="Document version"
           :value="artifactValue"
           @change="emit('artifact', ($event.target as HTMLSelectElement).value)"
           ><option v-for="option in artifactOptions" :key="option.value" :value="option.value">{{
             option.label
-          }}</option></select
+          }}</option></AppSelect
         ><span v-else>{{ artifactLabel }} · Read only</span></div
       ><span class="artifact-readonly">{{
         originalId
@@ -679,49 +681,54 @@ onBeforeUnmount(() => {
         v-show="navigationOpen && !focusedReading"
         class="artifact-navigation"
       >
-        <div
-          v-if="originalId"
-          class="original-panel-tabs"
-          role="tablist"
-          aria-label="Original reader panels"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-label="Source pages"
-            :aria-selected="originalNavTab === 'pages'"
-            :class="{ active: originalNavTab === 'pages' }"
-            @click="originalNavTab = 'pages'"
-            ><LayoutGrid :size="17"
-          /></button>
-          <button
-            type="button"
-            role="tab"
-            aria-label="Search source"
-            :aria-selected="originalNavTab === 'search'"
-            :class="{ active: originalNavTab === 'search' }"
-            @click="openOriginalSearch"
-            ><Search :size="17"
-          /></button>
-          <button
-            type="button"
-            role="tab"
-            aria-label="Source bookmarks"
-            :aria-selected="originalNavTab === 'bookmarks'"
-            :class="{ active: originalNavTab === 'bookmarks' }"
-            @click="originalNavTab = 'bookmarks'"
-            ><Bookmark :size="17"
-          /></button>
-          <button
-            type="button"
-            role="tab"
-            aria-label="Source comments"
-            :aria-selected="originalNavTab === 'comments'"
-            :class="{ active: originalNavTab === 'comments' }"
-            @click="originalNavTab = 'comments'"
-            ><MessageSquare :size="17"
-          /></button>
-        </div>
+        <RovingFocusGroup as-child orientation="horizontal" loop>
+          <div
+            v-if="originalId"
+            class="original-panel-tabs"
+            role="tablist"
+            aria-label="Original reader panels"
+          >
+            <RovingFocusItem as-child :active="originalNavTab === 'pages'"
+              ><button
+                type="button"
+                role="tab"
+                aria-label="Source pages"
+                :aria-selected="originalNavTab === 'pages'"
+                :class="{ active: originalNavTab === 'pages' }"
+                @click="originalNavTab = 'pages'"
+                ><LayoutGrid :size="17" /></button
+            ></RovingFocusItem>
+            <RovingFocusItem as-child :active="originalNavTab === 'search'"
+              ><button
+                type="button"
+                role="tab"
+                aria-label="Search source"
+                :aria-selected="originalNavTab === 'search'"
+                :class="{ active: originalNavTab === 'search' }"
+                @click="openOriginalSearch"
+                ><Search :size="17" /></button
+            ></RovingFocusItem>
+            <RovingFocusItem as-child :active="originalNavTab === 'bookmarks'"
+              ><button
+                type="button"
+                role="tab"
+                aria-label="Source bookmarks"
+                :aria-selected="originalNavTab === 'bookmarks'"
+                :class="{ active: originalNavTab === 'bookmarks' }"
+                @click="originalNavTab = 'bookmarks'"
+                ><Bookmark :size="17" /></button
+            ></RovingFocusItem>
+            <RovingFocusItem as-child :active="originalNavTab === 'comments'"
+              ><button
+                type="button"
+                role="tab"
+                aria-label="Source comments"
+                :aria-selected="originalNavTab === 'comments'"
+                :class="{ active: originalNavTab === 'comments' }"
+                @click="originalNavTab = 'comments'"
+                ><MessageSquare :size="17" /></button
+            ></RovingFocusItem> </div
+        ></RovingFocusGroup>
         <PdfThumbnailRail
           v-if="originalId && (originalNavTab === 'pages' || originalNavTab === 'search')"
           :pdf="pdf"

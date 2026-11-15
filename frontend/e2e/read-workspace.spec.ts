@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { closeWorkspaceNavigation, openDocumentBrowser } from './navigation';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
@@ -78,9 +79,9 @@ test('FLOW / 03 read-only source, history and unsaved navigation use the scoped 
 }) => {
   await openFixture(page, request);
   await closeWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Document version' }).selectOption('original');
+  await selectOption(page.getByRole('combobox', { name: 'Document version' }), 'original');
   const original = page.getByRole('dialog', { name: 'Review imported original' });
-  await original.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await selectOption(original.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   await expect(original.getByRole('complementary', { name: 'Artifact information' })).toContainText(
     'Source file unchanged',
   );
@@ -97,7 +98,7 @@ test('FLOW / 03 read-only source, history and unsaved navigation use the scoped 
   await original.getByRole('tab', { name: 'Source pages' }).click();
   await original.getByRole('button', { name: 'Open Working Copy', exact: true }).click();
   await closeWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   await page.getByRole('tab', { name: 'Edit', exact: true }).click();
   await page.getByRole('button', { name: 'History', exact: true }).click();
   const actions = page.getByRole('region', { name: 'Working history' });
@@ -117,7 +118,8 @@ test('FLOW / 03 read-only source, history and unsaved navigation use the scoped 
   await expect(guard.getByRole('button', { name: 'Save', exact: true })).toBeFocused();
   await page.screenshot({ path: '../docs/ui-evidence/flow03/ED26-unsaved-1440.png' });
   await guard.getByRole('button', { name: 'Cancel' }).click();
-  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveValue(
+  await expectValue(
+    page.getByRole('textbox', { name: /Add text on page/ }),
     'Pending synthetic note',
   );
 });
@@ -131,7 +133,7 @@ test('FLOW / 03 empty image page offers OCR and replacement text without claimin
   await page.getByRole('spinbutton', { name: 'Go to page' }).fill('2');
   await page.getByRole('spinbutton', { name: 'Go to page' }).press('Enter');
   await page.getByRole('tab', { name: 'Edit', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   await page.getByRole('button', { name: 'Edit text' }).click();
   const unavailable = page.getByRole('region', { name: 'Text editing unavailable' });
   await expect(unavailable).toContainText('No change was made');
@@ -146,7 +148,7 @@ test('Edit toolbar follows the supplied content tools and keeps add-text control
   const { document } = await openFixture(page, request);
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'Edit', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   const tools = page.getByRole('group', { name: 'Edit PDF' });
   await expect(page.getByRole('region', { name: 'Select a PDF object' })).toBeVisible();
   await page.screenshot({ path: '../docs/ui-evidence/flow03/ED02-object-selection-1440.png' });
@@ -161,7 +163,7 @@ test('Edit toolbar follows the supplied content tools and keeps add-text control
   await expect(page.getByRole('button', { name: 'Go to page 1', exact: true })).toBeVisible();
   const panel = page.getByRole('region', { name: 'New text properties' });
   await expect(panel).toContainText('Ready to place');
-  await expect(panel.getByRole('combobox', { name: 'Font family' })).toHaveValue('helv');
+  await expectValue(panel.getByRole('combobox', { name: 'Font family' }), 'helv');
   const canvas = await page.locator('.viewer-page-column').boundingBox();
   const inspector = await page.locator('.edit-mode-inspector').boundingBox();
   expect(canvas && inspector && inspector.x >= canvas.x + canvas.width - 1).toBeTruthy();
@@ -186,10 +188,10 @@ test('Edit toolbar follows the supplied content tools and keeps add-text control
   await page.getByRole('button', { name: 'Apply text' }).click();
   await expect(page.locator('.pdf-review-shape.text')).toContainText('Synthetic placed object');
   const placed = page.getByRole('region', { name: 'Placed text properties' });
-  await expect(placed.getByRole('combobox', { name: 'Font family' })).toHaveValue('helv');
+  await expectValue(placed.getByRole('combobox', { name: 'Font family' }), 'helv');
   await expect(placed.getByRole('spinbutton', { name: 'Width in points' })).toBeVisible();
-  await placed.getByRole('combobox', { name: 'Font family' }).selectOption('tiro');
-  await placed.getByRole('combobox', { name: 'Weight' }).selectOption('true');
+  await selectOption(placed.getByRole('combobox', { name: 'Font family' }), 'tiro');
+  await selectOption(placed.getByRole('combobox', { name: 'Weight' }), 'true');
   await placed.getByRole('button', { name: 'Align center' }).click();
   await placed.getByRole('button', { name: 'Save text properties' }).click();
   await expect(placed.getByRole('button', { name: 'Save text properties' })).toBeEnabled();
@@ -250,9 +252,10 @@ test('Edit toolbar follows the supplied content tools and keeps add-text control
     })
     .toBe(120);
   await page.locator('.pdf-image-overlay').click();
-  await expect(
+  await expectValue(
     imageProperties.getByRole('spinbutton', { name: 'Image width in points' }),
-  ).toHaveValue('120');
+    '120',
+  );
   const imageInspector = await page.locator('.edit-mode-inspector').boundingBox();
   expect(imageInspector!.x).toBeCloseTo(1148, 0);
   expect(imageInspector!.y).toBeCloseTo(192, 0);
@@ -295,12 +298,12 @@ test('Read workspace navigates real occurrences and bookmarks and restores panel
     'aria-selected',
     'true',
   );
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   const thumb = page.getByRole('button', { name: 'Go to page 1', exact: true });
   await thumb.focus();
   await thumb.press('ArrowDown');
   await expect(page.getByRole('button', { name: 'Go to page 2', exact: true })).toBeFocused();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   const search = page.getByRole('button', { name: 'Search', exact: true });
   await search.click();
   const input = page.getByRole('searchbox', { name: 'Find text in this PDF' });
@@ -308,7 +311,7 @@ test('Read workspace navigates real occurrences and bookmarks and restores panel
   await input.fill('Orchid');
   await expect(page.locator('.pdf-findbar')).toContainText('2 matches');
   await page.getByLabel('PDF search occurrences').getByRole('button').first().click();
-  await expect(page.locator('.page-counter input')).toHaveValue('3');
+  await expectValue(page.locator('.page-counter input'), '3');
   await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute(
     'data-pdf-match',
     '0',
@@ -328,7 +331,7 @@ test('Read workspace navigates real occurrences and bookmarks and restores panel
   await page.keyboard.press('Escape');
   await expect(info).toBeFocused();
   await search.click();
-  await expect(input).toHaveValue('Orchid');
+  await expectValue(input, 'Orchid');
   await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute(
     'data-pdf-match',
     '1',
@@ -338,9 +341,9 @@ test('Read workspace navigates real occurrences and bookmarks and restores panel
   const bookmarks = page.getByRole('button', { name: 'Document bookmarks', exact: true });
   await bookmarks.click();
   await page.getByRole('button', { name: 'Manual leaf four · Source 4' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('4');
+  await expectValue(page.locator('.page-counter input'), '4');
   await page.getByRole('button', { name: 'Opening · p1' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('1');
+  await expectValue(page.locator('.page-counter input'), '1');
   await page.getByRole('button', { name: 'Close PDF outline' }).click();
   await expect(bookmarks).toBeFocused();
   // A real scroll anchor, not just a page number, survives panel and focus changes.
@@ -355,7 +358,7 @@ test('Read workspace navigates real occurrences and bookmarks and restores panel
   const focused = page.getByRole('button', { name: 'Focused reading', exact: true });
   await focused.click();
   await expect(page.locator('.reader-side-panel')).toBeHidden();
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('100');
+  await expectValue(page.getByRole('combobox', { name: 'Zoom', exact: true }), '100');
   await page.keyboard.press('Escape');
   await expect(focused).toBeFocused();
   await expect(page.getByRole('region', { name: 'Document information' })).toBeVisible();
@@ -374,7 +377,7 @@ test('Read workspace navigates real occurrences and bookmarks and restores panel
   page.once('dialog', (dialog) => dialog.dismiss());
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'Read', exact: true }).click();
-  await expect(draft).toHaveValue('Unfinished synthetic text');
+  await expectValue(draft, 'Unfinished synthetic text');
   await expect(page.getByRole('tab', { name: 'Edit', exact: true })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -433,7 +436,7 @@ test('Read workspace reports bookmark failure and refuses stale manual destinati
     page.getByRole('button', { name: 'Manual leaf four · Source 4 · Needs review' }),
   ).toBeDisabled();
   await page.getByRole('button', { name: 'Opening · p1' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('1');
+  await expectValue(page.locator('.page-counter input'), '1');
 });
 
 test('FLOW / 03 reading context and undo outcome retain real source and redo state', async ({

@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -125,12 +126,12 @@ test('B02B BU03 11C 12A layouts, persistence and draft guards', async ({ page, r
   }
   await expect(w.getByLabel('Style', { exact: true })).toHaveCSS('height', '36px');
   await matrix(page, info, 'BU03');
-  await w.getByLabel('Style', { exact: true }).selectOption('roman_upper');
+  await selectOption(w.getByLabel('Style', { exact: true }), 'roman_upper');
   await w.getByLabel('Start', { exact: true }).fill('7');
   await expect(w.locator('.number-placement')).toContainText('V1 · VII');
   await w.getByRole('button', { name: 'Cancel changes', exact: true }).click();
-  await expect(w.getByLabel('Style', { exact: true })).toHaveValue('arabic');
-  await w.getByLabel('Style', { exact: true }).selectOption('roman_upper');
+  await expectValue(w.getByLabel('Style', { exact: true }), 'arabic');
+  await selectOption(w.getByLabel('Style', { exact: true }), 'roman_upper');
   await w.getByRole('button', { name: 'Apply settings', exact: true }).click();
   await expect(w).toContainText('Settings applied');
   await w.getByRole('button', { name: 'Back to page map' }).click();
@@ -138,7 +139,7 @@ test('B02B BU03 11C 12A layouts, persistence and draft guards', async ({ page, r
   await w.getByRole('button', { name: 'Bookmarks', exact: true }).click();
   await w.getByRole('button', { name: 'Add bookmark', exact: true }).click();
   await w.getByLabel('Bookmark label', { exact: true }).fill('Reviewed source destination');
-  await w.getByLabel('Target document', { exact: true }).selectOption(docs[1].id);
+  await selectOption(w.getByLabel('Target document', { exact: true }), docs[1].id);
   await w.getByLabel('Source document page', { exact: true }).fill('2');
   await expect(w.locator('.placement-paper img')).toBeVisible();
   await w.getByRole('button', { name: 'Save bookmark', exact: true }).click();
@@ -152,7 +153,7 @@ test('B02B BU03 11C 12A layouts, persistence and draft guards', async ({ page, r
   const guard = page.getByRole('alertdialog');
   await expect(guard).toBeVisible();
   await guard.getByRole('button', { name: 'Keep editing', exact: true }).click();
-  await expect(w.getByLabel('Bookmark label', { exact: true })).toHaveValue('Unsaved bookmark');
+  await expectValue(w.getByLabel('Bookmark label', { exact: true }), 'Unsaved bookmark');
   await page
     .locator('.matter-rail')
     .getByRole('button', { name: 'Build bundle', exact: true })
@@ -169,7 +170,7 @@ test('B02B BU03 11C 12A layouts, persistence and draft guards', async ({ page, r
     target_revision: docs[1].revision,
   });
   await page.getByRole('button', { name: 'Edit numbering', exact: true }).click();
-  await expect(w.getByLabel('Style', { exact: true })).toHaveValue('roman_upper');
+  await expectValue(w.getByLabel('Style', { exact: true }), 'roman_upper');
   await page.reload();
   await enterLatestMatter(page);
   await page
@@ -177,7 +178,7 @@ test('B02B BU03 11C 12A layouts, persistence and draft guards', async ({ page, r
     .getByRole('button', { name: 'Index & bookmarks', exact: true })
     .click();
   await w.getByRole('button', { name: 'Bookmarks', exact: true }).click();
-  await expect(w.getByLabel('Bookmark label', { exact: true })).toHaveValue('Unsaved bookmark');
+  await expectValue(w.getByLabel('Bookmark label', { exact: true }), 'Unsaved bookmark');
 });
 test('B02B failed saves, stale placement and map error recovery', async ({
   page,
@@ -200,7 +201,7 @@ test('B02B failed saves, stale placement and map error recovery', async ({
   await w.getByLabel('Start', { exact: true }).fill('9');
   await w.getByRole('button', { name: 'Apply settings' }).click();
   await expect(w.getByRole('alert')).toContainText('Synthetic save failure');
-  await expect(w.getByLabel('Start', { exact: true })).toHaveValue('9');
+  await expectValue(w.getByLabel('Start', { exact: true }), '9');
   await page.unroute('**/bundle-settings');
   await w.getByRole('button', { name: 'Retry settings' }).click();
   await expect(w).toContainText('Settings applied');
@@ -278,9 +279,9 @@ test('B02B delayed bookmark loads preserve entries and compact settings stay key
   await expect(page.getByRole('button', { name: 'Add bookmark', exact: true })).toBeDisabled();
   release();
   await expect(page.locator('.bookmark-tree-row')).toHaveCount(2);
-  await expect(page.getByLabel('Bookmark label', { exact: true })).toHaveValue('Affidavit');
+  await expectValue(page.getByLabel('Bookmark label', { exact: true }), 'Affidavit');
   await page.locator('.bookmark-hierarchy summary').click();
-  await page.getByLabel('Parent bookmark', { exact: true }).selectOption(existing.id);
+  await selectOption(page.getByLabel('Parent bookmark', { exact: true }), existing.id);
   await page.getByRole('button', { name: 'Save bookmark', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Add bookmark', exact: true })).toBeEnabled();
   const values = await (

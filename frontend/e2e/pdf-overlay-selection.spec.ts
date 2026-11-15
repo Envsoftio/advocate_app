@@ -1,3 +1,4 @@
+import { expectValue, selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import {
   closeWorkspaceNavigation,
@@ -93,9 +94,7 @@ test('clicking a saved comment opens its editor properties and on-page read popo
   await expect(comment).toBeVisible();
   await comment.click();
   const inspector = page.getByLabel('PDF editing controls');
-  await expect(inspector.getByRole('textbox', { name: 'Comment text' })).toHaveValue(
-    'Check this date',
-  );
+  await expectValue(inspector.getByRole('textbox', { name: 'Comment text' }), 'Check this date');
   await page.screenshot({
     path: test.info().outputPath('comment-editor-properties.png'),
     animations: 'disabled',
@@ -113,9 +112,7 @@ test('clicking a saved comment opens its editor properties and on-page read popo
   await page.locator('.pdf-review-shape.box:not(.draft)').click();
   await expect(inspector.getByText('Box', { exact: true }).first()).toBeVisible();
   await page.locator('.pdf-reviewed-link').click();
-  await expect(inspector.getByRole('textbox', { name: 'Readable label' })).toHaveValue(
-    'Source link',
-  );
+  await expectValue(inspector.getByRole('textbox', { name: 'Readable label' }), 'Source link');
   await inspector.getByRole('textbox', { name: 'Readable label' }).fill('Updated source link');
   await inspector.getByRole('button', { name: 'Update link' }).click();
   await expect
@@ -128,7 +125,8 @@ test('clicking a saved comment opens its editor properties and on-page read popo
     .toBe('Updated source link');
   await page.setViewportSize({ width: 1024, height: 768 });
   await comment.click();
-  await expect(inspector.getByRole('textbox', { name: 'Comment text' })).toHaveValue(
+  await expectValue(
+    inspector.getByRole('textbox', { name: 'Comment text' }),
     'Check this date again',
   );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
@@ -147,7 +145,7 @@ test('clicking a saved comment opens its editor properties and on-page read popo
   expect((await page.locator('.pdf-paper').boundingBox())?.width).toBe(paperWidth);
   await expect(page.getByRole('textbox', { name: 'Comment text' })).toHaveCount(0);
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark');
+  await selectOption(page.getByRole('combobox', { name: 'Theme' }), 'dark');
   await closeWorkspaceNavigation(page);
   await expect(popover).toBeHidden();
   await comment.click();

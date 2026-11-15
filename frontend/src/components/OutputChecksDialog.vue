@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { X } from 'lucide-vue-next';
 import {
@@ -111,11 +112,11 @@ onBeforeUnmount(() => {
     <div class="output-checks-body">
       <section class="output-checks-results">
         <label
-          >Output file<select aria-label="Output file" v-model="file" :disabled="pending"
+          >Output file<AppSelect aria-label="Output file" v-model="file" :disabled="pending"
             ><option value="">All outputs · {{ artifact.files.length }} saved files</option
             ><option v-for="item in artifact.files" :key="item.name" :value="item.name">{{
               item.name
-            }}</option></select
+            }}</option></AppSelect
           ></label
         >
         <div class="output-checks-table"
@@ -153,12 +154,12 @@ onBeforeUnmount(() => {
           ><button class="membership-button quiet" :disabled="pending" @click="runChecks">{{
             pending ? 'Checking…' : 'Run output checks'
           }}</button
-          ><select v-model="runId" aria-label="Validation history"
+          ><AppSelect v-model="runId" aria-label="Validation history"
             ><option value="">Latest run</option
             ><option v-for="r in state?.history" :key="r.id" :value="r.id"
               >{{ prettyDate(r.created_at) }} · {{ r.id.slice(0, 6) }} ·
               {{ r.selected_files.length }} files</option
-            ></select
+            ></AppSelect
           ></div
         >
         <details v-if="evidenceRow" open class="qa-evidence"

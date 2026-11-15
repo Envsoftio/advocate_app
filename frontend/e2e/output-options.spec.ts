@@ -1,3 +1,4 @@
+import { expectValue, selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -45,7 +46,7 @@ async function enter(page: any) {
   await expect(page.locator('.section-enter-active')).toHaveCount(0);
   await page.evaluate(() => document.fonts.ready);
   await page.getByRole('button', { name: 'Output options', exact: true }).click();
-  await expect(page.getByLabel('Page quality', { exact: true })).toHaveValue('original');
+  await expectValue(page.getByLabel('Page quality', { exact: true }), 'original');
 }
 test('B03A BU04 reference geometry, appearance matrix, keyboard and dirty cancellation', async ({
   page,
@@ -150,7 +151,7 @@ test('B03A saved options produce measured artifacts, stale results and preserved
   );
   await w.getByRole('button', { name: 'Rebuild', exact: true }).click();
   await w.getByRole('button', { name: 'Output options', exact: true }).click();
-  await dialog.getByLabel('Page quality', { exact: true }).selectOption('balanced');
+  await selectOption(dialog.getByLabel('Page quality', { exact: true }), 'balanced');
   await dialog.getByLabel('Remove author and editing metadata').check();
   for (const name of ['DOCX', 'XLSX', 'PPTX'])
     await dialog.getByLabel(name, { exact: true }).check();
@@ -167,7 +168,7 @@ test('B03A saved options produce measured artifacts, stale results and preserved
     office_pptx: true,
   });
   await w.getByRole('button', { name: 'Output options', exact: true }).click();
-  await expect(dialog.getByLabel('Page quality', { exact: true })).toHaveValue('balanced');
+  await expectValue(dialog.getByLabel('Page quality', { exact: true }), 'balanced');
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await w.getByRole('button', { name: 'Build bundle', exact: true }).click();
   await expect(w.getByRole('heading', { name: 'Bundle ready for review' })).toBeVisible({

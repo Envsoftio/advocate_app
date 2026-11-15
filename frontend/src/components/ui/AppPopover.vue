@@ -27,7 +27,7 @@ function close() {
 }
 function select(event: MouseEvent, enabled: boolean) {
   const button = (event.target as HTMLElement).closest('button');
-  if (enabled && button && !button.disabled) close();
+  if (enabled && button && !button.disabled && button.getAttribute('role') !== 'combobox') close();
 }
 defineExpose({
   close,

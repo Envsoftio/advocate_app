@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { api } from '../lib/api';
 import { friendlyError } from '../lib/format';
@@ -132,8 +133,8 @@ onBeforeUnmount(() => {
     >
     <div v-if="!destination && picker" class="placement-picker"
       ><label
-        >Document<select v-model="selected"
-          ><option v-for="d in included" :key="d.id" :value="d.id">{{ d.title }}</option></select
+        >Document<AppSelect v-model="selected"
+          ><option v-for="d in included" :key="d.id" :value="d.id">{{ d.title }}</option></AppSelect
         ></label
       ><label
         >Source page<input

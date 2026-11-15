@@ -1,3 +1,4 @@
+import { selectOption } from './select';
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -48,13 +49,13 @@ test('annotation properties fit the right edge at supported sizes', async ({ pag
     page.getByLabel('PDF editing controls').getByText('Highlight', { exact: true }).first(),
   ).toBeVisible();
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark');
+  await selectOption(page.getByRole('combobox', { name: 'Theme' }), 'dark');
   await closeWorkspaceNavigation(page);
   for (const width of [1440, 1024, 900, 768]) {
     await page.setViewportSize({ width, height: 768 });
     for (const scale of [90, 100, 110, 125]) {
       await openWorkspaceNavigation(page);
-      await page.getByRole('combobox', { name: 'Interface size' }).selectOption(String(scale));
+      await selectOption(page.getByRole('combobox', { name: 'Interface size' }), String(scale));
       await closeWorkspaceNavigation(page);
       const geometry = await page.evaluate(() => {
         const rect = (selector: string) =>

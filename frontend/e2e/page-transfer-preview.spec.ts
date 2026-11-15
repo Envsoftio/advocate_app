@@ -1,3 +1,4 @@
+import { selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import { closeWorkspaceNavigation, openDocumentBrowser } from './navigation';
 import { expect, test } from '@playwright/test';
@@ -91,9 +92,9 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
   const tools = page.getByRole('dialog', { name: 'Page tools' });
   await expect(tools.getByRole('heading', { name: 'Add pages' })).toBeVisible();
   const preview = tools.getByRole('region', { name: 'Page transfer preview' });
-  await tools.getByRole('combobox', { name: 'Source document' }).selectOption(source.id);
+  await selectOption(tools.getByRole('combobox', { name: 'Source document' }), source.id);
   await tools.getByRole('textbox', { name: 'Source pages' }).fill('2,1');
-  await tools.getByRole('combobox', { name: 'Where to add pages' }).selectOption('after');
+  await selectOption(tools.getByRole('combobox', { name: 'Where to add pages' }), 'after');
   await tools.getByRole('spinbutton', { name: 'Insert after page' }).fill('2');
   await expect(preview).toContainText('Insert between current pages 2 and 3');
   await expect(preview).toContainText(

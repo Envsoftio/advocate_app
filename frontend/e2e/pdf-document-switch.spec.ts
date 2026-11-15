@@ -1,3 +1,4 @@
+import { expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import {
   openReaderView,
@@ -141,10 +142,10 @@ test('document switches clear old PDF content before delayed reading state and i
   await openDocumentActions(page);
   await expect(page.getByRole('button', { name: 'Save working copy', exact: true })).toBeDisabled();
   bravo.release();
-  await expect(page.getByRole('spinbutton', { name: 'Go to page', exact: true })).toHaveValue('3');
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('75');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page', exact: true }), '3');
+  await expectValue(page.getByRole('combobox', { name: 'Zoom', exact: true }), '75');
   await openReaderView(page);
-  await expect(page.getByRole('combobox', { name: 'Reading mode' })).toHaveValue('continuous');
+  await expectValue(page.getByRole('combobox', { name: 'Reading mode' }), 'continuous');
   await page.getByRole('button', { name: 'View options' }).click();
   await expect(page.locator('[data-reader-page="3"] .pdf-text-layer')).toContainText(
     'BRAVO page 3',
@@ -229,6 +230,6 @@ test('same-document text edits retain their snapshot during delayed reading-stat
   position.release();
   await expect(page.locator('.pdf-text-layer')).toContainText('AFTER page 1');
   await expect(page.locator('.pdf-edit-snapshot')).toHaveCount(0);
-  await expect(page.getByRole('spinbutton', { name: 'Go to page', exact: true })).toHaveValue('1');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page', exact: true }), '1');
   expect(errors).toEqual([]);
 });

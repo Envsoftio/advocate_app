@@ -84,7 +84,7 @@
   margin: 0 0 16px;
 }
 .bundle-structure input:not([type='checkbox']),
-.bundle-structure select,
+.bundle-structure :is(select, :where(.app-select-trigger)),
 .bundle-preset-dialog input:not([type='checkbox']):not([type='radio']) {
   width: 100%;
   height: 36px;
@@ -234,7 +234,7 @@
   align-items: center;
   gap: 4px;
 }
-.generated-front > footer select {
+.generated-front > footer :is(select, :where(.app-select-trigger)) {
   width: 50px;
   height: 28px;
   padding: 0 4px;
@@ -672,7 +672,7 @@
   }
 }
 :root .design-shell .bundle-structure input:not([type='checkbox']),
-:root .design-shell .bundle-structure select {
+:root .design-shell .bundle-structure :is(select, :where(.app-select-trigger)) {
   height: 36px;
   min-height: 36px;
   font:
@@ -680,7 +680,12 @@
     sans-serif;
   padding: 0 12px;
 }
-:root .design-shell .bundle-structure .generated-front > footer select {
+:root
+  .design-shell
+  .bundle-structure
+  .generated-front
+  > footer
+  :is(select, :where(.app-select-trigger)) {
   height: 28px;
   min-height: 28px;
   padding: 0 4px;
@@ -905,7 +910,7 @@
 .placement-picker label:last-child {
   max-width: 150px;
 }
-.placement-picker select {
+.placement-picker :is(select, :where(.app-select-trigger)) {
   max-width: 300px;
 }
 .placement-identity {

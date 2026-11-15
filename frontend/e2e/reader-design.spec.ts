@@ -1,3 +1,4 @@
+import { selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import { closeWorkspaceNavigation, openDocumentActions, openDocumentBrowser } from './navigation';
 import { test, expect } from '@playwright/test';
@@ -149,7 +150,7 @@ sys.stdout.buffer.write(pdf.tobytes())`,
   await enterLatestMatter(page);
   if (await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).isVisible())
     await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Document version' }).selectOption('original');
+  await selectOption(page.getByRole('combobox', { name: 'Document version' }), 'original');
   const original = page.getByRole('dialog', { name: 'Review imported original' });
   await expect(original.locator('.pdf-text-layer')).toContainText('ANNEXURE B');
   if (!(await original.getByRole('complementary', { name: 'Artifact information' }).isVisible()))

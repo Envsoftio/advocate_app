@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import AppPopover from './ui/AppPopover.vue';
 import { computed, ref, watch } from 'vue';
 import {
@@ -111,13 +112,13 @@ function reorder(value: number, ordered: MatterDocument[]) {
     /></label>
     <div class="navigator-filters"
       ><label
-        ><ListFilter :size="16" /><select
+        ><ListFilter :size="16" /><AppSelect
           v-model.number="part"
           aria-label="Filter documents by Part"
           ><option :value="0">All Parts</option
           ><option v-for="value in parts" :key="value" :value="value"
             >Part {{ value }}</option
-          ></select
+          ></AppSelect
         ></label
       ><button
         class="btn secondary small"

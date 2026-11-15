@@ -1,8 +1,9 @@
+import { selectOption, expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-const base = 'http://127.0.0.1:8768',
+const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`,
   headers = { Authorization: 'Bearer e2e-isolated-token' };
 test('JSON preparation matches 05A and preserves document context in the editor', async ({
   page,
@@ -81,9 +82,9 @@ test('JSON preparation matches 05A and preserves document context in the editor'
   await expect(
     page.getByRole('button', { name: 'Save document details', exact: true }),
   ).toContainText('Save changes');
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('fit-width');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), 'fit-width');
   await page.getByRole('button', { name: 'Next page', exact: true }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await page.screenshot({
     path: info.outputPath('05A-documents-1440-light.png'),
     animations: 'disabled',
@@ -91,7 +92,7 @@ test('JSON preparation matches 05A and preserves document context in the editor'
   const viewer = await page.locator('.viewer-root').elementHandle();
   await page.getByRole('button', { name: 'Open editor', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Edit', exact: true })).toBeVisible();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   expect(await viewer!.evaluate((el) => el.isConnected)).toBe(true);
   await expect(page.locator('.document-revision')).toContainText('source pages');
   expect(Math.round((await page.locator('.viewer-page-column').boundingBox())!.x)).toBe(296);
@@ -138,14 +139,14 @@ test('JSON preparation matches 05A and preserves document context in the editor'
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Close document information' }).click();
   await page.getByRole('button', { name: 'Browse documents' }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await nav.getByRole('textbox', { name: 'Find a document' }).fill('Order');
   await expect(nav.locator('.navigator-document')).toHaveCount(1);
   await nav.getByRole('textbox', { name: 'Find a document' }).fill('');
-  await nav.getByRole('combobox', { name: 'Filter documents by Part' }).selectOption('2');
+  await selectOption(nav.getByRole('combobox', { name: 'Filter documents by Part' }), '2');
   await nav.getByRole('button', { name: 'Part 2', exact: false }).click();
   await expect(nav.locator('.navigator-document')).toHaveCount(2);
-  await nav.getByRole('combobox', { name: 'Filter documents by Part' }).selectOption('0');
+  await selectOption(nav.getByRole('combobox', { name: 'Filter documents by Part' }), '0');
   await nav
     .getByRole('button', { name: 'Reorder Order · 12 January 2026. Use Up or Down.', exact: true })
     .press('ArrowUp');
@@ -177,11 +178,12 @@ test('JSON preparation matches 05A and preserves document context in the editor'
   expect(saved.source_sha256).toBe(documents[1].source_sha256);
   expect(saved.notes).toBe('Synthetic source checked against the working copy.');
   await nav.getByRole('button', { name: 'Sort', exact: true }).click();
-  await expect(
+  await expectValue(
     page
       .getByRole('region', { name: 'Editable document table' })
       .getByRole('textbox', { name: /^Title for Affidavit/ }),
-  ).toHaveValue('Reviewed synthetic affidavit');
+    'Reviewed synthetic affidavit',
+  );
   await page.locator('.batch-tools-menu>button').click();
   await page.getByRole('button', { name: 'Close table', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Open editor', exact: true })).toBeVisible();

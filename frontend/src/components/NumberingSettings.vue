@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import type { OutputMarks } from '../lib/types';
 const marks = defineModel<OutputMarks>({ required: true });
 defineProps<{ disabled: boolean }>();
@@ -9,16 +10,16 @@ defineProps<{ disabled: boolean }>();
     ><fieldset :disabled="disabled">
       <div class="numbering-pair"
         ><label
-          >Style<select aria-label="Style" v-model="marks.numbering_style"
+          >Style<AppSelect aria-label="Style" v-model="marks.numbering_style"
             ><option value="arabic">Arabic · 1, 2, 3</option
             ><option value="roman_lower">Roman lower · i, ii, iii</option
-            ><option value="roman_upper">Roman upper · I, II, III</option></select
+            ><option value="roman_upper">Roman upper · I, II, III</option></AppSelect
           ></label
         ><label
-          >Restart<select v-model="marks.numbering_restart"
+          >Restart<AppSelect v-model="marks.numbering_restart"
             ><option value="volume">Each volume</option
             ><option value="continuous">Continuous</option
-            ><option value="section">Each Part section</option></select
+            ><option value="section">Each Part section</option></AppSelect
           ></label
         ></div
       >
@@ -37,19 +38,19 @@ defineProps<{ disabled: boolean }>();
             title="Use {volume} or {section}; Latin-1 text" /></label
       ></div>
       <label
-        >Position<select v-model="marks.numbering_position"
+        >Position<AppSelect v-model="marks.numbering_position"
           ><option value="bottom_right">Footer · right · 12 mm inset</option
           ><option value="bottom_center">Footer · center · 24 pt inset</option
           ><option value="bottom_left">Footer · left · 12 mm inset</option
           ><option value="top_left">Header · left · 12 mm inset</option
-          ><option value="top_right">Header · right · 12 mm inset</option></select
+          ><option value="top_right">Header · right · 12 mm inset</option></AppSelect
         ></label
       >
       <label
-        >Front matter<select v-model="marks.numbering_front_matter"
+        >Front matter<AppSelect v-model="marks.numbering_front_matter"
           ><option value="roman">Roman i–iii in viewer; no printed stamp</option
           ><option value="physical">Count and stamp with content (existing policy)</option
-          ><option value="none">Unlabelled in viewer; no printed stamp</option></select
+          ><option value="none">Unlabelled in viewer; no printed stamp</option></AppSelect
         ></label
       >
       <label class="structure-check"
@@ -92,7 +93,7 @@ defineProps<{ disabled: boolean }>();
             min="1"
             max="12" /></label
         ><label
-          >Bates position<select v-model="marks.bates_position"
+          >Bates position<AppSelect v-model="marks.bates_position"
             ><option
               v-for="p in [
                 'top_left',
@@ -106,7 +107,7 @@ defineProps<{ disabled: boolean }>();
               :key="p"
               :value="p"
               >{{ p.replace(/_/g, ' ') }}</option
-            ></select
+            ></AppSelect
           ></label
         ><label
           >Bates font size<input

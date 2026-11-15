@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -29,8 +30,8 @@ test('shared popovers dismiss outside, retain controls, restore focus and fit da
       for (const scale of [100, 125]) {
         await page.setViewportSize({ width, height: width === 1440 ? 900 : 768 });
         await openWorkspaceNavigation(page);
-        await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption(theme);
-        await page.getByRole('combobox', { name: 'Interface size' }).selectOption(String(scale));
+        await selectOption(page.getByRole('combobox', { name: 'Theme', exact: true }), theme);
+        await selectOption(page.getByRole('combobox', { name: 'Interface size' }), String(scale));
         await closeWorkspaceNavigation(page);
         const trigger = page.getByRole('button', { name: 'View options', exact: true });
         await trigger.click();
@@ -54,10 +55,10 @@ test('shared popovers dismiss outside, retain controls, restore focus and fit da
         await expect(popup).toBeHidden();
         await expect(trigger).toBeFocused();
         await trigger.click();
-        await popup.getByLabel('Reading mode').selectOption('continuous');
+        await selectOption(popup.getByLabel('Reading mode'), 'continuous');
         await expect(popup).toBeHidden();
         await trigger.click();
-        await expect(popup.getByLabel('Reading mode')).toHaveValue('continuous');
+        await expectValue(popup.getByLabel('Reading mode'), 'continuous');
         await popup.getByRole('button', { name: 'PDF keyboard shortcuts', exact: true }).click();
         const help = page.getByRole('dialog', { name: 'PDF keyboard shortcuts', exact: true });
         await expect(help).toBeVisible();
@@ -68,10 +69,10 @@ test('shared popovers dismiss outside, retain controls, restore focus and fit da
         await expect(help).toBeHidden();
         await expect(trigger).toBeFocused();
         await trigger.click();
-        await popup.getByLabel('Reading mode').selectOption('single');
+        await selectOption(popup.getByLabel('Reading mode'), 'single');
       }
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Interface size' }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Interface size' }), '100');
   await closeWorkspaceNavigation(page);
   if (await page.getByRole('button', { name: 'Open editor', exact: true }).isVisible())
     await page.getByRole('button', { name: 'Open editor', exact: true }).click();
@@ -98,6 +99,11 @@ test('shared popovers dismiss outside, retain controls, restore focus and fit da
   });
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.getByRole('button', { name: 'More document actions', exact: true }).click();
+  await page.getByRole('tab', { name: 'Stamps', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Output', exact: true })).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(page.getByRole('tab', { name: 'Stamps', exact: true })).toBeFocused();
   await expect(
     page.locator('.app-popover').getByRole('button', { name: 'Save working copy' }),
   ).toBeVisible();
@@ -122,7 +128,7 @@ test('shared popovers dismiss outside, retain controls, restore focus and fit da
   const table = page.locator('.document-register');
   await expect(table).toBeVisible();
   await table.getByRole('button', { name: 'Filters', exact: true }).click();
-  await page.locator('.app-popover').getByLabel('Filter by Part').selectOption('1');
+  await selectOption(page.locator('.app-popover').getByLabel('Filter by Part'), '1');
   await expect(page.locator('.app-popover')).toBeVisible();
   await table.getByRole('heading', { name: 'Batch review' }).click();
   await expect(page.locator('.app-popover')).toBeHidden();

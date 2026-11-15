@@ -143,7 +143,9 @@ export async function enterLatestMatter(page: Page) {
   await expect(page.locator('.matter-home')).toBeVisible();
   await expect(page.locator('.preparation-engine')).toContainText('Engine connected');
   const rows = page.locator('.matter-home-card');
-  if (!(await rows.count())) return;
+  // Engine health can resolve before the asynchronous matter list arrives.
+  // Callers create a fixture first; wait for it rather than skipping navigation.
+  await expect(rows.first()).toBeVisible();
   await rows.first().click();
   await expect(page.locator('.matter-overview')).toBeVisible();
   await page

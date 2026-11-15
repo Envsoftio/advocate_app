@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { Info, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-vue-next';
 import { api } from '../lib/api';
@@ -389,9 +390,9 @@ onBeforeUnmount(() => {
                 maxlength="200"
                 placeholder="Document bundle" /></label
             ><label
-              >Volume front matter<select v-model="settings.output_marks.front_matter"
+              >Volume front matter<AppSelect v-model="settings.output_marks.front_matter"
                 ><option value="index_only">Generated index only</option
-                ><option value="cover_index">Cover + generated index</option></select
+                ><option value="cover_index">Cover + generated index</option></AppSelect
               ></label
             ><h3>Index columns</h3
             ><label class="structure-check"
@@ -403,10 +404,10 @@ onBeforeUnmount(() => {
             ><details
               ><summary>Index density &amp; Part PDFs</summary
               ><label
-                >Index layout<select v-model="settings.output_marks.index_style"
+                >Index layout<AppSelect v-model="settings.output_marks.index_style"
                   ><option value="review">Review · spacious linked index</option
                   ><option value="compact">Compact</option
-                  ><option value="readable">Readable</option></select
+                  ><option value="readable">Readable</option></AppSelect
                 ></label
               ><label class="structure-check"
                 ><input v-model="settings.output_marks.part_extracts_enabled" type="checkbox" />Also
@@ -452,10 +453,10 @@ onBeforeUnmount(() => {
               {{ preview.volumes[preview.selected_volume - 1].index_pages }} index page(s) counted
               physically in this volume.</span
             ><label
-              >Volume<select v-model.number="volume"
+              >Volume<AppSelect v-model.number="volume"
                 ><option v-for="v in preview.volumes" :value="v.number" :key="v.number">{{
                   v.number
-                }}</option></select
+                }}</option></AppSelect
               ></label
             ><button
               class="icon-btn"

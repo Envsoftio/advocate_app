@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { reactive, ref, onMounted, onUnmounted } from 'vue';
 import { X, Folder, HardDrive } from 'lucide-vue-next';
 import type { CourtProfile, MatterNew } from '../lib/types';
@@ -167,10 +168,10 @@ onUnmounted(() => opener?.focus());
         >
         <details class="new-matter-advanced"
           ><summary>Preparation settings</summary><label for="matter-profile">Court profile</label
-          ><select id="matter-profile" v-model="form.court_profile"
+          ><AppSelect id="matter-profile" v-model="form.court_profile"
             ><option v-for="profile in profiles" :key="profile.id" :value="profile.id">{{
               profile.name
-            }}</option></select
+            }}</option></AppSelect
           ><p>Profiles are illustrative and do not certify compliance.</p
           ><label for="matter-case-type">Case type</label
           ><input id="matter-case-type" v-model="form.case_type" maxlength="150"

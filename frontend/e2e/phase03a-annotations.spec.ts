@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -41,7 +42,7 @@ test('03A highlight and comment Save, retry, reload and source navigation', asyn
   await page.getByRole('button', { name: 'Highlight', exact: true }).click();
   const inspector = page.locator('.viewer-tool-inspector');
   await expect(inspector).toBeVisible();
-  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('100');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom' }), '100');
   await page.screenshot({ path: test.info().outputPath('ED07-runtime.png') });
   const draw = async (x: number, y: number, w: number, h: number) => {
     const paper = page.locator('.pdf-paper');
@@ -93,9 +94,7 @@ test('03A highlight and comment Save, retry, reload and source navigation', asyn
   );
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.document-save-state')).toContainText('Unsaved changes');
-  await expect(page.getByRole('textbox', { name: 'Comment text' })).toHaveValue(
-    'Confirm the cited date',
-  );
+  await expectValue(page.getByRole('textbox', { name: 'Comment text' }), 'Confirm the cited date');
   await page.unroute(`**/documents/${doc.id}/annotations`);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.pdf-review-comment')).toHaveCount(1);
@@ -125,7 +124,7 @@ test('03A highlight and comment Save, retry, reload and source navigation', asyn
   await page.screenshot({ path: test.info().outputPath('ED09-runtime.png') });
   await page.setViewportSize({ width: 1024, height: 768 });
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark');
+  await selectOption(page.getByRole('combobox', { name: 'Theme' }), 'dark');
   await closeWorkspaceNavigation(page);
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'dark');
   await expect(
@@ -144,9 +143,7 @@ test('03A highlight and comment Save, retry, reload and source navigation', asyn
     .getByRole('region', { name: 'Private review comments' })
     .getByRole('button', { name: /Source 1/ })
     .click();
-  await expect(page.getByRole('textbox', { name: 'Comment text' })).toHaveValue(
-    'Confirm the cited date',
-  );
+  await expectValue(page.getByRole('textbox', { name: 'Comment text' }), 'Confirm the cited date');
   await expect(page.locator('.thumbnail-button.selected canvas')).toHaveClass(/is-rendered/);
   await page.screenshot({
     path: test.info().outputPath('ED08-compact-dark-inspector.png'),
@@ -213,7 +210,7 @@ test('03A placement stays on rotated source page at 125% zoom', async ({ page, r
   await expect(page.locator('.pdf-text-layer')).toContainText('DRAFT PETITION');
   await page.getByRole('tab', { name: 'Annotate' }).click();
   await page.getByRole('button', { name: 'Next page' }).click();
-  await page.getByRole('combobox', { name: 'Zoom' }).selectOption('125');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom' }), '125');
   await page.getByRole('button', { name: 'Highlight', exact: true }).click();
   const paper = page.locator('.pdf-paper');
   await paper.scrollIntoViewIfNeeded();
@@ -227,7 +224,7 @@ test('03A placement stays on rotated source page at 125% zoom', async ({ page, r
   await page.getByRole('textbox', { name: 'Optional highlight note' }).fill('Rotated source page');
   page.once('dialog', (dialog) => void dialog.dismiss());
   await page.getByRole('button', { name: 'Previous page' }).click();
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue('2');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '2');
   await expect(page.locator('.document-save-state')).toContainText('Unsaved changes');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.document-save-state')).toContainText('Saved locally');
@@ -251,7 +248,7 @@ test('03A placement stays on rotated source page at 125% zoom', async ({ page, r
   await page.reload();
   await enterLatestMatter(page);
   await expect(page.locator('.pdf-review-highlight')).toHaveCount(1);
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue('2');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '2');
   const docs = await (
     await request.get(`${base}/matters/${matter.id}/documents`, { headers })
   ).json();

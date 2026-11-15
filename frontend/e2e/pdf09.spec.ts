@@ -1,3 +1,4 @@
+import { expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation';
 import { includeAllDocuments, openDocumentBrowser, openWorkspaceNavigation } from './navigation';
@@ -53,7 +54,7 @@ with pymupdf.open(sys.argv[1]) as pdf:
     await expect(prompt.getByRole('alert')).toContainText('Incorrect PDF password');
     await prompt.getByRole('button', { name: 'Cancel import' }).click();
     await expect(page.locator('.doc-item')).toHaveCount(0);
-    await expect(page.getByLabel('Choose import files')).toHaveValue('');
+    await expectValue(page.getByLabel('Choose import files'), '');
 
     await page.getByRole('button', { name: 'Retry remaining files', exact: true }).click();
     await prompt.getByLabel('PDF password', { exact: true }).fill('synthetic input');

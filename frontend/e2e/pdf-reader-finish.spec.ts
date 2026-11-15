@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import {
   openReaderView,
@@ -9,7 +10,7 @@ import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-const base = 'http://127.0.0.1:8768',
+const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`,
   headers = { Authorization: 'Bearer e2e-isolated-token' };
 const backend = resolve(import.meta.dirname, '../../backend');
 const python =
@@ -58,11 +59,11 @@ test('reader persists revision-scoped positions after reload and keyboard dialog
   await page.locator('.doc-item').filter({ hasText: 'reader-restart' }).click();
   await expect(page.getByRole('spinbutton', { name: 'Go to page', exact: true })).toBeEnabled();
   await openReaderView(page);
-  await page.getByRole('combobox', { name: 'Reading mode' }).selectOption('continuous');
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('125');
+  await selectOption(page.getByRole('combobox', { name: 'Reading mode' }), 'continuous');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '125');
   await page.getByRole('spinbutton', { name: 'Go to page', exact: true }).fill('7');
   await page.getByRole('spinbutton', { name: 'Go to page', exact: true }).press('Enter');
-  await expect(page.getByRole('spinbutton', { name: 'Go to page', exact: true })).toHaveValue('7');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page', exact: true }), '7');
   await page.locator('.canvas-scroll').evaluate((element) => {
     element.scrollTop += 150;
   });
@@ -87,10 +88,10 @@ test('reader persists revision-scoped positions after reload and keyboard dialog
   await enterLatestMatter(page);
   await openDocumentBrowser(page);
   await page.locator('.doc-item').filter({ hasText: 'reader-restart' }).click();
-  await expect(page.getByRole('spinbutton', { name: 'Go to page', exact: true })).toHaveValue('7');
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('125');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page', exact: true }), '7');
+  await expectValue(page.getByRole('combobox', { name: 'Zoom', exact: true }), '125');
   await openReaderView(page);
-  await expect(page.getByRole('combobox', { name: 'Reading mode' })).toHaveValue('continuous');
+  await expectValue(page.getByRole('combobox', { name: 'Reading mode' }), 'continuous');
   await page.getByRole('button', { name: 'View options' }).click();
   await expect
     .poll(() =>
@@ -110,7 +111,7 @@ test('reader persists revision-scoped positions after reload and keyboard dialog
   await expect(dialog.getByRole('button', { name: 'Close shortcuts' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
-  await expect(help).toBeFocused();
+  await expect(page.getByRole('button', { name: 'View options', exact: true })).toBeFocused();
   await closeWorkspaceNavigation(page);
   await page.getByRole('tab', { name: 'Edit', exact: true }).focus();
   await page.keyboard.press('ArrowRight');
@@ -153,8 +154,8 @@ test('continuous reading covers the viewport for tiny pages with bounded raster 
   await openDocumentActions(page);
   await page.getByRole('button', { name: 'Full screen', exact: true }).click();
   await openReaderView(page);
-  await page.getByRole('combobox', { name: 'Reading mode' }).selectOption('continuous');
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('25');
+  await selectOption(page.getByRole('combobox', { name: 'Reading mode' }), 'continuous');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '25');
   await page.getByRole('spinbutton', { name: 'Go to page', exact: true }).fill('50');
   await page.getByRole('spinbutton', { name: 'Go to page', exact: true }).press('Enter');
   await expect
@@ -214,7 +215,7 @@ test('single-page navigation and zoom persist without scrolling or unmounting', 
   await page.locator('.doc-item').filter({ hasText: 'reader-no-scroll' }).click();
   const number = page.getByRole('spinbutton', { name: 'Go to page', exact: true });
   await expect(number).toBeEnabled();
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('125');
+  await selectOption(page.getByRole('combobox', { name: 'Zoom', exact: true }), '125');
   await number.fill('9');
   await number.press('Enter');
   await expect(page.locator('.pdf-page-surface[data-page="9"]')).toHaveAttribute(
@@ -222,7 +223,7 @@ test('single-page navigation and zoom persist without scrolling or unmounting', 
     'false',
   );
   await openReaderView(page);
-  await expect(page.getByRole('combobox', { name: 'Reading mode' })).toHaveValue('single');
+  await expectValue(page.getByRole('combobox', { name: 'Reading mode' }), 'single');
   await page.getByRole('button', { name: 'View options' }).click();
   expect(await page.locator('.canvas-scroll').evaluate((element) => element.scrollTop)).toBe(0);
   const key = `${document.id}:1`;
@@ -241,10 +242,10 @@ test('single-page navigation and zoom persist without scrolling or unmounting', 
   await enterLatestMatter(page);
   await openDocumentBrowser(page);
   await page.locator('.doc-item').filter({ hasText: 'reader-no-scroll' }).click();
-  await expect(number).toHaveValue('9');
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('125');
+  await expectValue(number, '9');
+  await expectValue(page.getByRole('combobox', { name: 'Zoom', exact: true }), '125');
   await openReaderView(page);
-  await expect(page.getByRole('combobox', { name: 'Reading mode' })).toHaveValue('single');
+  await expectValue(page.getByRole('combobox', { name: 'Reading mode' }), 'single');
   await page.getByRole('button', { name: 'View options' }).click();
   await expect(page.locator('.pdf-page-surface[data-page="9"]')).toHaveAttribute(
     'aria-busy',

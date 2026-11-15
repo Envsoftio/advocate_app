@@ -1,3 +1,4 @@
+import { expectValue, selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -51,18 +52,18 @@ test('PDF copy pastes into searches and editable text while app chrome cannot be
   const search = page.getByRole('searchbox', { name: 'Find text in this PDF' });
   await search.focus();
   await page.keyboard.press('ControlOrMeta+v');
-  await expect(search).toHaveValue('PETITION');
+  await expectValue(search, 'PETITION');
   await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.press('ControlOrMeta+x');
-  await expect(search).toHaveValue('');
+  await expectValue(search, '');
   await page.keyboard.press('ControlOrMeta+v');
-  await expect(search).toHaveValue('PETITION');
+  await expectValue(search, 'PETITION');
   await page.keyboard.press('Escape');
   await openDocumentBrowser(page);
   const documents = page.getByRole('textbox', { name: 'Search documents', exact: true });
   await documents.focus();
   await page.keyboard.press('ControlOrMeta+v');
-  await expect(documents).toHaveValue('PETITION');
+  await expectValue(documents, 'PETITION');
   await page.getByRole('button', { name: 'Close document browser', exact: true }).click();
   await page.getByRole('tab', { name: 'Edit', exact: true }).click();
   await page.getByRole('button', { name: 'Add text', exact: true }).click();
@@ -70,7 +71,7 @@ test('PDF copy pastes into searches and editable text while app chrome cannot be
   const text = page.getByRole('textbox', { name: /Add text on page/ });
   await text.focus();
   await page.keyboard.press('ControlOrMeta+v');
-  await expect(text).toHaveValue('PETITION');
+  await expectValue(text, 'PETITION');
   await text.fill('');
   await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: 'Read', exact: true }).click();
@@ -84,14 +85,15 @@ test('PDF copy pastes into searches and editable text while app chrome cannot be
     await locator.dblclick();
     expect(await page.evaluate(() => getSelection()?.toString())).toBe('');
   }
-  await page
-    .getByRole('combobox', { name: 'Document version', exact: true })
-    .selectOption('original');
+  await selectOption(
+    page.getByRole('combobox', { name: 'Document version', exact: true }),
+    'original',
+  );
   const review = page.getByRole('dialog', { name: /original/i });
   await copyPdfWord(page, review.locator('.pdf-text-layer'));
   await review.getByRole('button', { name: 'Search artifact', exact: true }).click();
   const artifactSearch = review.getByRole('searchbox');
   await artifactSearch.focus();
   await page.keyboard.press('ControlOrMeta+v');
-  await expect(artifactSearch).toHaveValue('PETITION');
+  await expectValue(artifactSearch, 'PETITION');
 });

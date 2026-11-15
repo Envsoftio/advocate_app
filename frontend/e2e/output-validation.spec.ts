@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect } from '@playwright/test';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -121,11 +122,11 @@ test('B01C new design, exact findings, persisted review, measured output and rel
   expect(Math.round(summary.x)).toBe(208);
   expect(Math.round(summary.width)).toBe(1208);
   await matrix(page, info, '14C-preflight');
-  await preflight.getByLabel('Show', { exact: true }).selectOption('warning');
+  await selectOption(preflight.getByLabel('Show', { exact: true }), 'warning');
   await preflight.getByRole('button', { name: 'Review source 2' }).click();
   const panel = page.getByRole('complementary', { name: 'Preflight finding' });
   await expect(panel).toContainText('Source 2 · Revision 1');
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue('2');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '2');
   await panel.getByLabel('Review note').fill('Synthetic intentional blank page');
   await matrix(page, info, 'ED34-finding');
   const savedReview = page.waitForResponse(
@@ -136,15 +137,15 @@ test('B01C new design, exact findings, persisted review, measured output and rel
   expect((await (await request.get(savedResponse.url(), { headers })).json()).review.note).toBe(
     'Synthetic intentional blank page',
   );
-  await expect(preflight.getByLabel('Show', { exact: true })).toHaveValue('warning');
+  await expectValue(preflight.getByLabel('Show', { exact: true }), 'warning');
   await expect(preflight.getByRole('button', { name: 'Review source 2' })).toBeFocused();
   await preflight.getByRole('button', { name: 'Review source 2' }).click();
-  await expect(panel.getByLabel('Review note')).toHaveValue(''); // Recheck creates a new run; the note remains on its historical finding.
+  await expectValue(panel.getByLabel('Review note'), ''); // Recheck creates a new run; the note remains on its historical finding.
   await page
     .locator('.application-status')
     .getByRole('button', { name: 'Return to Preflight', exact: true })
     .click();
-  await expect(preflight.getByLabel('Show', { exact: true })).toHaveValue('warning');
+  await expectValue(preflight.getByLabel('Show', { exact: true }), 'warning');
   await expect(preflight.getByRole('button', { name: 'Review source 2' })).toBeFocused();
   await page
     .locator('.matter-rail')
@@ -163,7 +164,7 @@ test('B01C new design, exact findings, persisted review, measured output and rel
   await expect(checks).toContainText('not run');
   await expect(checks).toContainText('not applicable');
   await matrix(page, info, 'BU07-output-checks');
-  await checks.getByLabel('Output file', { exact: true }).selectOption('index.csv');
+  await selectOption(checks.getByLabel('Output file', { exact: true }), 'index.csv');
   await checks.getByRole('button', { name: 'Run output checks' }).click();
   await expect(checks).toContainText('No PDFs selected');
   await checks
@@ -173,7 +174,7 @@ test('B01C new design, exact findings, persisted review, measured output and rel
   await page.keyboard.press('Escape');
   await expect(workspace.getByRole('button', { name: 'View output checks' })).toBeFocused();
   await workspace.getByRole('button', { name: 'View output checks' }).click();
-  await expect(checks.getByLabel('Output file', { exact: true })).toHaveValue('index.csv');
+  await expectValue(checks.getByLabel('Output file', { exact: true }), 'index.csv');
   await page.keyboard.press('Escape');
   for (const label of [
     'Index links and bookmarks',
@@ -193,7 +194,7 @@ test('B01C new design, exact findings, persisted review, measured output and rel
   await workspace.getByRole('button', { name: 'Export files', exact: true }).click();
   const exp = page.getByRole('dialog', { name: 'Export bundle files' });
   await exp.getByLabel('Release reviewed output').check();
-  await exp.getByLabel('File name').selectOption('combined.pdf');
+  await selectOption(exp.getByLabel('File name'), 'combined.pdf');
   const event = page.waitForEvent('download');
   await exp.getByRole('button', { name: 'Export files', exact: true }).click();
   const bytes = await readFile((await (await event).path())!);
@@ -281,14 +282,14 @@ test('B01C output history and late responses stay with the selected build', asyn
     };
   }, build.id);
   try {
-    await workspace.getByLabel('Saved build').selectOption(build.id);
+    await selectOption(workspace.getByLabel('Saved build'), build.id);
     await workspace.getByRole('button', { name: 'View output checks' }).click();
     await expect(page.getByRole('dialog', { name: /Output checks/ })).toContainText(
       'Checking saved file identities',
     );
     await expect.poll(() => page.evaluate(() => (window as any).heldValidation)).toBeGreaterThan(0);
     await page.keyboard.press('Escape');
-    await workspace.getByLabel('Saved build').selectOption(job.id);
+    await selectOption(workspace.getByLabel('Saved build'), job.id);
     await expect(workspace).toContainText(job.id);
     await page.evaluate(() => (window as any).releaseValidation());
     await expect
@@ -340,20 +341,21 @@ c['labels'][i]='UNEXPECTED';write_bytes(p,json.dumps(m).encode())`,
     .getByRole('button', { name: 'View output checks' })
     .click();
   const checks = page.getByRole('dialog', { name: /Output checks/ });
-  await checks.getByLabel('Output file', { exact: true }).selectOption('combined.pdf');
-  await checks.getByLabel('Validation history').selectOption(originalRun.id);
+  await selectOption(checks.getByLabel('Output file', { exact: true }), 'combined.pdf');
+  await selectOption(checks.getByLabel('Validation history'), originalRun.id);
   await checks
     .getByRole('button', { name: `Review source ${finding.page_index + 1}`, exact: true })
     .click();
   const panel = page.getByRole('complementary', { name: 'Preflight finding' });
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue(
+  await expectValue(
+    page.getByRole('spinbutton', { name: 'Go to page' }),
     String(finding.page_index + 1),
   );
   await panel.getByLabel('Review note').fill('Synthetic review does not repair the saved PDF');
   await panel.getByRole('button', { name: 'Keep page & return' }).click();
   await expect(checks).toBeVisible();
-  await expect(checks.getByLabel('Output file', { exact: true })).toHaveValue('combined.pdf');
-  await expect(checks.getByLabel('Validation history')).toHaveValue(originalRun.id);
+  await expectValue(checks.getByLabel('Output file', { exact: true }), 'combined.pdf');
+  await expectValue(checks.getByLabel('Validation history'), originalRun.id);
   await expect(
     checks.getByRole('button', { name: `Review source ${finding.page_index + 1}`, exact: true }),
   ).toBeFocused();

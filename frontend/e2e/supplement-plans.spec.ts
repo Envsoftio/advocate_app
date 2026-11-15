@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { test, expect, type Page } from '@playwright/test';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -69,8 +70,8 @@ async function enter(page: Page) {
 }
 async function appearance(page: Page, theme: string, scale: number) {
   await openWorkspaceNavigation(page);
-  await page.getByLabel('Theme', { exact: true }).selectOption(theme);
-  await page.getByLabel('Interface size', { exact: true }).selectOption(String(scale));
+  await selectOption(page.getByLabel('Theme', { exact: true }), theme);
+  await selectOption(page.getByLabel('Interface size', { exact: true }), String(scale));
   await closeWorkspaceNavigation(page);
 }
 async function seedPreservedInsert(request: any) {
@@ -395,9 +396,7 @@ test('B04A navigation Save Discard Keep editing uses the supplemental draft', as
     .locator('.matter-rail')
     .getByRole('button', { name: 'Build bundle', exact: true })
     .click();
-  await expect(w.getByLabel('Supplement title', { exact: true })).toHaveValue(
-    'Native-style saved plan',
-  );
+  await expectValue(w.getByLabel('Supplement title', { exact: true }), 'Native-style saved plan');
   await w.getByLabel('Supplement title', { exact: true }).fill('Discard this');
   await w.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.keyboard.press('Escape');

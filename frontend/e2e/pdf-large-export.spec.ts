@@ -1,3 +1,4 @@
+import { expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
@@ -190,22 +191,23 @@ test('generated PDFs above 25 MiB use bounded ranges, cancel cleanly, retry and 
   phase = 'keyboard navigation';
   await dialog.getByRole('button', { name: 'Close review', exact: true }).focus();
   await page.keyboard.press('Control+0');
-  await expect(dialog.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue(
-    'fit-width',
-  );
+  await expectValue(dialog.getByRole('combobox', { name: 'Zoom', exact: true }), 'fit-width');
   await page.keyboard.press('Control+=');
-  await expect(dialog.getByRole('combobox', { name: 'Zoom', exact: true })).not.toHaveValue(
+  await expectValue(
+    dialog.getByRole('combobox', { name: 'Zoom', exact: true }),
     'fit-width',
+    undefined,
+    true,
   );
   await page.keyboard.press('PageUp');
-  await expect(pageInput).toHaveValue('1');
+  await expectValue(pageInput, '1');
   await page.keyboard.press('PageDown');
-  await expect(pageInput).toHaveValue('2');
+  await expectValue(pageInput, '2');
   await page.keyboard.press('Control+f');
   const find = dialog.getByRole('searchbox', { name: 'Find text in generated PDF' });
   await expect(find).toBeFocused();
   await page.keyboard.press('Home');
-  await expect(pageInput).toHaveValue('2');
+  await expectValue(pageInput, '2');
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   const key = `export:${matterId}:${exportId}:combined.pdf`;
@@ -238,7 +240,7 @@ test('generated PDFs above 25 MiB use bounded ranges, cancel cleanly, retry and 
   await page.getByRole('button', { name: 'Build bundle', exact: true }).click();
   await page.getByRole('button', { name: 'Open earlier bundle', exact: true }).click();
   await expect(dialog).toContainText('Matter inputs changed since this export.');
-  await expect(pageInput).toHaveValue('2');
+  await expectValue(pageInput, '2');
   await expect(dialog.locator('.pdf-text-layer')).toContainText('Large synthetic document');
   await dialog.getByRole('button', { name: 'Close review', exact: true }).click();
   expect(errors).toEqual([]);

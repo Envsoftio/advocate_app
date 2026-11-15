@@ -1,3 +1,4 @@
+import { expectValue, selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import { openWorkspaceNavigation } from './navigation';
 import { test, expect } from '@playwright/test';
@@ -13,13 +14,13 @@ test('court rules identifies applied checks and keeps dark theme reference text 
     .getByRole('dialog', { name: 'Create matter' })
     .getByText('Preparation settings')
     .click();
-  await expect(page.getByRole('combobox', { name: 'Court profile' })).toHaveValue('general-demo');
+  await expectValue(page.getByRole('combobox', { name: 'Court profile' }), 'general-demo');
   await page
     .getByRole('dialog', { name: 'Create matter' })
     .getByRole('button', { name: 'Cancel' })
     .click();
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark');
+  await selectOption(page.getByRole('combobox', { name: 'Theme' }), 'dark');
   await page.locator('.workspace-drawer').getByRole('button', { name: 'Court rules' }).click();
   await expect(
     page.getByRole('heading', { name: 'Court rules & technical profiles' }),
@@ -66,7 +67,7 @@ test('court rules identifies applied checks and keeps dark theme reference text 
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
     .toBe(true);
   await openWorkspaceNavigation(page);
-  await page.getByRole('combobox', { name: 'Theme' }).selectOption('system');
+  await selectOption(page.getByRole('combobox', { name: 'Theme' }), 'system');
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('.template-row strong span').first()).toHaveCSS(
     'color',

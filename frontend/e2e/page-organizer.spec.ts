@@ -1,3 +1,4 @@
+import { expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { closeWorkspaceNavigation } from './navigation';
 import { expect, test } from '@playwright/test';
@@ -238,7 +239,7 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
   await organizer.getByRole('button', { name: 'Crop', exact: true }).click();
   const tools = page.getByRole('dialog', { name: 'Page tools' });
   await expect(tools).toBeVisible();
-  await expect(tools.getByLabel('Pages to crop')).toHaveValue('2');
+  await expectValue(tools.getByLabel('Pages to crop'), '2');
   await tools.getByRole('button', { name: 'Close page tools' }).click();
   await page.getByRole('button', { name: 'Organize pages', exact: true }).click();
   await organizer.getByRole('checkbox', { name: 'Select page 1', exact: true }).click();

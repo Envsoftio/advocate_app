@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useOutputValidation } from '../lib/outputValidation';
 import { computed } from 'vue';
@@ -92,10 +93,10 @@ onBeforeUnmount(() => {
       }}</div></label
     >
     <label
-      >File name<select v-model="selected" :disabled="pending"
+      >File name<AppSelect v-model="selected" :disabled="pending"
         ><option v-for="file in artifact.files" :value="file.name" :key="file.name"
           >{{ file.name }} · {{ bytesLabel(file.bytes) }}</option
-        ></select
+        ></AppSelect
       ></label
     >
     <p class="export-package-info">{{

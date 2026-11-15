@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
+import AppDateInput from './ui/AppDateInput.vue';
 import AppPopover from './ui/AppPopover.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import MetadataSuggestions from './MetadataSuggestions.vue';
@@ -231,7 +233,7 @@ function closeOverlays(event: PointerEvent) {
   if (
     advanced.value &&
     !advancedRef.value?.contains(target) &&
-    !target.closest('.app-popover,.batch-tools-menu')
+    !target.closest('.app-popover,.app-select-content,.batch-review-toolbar')
   )
     closeAdvanced();
 }
@@ -811,17 +813,17 @@ async function moveDocument(doc: MatterDocument) {
                 : 'Select document rows to enable batch changes.'
             "
             ><span class="sr-only">Set selected Part</span
-            ><select
+            ><AppSelect
               v-model="batch.part"
               aria-label="Set selected Part"
               :disabled="!selectedIds.length || busy || localBusy"
               ><option value="">Set selected Part…</option
               ><option v-for="part in parts" :value="part" :key="part"
                 >Part {{ part }}</option
-              ></select
+              ></AppSelect
             ></label
           >
-          <select
+          <AppSelect
             class="batch-kind-select"
             v-model="batch.kind"
             aria-label="Set selected document type"
@@ -832,7 +834,7 @@ async function moveDocument(doc: MatterDocument) {
             "
             :disabled="!selectedIds.length || busy || localBusy"
             ><option value="">Set selected type…</option
-            ><option v-for="kind in kinds" :value="kind" :key="kind">{{ kind }}</option></select
+            ><option v-for="kind in kinds" :value="kind" :key="kind">{{ kind }}</option></AppSelect
           >
           <div class="batch-toolbar-middle">
             <button
@@ -869,26 +871,26 @@ async function moveDocument(doc: MatterDocument) {
               >
               <strong>Filter documents</strong
               ><label
-                >Part<select v-model="filterPart" aria-label="Filter by Part"
+                >Part<AppSelect v-model="filterPart" aria-label="Filter by Part"
                   ><option value="">All Parts</option
                   ><option v-for="part in parts" :key="part" :value="String(part)"
                     >Part {{ part }}</option
-                  ></select
+                  ></AppSelect
                 ></label
               ><label
-                >Type<select v-model="filterKind" aria-label="Filter by type"
+                >Type<AppSelect v-model="filterKind" aria-label="Filter by type"
                   ><option value="">All types</option
                   ><option v-for="kind in kinds" :key="kind" :value="kind">{{
                     kind
-                  }}</option></select
+                  }}</option></AppSelect
                 ></label
               ><label
-                >Review status<select v-model="filterStatus" aria-label="Filter by status"
+                >Review status<AppSelect v-model="filterStatus" aria-label="Filter by status"
                   ><option value="">All statuses</option
                   ><option value="needs_review">Needs date review</option
                   ><option value="reviewed">Date reviewed</option
                   ><option value="needs_ocr">OCR needed</option
-                  ><option value="unsaved">Unsaved edits</option></select
+                  ><option value="unsaved">Unsaved edits</option></AppSelect
                 ></label
               ><button class="text-tool" :disabled="!activeFilterCount" @click="clearFilters"
                 >Clear filters</button
@@ -973,10 +975,10 @@ async function moveDocument(doc: MatterDocument) {
               ></div
             >
             <label
-              >Method<select v-model="labelOptions.mode"
+              >Method<AppSelect v-model="labelOptions.mode"
                 ><option value="sequential">Sequential</option
                 ><option value="grouped_suffix">Grouped suffix</option
-                ><option value="filename">Conservative filename scan</option></select
+                ><option value="filename">Conservative filename scan</option></AppSelect
               ></label
             >
             <label v-if="labelOptions.mode !== 'filename'"
@@ -986,20 +988,20 @@ async function moveDocument(doc: MatterDocument) {
               >Start<input v-model.number="labelOptions.start" type="number" min="1" max="9999"
             /></label>
             <label
-              >Existing labels<select v-model="labelOptions.existing_label_policy"
+              >Existing labels<AppSelect v-model="labelOptions.existing_label_policy"
                 ><option value="compact">Compact and renumber selection</option
-                ><option value="preserve">Preserve; fill new labels manually</option></select
+                ><option value="preserve">Preserve; fill new labels manually</option></AppSelect
               ></label
             >
             <template v-if="labelOptions.mode === 'grouped_suffix'">
               <label
-                >Suffix style<select v-model="labelOptions.group_suffix_style"
+                >Suffix style<AppSelect v-model="labelOptions.group_suffix_style"
                   ><option value="lower_alpha">a, b, c</option
                   ><option value="upper_alpha">A, B, C</option
                   ><option value="numeric">1, 2, 3</option
                   ><option value="lower_alpha_parenthesized">(a), (b), (c)</option
                   ><option value="upper_alpha_parenthesized">(A), (B), (C)</option
-                  ><option value="numeric_parenthesized">(1), (2), (3)</option></select
+                  ><option value="numeric_parenthesized">(1), (2), (3)</option></AppSelect
                 ></label
               >
               <label
@@ -1016,11 +1018,11 @@ async function moveDocument(doc: MatterDocument) {
               >
             </template>
             <label
-              >Citation reference<select v-model="labelOptions.reference_document_id"
+              >Citation reference<AppSelect v-model="labelOptions.reference_document_id"
                 ><option value="">Do not scan</option
                 ><option v-for="doc in documents" :key="doc.id" :value="doc.id">{{
                   doc.title
-                }}</option></select
+                }}</option></AppSelect
               ></label
             >
             <button
@@ -1149,11 +1151,11 @@ async function moveDocument(doc: MatterDocument) {
               ><strong>Preview order</strong
               ><small>Unknown dates go last; equal keys retain current manual order.</small></div
             >
-            <select v-model="sortMode" aria-label="Order method"
+            <AppSelect v-model="sortMode" aria-label="Order method"
               ><option value="manual">Current manual order</option
               ><option value="upload">Upload order</option
               ><option value="filename">Original filename</option
-              ><option value="document_date">Document date</option></select
+              ><option value="document_date">Document date</option></AppSelect
             >
             <button class="btn secondary small" :disabled="busy || localBusy" @click="previewSort"
               >Preview order</button
@@ -1292,9 +1294,9 @@ async function moveDocument(doc: MatterDocument) {
                     @click="moveDocument(doc)"
                     >Move</button
                   ><label
-                    >Hierarchy<select v-model="drafts[doc.id].group_role"
+                    >Hierarchy<AppSelect v-model="drafts[doc.id].group_role"
                       ><option value="member">Member</option
-                      ><option value="parent">Designated parent</option></select
+                      ><option value="parent">Designated parent</option></AppSelect
                     ></label
                   ></AppPopover
                 ></td
@@ -1308,25 +1310,26 @@ async function moveDocument(doc: MatterDocument) {
                 :title="doc.original_name + ' · ' + sourceTimestamp(doc)"
                 >{{ doc.original_name }}</td
               ><td
-                ><input
+                ><AppDateInput
                   v-model="drafts[doc.id].document_date"
                   :aria-label="'Date for ' + doc.original_name"
-                  type="date"
-                  @input="drafts[doc.id].date_confirmed = true"
+                  @input="drafts[doc.id].date_confirmed = !!drafts[doc.id].document_date"
                   :title="dateStatus(doc)" /></td
               ><td
-                ><select v-model="drafts[doc.id].kind" :aria-label="'Type for ' + doc.original_name"
+                ><AppSelect
+                  v-model="drafts[doc.id].kind"
+                  :aria-label="'Type for ' + doc.original_name"
                   ><option v-for="kind in kinds" :value="kind" :key="kind">{{
                     kind
-                  }}</option></select
+                  }}</option></AppSelect
                 ></td
               ><td
-                ><select
+                ><AppSelect
                   v-model.number="drafts[doc.id].part"
                   :aria-label="'Part for ' + doc.original_name"
                   ><option v-for="part in parts" :value="part" :key="part">{{
                     part
-                  }}</option></select
+                  }}</option></AppSelect
                 ></td
               ><td
                 ><input

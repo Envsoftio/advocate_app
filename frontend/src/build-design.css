@@ -333,7 +333,7 @@
 .generated-files h2 {
   margin: 0;
 }
-.generated-files select {
+.generated-files :is(select, :where(.app-select-trigger)) {
   max-width: 300px;
   min-width: 0;
   font: 12px Inter;
@@ -530,7 +530,7 @@
   margin: 20px 0 26px;
   font-weight: 600;
 }
-.bundle-export-dialog select,
+.bundle-export-dialog :is(select, :where(.app-select-trigger)),
 .export-destination {
   display: block;
   width: 100%;
@@ -953,7 +953,7 @@
   .generated-files > header {
     flex-wrap: wrap;
   }
-  .generated-files select {
+  .generated-files :is(select, :where(.app-select-trigger)) {
     width: 100%;
   }
   .stale-summary {

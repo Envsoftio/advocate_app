@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { openNamedMatter } from './navigation';
 import { enterLatestMatter } from './navigation';
 import {
@@ -87,31 +88,39 @@ test('02B original and generated artifacts are read only and retain independent 
   await expect(page.locator('.pdf-findbar')).toContainText('2 matches');
   const reader = await page.locator('.shared-reader-viewport').elementHandle();
   await page.getByRole('combobox', { name: 'Document version', exact: true }).focus();
-  await page
-    .getByRole('combobox', { name: 'Document version', exact: true })
-    .selectOption('original');
+  await selectOption(
+    page.getByRole('combobox', { name: 'Document version', exact: true }),
+    'original',
+  );
   const original = page.getByRole('dialog', { name: 'Review imported original' });
   await expect(original).toBeVisible();
   await expect(original).toContainText('3 original source pages');
+  await original.getByRole('tab', { name: 'Source pages', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(original.getByRole('tab', { name: 'Search source', exact: true })).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(original.getByRole('tab', { name: 'Source comments', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(original.getByRole('tab', { name: 'Source comments', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await original.getByRole('tab', { name: 'Source pages', exact: true }).click();
   await expect(original.getByRole('tab', { name: 'Edit', exact: true })).toHaveCount(0);
   await original.getByRole('spinbutton', { name: 'Original source page number' }).fill('3');
   await original.getByRole('spinbutton', { name: 'Original source page number' }).press('Enter');
   await expect(original.locator('.pdf-text-layer')).toContainText('Artifact evidence page 3');
   const generated = `export:${job.id}:combined.pdf`;
-  await original.getByRole('combobox', { name: 'Document version' }).selectOption(generated);
+  await selectOption(original.getByRole('combobox', { name: 'Document version' }), generated);
   const review = page.getByRole('dialog', { name: 'Review generated PDF' });
   await expect(review).toContainText('Matter inputs changed since this export');
   await expect(review.locator('canvas').first()).toBeVisible();
-  await review.getByRole('combobox', { name: 'Document version' }).selectOption('original');
-  await expect(
-    original.getByRole('spinbutton', { name: 'Original source page number' }),
-  ).toHaveValue('3');
-  await original.getByRole('combobox', { name: 'Document version' }).selectOption('working');
+  await selectOption(review.getByRole('combobox', { name: 'Document version' }), 'original');
+  await expectValue(original.getByRole('spinbutton', { name: 'Original source page number' }), '3');
+  await selectOption(original.getByRole('combobox', { name: 'Document version' }), 'working');
   await expect(original).toBeHidden();
   await expect(page.getByRole('combobox', { name: 'Document version', exact: true })).toBeFocused();
-  await expect(page.getByRole('searchbox', { name: 'Find text in this PDF' })).toHaveValue(
-    'evidence',
-  );
+  await expectValue(page.getByRole('searchbox', { name: 'Find text in this PDF' }), 'evidence');
   expect(await reader!.evaluate((el) => el.isConnected)).toBe(true);
 });
 
@@ -135,17 +144,17 @@ test('02B Save failure and Cancel retain drafts and origin; Save and Discard res
   await title.fill('Retained 02B title');
   const selector = page.getByRole('combobox', { name: 'Document version', exact: true });
   await selector.focus();
-  await selector.selectOption('original');
+  await selectOption(selector, 'original');
   const guard = page.getByRole('alertdialog', { name: /Unsaved work in this tab|Save changes to/ });
   await guard.getByRole('button', { name: /^Save(?: changes)?$/ }).click();
   await expect(guard).toContainText('Your work and pending destination are retained');
-  await expect(title).toHaveValue('Retained 02B title');
+  await expectValue(title, 'Retained 02B title');
   await expect(page.getByRole('dialog', { name: 'Review imported original' })).toHaveCount(0);
   await guard.getByRole('button', { name: /^(Keep editing|Cancel)$/ }).click();
   await expect(selector).toBeFocused();
-  await expect(title).toHaveValue('Retained 02B title');
+  await expectValue(title, 'Retained 02B title');
   await selector.focus();
-  await selector.selectOption('original');
+  await selectOption(selector, 'original');
   await page.unroute(`**/documents/${doc.id}`);
   await guard.getByRole('button', { name: /^Save(?: changes)?$/ }).click();
   await expect(page.getByRole('dialog', { name: 'Review imported original' })).toBeVisible();
@@ -172,7 +181,7 @@ test('02B Save failure and Cancel retain drafts and origin; Save and Discard res
   await page.locator('.doc-item').filter({ hasText: 'artifact-beta' }).click();
   await guard.getByRole('button', { name: /^Save(?: changes)?$/ }).click();
   await expect(guard).toContainText('PDF tool draft could not be saved');
-  await expect(draft).toHaveValue('Persisted from navigation');
+  await expectValue(draft, 'Persisted from navigation');
   await page.unroute(`**/documents/${doc.id}/annotations`);
   await guard.getByRole('button', { name: /^Save(?: changes)?$/ }).click();
   await expect(page.locator('.reader-document strong')).toHaveText('artifact-beta');
@@ -191,7 +200,7 @@ test('02B Save failure and Cancel retain drafts and origin; Save and Discard res
   await page.locator('.pdf-paper').click({ position: { x: 130, y: 200 } });
   await draft.fill('Discard only this draft');
   await selector.focus();
-  await selector.selectOption('original');
+  await selectOption(selector, 'original');
   await guard.getByRole('button', { name: /^Discard(?: changes)?$/ }).click();
   await expect(page.getByRole('dialog', { name: 'Review imported original' })).toContainText(
     'artifact-beta.pdf',
@@ -206,7 +215,7 @@ test('02B Preflight opens exact source and revision, returns to finding and refu
   await page.getByRole('button', { name: /Preflight checks/ }).click();
   const finding = page.locator('.preflight-finding').filter({ hasText: 'artifact-alpha, page 2' });
   await finding.getByRole('button', { name: 'Review source 2' }).click();
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue('2');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '2');
   await expect(page.locator('.finding-review-panel')).toContainText('Revision 1');
   await page
     .locator('.finding-review-panel')
@@ -227,7 +236,7 @@ test('02B Preflight opens exact source and revision, returns to finding and refu
   await page.getByRole('button', { name: 'Run checks', exact: true }).click();
   const current = page.locator('.preflight-finding').filter({ hasText: 'artifact-alpha, page 1' });
   await current.getByRole('button', { name: 'Review source 1' }).click();
-  await expect(page.getByRole('spinbutton', { name: 'Go to page' })).toHaveValue('1');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '1');
   await expect(page.locator('.finding-review-panel')).toContainText('Revision 2');
 });
 
@@ -324,7 +333,7 @@ test('02B closing a parent matter guards its active PDF draft and cancelling kee
   await expect(guard).toBeVisible();
   await guard.getByRole('button', { name: /^(Keep editing|Cancel)$/ }).click();
   await expect(close).toBeFocused();
-  await expect(draft).toHaveValue('Keep the active child tab draft');
+  await expectValue(draft, 'Keep the active child tab draft');
   await close.click();
   await guard.getByRole('button', { name: /^Discard(?: changes)?$/ }).click();
   await expect(close).toHaveCount(0);

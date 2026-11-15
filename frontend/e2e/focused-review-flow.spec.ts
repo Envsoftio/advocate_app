@@ -1,3 +1,4 @@
+import { expectValue, selectOption } from './select';
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -50,16 +51,16 @@ test('FLOW 06 preserves source, focus panels and frozen output through preparati
   const impact = page.getByRole('complementary', { name: 'Bundle impact' });
   await expect(impact).toContainText('Previous bundle · Stale');
   await page.getByRole('button', { name: 'Next page', exact: true }).click();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await page.screenshot({ path: info.outputPath('ED33-stale.png'), animations: 'disabled' });
   await page.getByRole('button', { name: 'Focused reading', exact: true }).click();
   await expect(impact).toBeHidden();
   await expect(page.locator('.focus-context')).toContainText('Escape restores your panels');
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await page.screenshot({ path: info.outputPath('ED24-focus.png'), animations: 'disabled' });
   await page.keyboard.press('Escape');
   await expect(impact).toBeVisible();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   await impact.getByRole('button', { name: 'View previous output' }).click();
   const artifact = page.getByRole('dialog', { name: 'Review generated PDF' });
   await expect(artifact.locator('.pdf-paper')).toBeVisible();
@@ -74,8 +75,8 @@ test('FLOW 06 preserves source, focus panels and frozen output through preparati
       for (const scale of [100, 125]) {
         await page.setViewportSize({ width, height: width === 1440 ? 900 : 768 });
         await openWorkspaceNavigation(page);
-        await page.getByRole('combobox', { name: 'Theme', exact: true }).selectOption(theme);
-        await page.getByRole('combobox', { name: 'Interface size' }).selectOption(String(scale));
+        await selectOption(page.getByRole('combobox', { name: 'Theme', exact: true }), theme);
+        await selectOption(page.getByRole('combobox', { name: 'Interface size' }), String(scale));
         await closeWorkspaceNavigation(page);
         await expect(impact.locator('.finding-recheck strong')).toHaveCSS(
           'color',
@@ -112,7 +113,7 @@ test('FLOW 06 preserves source, focus panels and frozen output through preparati
     .getByRole('button', { name: 'Back to preparation' })
     .click();
   await expect(page.getByRole('button', { name: 'Open editor', exact: true })).toBeVisible();
-  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  await expectValue(page.locator('.page-counter input'), '2');
   expect(
     (await (await request.get(`${base}/documents/${doc.id}/original`, { headers })).body()).equals(
       buffer,

@@ -94,7 +94,10 @@
   flex-wrap: nowrap;
   padding-right: 9px;
 }
-:root .design-shell[data-batch='true'] .batch-review-toolbar select,
+:root
+  .design-shell[data-batch='true']
+  .batch-review-toolbar
+  :is(select, :where(.app-select-trigger)),
 :root .design-shell[data-batch='true'] .batch-review-toolbar input[type='search'] {
   height: 34px !important;
 }
@@ -114,7 +117,7 @@
   flex: 0 0 98px;
 }
 .batch-review-toolbar .batch-part-select,
-.batch-review-toolbar .batch-part-select select {
+.batch-review-toolbar .batch-part-select :is(select, :where(.app-select-trigger)) {
   width: 220px;
 }
 .batch-review-toolbar .batch-kind-select {
@@ -195,7 +198,7 @@
   opacity: 0.5;
 }
 :root .design-shell .batch-review input:not([type='checkbox']),
-:root .design-shell .batch-review select,
+:root .design-shell .batch-review :is(select, :where(.app-select-trigger)),
 :root .design-shell .metadata-review input:not([type='checkbox']) {
   height: 36px;
   min-height: 0;
@@ -264,7 +267,7 @@
   box-shadow: inset 3px 0 var(--cb-focus);
 }
 :root .design-shell .batch-table input:not([type='checkbox']),
-:root .design-shell .batch-table select {
+:root .design-shell .batch-table :is(select, :where(.app-select-trigger)) {
   height: 30px;
   min-height: 0;
   width: 100%;
@@ -274,7 +277,7 @@
   padding: 0 2px;
 }
 .batch-table input:focus,
-.batch-table select:focus {
+.batch-table :is(select, :where(.app-select-trigger)):focus {
   outline: 2px solid var(--cb-focus);
   outline-offset: -2px;
   background: var(--cb-surface);
@@ -680,7 +683,7 @@
     flex-basis: 80px;
   }
   .batch-review-toolbar .batch-part-select,
-  .batch-review-toolbar .batch-part-select select {
+  .batch-review-toolbar .batch-part-select :is(select, :where(.app-select-trigger)) {
     width: 140px;
   }
   .batch-review-toolbar .batch-kind-select {
@@ -767,20 +770,20 @@
   overflow: hidden;
 }
 :root .design-shell[data-batch='true'] .batch-review input:not([type='checkbox']),
-:root .design-shell[data-batch='true'] .batch-review select,
+:root .design-shell[data-batch='true'] .batch-review :is(select, :where(.app-select-trigger)),
 :root .design-shell[data-batch='true'] .metadata-review input:not([type='checkbox']) {
   height: 36px !important;
   min-height: 0 !important;
 }
 :root .design-shell[data-batch='true'] .batch-table input:not([type='checkbox']),
-:root .design-shell[data-batch='true'] .batch-table select {
+:root .design-shell[data-batch='true'] .batch-table :is(select, :where(.app-select-trigger)) {
   height: 30px !important;
   min-height: 0 !important;
   border-color: transparent;
   background: transparent;
 }
 :root .design-shell[data-batch='true'] .batch-table input:focus,
-:root .design-shell[data-batch='true'] .batch-table select:focus {
+:root .design-shell[data-batch='true'] .batch-table :is(select, :where(.app-select-trigger)):focus {
   background: var(--cb-surface);
 }
 .batch-row-menu[open] > div {
@@ -805,11 +808,14 @@
   padding-left: 13px;
   padding-right: 9px;
 }
-:root .design-shell[data-batch='true'] .batch-review-toolbar select {
+:root
+  .design-shell[data-batch='true']
+  .batch-review-toolbar
+  :is(select, :where(.app-select-trigger)) {
   height: 34px !important;
 }
 .batch-review-toolbar .batch-part-select,
-.batch-review-toolbar .batch-part-select select {
+.batch-review-toolbar .batch-part-select :is(select, :where(.app-select-trigger)) {
   width: 220px;
 }
 .batch-review-toolbar .batch-part-select {
@@ -1018,7 +1024,7 @@
     order: 2;
   }
   .batch-review-toolbar .batch-part-select,
-  .batch-review-toolbar .batch-part-select select {
+  .batch-review-toolbar .batch-part-select :is(select, :where(.app-select-trigger)) {
     width: 170px;
   }
   .batch-review-toolbar .batch-kind-select {
@@ -1041,7 +1047,7 @@
     min-width: 120px;
   }
   .batch-review-toolbar .batch-part-select,
-  .batch-review-toolbar .batch-part-select select {
+  .batch-review-toolbar .batch-part-select :is(select, :where(.app-select-trigger)) {
     width: 150px;
   }
 }

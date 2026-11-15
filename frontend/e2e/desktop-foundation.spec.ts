@@ -1,3 +1,4 @@
+import { selectOption } from './select';
 import { enterLatestMatter } from './navigation';
 import { openBuildTool, submitBundleBuild, openOutputTools } from './navigation';
 import { openDocumentActions } from './navigation';
@@ -119,7 +120,7 @@ test('storage, idle autosave, Office downloads and print copy use one completed 
   }
   await page.getByRole('button', { name: 'Print combined.pdf' }).click();
   await page.getByRole('textbox', { name: 'Print pages' }).fill('1');
-  await page.getByRole('combobox', { name: 'Print paper orientation' }).selectOption('landscape');
+  await selectOption(page.getByRole('combobox', { name: 'Print paper orientation' }), 'landscape');
   await page.getByRole('button', { name: 'Prepare print copy' }).click();
   await expect(page.getByTitle('Print copy preview')).toBeVisible();
   await page.getByRole('button', { name: 'Close', exact: true }).click();

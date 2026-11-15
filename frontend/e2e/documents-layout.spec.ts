@@ -1,3 +1,4 @@
+import { selectOption, expectValue } from './select';
 import { enterLatestMatter } from './navigation';
 import { closeDocumentActions, closeDocumentBrowser, openDocumentActions } from './navigation';
 import { expect, test } from '@playwright/test';
@@ -87,7 +88,10 @@ for (const viewport of [
           await enterLatestMatter(page);
           await closeDocumentBrowser(page);
           await expect(page.locator('.pdf-paper')).toBeVisible();
-          await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('fit-width');
+          await selectOption(
+            page.getByRole('combobox', { name: 'Zoom', exact: true }),
+            'fit-width',
+          );
           const viewer = await page.locator('.viewer-root').elementHandle();
           const assertPaper = async () => {
             await expect.poll(async () => (await visiblePaper(page)).width).toBeGreaterThan(200);
@@ -137,9 +141,9 @@ for (const viewport of [
           ).toBeFocused();
           await closeDocumentBrowser(page);
           await page.getByRole('button', { name: 'Next page', exact: true }).click();
-          await expect(page.locator('.page-counter input')).toHaveValue('2');
+          await expectValue(page.locator('.page-counter input'), '2');
           await page.getByRole('button', { name: 'Previous page', exact: true }).click();
-          await expect(page.locator('.page-counter input')).toHaveValue('1');
+          await expectValue(page.locator('.page-counter input'), '1');
           const information = page.getByRole('button', {
             name: 'Document information',
             exact: true,

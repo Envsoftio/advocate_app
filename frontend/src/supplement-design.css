@@ -113,7 +113,7 @@
 .supplement-title input,
 .supplement-field,
 .supplement-numbering-grid input:not([type='checkbox']),
-.supplement-numbering-grid select {
+.supplement-numbering-grid :is(select, :where(.app-select-trigger)) {
   display: flex;
   align-items: center;
   justify-content: space-between;

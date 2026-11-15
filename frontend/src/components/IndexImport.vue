@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppSelect from './ui/AppSelect.vue';
 import { computed, ref, watch } from 'vue';
 import { api } from '../lib/api';
 import { friendlyError } from '../lib/format';
@@ -175,11 +176,11 @@ async function importRows() {
           <label class="field"
             >Source document
             <small v-if="!row.documentId">CSV: {{ row.sourceName || 'blank' }}</small
-            ><select v-model="row.documentId"
+            ><AppSelect v-model="row.documentId"
               ><option value="">Choose document</option
               ><option v-for="doc in documents" :key="doc.id" :value="doc.id"
                 >{{ doc.title }} · {{ doc.page_count }} pages</option
-              ></select
+              ></AppSelect
             ></label
           >
           <label class="field"
