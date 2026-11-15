@@ -1,18 +1,30 @@
-import { enterLatestMatter } from './navigation'
-import { closeWorkspaceNavigation, openDocumentBrowser } from './navigation'
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { randomUUID } from 'node:crypto'
-const base = 'http://127.0.0.1:8768'
-const headers = { Authorization: 'Bearer e2e-isolated-token' }
-const backend = resolve(import.meta.dirname, '../../backend')
-const python = process.env.MATTERDRAFT_TEST_PYTHON || [resolve(backend, '.venv312/bin/python'), resolve(backend, '.venv/bin/python')].find(existsSync) || 'python3'
+import { enterLatestMatter } from './navigation';
+import { closeWorkspaceNavigation, openDocumentBrowser } from './navigation';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+const base = 'http://127.0.0.1:8768';
+const headers = { Authorization: 'Bearer e2e-isolated-token' };
+const backend = resolve(import.meta.dirname, '../../backend');
+const python =
+  process.env.MATTERDRAFT_TEST_PYTHON ||
+  [resolve(backend, '.venv312/bin/python'), resolve(backend, '.venv/bin/python')].find(
+    existsSync,
+  ) ||
+  'python3';
 async function openFixture(page: Page, request: APIRequestContext, blankSecondPage = false) {
-  page.setDefaultTimeout(15_000)
-  const matter = await (await request.post(`${base}/matters`, { headers, data: { name: '02A Synthetic Reader', court_profile: 'general-demo' } })).json()
-  const pdf = execFileSync(python, ['-c', `import pymupdf,sys
+  page.setDefaultTimeout(15_000);
+  const matter = await (
+    await request.post(`${base}/matters`, {
+      headers,
+      data: { name: '02A Synthetic Reader', court_profile: 'general-demo' },
+    })
+  ).json();
+  const pdf = execFileSync(python, [
+    '-c',
+    `import pymupdf,sys
 pdf=pymupdf.open()
 image_path=${JSON.stringify(resolve(import.meta.dirname, '../../samples/04_scanned_annexure.jpg'))}
 for i in range(4):
@@ -24,290 +36,442 @@ for i in range(4):
   p.insert_text((36,200),'Orchid Orchid' if i==2 else 'Plain page')
   p.insert_text((36,400),'End of synthetic evidence')
 pdf.set_toc([[1,'Opening',1],[1,'Evidence',3],[2,'Final leaf',4]])
-sys.stdout.buffer.write(pdf.tobytes())`])
-  const upload = await request.post(`${base}/matters/${matter.id}/documents?included=true`, { headers, multipart: { files: { name: 'reader-02a.pdf', mimeType: 'application/pdf', buffer: pdf } } })
-  expect(upload.ok()).toBeTruthy()
-  const [document] = await upload.json()
-  expect((await request.put(`${base}/matters/${matter.id}/bookmarks`, { headers, data: { entries: [{ id: randomUUID().replaceAll('-', ''), title: 'Manual leaf four', document_id: document.id, page_index: 3, target_revision: document.revision, parent_id: null }] } })).ok()).toBeTruthy()
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto('/');await enterLatestMatter(page)
-  await openDocumentBrowser(page)
-  await page.locator('.doc-item').filter({ hasText: 'reader-02a' }).click()
-  await expect(page.locator('.pdf-text-layer')).toContainText('Synthetic reading page 1')
-  return { matter, document }
+sys.stdout.buffer.write(pdf.tobytes())`,
+  ]);
+  const upload = await request.post(`${base}/matters/${matter.id}/documents?included=true`, {
+    headers,
+    multipart: { files: { name: 'reader-02a.pdf', mimeType: 'application/pdf', buffer: pdf } },
+  });
+  expect(upload.ok()).toBeTruthy();
+  const [document] = await upload.json();
+  expect(
+    (
+      await request.put(`${base}/matters/${matter.id}/bookmarks`, {
+        headers,
+        data: {
+          entries: [
+            {
+              id: randomUUID().replaceAll('-', ''),
+              title: 'Manual leaf four',
+              document_id: document.id,
+              page_index: 3,
+              target_revision: document.revision,
+              parent_id: null,
+            },
+          ],
+        },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await enterLatestMatter(page);
+  await openDocumentBrowser(page);
+  await page.locator('.doc-item').filter({ hasText: 'reader-02a' }).click();
+  await expect(page.locator('.pdf-text-layer')).toContainText('Synthetic reading page 1');
+  return { matter, document };
 }
 
-test('FLOW / 03 read-only source, history and unsaved navigation use the scoped states', async ({page,request}) => {
-  await openFixture(page,request)
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('combobox',{name:'Document version'}).selectOption('original')
-  const original=page.getByRole('dialog',{name:'Review imported original'})
-  await original.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('100')
-  await expect(original.getByRole('complementary',{name:'Artifact information'})).toContainText('Source file unchanged')
-  await expect(original.locator('.thumbnail-button canvas.is-rendered')).toHaveCount(4)
-  await page.screenshot({path:'../docs/ui-evidence/flow03/ED31-original-1440.png'})
-  await original.getByRole('tab',{name:'Source bookmarks'}).click()
-  await expect(original.getByRole('complementary',{name:'Source bookmarks'})).toContainText('Opening')
-  await original.getByRole('tab',{name:'Source comments'}).click()
-  await expect(original.getByRole('complementary',{name:'Source comments'})).toContainText('No comments')
-  await original.getByRole('tab',{name:'Source pages'}).click()
-  await original.getByRole('button',{name:'Open Working Copy',exact:true}).click()
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('100')
-  await page.getByRole('tab',{name:'Edit',exact:true}).click()
-  await page.getByRole('button',{name:'History',exact:true}).click()
-  const actions=page.getByRole('region',{name:'Working history'})
-  await expect(actions).toContainText('Most recent action first')
-  await expect(actions).toContainText('Add or restore document')
-  await page.screenshot({path:'../docs/ui-evidence/flow03/ED27-history-1440.png'})
-  await page.getByRole('group',{name:'PDF history tools'}).getByRole('button',{name:'History'}).click()
-  await page.getByRole('button',{name:'Add text',exact:true}).click()
-  await page.locator('.pdf-paper').click({position:{x:130,y:260}})
-  await page.getByRole('textbox',{name:/Add text on page/}).fill('Pending synthetic note')
-  await page.getByRole('button',{name:'Browse documents'}).click()
-  const guard=page.getByRole('alertdialog',{name:/Save changes to/})
-  await expect(guard).toContainText('imported original stays preserved')
-  await expect(guard.getByRole('button',{name:'Save',exact:true})).toBeFocused()
-  await page.screenshot({path:'../docs/ui-evidence/flow03/ED26-unsaved-1440.png'})
-  await guard.getByRole('button',{name:'Cancel'}).click()
-  await expect(page.getByRole('textbox',{name:/Add text on page/})).toHaveValue('Pending synthetic note')
-})
+test('FLOW / 03 read-only source, history and unsaved navigation use the scoped states', async ({
+  page,
+  request,
+}) => {
+  await openFixture(page, request);
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('combobox', { name: 'Document version' }).selectOption('original');
+  const original = page.getByRole('dialog', { name: 'Review imported original' });
+  await original.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await expect(original.getByRole('complementary', { name: 'Artifact information' })).toContainText(
+    'Source file unchanged',
+  );
+  await expect(original.locator('.thumbnail-button canvas.is-rendered')).toHaveCount(4);
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED31-original-1440.png' });
+  await original.getByRole('tab', { name: 'Source bookmarks' }).click();
+  await expect(original.getByRole('complementary', { name: 'Source bookmarks' })).toContainText(
+    'Opening',
+  );
+  await original.getByRole('tab', { name: 'Source comments' }).click();
+  await expect(original.getByRole('complementary', { name: 'Source comments' })).toContainText(
+    'No comments',
+  );
+  await original.getByRole('tab', { name: 'Source pages' }).click();
+  await original.getByRole('button', { name: 'Open Working Copy', exact: true }).click();
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await page.getByRole('tab', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'History', exact: true }).click();
+  const actions = page.getByRole('region', { name: 'Working history' });
+  await expect(actions).toContainText('Most recent action first');
+  await expect(actions).toContainText('Add or restore document');
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED27-history-1440.png' });
+  await page
+    .getByRole('group', { name: 'PDF history tools' })
+    .getByRole('button', { name: 'History' })
+    .click();
+  await page.getByRole('button', { name: 'Add text', exact: true }).click();
+  await page.locator('.pdf-paper').click({ position: { x: 130, y: 260 } });
+  await page.getByRole('textbox', { name: /Add text on page/ }).fill('Pending synthetic note');
+  await page.getByRole('button', { name: 'Browse documents' }).click();
+  const guard = page.getByRole('alertdialog', { name: /Save changes to/ });
+  await expect(guard).toContainText('imported original stays preserved');
+  await expect(guard.getByRole('button', { name: 'Save', exact: true })).toBeFocused();
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED26-unsaved-1440.png' });
+  await guard.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('textbox', { name: /Add text on page/ })).toHaveValue(
+    'Pending synthetic note',
+  );
+});
 
-test('FLOW / 03 empty image page offers OCR and replacement text without claiming an edit',async({page,request})=>{
-  await openFixture(page,request,true)
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('spinbutton',{name:'Go to page'}).fill('2')
-  await page.getByRole('spinbutton',{name:'Go to page'}).press('Enter')
-  await page.getByRole('tab',{name:'Edit',exact:true}).click()
-  await page.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('100')
-  await page.getByRole('button',{name:'Edit text'}).click()
-  const unavailable=page.getByRole('region',{name:'Text editing unavailable'})
-  await expect(unavailable).toContainText('No change was made')
-  await expect(unavailable.getByRole('button',{name:'Run OCR'})).toBeEnabled()
-  await page.screenshot({path:'../docs/ui-evidence/flow03/ED29-unavailable-1440.png'})
-})
+test('FLOW / 03 empty image page offers OCR and replacement text without claiming an edit', async ({
+  page,
+  request,
+}) => {
+  await openFixture(page, request, true);
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('spinbutton', { name: 'Go to page' }).fill('2');
+  await page.getByRole('spinbutton', { name: 'Go to page' }).press('Enter');
+  await page.getByRole('tab', { name: 'Edit', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  await page.getByRole('button', { name: 'Edit text' }).click();
+  const unavailable = page.getByRole('region', { name: 'Text editing unavailable' });
+  await expect(unavailable).toContainText('No change was made');
+  await expect(unavailable.getByRole('button', { name: 'Run OCR' })).toBeEnabled();
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED29-unavailable-1440.png' });
+});
 
-test('Edit toolbar follows the supplied content tools and keeps add-text controls usable', async ({ page, request }) => {
-  const {document}=await openFixture(page, request)
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('tab', { name: 'Edit', exact: true }).click()
-  await page.getByRole('combobox',{name:'Zoom',exact:true}).selectOption('100')
-  const tools = page.getByRole('group', { name: 'Edit PDF' })
-  await expect(page.getByRole('region',{name:'Select a PDF object'})).toBeVisible()
-  await page.screenshot({path:'../docs/ui-evidence/flow03/ED02-object-selection-1440.png'})
-  await expect(tools.getByRole('button', { name: 'Edit text' })).toBeVisible()
-  await expect(tools.getByRole('button', { name: 'Image' })).toBeVisible()
-  await expect(tools.getByRole('button', { name: 'Link' })).toBeVisible()
-  await tools.getByRole('button', { name: 'Add text' }).click()
-  await expect(tools.getByRole('button', { name: 'Select object' })).toHaveAttribute('aria-pressed', 'false')
-  await expect(page.getByRole('button', { name: 'Go to page 1', exact: true })).toBeVisible()
-  const panel = page.getByRole('region', { name: 'New text properties' })
-  await expect(panel).toContainText('Ready to place')
-  await expect(panel.getByRole('combobox', { name: 'Font family' })).toHaveValue('helv')
-  const canvas = await page.locator('.viewer-page-column').boundingBox()
-  const inspector = await page.locator('.edit-mode-inspector').boundingBox()
-  expect(canvas && inspector && inspector.x >= canvas.x + canvas.width - 1).toBeTruthy()
-  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED04-add-text-1440.png' })
-  await page.setViewportSize({ width: 1024, height: 768 })
-  await expect(panel.getByRole('spinbutton', { name: 'Text size in points' })).toBeVisible()
-  await page.waitForTimeout(500)
-  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED04-add-text-1024.png' })
-  await page.setViewportSize({ width: 1440, height: 900 })
-  const paper = page.locator('.pdf-paper')
+test('Edit toolbar follows the supplied content tools and keeps add-text controls usable', async ({
+  page,
+  request,
+}) => {
+  const { document } = await openFixture(page, request);
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('tab', { name: 'Edit', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  const tools = page.getByRole('group', { name: 'Edit PDF' });
+  await expect(page.getByRole('region', { name: 'Select a PDF object' })).toBeVisible();
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED02-object-selection-1440.png' });
+  await expect(tools.getByRole('button', { name: 'Edit text' })).toBeVisible();
+  await expect(tools.getByRole('button', { name: 'Image' })).toBeVisible();
+  await expect(tools.getByRole('button', { name: 'Link' })).toBeVisible();
+  await tools.getByRole('button', { name: 'Add text' }).click();
+  await expect(tools.getByRole('button', { name: 'Select object' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await expect(page.getByRole('button', { name: 'Go to page 1', exact: true })).toBeVisible();
+  const panel = page.getByRole('region', { name: 'New text properties' });
+  await expect(panel).toContainText('Ready to place');
+  await expect(panel.getByRole('combobox', { name: 'Font family' })).toHaveValue('helv');
+  const canvas = await page.locator('.viewer-page-column').boundingBox();
+  const inspector = await page.locator('.edit-mode-inspector').boundingBox();
+  expect(canvas && inspector && inspector.x >= canvas.x + canvas.width - 1).toBeTruthy();
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED04-add-text-1440.png' });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect(panel.getByRole('spinbutton', { name: 'Text size in points' })).toBeVisible();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED04-add-text-1024.png' });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const paper = page.locator('.pdf-paper');
   const draw = async (x: number, y: number, width: number, height: number) => {
-    const box = await paper.boundingBox()
-    expect(box).toBeTruthy()
-    await page.mouse.move(box!.x + x, box!.y + y)
-    await page.mouse.down()
-    await page.mouse.move(box!.x + x + width, box!.y + y + height, { steps: 5 })
-    await page.mouse.up()
-  }
-  await paper.click({ position: { x: 130, y: 260 } })
-  await page.getByRole('textbox', { name: 'Add text on page 1' }).fill('Synthetic placed object')
-  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED04B-placed-text-1440.png' })
-  await page.getByRole('button', { name: 'Apply text' }).click()
-  await expect(page.locator('.pdf-review-shape.text')).toContainText('Synthetic placed object')
-  const placed=page.getByRole('region',{name:'Placed text properties'})
-  await expect(placed.getByRole('combobox',{name:'Font family'})).toHaveValue('helv')
-  await expect(placed.getByRole('spinbutton',{name:'Width in points'})).toBeVisible()
-  await placed.getByRole('combobox',{name:'Font family'}).selectOption('tiro')
-  await placed.getByRole('combobox',{name:'Weight'}).selectOption('true')
-  await placed.getByRole('button',{name:'Align center'}).click()
-  await placed.getByRole('button',{name:'Save text properties'}).click()
-  await expect(placed.getByRole('button',{name:'Save text properties'})).toBeEnabled()
-  await expect(placed.getByRole('button',{name:'Align center'})).toHaveAttribute('aria-pressed','true')
-  await expect.poll(async()=>{
-    const marks=await (await request.get(`${base}/matters/${document.matter_id}/annotations`,{headers})).json()
-    return marks.find((item:{kind:string,body:string})=>item.kind==='text' && item.body==='Synthetic placed object')?.text_style
-  }).toMatchObject({font_family:'tiro',bold:true,alignment:'center'})
-  expect((await request.get(`${base}/documents/${document.id}/pdf?revision=${document.revision}&editable=true`,{headers})).ok()).toBeTruthy()
-  await page.locator('.viewer-tool-inspector').evaluate(element => { element.scrollTop=0 })
-  await page.screenshot({path:'../docs/ui-evidence/flow03/ED04B-object-properties-1440.png'})
-  await tools.getByRole('button', { name: 'Image' }).click()
-  await expect(page.getByText('Choose a PNG or JPEG, then drag its size and position on the page.')).toBeVisible()
-  await page.getByLabel('PNG or JPEG').setInputFiles(resolve(import.meta.dirname, '../../samples/04_scanned_annexure.jpg'))
-  await draw(250, 240, 130, 80)
-  await page.getByRole('button', { name: 'Add mark' }).click()
-  await expect(page.locator('.pdf-image-overlay')).toHaveCount(1)
-  await page.locator('.pdf-image-overlay').click()
-  await expect(page.getByRole('tab',{name:'Edit',exact:true})).toHaveAttribute('aria-selected','true')
-  const imageProperties=page.getByRole('region',{name:'Image properties'})
-  await imageProperties.getByRole('spinbutton',{name:'Image width in points'}).fill('120')
-  await imageProperties.getByRole('spinbutton',{name:'Image width in points'}).press('Tab')
-  await page.getByRole('button',{name:'Update mark',exact:true}).click()
-  await expect.poll(async()=>{
-    const marks=await (await request.get(`${base}/matters/${document.matter_id}/annotations`,{headers})).json()
-    return Math.round(marks.find((item:{kind:string})=>item.kind==='image').rect_width*525)
-  }).toBe(120)
-  await page.locator('.pdf-image-overlay').click()
-  await expect(imageProperties.getByRole('spinbutton',{name:'Image width in points'})).toHaveValue('120')
-  const imageInspector=await page.locator('.edit-mode-inspector').boundingBox()
-  expect(imageInspector!.x).toBeCloseTo(1148,0)
-  expect(imageInspector!.y).toBeCloseTo(192,0)
-  expect(imageInspector!.width).toBeCloseTo(292,0)
-  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED05-image-1440.png' })
-  await page.setViewportSize({width:1024,height:768})
-  await page.getByRole('button',{name:'Update mark',exact:true}).scrollIntoViewIfNeeded()
-  await expect(page.getByRole('button',{name:'Update mark',exact:true})).toBeInViewport()
-  expect(await page.locator('.viewer-tool-inspector').evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true)
-  await page.screenshot({path:'../docs/ui-evidence/flow03/ED05-image-1024.png'})
-  await page.setViewportSize({width:1440,height:900})
-  await tools.getByRole('button', { name: 'Link' }).click()
-  await expect(page.getByRole('region', { name: 'Reviewed PDF links' })).toBeVisible()
-  await page.getByRole('textbox', { name: 'Readable label' }).fill('Supporting source page')
-  await draw(80, 90, 140, 40)
-  await expect(page.getByRole('button', { name: 'Save reviewed link' })).toBeEnabled()
-  await page.waitForTimeout(300)
-  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED06-link-1440.png' })
-  await tools.getByRole('button', { name: 'Edit text' }).click()
-  await expect(page.getByLabel('Edit existing text')).toBeVisible()
-  await page.locator('.pdf-text-run').first().click()
-  await expect(page.getByLabel('Edit existing text')).toContainText('Selected text')
-  await page.waitForTimeout(300)
-  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED03-edit-text-1440.png' })
-})
+    const box = await paper.boundingBox();
+    expect(box).toBeTruthy();
+    await page.mouse.move(box!.x + x, box!.y + y);
+    await page.mouse.down();
+    await page.mouse.move(box!.x + x + width, box!.y + y + height, { steps: 5 });
+    await page.mouse.up();
+  };
+  await paper.click({ position: { x: 130, y: 260 } });
+  await page.getByRole('textbox', { name: 'Add text on page 1' }).fill('Synthetic placed object');
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED04B-placed-text-1440.png' });
+  await page.getByRole('button', { name: 'Apply text' }).click();
+  await expect(page.locator('.pdf-review-shape.text')).toContainText('Synthetic placed object');
+  const placed = page.getByRole('region', { name: 'Placed text properties' });
+  await expect(placed.getByRole('combobox', { name: 'Font family' })).toHaveValue('helv');
+  await expect(placed.getByRole('spinbutton', { name: 'Width in points' })).toBeVisible();
+  await placed.getByRole('combobox', { name: 'Font family' }).selectOption('tiro');
+  await placed.getByRole('combobox', { name: 'Weight' }).selectOption('true');
+  await placed.getByRole('button', { name: 'Align center' }).click();
+  await placed.getByRole('button', { name: 'Save text properties' }).click();
+  await expect(placed.getByRole('button', { name: 'Save text properties' })).toBeEnabled();
+  await expect(placed.getByRole('button', { name: 'Align center' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect
+    .poll(async () => {
+      const marks = await (
+        await request.get(`${base}/matters/${document.matter_id}/annotations`, { headers })
+      ).json();
+      return marks.find(
+        (item: { kind: string; body: string }) =>
+          item.kind === 'text' && item.body === 'Synthetic placed object',
+      )?.text_style;
+    })
+    .toMatchObject({ font_family: 'tiro', bold: true, alignment: 'center' });
+  expect(
+    (
+      await request.get(
+        `${base}/documents/${document.id}/pdf?revision=${document.revision}&editable=true`,
+        { headers },
+      )
+    ).ok(),
+  ).toBeTruthy();
+  await page.locator('.viewer-tool-inspector').evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED04B-object-properties-1440.png' });
+  await tools.getByRole('button', { name: 'Image' }).click();
+  await expect(
+    page.getByText('Choose a PNG or JPEG, then drag its size and position on the page.'),
+  ).toBeVisible();
+  await page
+    .getByLabel('PNG or JPEG')
+    .setInputFiles(resolve(import.meta.dirname, '../../samples/04_scanned_annexure.jpg'));
+  await draw(250, 240, 130, 80);
+  await page.getByRole('button', { name: 'Add mark' }).click();
+  await expect(page.locator('.pdf-image-overlay')).toHaveCount(1);
+  await page.locator('.pdf-image-overlay').click();
+  await expect(page.getByRole('tab', { name: 'Edit', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  const imageProperties = page.getByRole('region', { name: 'Image properties' });
+  await imageProperties.getByRole('spinbutton', { name: 'Image width in points' }).fill('120');
+  await imageProperties.getByRole('spinbutton', { name: 'Image width in points' }).press('Tab');
+  await page.getByRole('button', { name: 'Update mark', exact: true }).click();
+  await expect
+    .poll(async () => {
+      const marks = await (
+        await request.get(`${base}/matters/${document.matter_id}/annotations`, { headers })
+      ).json();
+      return Math.round(
+        marks.find((item: { kind: string }) => item.kind === 'image').rect_width * 525,
+      );
+    })
+    .toBe(120);
+  await page.locator('.pdf-image-overlay').click();
+  await expect(
+    imageProperties.getByRole('spinbutton', { name: 'Image width in points' }),
+  ).toHaveValue('120');
+  const imageInspector = await page.locator('.edit-mode-inspector').boundingBox();
+  expect(imageInspector!.x).toBeCloseTo(1148, 0);
+  expect(imageInspector!.y).toBeCloseTo(192, 0);
+  expect(imageInspector!.width).toBeCloseTo(292, 0);
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED05-image-1440.png' });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.getByRole('button', { name: 'Update mark', exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole('button', { name: 'Update mark', exact: true })).toBeInViewport();
+  expect(
+    await page
+      .locator('.viewer-tool-inspector')
+      .evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+  ).toBe(true);
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED05-image-1024.png' });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await tools.getByRole('button', { name: 'Link' }).click();
+  await expect(page.getByRole('region', { name: 'Reviewed PDF links' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Readable label' }).fill('Supporting source page');
+  await draw(80, 90, 140, 40);
+  await expect(page.getByRole('button', { name: 'Save reviewed link' })).toBeEnabled();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED06-link-1440.png' });
+  await tools.getByRole('button', { name: 'Edit text' }).click();
+  await expect(page.getByLabel('Edit existing text')).toBeVisible();
+  await page.locator('.pdf-text-run').first().click();
+  await expect(page.getByLabel('Edit existing text')).toContainText('Selected text');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED03-edit-text-1440.png' });
+});
 
-test('Read workspace navigates real occurrences and bookmarks and restores panels, position and focus', async ({ page, request }) => {
-  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
-  const { document } = await openFixture(page, request)
-  const reader = await page.locator('.shared-reader-viewport').elementHandle()
-  await expect(page.getByRole('tab', { name: 'Read', exact: true })).toHaveAttribute('aria-selected', 'true')
-  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100')
-  const thumb = page.getByRole('button', { name: 'Go to page 1', exact: true })
-  await thumb.focus(); await thumb.press('ArrowDown')
-  await expect(page.getByRole('button', { name: 'Go to page 2', exact: true })).toBeFocused()
-  await expect(page.locator('.page-counter input')).toHaveValue('2')
-  const search = page.getByRole('button', { name: 'Search', exact: true })
-  await search.click()
-  const input = page.getByRole('searchbox', { name: 'Find text in this PDF' })
-  await expect(input).toBeFocused(); await input.fill('Orchid')
-  await expect(page.locator('.pdf-findbar')).toContainText('2 matches')
-  await page.getByLabel('PDF search occurrences').getByRole('button').first().click()
-  await expect(page.locator('.page-counter input')).toHaveValue('3')
-  await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute('data-pdf-match', '0')
-  await page.getByLabel('PDF search occurrences').getByRole('button').first().press('ArrowDown')
-  await expect(page.getByLabel('PDF search occurrences').getByRole('button').nth(1)).toBeFocused()
-  await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute('data-pdf-match', '1')
-  const info = page.getByRole('button', { name: 'Document information', exact: true })
-  await info.click()
-  await expect(input).toBeHidden()
-  await expect(page.getByRole('region', { name: 'Document information' })).toContainText(document.source_sha256)
-  await page.keyboard.press('Escape'); await expect(info).toBeFocused()
-  await search.click(); await expect(input).toHaveValue('Orchid')
-  await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute('data-pdf-match', '1')
-  await page.getByRole('button', { name: 'Close PDF search' }).click(); await expect(search).toBeFocused()
-  const bookmarks = page.getByRole('button', { name: 'Document bookmarks', exact: true })
-  await bookmarks.click(); await page.getByRole('button', { name: 'Manual leaf four · Source 4' }).click()
-  await expect(page.locator('.page-counter input')).toHaveValue('4')
-  await page.getByRole('button', { name: 'Opening · p1' }).click()
-  await expect(page.locator('.page-counter input')).toHaveValue('1')
-  await page.getByRole('button', { name: 'Close PDF outline' }).click(); await expect(bookmarks).toBeFocused()
+test('Read workspace navigates real occurrences and bookmarks and restores panels, position and focus', async ({
+  page,
+  request,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const { document } = await openFixture(page, request);
+  const reader = await page.locator('.shared-reader-viewport').elementHandle();
+  await expect(page.getByRole('tab', { name: 'Read', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await page.getByRole('combobox', { name: 'Zoom', exact: true }).selectOption('100');
+  const thumb = page.getByRole('button', { name: 'Go to page 1', exact: true });
+  await thumb.focus();
+  await thumb.press('ArrowDown');
+  await expect(page.getByRole('button', { name: 'Go to page 2', exact: true })).toBeFocused();
+  await expect(page.locator('.page-counter input')).toHaveValue('2');
+  const search = page.getByRole('button', { name: 'Search', exact: true });
+  await search.click();
+  const input = page.getByRole('searchbox', { name: 'Find text in this PDF' });
+  await expect(input).toBeFocused();
+  await input.fill('Orchid');
+  await expect(page.locator('.pdf-findbar')).toContainText('2 matches');
+  await page.getByLabel('PDF search occurrences').getByRole('button').first().click();
+  await expect(page.locator('.page-counter input')).toHaveValue('3');
+  await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute(
+    'data-pdf-match',
+    '0',
+  );
+  await page.getByLabel('PDF search occurrences').getByRole('button').first().press('ArrowDown');
+  await expect(page.getByLabel('PDF search occurrences').getByRole('button').nth(1)).toBeFocused();
+  await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute(
+    'data-pdf-match',
+    '1',
+  );
+  const info = page.getByRole('button', { name: 'Document information', exact: true });
+  await info.click();
+  await expect(input).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Document information' })).toContainText(
+    document.source_sha256,
+  );
+  await page.keyboard.press('Escape');
+  await expect(info).toBeFocused();
+  await search.click();
+  await expect(input).toHaveValue('Orchid');
+  await expect(page.locator('.pdf-search-highlight.is-active')).toHaveAttribute(
+    'data-pdf-match',
+    '1',
+  );
+  await page.getByRole('button', { name: 'Close PDF search' }).click();
+  await expect(search).toBeFocused();
+  const bookmarks = page.getByRole('button', { name: 'Document bookmarks', exact: true });
+  await bookmarks.click();
+  await page.getByRole('button', { name: 'Manual leaf four · Source 4' }).click();
+  await expect(page.locator('.page-counter input')).toHaveValue('4');
+  await page.getByRole('button', { name: 'Opening · p1' }).click();
+  await expect(page.locator('.page-counter input')).toHaveValue('1');
+  await page.getByRole('button', { name: 'Close PDF outline' }).click();
+  await expect(bookmarks).toBeFocused();
   // A real scroll anchor, not just a page number, survives panel and focus changes.
-  await page.locator('.canvas-scroll').evaluate(el => { el.scrollTop = 180 })
-  await expect.poll(() => page.locator('.canvas-scroll').evaluate(el => el.scrollTop)).toBeGreaterThan(150)
-  await info.click()
-  const anchor = await page.locator('.canvas-scroll').evaluate(el => el.scrollTop)
-  const focused = page.getByRole('button', { name: 'Focused reading', exact: true })
-  await focused.click()
-  await expect(page.locator('.reader-side-panel')).toBeHidden()
-  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('100')
-  await page.keyboard.press('Escape'); await expect(focused).toBeFocused()
-  await expect(page.getByRole('region', { name: 'Document information' })).toBeVisible()
-  await expect.poll(() => page.locator('.canvas-scroll').evaluate(el => el.scrollTop)).toBeCloseTo(anchor, 0)
-  expect(await reader!.evaluate(el => el.isConnected)).toBe(true)
-  await page.getByRole('button', { name: 'Close document information' }).click()
+  await page.locator('.canvas-scroll').evaluate((el) => {
+    el.scrollTop = 180;
+  });
+  await expect
+    .poll(() => page.locator('.canvas-scroll').evaluate((el) => el.scrollTop))
+    .toBeGreaterThan(150);
+  await info.click();
+  const anchor = await page.locator('.canvas-scroll').evaluate((el) => el.scrollTop);
+  const focused = page.getByRole('button', { name: 'Focused reading', exact: true });
+  await focused.click();
+  await expect(page.locator('.reader-side-panel')).toBeHidden();
+  await expect(page.getByRole('combobox', { name: 'Zoom', exact: true })).toHaveValue('100');
+  await page.keyboard.press('Escape');
+  await expect(focused).toBeFocused();
+  await expect(page.getByRole('region', { name: 'Document information' })).toBeVisible();
+  await expect
+    .poll(() => page.locator('.canvas-scroll').evaluate((el) => el.scrollTop))
+    .toBeCloseTo(anchor, 0);
+  expect(await reader!.evaluate((el) => el.isConnected)).toBe(true);
+  await page.getByRole('button', { name: 'Close document information' }).click();
   // Read doesn't silently discard the existing editor's pending text draft.
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('tab', { name: 'Edit', exact: true }).click()
-  await page.getByRole('button', { name: 'Add text', exact: true }).click()
-  await page.locator('.pdf-paper').click({ position: { x: 110, y: 230 } })
-  const draft = page.getByRole('textbox', { name: /Add text on page/ })
-  await draft.fill('Unfinished synthetic text')
-  page.once('dialog', dialog => dialog.dismiss())
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('tab', { name: 'Read', exact: true }).click()
-  await expect(draft).toHaveValue('Unfinished synthetic text')
-  await expect(page.getByRole('tab', { name: 'Edit', exact: true })).toHaveAttribute('aria-selected', 'true')
-  page.once('dialog', dialog => dialog.accept())
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('tab', { name: 'Read', exact: true }).click()
-  await expect(draft).toBeHidden()
-  await search.click(); await input.fill('not-in-the-document')
-  await expect(page.locator('.pdf-findbar')).toContainText('0 matches')
-  await expect(page.getByRole('button', { name: 'Next search result' })).toBeDisabled()
-  await page.keyboard.press('Escape'); await expect(search).toBeFocused()
-  expect(errors).toEqual([])
-})
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('tab', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'Add text', exact: true }).click();
+  await page.locator('.pdf-paper').click({ position: { x: 110, y: 230 } });
+  const draft = page.getByRole('textbox', { name: /Add text on page/ });
+  await draft.fill('Unfinished synthetic text');
+  page.once('dialog', (dialog) => dialog.dismiss());
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('tab', { name: 'Read', exact: true }).click();
+  await expect(draft).toHaveValue('Unfinished synthetic text');
+  await expect(page.getByRole('tab', { name: 'Edit', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  page.once('dialog', (dialog) => dialog.accept());
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('tab', { name: 'Read', exact: true }).click();
+  await expect(draft).toBeHidden();
+  await search.click();
+  await input.fill('not-in-the-document');
+  await expect(page.locator('.pdf-findbar')).toContainText('0 matches');
+  await expect(page.getByRole('button', { name: 'Next search result' })).toBeDisabled();
+  await page.keyboard.press('Escape');
+  await expect(search).toBeFocused();
+  expect(errors).toEqual([]);
+});
 
-test('Read workspace reports bookmark failure and refuses stale manual destinations', async ({ page, request }) => {
-  const { matter, document } = await openFixture(page, request)
-  let bookmarkReads = 0
+test('Read workspace reports bookmark failure and refuses stale manual destinations', async ({
+  page,
+  request,
+}) => {
+  const { matter, document } = await openFixture(page, request);
+  let bookmarkReads = 0;
   // Let the existing matter bootstrap finish; fail the reader's own lookup.
-  await page.route(`**/matters/${matter.id}/bookmarks`, route => ++bookmarkReads === 1 ? route.continue() : route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'Synthetic unavailable store' }) }))
-  await page.reload();await enterLatestMatter(page)
-  await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click()
-  await expect(page.getByRole('region', { name: 'Source PDF outline' })).toContainText('Manual bookmarks could not be loaded')
-  await expect(page.getByRole('region', { name: 'Source PDF outline' })).not.toContainText('No manual bookmarks')
-  await page.unroute(`**/matters/${matter.id}/bookmarks`)
-  expect((await request.post(`${base}/documents/${document.id}/pages/rotate`, { headers, data: { page_index: 0, degrees: 90 } })).ok()).toBeTruthy()
-  await page.reload();await enterLatestMatter(page)
-  await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Manual leaf four · Source 4 · Needs review' })).toBeDisabled()
-  await page.getByRole('button', { name: 'Opening · p1' }).click()
-  await expect(page.locator('.page-counter input')).toHaveValue('1')
-})
+  await page.route(`**/matters/${matter.id}/bookmarks`, (route) =>
+    ++bookmarkReads === 1
+      ? route.continue()
+      : route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: 'Synthetic unavailable store' }),
+        }),
+  );
+  await page.reload();
+  await enterLatestMatter(page);
+  await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Source PDF outline' })).toContainText(
+    'Manual bookmarks could not be loaded',
+  );
+  await expect(page.getByRole('region', { name: 'Source PDF outline' })).not.toContainText(
+    'No manual bookmarks',
+  );
+  await page.unroute(`**/matters/${matter.id}/bookmarks`);
+  expect(
+    (
+      await request.post(`${base}/documents/${document.id}/pages/rotate`, {
+        headers,
+        data: { page_index: 0, degrees: 90 },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await page.reload();
+  await enterLatestMatter(page);
+  await page.getByRole('button', { name: 'Document bookmarks', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Manual leaf four · Source 4 · Needs review' }),
+  ).toBeDisabled();
+  await page.getByRole('button', { name: 'Opening · p1' }).click();
+  await expect(page.locator('.page-counter input')).toHaveValue('1');
+});
 
-
-test('FLOW / 03 reading context and undo outcome retain real source and redo state',async({page,request})=>{
-  const {document}=await openFixture(page,request)
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('button',{name:'Document information',exact:true}).click()
-  const info=page.getByRole('region',{name:'Document information',exact:true})
-  await expect(page.getByRole('tab',{name:'Read',exact:true})).toHaveAttribute('aria-selected','true')
-  await expect(info).toContainText(document.source_sha256)
-  await page.screenshot({path:'../docs/ui-evidence/flow03/ED01I-information-1440.png'})
-  await info.getByRole('button',{name:'Open comments',exact:true}).click()
-  await expect(page.getByRole('region',{name:'Private review comments'})).toBeVisible()
-  await page.getByRole('button',{name:'Close comments',exact:true}).click()
-  await page.getByRole('button',{name:'Document information',exact:true}).click()
-  await info.getByRole('button',{name:'View imported original',exact:true}).click()
-  const original=page.getByRole('dialog',{name:'Review imported original'})
-  await expect(original).toBeVisible()
-  await original.getByRole('button',{name:'Open Working Copy',exact:true}).click()
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('tab',{name:'Edit',exact:true}).click()
-  await page.getByRole('button',{name:'Add text',exact:true}).click()
-  await page.locator('.pdf-paper').click({position:{x:110,y:180}})
-  await page.getByRole('textbox',{name:/Add text on page/}).fill('Undo outcome fixture')
-  await page.getByRole('button',{name:'Apply text',exact:true}).click()
-  await expect(page.locator('.pdf-review-shape.text')).toContainText('Undo outcome fixture')
-  await page.getByRole('button',{name:'History',exact:true}).click()
-  const history=page.getByRole('region',{name:'Working history'})
-  await history.getByRole('button',{name:'Undo',exact:true}).click()
-  await expect(history.getByRole('status')).toContainText('Undo applied')
-  await expect(page.locator('.pdf-review-shape.text')).toHaveCount(0)
-  await page.screenshot({path:'../docs/ui-evidence/flow03/ED27B-undo-applied-1440.png'})
-  await history.getByRole('button',{name:'Redo',exact:true}).click()
-  await expect(page.locator('.pdf-review-shape.text')).toContainText('Undo outcome fixture')
-  await expect(history.locator('.flow03-undo-outcome')).toHaveCount(0)
-})
+test('FLOW / 03 reading context and undo outcome retain real source and redo state', async ({
+  page,
+  request,
+}) => {
+  const { document } = await openFixture(page, request);
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('button', { name: 'Document information', exact: true }).click();
+  const info = page.getByRole('region', { name: 'Document information', exact: true });
+  await expect(page.getByRole('tab', { name: 'Read', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(info).toContainText(document.source_sha256);
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED01I-information-1440.png' });
+  await info.getByRole('button', { name: 'Open comments', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Private review comments' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+  await page.getByRole('button', { name: 'Document information', exact: true }).click();
+  await info.getByRole('button', { name: 'View imported original', exact: true }).click();
+  const original = page.getByRole('dialog', { name: 'Review imported original' });
+  await expect(original).toBeVisible();
+  await original.getByRole('button', { name: 'Open Working Copy', exact: true }).click();
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('tab', { name: 'Edit', exact: true }).click();
+  await page.getByRole('button', { name: 'Add text', exact: true }).click();
+  await page.locator('.pdf-paper').click({ position: { x: 110, y: 180 } });
+  await page.getByRole('textbox', { name: /Add text on page/ }).fill('Undo outcome fixture');
+  await page.getByRole('button', { name: 'Apply text', exact: true }).click();
+  await expect(page.locator('.pdf-review-shape.text')).toContainText('Undo outcome fixture');
+  await page.getByRole('button', { name: 'History', exact: true }).click();
+  const history = page.getByRole('region', { name: 'Working history' });
+  await history.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(history.getByRole('status')).toContainText('Undo applied');
+  await expect(page.locator('.pdf-review-shape.text')).toHaveCount(0);
+  await page.screenshot({ path: '../docs/ui-evidence/flow03/ED27B-undo-applied-1440.png' });
+  await history.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(page.locator('.pdf-review-shape.text')).toContainText('Undo outcome fixture');
+  await expect(history.locator('.flow03-undo-outcome')).toHaveCount(0);
+});

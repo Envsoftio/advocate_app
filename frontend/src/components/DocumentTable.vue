@@ -1,418 +1,1377 @@
 <script setup lang="ts">
-import AppPopover from './ui/AppPopover.vue'
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import MetadataSuggestions from './MetadataSuggestions.vue'
-import { api } from '../lib/api'
-import { friendlyError } from '../lib/format'
-import type { DocKind, MatterDocument } from '../lib/types'
+import AppPopover from './ui/AppPopover.vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import MetadataSuggestions from './MetadataSuggestions.vue';
+import { api } from '../lib/api';
+import { friendlyError } from '../lib/format';
+import type { DocKind, MatterDocument } from '../lib/types';
 
-type SortMode = 'manual' | 'upload' | 'filename' | 'document_date'
+type SortMode = 'manual' | 'upload' | 'filename' | 'document_date';
 type SortPreview = {
-  mode: SortMode
-  ids: string[]
-  rows: Array<Pick<MatterDocument, 'id'|'title'|'original_name'|'document_date'|'date_status'|'date_source'|'date_note'|'group_key'> & {old_position:number,new_position:number}>
-  unknown_dates: 'last'
-  stable_ties: string
-  group_policy: string
-}
-type Draft = Pick<MatterDocument, 'title'|'label'|'kind'|'part'|'group_key'|'group_role'|'document_date'> & {date_confirmed:boolean}
-type LabelMode = 'sequential' | 'grouped_suffix' | 'filename'
-type GroupSuffixStyle = 'lower_alpha'|'upper_alpha'|'numeric'|'lower_alpha_parenthesized'|'upper_alpha_parenthesized'|'numeric_parenthesized'
+  mode: SortMode;
+  ids: string[];
+  rows: Array<
+    Pick<
+      MatterDocument,
+      | 'id'
+      | 'title'
+      | 'original_name'
+      | 'document_date'
+      | 'date_status'
+      | 'date_source'
+      | 'date_note'
+      | 'group_key'
+    > & { old_position: number; new_position: number }
+  >;
+  unknown_dates: 'last';
+  stable_ties: string;
+  group_policy: string;
+};
+type Draft = Pick<
+  MatterDocument,
+  'title' | 'label' | 'kind' | 'part' | 'group_key' | 'group_role' | 'document_date'
+> & { date_confirmed: boolean };
+type LabelMode = 'sequential' | 'grouped_suffix' | 'filename';
+type GroupSuffixStyle =
+  | 'lower_alpha'
+  | 'upper_alpha'
+  | 'numeric'
+  | 'lower_alpha_parenthesized'
+  | 'upper_alpha_parenthesized'
+  | 'numeric_parenthesized';
 type LabelPreviewRow = {
-  document_id:string, title:string, original_name:string, description:string, group_key:string,
-  group_role:'member'|'parent',
-  old_label:string, old_status:'unreviewed'|'confirmed', proposed_label:string,
-  proposal_status:'suggested'|'needs_manual', reason:string
-}
+  document_id: string;
+  title: string;
+  original_name: string;
+  description: string;
+  group_key: string;
+  group_role: 'member' | 'parent';
+  old_label: string;
+  old_status: 'unreviewed' | 'confirmed';
+  proposed_label: string;
+  proposal_status: 'suggested' | 'needs_manual';
+  reason: string;
+};
 type ReferenceReview = {
-  document_id:string, title:string, revision:number, searchable_pages:number, truncated:boolean,
-  references:Array<{page:number,raw:string,label:string,status:'old_label'|'proposed_label'|'unmatched',document_id:string|null,snippet:string}>
-}
+  document_id: string;
+  title: string;
+  revision: number;
+  searchable_pages: number;
+  truncated: boolean;
+  references: Array<{
+    page: number;
+    raw: string;
+    label: string;
+    status: 'old_label' | 'proposed_label' | 'unmatched';
+    document_id: string | null;
+    snippet: string;
+  }>;
+};
 type LabelPreview = {
-  rows:LabelPreviewRow[], warnings:string[], blocking:string[], policy:string,
-  reference_review:ReferenceReview|null,
-  export_history:{has_prior_exports:boolean,prior_uses:Array<{id:string,created_at:string,labels:Array<{document_id:string,label:string}>}>,unknown_exports:Array<{id:string,created_at:string}>}
-}
+  rows: LabelPreviewRow[];
+  warnings: string[];
+  blocking: string[];
+  policy: string;
+  reference_review: ReferenceReview | null;
+  export_history: {
+    has_prior_exports: boolean;
+    prior_uses: Array<{
+      id: string;
+      created_at: string;
+      labels: Array<{ document_id: string; label: string }>;
+    }>;
+    unknown_exports: Array<{ id: string; created_at: string }>;
+  };
+};
 
-const props = defineProps<{matterId:string, documents:MatterDocument[], parts:number[], busy:boolean, keepGroups:boolean}>()
+const props = defineProps<{
+  matterId: string;
+  documents: MatterDocument[];
+  parts: number[];
+  busy: boolean;
+  keepGroups: boolean;
+}>();
 const emit = defineEmits<{
-  modified: []
-  openDocument: [id:string]
-  error: [error:unknown]
-  close: []
-  manageParts: []
-  dirtyChanged: [value:boolean]
-}>()
-const kinds: DocKind[] = ['petition','affidavit','order','annexure','application','evidence','other']
-const query = ref('')
-const filterPart = ref(''), filterKind = ref(''), filterStatus = ref('')
-const filtersOpen = ref(false)
-const advancedRef = ref<HTMLElement|null>(null)
+  modified: [];
+  openDocument: [id: string];
+  error: [error: unknown];
+  close: [];
+  manageParts: [];
+  dirtyChanged: [value: boolean];
+}>();
+const kinds: DocKind[] = [
+  'petition',
+  'affidavit',
+  'order',
+  'annexure',
+  'application',
+  'evidence',
+  'other',
+];
+const query = ref('');
+const filterPart = ref(''),
+  filterKind = ref(''),
+  filterStatus = ref('');
+const filtersOpen = ref(false);
+const advancedRef = ref<HTMLElement | null>(null);
 const columnDefinitions = [
-  {key:'select',label:'Selection',width:43,min:43}, {key:'actions',label:'Actions',width:39,min:39},
-  {key:'title',label:'Title',width:256,min:150}, {key:'filename',label:'File name',width:171,min:110},
-  {key:'date',label:'Document date',width:135,min:124}, {key:'kind',label:'Type',width:108,min:86},
-  {key:'part',label:'Part',width:76,min:64}, {key:'label',label:'Label',width:102,min:75},
-  {key:'group',label:'Group',width:102,min:80}, {key:'pages',label:'Source pages',width:102,min:88},
-  {key:'ocr',label:'OCR',width:76,min:65}, {key:'status',label:'Status',width:118,min:88},
-] as const
-type ColumnKey = typeof columnDefinitions[number]['key']
-const columnWidths = reactive<Record<ColumnKey,number>>(Object.fromEntries(columnDefinitions.map(c=>[c.key,c.width])) as Record<ColumnKey,number>)
-const visibleColumns = computed(()=>columnDefinitions.filter(c=>!hiddenColumns.value.includes(c.label)))
-const tableWidth = computed(()=>visibleColumns.value.reduce((total,c)=>total+columnWidths[c.key],0))
-function frozenLeft(key:ColumnKey){return key==='select'?0:key==='actions'?columnWidths.select:columnWidths.select+columnWidths.actions}
-let resizing: {key:ColumnKey,startX:number,startWidth:number}|null=null
-function startResize(key:ColumnKey,event:PointerEvent){
-  if(event.button!==0)return
-  event.preventDefault();event.stopPropagation()
-  resizing={key,startX:event.clientX,startWidth:columnWidths[key]}
-  window.addEventListener('pointermove',resizeColumn)
-  window.addEventListener('pointerup',stopResize,{once:true})
-  document.body.classList.add('batch-resizing')
+  { key: 'select', label: 'Selection', width: 43, min: 43 },
+  { key: 'actions', label: 'Actions', width: 39, min: 39 },
+  { key: 'title', label: 'Title', width: 256, min: 150 },
+  { key: 'filename', label: 'File name', width: 171, min: 110 },
+  { key: 'date', label: 'Document date', width: 135, min: 124 },
+  { key: 'kind', label: 'Type', width: 108, min: 86 },
+  { key: 'part', label: 'Part', width: 76, min: 64 },
+  { key: 'label', label: 'Label', width: 102, min: 75 },
+  { key: 'group', label: 'Group', width: 102, min: 80 },
+  { key: 'pages', label: 'Source pages', width: 102, min: 88 },
+  { key: 'ocr', label: 'OCR', width: 76, min: 65 },
+  { key: 'status', label: 'Status', width: 118, min: 88 },
+] as const;
+type ColumnKey = (typeof columnDefinitions)[number]['key'];
+const columnWidths = reactive<Record<ColumnKey, number>>(
+  Object.fromEntries(columnDefinitions.map((c) => [c.key, c.width])) as Record<ColumnKey, number>,
+);
+const visibleColumns = computed(() =>
+  columnDefinitions.filter((c) => !hiddenColumns.value.includes(c.label)),
+);
+const tableWidth = computed(() =>
+  visibleColumns.value.reduce((total, c) => total + columnWidths[c.key], 0),
+);
+function frozenLeft(key: ColumnKey) {
+  return key === 'select'
+    ? 0
+    : key === 'actions'
+      ? columnWidths.select
+      : columnWidths.select + columnWidths.actions;
 }
-function resizeColumn(event:PointerEvent){
-  if(!resizing)return
-  const minimum=columnDefinitions.find(c=>c.key===resizing?.key)?.min||64
-  columnWidths[resizing.key]=Math.max(minimum,Math.round(resizing.startWidth+event.clientX-resizing.startX))
+let resizing: { key: ColumnKey; startX: number; startWidth: number } | null = null;
+function startResize(key: ColumnKey, event: PointerEvent) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  resizing = { key, startX: event.clientX, startWidth: columnWidths[key] };
+  window.addEventListener('pointermove', resizeColumn);
+  window.addEventListener('pointerup', stopResize, { once: true });
+  document.body.classList.add('batch-resizing');
 }
-function resizeColumnByKey(key:ColumnKey,event:KeyboardEvent){if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;event.preventDefault();const minimum=columnDefinitions.find(c=>c.key===key)?.min||64;columnWidths[key]=Math.max(minimum,columnWidths[key]+(event.key==='ArrowRight'?16:-16));saveColumns()}
-function stopResize(){resizing=null;window.removeEventListener('pointermove',resizeColumn);document.body.classList.remove('batch-resizing');saveColumns()}
-function resetColumnWidths(){for(const column of columnDefinitions)columnWidths[column.key]=column.width;saveColumns()}
-function toggleColumn(label:string){hiddenColumns.value=hiddenColumns.value.includes(label)?hiddenColumns.value.filter(x=>x!==label):[...hiddenColumns.value,label];saveColumns()}
-function saveColumns(){try{localStorage.setItem('matterdraft.batch.columns',JSON.stringify({widths:columnWidths,hidden:hiddenColumns.value}))}catch{/* Storage may be unavailable. */}}
-function clearFilters(){query.value='';filterPart.value='';filterKind.value='';filterStatus.value='';filtersOpen.value=false}
-const activeFilterCount=computed(()=>[query.value.trim(),filterPart.value,filterKind.value,filterStatus.value].filter(Boolean).length)
-const batchPending=computed(()=>!!(batch.part||batch.kind||batch.applyGroup))
-const batchActionLabel=computed(()=>!selectedIds.value.length?'Select rows first':`Apply to ${selectedIds.value.length} selected`)
-const batchActionTitle=computed(()=>{
-  if(!selectedIds.value.length)return 'Select document rows before changing their Part or Type.'
-  if(!batchPending.value)return 'Choose a Part or Type, then apply the change to the selected documents.'
-  return `Apply ${[batch.part&&`Part ${batch.part}`,batch.kind&&`Type ${batch.kind}`,batch.applyGroup&&`Group ${batch.group_key||'(clear)'}`].filter(Boolean).join(', ')} to ${selectedIds.value.length} selected document(s), including selected rows hidden by filters.`
-})
-function closeAdvanced(){advanced.value=false;labelPreview.value=null;sortPreview.value=null}
-function closeOverlays(event:PointerEvent){
- const target=event.target as HTMLElement
- if(advanced.value&&!advancedRef.value?.contains(target)&&!target.closest('.app-popover,.batch-tools-menu'))closeAdvanced()
+function resizeColumn(event: PointerEvent) {
+  if (!resizing) return;
+  const minimum = columnDefinitions.find((c) => c.key === resizing?.key)?.min || 64;
+  columnWidths[resizing.key] = Math.max(
+    minimum,
+    Math.round(resizing.startWidth + event.clientX - resizing.startX),
+  );
 }
-function onEscape(event:KeyboardEvent){if(event.key==='Escape')closeAdvanced()}
-onMounted(()=>{try{const saved=JSON.parse(localStorage.getItem('matterdraft.batch.columns')||'{}');for(const column of columnDefinitions){const width=Number(saved.widths?.[column.key]);if(Number.isFinite(width))columnWidths[column.key]=Math.max(column.min,Math.min(width,800))}if(Array.isArray(saved.hidden))hiddenColumns.value=saved.hidden.filter((label:unknown)=>typeof label==='string'&&['File name','Group','OCR','Status'].includes(label))}catch{/* Use design defaults. */}document.addEventListener('pointerdown',closeOverlays);document.addEventListener('keydown',onEscape)})
-const suggestionsOpen=ref(false),suggestionsRef=ref<InstanceType<typeof MetadataSuggestions>|null>(null),suggestionsDirty=ref(false),reviewIds=ref<string[]>([])
-const baseline=ref<MatterDocument[]>([]),snapshot=ref(''),loadError=ref(''),advanced=ref(false),compact=ref(true),showColumns=ref(false)
-const batchToolsOpen=ref(false),rowMenuId=ref('')
-function closeBatchMenu(){batchToolsOpen.value=false}
-const hiddenColumns=ref<string[]>([])
-let loadSequence=0,alive=true
-onBeforeUnmount(()=>{alive=false;loadSequence++;document.removeEventListener('pointerdown',closeOverlays);document.removeEventListener('keydown',onEscape);window.removeEventListener('pointermove',resizeColumn);window.removeEventListener('pointerup',stopResize);document.body.classList.remove('batch-resizing')})
-const dirtyRows=computed(()=>baseline.value.filter(rowDirty))
-const dirty=computed(()=>!!dirtyRows.value.length||suggestionsDirty.value)
-watch(dirty,v=>emit('dirtyChanged',v),{immediate:true})
-async function loadReview(force=false){const seq=++loadSequence;const startDraft=JSON.stringify(drafts);try{const value=await api<{input_snapshot:string;documents:MatterDocument[]}>(`/matters/${props.matterId}/metadata-review`);if(!alive||seq!==loadSequence)return;if(!force&&startDraft!==JSON.stringify(drafts)&&dirty.value){loadError.value='A refresh arrived while you were editing. Your draft is retained.';return}baseline.value=value.documents;selectedIds.value=selectedIds.value.filter(id=>baseline.value.some(d=>d.id===id));snapshot.value=value.input_snapshot;resetRows();loadError.value=''}catch(e){loadError.value=friendlyError(e)}}
-function resetRows(){for(const doc of baseline.value){drafts[doc.id]={title:doc.title,label:doc.label,kind:doc.kind,part:doc.part,group_key:doc.group_key,group_role:doc.group_role,document_date:doc.document_date,date_confirmed:doc.date_status==='confirmed'};moveTargets[doc.id]=doc.position+1}}
-function discard(){suggestionsRef.value?.discard();resetRows()}
-function rowChanges(doc:MatterDocument){const d=drafts[doc.id];const fields:Record<string,unknown>={};for(const k of ['title','label','kind','part','group_key','group_role'] as const)if(d[k]!==doc[k])fields[k]=typeof d[k]==='string'?(d[k] as string).trim():d[k];if('label' in fields){fields.label_status=fields.label?'confirmed':'unreviewed';fields.label_source=fields.label?'user':'none'}if(d.document_date!==doc.document_date||d.date_confirmed!==(doc.date_status==='confirmed'))Object.assign(fields,{document_date:d.document_date,date_status:d.document_date?'confirmed':'unknown',date_source:d.document_date?'user':'none',date_note:''});return fields}
-async function saveRows(ids?:string[]){if(localBusy.value)return false;const rows=dirtyRows.value.filter(d=>!ids||ids.includes(d.id));const retained=Object.fromEntries(dirtyRows.value.filter(d=>ids&&!ids.includes(d.id)).map(d=>[d.id,{...drafts[d.id]}]));if(!rows.length)return true;localBusy.value=true;loadError.value='';message.value='';try{await api(`/matters/${props.matterId}/metadata-review`,'PUT',{expected_snapshot:snapshot.value,rows:rows.map(d=>({document_id:d.id,changes:rowChanges(d)}))});await loadReview();Object.assign(drafts,retained);emit('modified');return true}catch(e){loadError.value=friendlyError(e);return false}finally{localBusy.value=false}}
-async function save(){return suggestionsOpen.value?!!(await suggestionsRef.value?.save()):await saveRows()}
-async function openSuggestions(){closeBatchMenu();closeAdvanced();if(dirtyRows.value.length){loadError.value='Save or discard table changes before reviewing source suggestions.';return}reviewIds.value=selectedIds.value.length?[...selectedIds.value]:baseline.value.map(d=>d.id);suggestionsOpen.value=true}
-function closeSuggestions(){if(suggestionsDirty.value){emit('close');return}suggestionsOpen.value=false;void loadReview()}
-function escapeCell(doc:MatterDocument,event:KeyboardEvent){if(event.key==='Escape'){const d=baseline.value.find(d=>d.id===doc.id);if(d){drafts[d.id]={title:d.title,label:d.label,kind:d.kind,part:d.part,group_key:d.group_key,group_role:d.group_role,document_date:d.document_date,date_confirmed:d.date_status==='confirmed'}}}}
-defineExpose({save,discard,hasPendingDraft:()=>dirty.value,pendingCount:()=>dirtyRows.value.length,closeSuggestions:()=>{suggestionsOpen.value=false;void loadReview()},isSuggestionsOpen:()=>suggestionsOpen.value})
+function resizeColumnByKey(key: ColumnKey, event: KeyboardEvent) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  event.preventDefault();
+  const minimum = columnDefinitions.find((c) => c.key === key)?.min || 64;
+  columnWidths[key] = Math.max(
+    minimum,
+    columnWidths[key] + (event.key === 'ArrowRight' ? 16 : -16),
+  );
+  saveColumns();
+}
+function stopResize() {
+  resizing = null;
+  window.removeEventListener('pointermove', resizeColumn);
+  document.body.classList.remove('batch-resizing');
+  saveColumns();
+}
+function resetColumnWidths() {
+  for (const column of columnDefinitions) columnWidths[column.key] = column.width;
+  saveColumns();
+}
+function toggleColumn(label: string) {
+  hiddenColumns.value = hiddenColumns.value.includes(label)
+    ? hiddenColumns.value.filter((x) => x !== label)
+    : [...hiddenColumns.value, label];
+  saveColumns();
+}
+function saveColumns() {
+  try {
+    localStorage.setItem(
+      'matterdraft.batch.columns',
+      JSON.stringify({ widths: columnWidths, hidden: hiddenColumns.value }),
+    );
+  } catch {
+    /* Storage may be unavailable. */
+  }
+}
+function clearFilters() {
+  query.value = '';
+  filterPart.value = '';
+  filterKind.value = '';
+  filterStatus.value = '';
+  filtersOpen.value = false;
+}
+const activeFilterCount = computed(
+  () =>
+    [query.value.trim(), filterPart.value, filterKind.value, filterStatus.value].filter(Boolean)
+      .length,
+);
+const batchPending = computed(() => !!(batch.part || batch.kind || batch.applyGroup));
+const batchActionLabel = computed(() =>
+  !selectedIds.value.length ? 'Select rows first' : `Apply to ${selectedIds.value.length} selected`,
+);
+const batchActionTitle = computed(() => {
+  if (!selectedIds.value.length) return 'Select document rows before changing their Part or Type.';
+  if (!batchPending.value)
+    return 'Choose a Part or Type, then apply the change to the selected documents.';
+  return `Apply ${[batch.part && `Part ${batch.part}`, batch.kind && `Type ${batch.kind}`, batch.applyGroup && `Group ${batch.group_key || '(clear)'}`].filter(Boolean).join(', ')} to ${selectedIds.value.length} selected document(s), including selected rows hidden by filters.`;
+});
+function closeAdvanced() {
+  advanced.value = false;
+  labelPreview.value = null;
+  sortPreview.value = null;
+}
+function closeOverlays(event: PointerEvent) {
+  const target = event.target as HTMLElement;
+  if (
+    advanced.value &&
+    !advancedRef.value?.contains(target) &&
+    !target.closest('.app-popover,.batch-tools-menu')
+  )
+    closeAdvanced();
+}
+function onEscape(event: KeyboardEvent) {
+  if (event.key === 'Escape') closeAdvanced();
+}
+onMounted(() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem('matterdraft.batch.columns') || '{}');
+    for (const column of columnDefinitions) {
+      const width = Number(saved.widths?.[column.key]);
+      if (Number.isFinite(width))
+        columnWidths[column.key] = Math.max(column.min, Math.min(width, 800));
+    }
+    if (Array.isArray(saved.hidden))
+      hiddenColumns.value = saved.hidden.filter(
+        (label: unknown) =>
+          typeof label === 'string' && ['File name', 'Group', 'OCR', 'Status'].includes(label),
+      );
+  } catch {
+    /* Use design defaults. */
+  }
+  document.addEventListener('pointerdown', closeOverlays);
+  document.addEventListener('keydown', onEscape);
+});
+const suggestionsOpen = ref(false),
+  suggestionsRef = ref<InstanceType<typeof MetadataSuggestions> | null>(null),
+  suggestionsDirty = ref(false),
+  reviewIds = ref<string[]>([]);
+const baseline = ref<MatterDocument[]>([]),
+  snapshot = ref(''),
+  loadError = ref(''),
+  advanced = ref(false),
+  compact = ref(true),
+  showColumns = ref(false);
+const batchToolsOpen = ref(false),
+  rowMenuId = ref('');
+function closeBatchMenu() {
+  batchToolsOpen.value = false;
+}
+const hiddenColumns = ref<string[]>([]);
+let loadSequence = 0,
+  alive = true;
+onBeforeUnmount(() => {
+  alive = false;
+  loadSequence++;
+  document.removeEventListener('pointerdown', closeOverlays);
+  document.removeEventListener('keydown', onEscape);
+  window.removeEventListener('pointermove', resizeColumn);
+  window.removeEventListener('pointerup', stopResize);
+  document.body.classList.remove('batch-resizing');
+});
+const dirtyRows = computed(() => baseline.value.filter(rowDirty));
+const dirty = computed(() => !!dirtyRows.value.length || suggestionsDirty.value);
+watch(dirty, (v) => emit('dirtyChanged', v), { immediate: true });
+async function loadReview(force = false) {
+  const seq = ++loadSequence;
+  const startDraft = JSON.stringify(drafts);
+  try {
+    const value = await api<{ input_snapshot: string; documents: MatterDocument[] }>(
+      `/matters/${props.matterId}/metadata-review`,
+    );
+    if (!alive || seq !== loadSequence) return;
+    if (!force && startDraft !== JSON.stringify(drafts) && dirty.value) {
+      loadError.value = 'A refresh arrived while you were editing. Your draft is retained.';
+      return;
+    }
+    baseline.value = value.documents;
+    selectedIds.value = selectedIds.value.filter((id) => baseline.value.some((d) => d.id === id));
+    snapshot.value = value.input_snapshot;
+    resetRows();
+    loadError.value = '';
+  } catch (e) {
+    loadError.value = friendlyError(e);
+  }
+}
+function resetRows() {
+  for (const doc of baseline.value) {
+    drafts[doc.id] = {
+      title: doc.title,
+      label: doc.label,
+      kind: doc.kind,
+      part: doc.part,
+      group_key: doc.group_key,
+      group_role: doc.group_role,
+      document_date: doc.document_date,
+      date_confirmed: doc.date_status === 'confirmed',
+    };
+    moveTargets[doc.id] = doc.position + 1;
+  }
+}
+function discard() {
+  suggestionsRef.value?.discard();
+  resetRows();
+}
+function rowChanges(doc: MatterDocument) {
+  const d = drafts[doc.id];
+  const fields: Record<string, unknown> = {};
+  for (const k of ['title', 'label', 'kind', 'part', 'group_key', 'group_role'] as const)
+    if (d[k] !== doc[k]) fields[k] = typeof d[k] === 'string' ? (d[k] as string).trim() : d[k];
+  if ('label' in fields) {
+    fields.label_status = fields.label ? 'confirmed' : 'unreviewed';
+    fields.label_source = fields.label ? 'user' : 'none';
+  }
+  if (
+    d.document_date !== doc.document_date ||
+    d.date_confirmed !== (doc.date_status === 'confirmed')
+  )
+    Object.assign(fields, {
+      document_date: d.document_date,
+      date_status: d.document_date ? 'confirmed' : 'unknown',
+      date_source: d.document_date ? 'user' : 'none',
+      date_note: '',
+    });
+  return fields;
+}
+async function saveRows(ids?: string[]) {
+  if (localBusy.value) return false;
+  const rows = dirtyRows.value.filter((d) => !ids || ids.includes(d.id));
+  const retained = Object.fromEntries(
+    dirtyRows.value
+      .filter((d) => ids && !ids.includes(d.id))
+      .map((d) => [d.id, { ...drafts[d.id] }]),
+  );
+  if (!rows.length) return true;
+  localBusy.value = true;
+  loadError.value = '';
+  message.value = '';
+  try {
+    await api(`/matters/${props.matterId}/metadata-review`, 'PUT', {
+      expected_snapshot: snapshot.value,
+      rows: rows.map((d) => ({ document_id: d.id, changes: rowChanges(d) })),
+    });
+    await loadReview();
+    Object.assign(drafts, retained);
+    emit('modified');
+    return true;
+  } catch (e) {
+    loadError.value = friendlyError(e);
+    return false;
+  } finally {
+    localBusy.value = false;
+  }
+}
+async function save() {
+  return suggestionsOpen.value ? !!(await suggestionsRef.value?.save()) : await saveRows();
+}
+async function openSuggestions() {
+  closeBatchMenu();
+  closeAdvanced();
+  if (dirtyRows.value.length) {
+    loadError.value = 'Save or discard table changes before reviewing source suggestions.';
+    return;
+  }
+  reviewIds.value = selectedIds.value.length
+    ? [...selectedIds.value]
+    : baseline.value.map((d) => d.id);
+  suggestionsOpen.value = true;
+}
+function closeSuggestions() {
+  if (suggestionsDirty.value) {
+    emit('close');
+    return;
+  }
+  suggestionsOpen.value = false;
+  void loadReview();
+}
+function escapeCell(doc: MatterDocument, event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    const d = baseline.value.find((d) => d.id === doc.id);
+    if (d) {
+      drafts[d.id] = {
+        title: d.title,
+        label: d.label,
+        kind: d.kind,
+        part: d.part,
+        group_key: d.group_key,
+        group_role: d.group_role,
+        document_date: d.document_date,
+        date_confirmed: d.date_status === 'confirmed',
+      };
+    }
+  }
+}
+defineExpose({
+  save,
+  discard,
+  hasPendingDraft: () => dirty.value,
+  pendingCount: () => dirtyRows.value.length,
+  closeSuggestions: () => {
+    suggestionsOpen.value = false;
+    void loadReview();
+  },
+  isSuggestionsOpen: () => suggestionsOpen.value,
+});
 
-const selectedIds = ref<string[]>([])
-const collapsedParts = ref<number[]>([])
-const localBusy = ref(false)
-const rowBusy = ref('')
-const message = ref('')
-const sortMode = ref<SortMode>('manual')
-const sortPreview = ref<SortPreview | null>(null)
-const drafts = reactive<Record<string,Draft>>({})
-const moveTargets = reactive<Record<string,number>>({})
-const batch = reactive({kind:'',part:'',group_key:'',applyGroup:false})
-const labelOptions = reactive<{mode:LabelMode,prefix:string,start:number,group_separator:string,
-  group_suffix_style:GroupSuffixStyle,first_member_base:boolean,
-  existing_label_policy:'compact'|'preserve',reference_document_id:string}>({
-  mode:'sequential', prefix:'P-', start:1, group_separator:'',
-  group_suffix_style:'lower_alpha', first_member_base:false,
-  existing_label_policy:'compact', reference_document_id:''
-})
-const labelPreview = ref<LabelPreview | null>(null)
-const labelAcks = reactive({existing:false,exports:false,references:false})
+const selectedIds = ref<string[]>([]);
+const collapsedParts = ref<number[]>([]);
+const localBusy = ref(false);
+const rowBusy = ref('');
+const message = ref('');
+const sortMode = ref<SortMode>('manual');
+const sortPreview = ref<SortPreview | null>(null);
+const drafts = reactive<Record<string, Draft>>({});
+const moveTargets = reactive<Record<string, number>>({});
+const batch = reactive({ kind: '', part: '', group_key: '', applyGroup: false });
+const labelOptions = reactive<{
+  mode: LabelMode;
+  prefix: string;
+  start: number;
+  group_separator: string;
+  group_suffix_style: GroupSuffixStyle;
+  first_member_base: boolean;
+  existing_label_policy: 'compact' | 'preserve';
+  reference_document_id: string;
+}>({
+  mode: 'sequential',
+  prefix: 'P-',
+  start: 1,
+  group_separator: '',
+  group_suffix_style: 'lower_alpha',
+  first_member_base: false,
+  existing_label_policy: 'compact',
+  reference_document_id: '',
+});
+const labelPreview = ref<LabelPreview | null>(null);
+const labelAcks = reactive({ existing: false, exports: false, references: false });
 
-watch(() => props.documents, ()=>{if(!dirty.value&&!localBusy.value&&!suggestionsOpen.value)void loadReview()}, {immediate:true})
+watch(
+  () => props.documents,
+  () => {
+    if (!dirty.value && !localBusy.value && !suggestionsOpen.value) void loadReview();
+  },
+  { immediate: true },
+);
 
 const filtered = computed(() => {
-  const needle = query.value.trim().toLocaleLowerCase()
-  return baseline.value.filter(doc =>
-    (!needle || [drafts[doc.id]?.title,doc.original_name,drafts[doc.id]?.label,drafts[doc.id]?.kind,
-      drafts[doc.id]?.group_key,drafts[doc.id]?.document_date].join(' ').toLocaleLowerCase().includes(needle)) &&
-    (!filterPart.value || String(drafts[doc.id]?.part)===filterPart.value) &&
-    (!filterKind.value || drafts[doc.id]?.kind===filterKind.value) &&
-    (!filterStatus.value || (filterStatus.value==='unsaved'?rowDirty(doc):
-      filterStatus.value==='needs_ocr'?doc.ocr_status==='needs_ocr':
-      filterStatus.value==='needs_review'?doc.date_status!=='confirmed':doc.date_status==='confirmed'))
-  )
-})
-const selectedSet = computed(() => new Set(selectedIds.value))
-const visibleSelected = computed(() => filtered.value.filter(doc => selectedSet.value.has(doc.id)).length)
-const allVisibleSelected = computed(() => !!filtered.value.length && visibleSelected.value === filtered.value.length)
+  const needle = query.value.trim().toLocaleLowerCase();
+  return baseline.value.filter(
+    (doc) =>
+      (!needle ||
+        [
+          drafts[doc.id]?.title,
+          doc.original_name,
+          drafts[doc.id]?.label,
+          drafts[doc.id]?.kind,
+          drafts[doc.id]?.group_key,
+          drafts[doc.id]?.document_date,
+        ]
+          .join(' ')
+          .toLocaleLowerCase()
+          .includes(needle)) &&
+      (!filterPart.value || String(drafts[doc.id]?.part) === filterPart.value) &&
+      (!filterKind.value || drafts[doc.id]?.kind === filterKind.value) &&
+      (!filterStatus.value ||
+        (filterStatus.value === 'unsaved'
+          ? rowDirty(doc)
+          : filterStatus.value === 'needs_ocr'
+            ? doc.ocr_status === 'needs_ocr'
+            : filterStatus.value === 'needs_review'
+              ? doc.date_status !== 'confirmed'
+              : doc.date_status === 'confirmed')),
+  );
+});
+const selectedSet = computed(() => new Set(selectedIds.value));
+const visibleSelected = computed(
+  () => filtered.value.filter((doc) => selectedSet.value.has(doc.id)).length,
+);
+const allVisibleSelected = computed(
+  () => !!filtered.value.length && visibleSelected.value === filtered.value.length,
+);
 const duplicateLabels = computed(() => {
-  const counts = new Map<string,number>()
-  for (const doc of props.documents) if (doc.label.trim()) {
-    const key = doc.label.trim().toLocaleLowerCase()
-    counts.set(key, (counts.get(key) || 0) + 1)
-  }
-  return new Set([...counts].filter(([,count]) => count > 1).map(([label]) => label))
-})
+  const counts = new Map<string, number>();
+  for (const doc of props.documents)
+    if (doc.label.trim()) {
+      const key = doc.label.trim().toLocaleLowerCase();
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  return new Set([...counts].filter(([, count]) => count > 1).map(([label]) => label));
+});
 const labelGaps = computed(() => {
-  const schemes = new Map<string,number[]>()
+  const schemes = new Map<string, number[]>();
   for (const doc of props.documents) {
-    const match = doc.label.trim().match(/^(.+?)[- ]?(\d+)$/)
-    if (!match) continue
-    const prefix = match[1].toLocaleUpperCase()
-    const values = schemes.get(prefix) || []
-    values.push(Number(match[2])); schemes.set(prefix, values)
+    const match = doc.label.trim().match(/^(.+?)[- ]?(\d+)$/);
+    if (!match) continue;
+    const prefix = match[1].toLocaleUpperCase();
+    const values = schemes.get(prefix) || [];
+    values.push(Number(match[2]));
+    schemes.set(prefix, values);
   }
-  const gaps:string[] = []
+  const gaps: string[] = [];
   for (const [prefix, values] of schemes) {
-    const unique = [...new Set(values)].sort((a,b) => a-b)
-    if (unique.length < 2) continue
-    for (let n=unique[0]; n<unique[unique.length-1]; n++) if (!unique.includes(n)) gaps.push(`${prefix}-${n}`)
+    const unique = [...new Set(values)].sort((a, b) => a - b);
+    if (unique.length < 2) continue;
+    for (let n = unique[0]; n < unique[unique.length - 1]; n++)
+      if (!unique.includes(n)) gaps.push(`${prefix}-${n}`);
   }
-  return gaps.slice(0,8)
-})
+  return gaps.slice(0, 8);
+});
 const labelProposalProblems = computed(() => {
-  if (!labelPreview.value) return [] as string[]
-  const problems = labelPreview.value.blocking.filter(item =>
-    !item.startsWith('Every selected document') && !item.includes('would be duplicated'))
-  const final = new Map(props.documents.map(doc => [doc.id, doc.label.trim()]))
-  for (const row of labelPreview.value.rows) final.set(row.document_id, row.proposed_label.trim())
-  if (labelPreview.value.rows.some(row => !row.proposed_label.trim()))
-    problems.push('Every selected document needs a label. Enter the missing labels manually.')
-  const seen = new Set<string>()
-  for (const label of final.values()) if (label) {
-    const key = label.toLocaleLowerCase()
-    if (seen.has(key)) { problems.push(`Label “${label}” would be duplicated.`); break }
-    seen.add(key)
-  }
-  return [...new Set(problems)]
-})
-const changesExistingLabels = computed(() => !!labelPreview.value?.rows.some(row =>
-  !!row.old_label.trim() && row.old_label.trim() !== row.proposed_label.trim()))
-const needsReferenceAck = computed(() => !!labelPreview.value?.reference_review?.references.length)
-const labelApplyReady = computed(() => !!labelPreview.value && !labelProposalProblems.value.length &&
-  (!changesExistingLabels.value || labelAcks.existing) &&
-  (!labelPreview.value.export_history.has_prior_exports || labelAcks.exports) &&
-  (!needsReferenceAck.value || labelAcks.references))
+  if (!labelPreview.value) return [] as string[];
+  const problems = labelPreview.value.blocking.filter(
+    (item) => !item.startsWith('Every selected document') && !item.includes('would be duplicated'),
+  );
+  const final = new Map(props.documents.map((doc) => [doc.id, doc.label.trim()]));
+  for (const row of labelPreview.value.rows) final.set(row.document_id, row.proposed_label.trim());
+  if (labelPreview.value.rows.some((row) => !row.proposed_label.trim()))
+    problems.push('Every selected document needs a label. Enter the missing labels manually.');
+  const seen = new Set<string>();
+  for (const label of final.values())
+    if (label) {
+      const key = label.toLocaleLowerCase();
+      if (seen.has(key)) {
+        problems.push(`Label “${label}” would be duplicated.`);
+        break;
+      }
+      seen.add(key);
+    }
+  return [...new Set(problems)];
+});
+const changesExistingLabels = computed(
+  () =>
+    !!labelPreview.value?.rows.some(
+      (row) => !!row.old_label.trim() && row.old_label.trim() !== row.proposed_label.trim(),
+    ),
+);
+const needsReferenceAck = computed(() => !!labelPreview.value?.reference_review?.references.length);
+const labelApplyReady = computed(
+  () =>
+    !!labelPreview.value &&
+    !labelProposalProblems.value.length &&
+    (!changesExistingLabels.value || labelAcks.existing) &&
+    (!labelPreview.value.export_history.has_prior_exports || labelAcks.exports) &&
+    (!needsReferenceAck.value || labelAcks.references),
+);
 
-function toggleVisible(checked:boolean) {
-  const next = new Set(selectedIds.value)
-  for (const doc of filtered.value) checked ? next.add(doc.id) : next.delete(doc.id)
-  selectedIds.value = [...next]
+function toggleVisible(checked: boolean) {
+  const next = new Set(selectedIds.value);
+  for (const doc of filtered.value) checked ? next.add(doc.id) : next.delete(doc.id);
+  selectedIds.value = [...next];
 }
-function toggleSelected(id:string, checked:boolean) {
-  const next = new Set(selectedIds.value)
-  checked ? next.add(id) : next.delete(id)
-  selectedIds.value = [...next]
+function toggleSelected(id: string, checked: boolean) {
+  const next = new Set(selectedIds.value);
+  checked ? next.add(id) : next.delete(id);
+  selectedIds.value = [...next];
 }
-function togglePart(part:number) {
+function togglePart(part: number) {
   collapsedParts.value = collapsedParts.value.includes(part)
-    ? collapsedParts.value.filter(value => value !== part) : [...collapsedParts.value, part]
+    ? collapsedParts.value.filter((value) => value !== part)
+    : [...collapsedParts.value, part];
 }
-function dateStatus(doc:MatterDocument) {
-  if (doc.date_status === 'confirmed') return 'Confirmed by user'
-  if (doc.date_status === 'suggested') return `Unreviewed ${doc.date_source} suggestion`
-  if (doc.date_status === 'ambiguous') return `Ambiguous ${doc.date_source} text: ${doc.date_note}`
-  return 'Unknown document date'
+function dateStatus(doc: MatterDocument) {
+  if (doc.date_status === 'confirmed') return 'Confirmed by user';
+  if (doc.date_status === 'suggested') return `Unreviewed ${doc.date_source} suggestion`;
+  if (doc.date_status === 'ambiguous') return `Ambiguous ${doc.date_source} text: ${doc.date_note}`;
+  return 'Unknown document date';
 }
-function sourceTimestamp(doc:MatterDocument) {
-  if (!doc.source_file_mtime) return 'No source file timestamp supplied'
-  return `File modified ${new Date(doc.source_file_mtime).toLocaleString()} — not used as the document date`
+function sourceTimestamp(doc: MatterDocument) {
+  if (!doc.source_file_mtime) return 'No source file timestamp supplied';
+  return `File modified ${new Date(doc.source_file_mtime).toLocaleString()} — not used as the document date`;
 }
-function rowDirty(doc:MatterDocument) {
-  const draft = drafts[doc.id]
-  if (!draft) return false
-  const desiredStatus = draft.document_date ? (draft.date_confirmed ? 'confirmed' : doc.date_status)
-    : (doc.date_status === 'ambiguous' ? 'ambiguous' : 'unknown')
-  return draft.title !== doc.title || draft.label !== doc.label || draft.kind !== doc.kind ||
-    draft.part !== doc.part || draft.group_key !== doc.group_key || draft.group_role !== doc.group_role ||
-    draft.document_date !== doc.document_date || desiredStatus !== doc.date_status
+function rowDirty(doc: MatterDocument) {
+  const draft = drafts[doc.id];
+  if (!draft) return false;
+  const desiredStatus = draft.document_date
+    ? draft.date_confirmed
+      ? 'confirmed'
+      : doc.date_status
+    : doc.date_status === 'ambiguous'
+      ? 'ambiguous'
+      : 'unknown';
+  return (
+    draft.title !== doc.title ||
+    draft.label !== doc.label ||
+    draft.kind !== doc.kind ||
+    draft.part !== doc.part ||
+    draft.group_key !== doc.group_key ||
+    draft.group_role !== doc.group_role ||
+    draft.document_date !== doc.document_date ||
+    desiredStatus !== doc.date_status
+  );
 }
-async function saveRow(doc:MatterDocument) {if(await saveRows([doc.id]))rowMenuId.value=''}
+async function saveRow(doc: MatterDocument) {
+  if (await saveRows([doc.id])) rowMenuId.value = '';
+}
 async function previewLabels() {
-  if (!selectedIds.value.length || localBusy.value) return
-  localBusy.value = true; message.value = ''; labelPreview.value = null
-  labelAcks.existing = false; labelAcks.exports = false; labelAcks.references = false
+  if (!selectedIds.value.length || localBusy.value) return;
+  localBusy.value = true;
+  message.value = '';
+  labelPreview.value = null;
+  labelAcks.existing = false;
+  labelAcks.exports = false;
+  labelAcks.references = false;
   try {
-    labelPreview.value = await api<LabelPreview>(`/matters/${props.matterId}/labels/preview`, 'POST', {
-      ids:[...selectedIds.value], mode:labelOptions.mode, prefix:labelOptions.prefix,
-      start:Number(labelOptions.start) || 1,
-      group_separator:labelOptions.group_separator,
-      group_suffix_style:labelOptions.group_suffix_style,
-      first_member_base:labelOptions.first_member_base,
-      existing_label_policy:labelOptions.existing_label_policy,
-      reference_document_id:labelOptions.reference_document_id || null,
-    })
-  } catch (error) { emit('error', error) }
-  finally { localBusy.value = false }
+    labelPreview.value = await api<LabelPreview>(
+      `/matters/${props.matterId}/labels/preview`,
+      'POST',
+      {
+        ids: [...selectedIds.value],
+        mode: labelOptions.mode,
+        prefix: labelOptions.prefix,
+        start: Number(labelOptions.start) || 1,
+        group_separator: labelOptions.group_separator,
+        group_suffix_style: labelOptions.group_suffix_style,
+        first_member_base: labelOptions.first_member_base,
+        existing_label_policy: labelOptions.existing_label_policy,
+        reference_document_id: labelOptions.reference_document_id || null,
+      },
+    );
+  } catch (error) {
+    emit('error', error);
+  } finally {
+    localBusy.value = false;
+  }
 }
 async function applyLabels() {
-  if (!labelPreview.value || !labelApplyReady.value || localBusy.value) return
-  localBusy.value = true; message.value = ''
+  if (!labelPreview.value || !labelApplyReady.value || localBusy.value) return;
+  localBusy.value = true;
+  message.value = '';
   try {
     await api(`/matters/${props.matterId}/labels/apply`, 'POST', {
-      mappings:labelPreview.value.rows.map(row => ({document_id:row.document_id,
-        old_label:row.old_label,new_label:row.proposed_label.trim()})),
-      reference_document_id:labelPreview.value.reference_review?.document_id || null,
-      expected_reference_revision:labelPreview.value.reference_review?.revision || null,
-      acknowledge_existing_labels:labelAcks.existing,
-      acknowledge_prior_exports:labelAcks.exports,
-      acknowledge_references:labelAcks.references,
-    })
-    message.value = `Applied ${labelPreview.value.rows.length} reviewed label mapping(s) in one undoable action.`
-    labelPreview.value = null
-    await loadReview()
-    emit('modified')
-  } catch (error) { emit('error', error) }
-  finally { localBusy.value = false }
+      mappings: labelPreview.value.rows.map((row) => ({
+        document_id: row.document_id,
+        old_label: row.old_label,
+        new_label: row.proposed_label.trim(),
+      })),
+      reference_document_id: labelPreview.value.reference_review?.document_id || null,
+      expected_reference_revision: labelPreview.value.reference_review?.revision || null,
+      acknowledge_existing_labels: labelAcks.existing,
+      acknowledge_prior_exports: labelAcks.exports,
+      acknowledge_references: labelAcks.references,
+    });
+    message.value = `Applied ${labelPreview.value.rows.length} reviewed label mapping(s) in one undoable action.`;
+    labelPreview.value = null;
+    await loadReview();
+    emit('modified');
+  } catch (error) {
+    emit('error', error);
+  } finally {
+    localBusy.value = false;
+  }
 }
 async function applyBatch() {
-  if (!selectedIds.value.length || localBusy.value) return
-  const payload:Record<string,unknown> = {ids:[...selectedIds.value]}
-  if (batch.kind) payload.kind = batch.kind
-  if (batch.part) payload.part = Number(batch.part)
-  if (batch.applyGroup) payload.group_key = batch.group_key
-  if (Object.keys(payload).length === 1) { message.value = 'Choose a type, Part or group change.'; return }
-  localBusy.value = true; message.value = ''
+  if (!selectedIds.value.length || localBusy.value) return;
+  const payload: Record<string, unknown> = { ids: [...selectedIds.value] };
+  if (batch.kind) payload.kind = batch.kind;
+  if (batch.part) payload.part = Number(batch.part);
+  if (batch.applyGroup) payload.group_key = batch.group_key;
+  if (Object.keys(payload).length === 1) {
+    message.value = 'Choose a type, Part or group change.';
+    return;
+  }
+  localBusy.value = true;
+  message.value = '';
   try {
-    await api(`/matters/${props.matterId}/documents/batch`, 'PATCH', payload)
-    message.value = `Updated ${selectedIds.value.length} selected document(s) in one undoable action.`
-    batch.kind='';batch.part='';batch.group_key='';batch.applyGroup=false
-    await loadReview()
-    emit('modified')
-  } catch (error) { emit('error', error) }
-  finally { localBusy.value = false }
+    await api(`/matters/${props.matterId}/documents/batch`, 'PATCH', payload);
+    message.value = `Updated ${selectedIds.value.length} selected document(s) in one undoable action.`;
+    batch.kind = '';
+    batch.part = '';
+    batch.group_key = '';
+    batch.applyGroup = false;
+    await loadReview();
+    emit('modified');
+  } catch (error) {
+    emit('error', error);
+  } finally {
+    localBusy.value = false;
+  }
 }
 async function previewSort() {
-  localBusy.value = true; message.value = ''; sortPreview.value = null
+  localBusy.value = true;
+  message.value = '';
+  sortPreview.value = null;
   try {
-    sortPreview.value = await api<SortPreview>(`/matters/${props.matterId}/documents/sort-preview`,
-      'POST', {mode:sortMode.value,unknown_dates:'last'})
-  } catch (error) { emit('error', error) }
-  finally { localBusy.value = false }
+    sortPreview.value = await api<SortPreview>(
+      `/matters/${props.matterId}/documents/sort-preview`,
+      'POST',
+      { mode: sortMode.value, unknown_dates: 'last' },
+    );
+  } catch (error) {
+    emit('error', error);
+  } finally {
+    localBusy.value = false;
+  }
 }
 async function applySort() {
-  if (!sortPreview.value || localBusy.value) return
-  localBusy.value = true
+  if (!sortPreview.value || localBusy.value) return;
+  localBusy.value = true;
   try {
-    await api(`/matters/${props.matterId}/documents/reorder`, 'POST', {ids:sortPreview.value.ids})
-    message.value = `Applied ${sortPreview.value.mode.replace('_',' ')} order.`
-    sortPreview.value = null
-    await loadReview()
-    emit('modified')
-  } catch (error) { emit('error', error) }
-  finally { localBusy.value = false }
+    await api(`/matters/${props.matterId}/documents/reorder`, 'POST', {
+      ids: sortPreview.value.ids,
+    });
+    message.value = `Applied ${sortPreview.value.mode.replace('_', ' ')} order.`;
+    sortPreview.value = null;
+    await loadReview();
+    emit('modified');
+  } catch (error) {
+    emit('error', error);
+  } finally {
+    localBusy.value = false;
+  }
 }
-async function moveDocument(doc:MatterDocument) {
-  const target = Math.min(props.documents.length, Math.max(1, Number(moveTargets[doc.id]) || 1)) - 1
-  const ids = props.documents.map(item => item.id)
-  const from = ids.indexOf(doc.id)
-  if (from === target || from < 0 || localBusy.value) return
-  ids.splice(target, 0, ids.splice(from, 1)[0])
-  localBusy.value = true
+async function moveDocument(doc: MatterDocument) {
+  const target =
+    Math.min(props.documents.length, Math.max(1, Number(moveTargets[doc.id]) || 1)) - 1;
+  const ids = props.documents.map((item) => item.id);
+  const from = ids.indexOf(doc.id);
+  if (from === target || from < 0 || localBusy.value) return;
+  ids.splice(target, 0, ids.splice(from, 1)[0]);
+  localBusy.value = true;
   try {
-    await api(`/matters/${props.matterId}/documents/reorder`, 'POST', {ids})
-    message.value = `Moved “${doc.title}” to position ${target + 1}.`
-    await loadReview()
-    emit('modified')
-  } catch (error) { emit('error', error) }
-  finally { localBusy.value = false }
+    await api(`/matters/${props.matterId}/documents/reorder`, 'POST', { ids });
+    message.value = `Moved “${doc.title}” to position ${target + 1}.`;
+    await loadReview();
+    emit('modified');
+  } catch (error) {
+    emit('error', error);
+  } finally {
+    localBusy.value = false;
+  }
 }
 </script>
 
 <template>
- <div class="metadata-batch-root">
- <MetadataSuggestions v-if="suggestionsOpen" ref="suggestionsRef" :matter-id="matterId" :documents="documents" :ids="reviewIds" :disabled="busy" @dirty-changed="suggestionsDirty=$event" @modified="emit('modified')" @close="closeSuggestions"/>
- <section v-show="!suggestionsOpen" class="document-register batch-review" aria-label="Editable document table">
-  <header class="batch-review-heading"><div><h1>Batch review</h1><p>{{documents.length}} documents · Edit metadata, labels and Parts in place. <button class="manage-parts-link" :disabled="busy || localBusy || dirty" @click="emit('manageParts')">Manage Parts</button></p></div><button class="membership-button secondary" :disabled="!selectedIds.length" @click="emit('openDocument',selectedIds[0])">Open document</button></header>
-  <div class="batch-toolbar-shell">
-  <div class="batch-review-toolbar">
-    <input type="checkbox" aria-label="Select all filtered documents" :checked="allVisibleSelected" @change="toggleVisible(($event.target as HTMLInputElement).checked)"/>
-    <strong :title="`${visibleSelected} visible in this filter`">{{selectedIds.length}} selected</strong>
-    <label class="batch-part-select" :title="selectedIds.length?'Change the Part for selected documents; then choose Apply.':'Select document rows to enable batch changes.'"><span class="sr-only">Set selected Part</span><select v-model="batch.part" aria-label="Set selected Part" :disabled="!selectedIds.length||busy||localBusy"><option value="">Set selected Part…</option><option v-for="part in parts" :value="part" :key="part">Part {{part}}</option></select></label>
-    <select class="batch-kind-select" v-model="batch.kind" aria-label="Set selected document type" :title="selectedIds.length?'Change the type for selected documents; then choose Apply.':'Select document rows to enable batch changes.'" :disabled="!selectedIds.length||busy||localBusy"><option value="">Set selected type…</option><option v-for="kind in kinds" :value="kind" :key="kind">{{kind}}</option></select>
-    <div class="batch-toolbar-middle">
-      <button class="batch-inline-action batch-apply-action" :title="batchActionTitle" :disabled="busy||localBusy||!selectedIds.length||!!dirtyRows.length||!batchPending" @click="applyBatch">{{batchActionLabel}}</button>
-      <button class="batch-inline-action batch-review-action" :disabled="!documents.length||!!dirtyRows.length" @click="openSuggestions">Review title &amp; dates</button>
-      <input v-model="query" class="batch-search" type="search" aria-label="Filter rows" placeholder="Find rows"/>
-      <AppPopover v-model:open="filtersOpen" class="batch-popover-anchor" label="Filter documents" content-class="batch-filter-panel"><template #trigger><button type="button" class="membership-button secondary batch-filter-trigger">Filters<span v-if="activeFilterCount"> · {{activeFilterCount}}</span></button></template>
-        <strong>Filter documents</strong><label>Part<select v-model="filterPart" aria-label="Filter by Part"><option value="">All Parts</option><option v-for="part in parts" :key="part" :value="String(part)">Part {{part}}</option></select></label><label>Type<select v-model="filterKind" aria-label="Filter by type"><option value="">All types</option><option v-for="kind in kinds" :key="kind" :value="kind">{{kind}}</option></select></label><label>Review status<select v-model="filterStatus" aria-label="Filter by status"><option value="">All statuses</option><option value="needs_review">Needs date review</option><option value="reviewed">Date reviewed</option><option value="needs_ocr">OCR needed</option><option value="unsaved">Unsaved edits</option></select></label><button class="text-tool" :disabled="!activeFilterCount" @click="clearFilters">Clear filters</button>
-      </AppPopover>
-      <AppPopover v-model:open="batchToolsOpen" class="batch-tools-menu" label="More batch actions" close-on-select><template #trigger><button type="button" class="icon-btn" aria-label="More batch actions" title="More batch actions">⋯</button></template><button :aria-expanded="advanced" @click="closeBatchMenu();advanced=!advanced">More tools</button><button @click="closeBatchMenu();emit('close')">Close table</button></AppPopover>
-    </div>
-    <AppPopover v-model:open="showColumns" class="batch-popover-anchor" label="Visible columns" content-class="batch-columns"><template #trigger><button type="button" class="membership-button secondary batch-columns-trigger">Columns</button></template><strong>Visible columns</strong><label v-for="name in ['File name','Group','OCR','Status']" :key="name"><input type="checkbox" :checked="!hiddenColumns.includes(name)" @change="toggleColumn(name)"/>{{name}}</label><button class="text-tool" @click="resetColumnWidths">Reset column widths</button></AppPopover>
-    <button class="membership-button secondary batch-density-trigger" :aria-pressed="compact" @click="compact=!compact">{{compact?'Compact':'Comfortable'}}</button>
-  </div>
-  <div v-if="advanced" ref="advancedRef" class="batch-advanced" aria-label="More batch tools"><slot name="history"/><button class="text-tool" @click="selectedIds=[]">Clear selection</button><label><input v-model="batch.applyGroup" type="checkbox"/>Change selected group<input v-model="batch.group_key" maxlength="100" :disabled="!batch.applyGroup"/></label><button class="text-tool" :disabled="!!dirtyRows.length||!selectedIds.length||!batchPending" @click="applyBatch">{{batchActionLabel}}</button>
-    <div class="label-proposal-bar">
-      <div><strong>Propose labels for the explicit selection</strong><small>Preview only. Labels stay independent of filenames and page numbers until you confirm the full mapping.</small></div>
-      <label>Method<select v-model="labelOptions.mode"><option value="sequential">Sequential</option><option value="grouped_suffix">Grouped suffix</option><option value="filename">Conservative filename scan</option></select></label>
-      <label v-if="labelOptions.mode!=='filename'">Prefix<input v-model="labelOptions.prefix" maxlength="20"/></label>
-      <label v-if="labelOptions.mode!=='filename'">Start<input v-model.number="labelOptions.start" type="number" min="1" max="9999"/></label>
-      <label>Existing labels<select v-model="labelOptions.existing_label_policy"><option value="compact">Compact and renumber selection</option><option value="preserve">Preserve; fill new labels manually</option></select></label>
-      <template v-if="labelOptions.mode==='grouped_suffix'">
-        <label>Suffix style<select v-model="labelOptions.group_suffix_style"><option value="lower_alpha">a, b, c</option><option value="upper_alpha">A, B, C</option><option value="numeric">1, 2, 3</option><option value="lower_alpha_parenthesized">(a), (b), (c)</option><option value="upper_alpha_parenthesized">(A), (B), (C)</option><option value="numeric_parenthesized">(1), (2), (3)</option></select></label>
-        <label>Separator<input v-model="labelOptions.group_separator" maxlength="5" placeholder="None, -, . or /"/></label>
-        <label class="group-base-choice"><span><input v-model="labelOptions.first_member_base" type="checkbox"/> First member uses base label</span><small>Uses group order; does not certify a parent document.</small></label>
-      </template>
-      <label>Citation reference<select v-model="labelOptions.reference_document_id"><option value="">Do not scan</option><option v-for="doc in documents" :key="doc.id" :value="doc.id">{{doc.title}}</option></select></label>
-      <button class="btn secondary small" :disabled="busy || localBusy || !selectedIds.length" @click="previewLabels">Preview label changes</button>
-    </div>
+  <div class="metadata-batch-root">
+    <MetadataSuggestions
+      v-if="suggestionsOpen"
+      ref="suggestionsRef"
+      :matter-id="matterId"
+      :documents="documents"
+      :ids="reviewIds"
+      :disabled="busy"
+      @dirty-changed="suggestionsDirty = $event"
+      @modified="emit('modified')"
+      @close="closeSuggestions"
+    />
+    <section
+      v-show="!suggestionsOpen"
+      class="document-register batch-review"
+      aria-label="Editable document table"
+    >
+      <header class="batch-review-heading"
+        ><div
+          ><h1>Batch review</h1
+          ><p
+            >{{ documents.length }} documents · Edit metadata, labels and Parts in place.
+            <button
+              class="manage-parts-link"
+              :disabled="busy || localBusy || dirty"
+              @click="emit('manageParts')"
+              >Manage Parts</button
+            ></p
+          ></div
+        ><button
+          class="membership-button secondary"
+          :disabled="!selectedIds.length"
+          @click="emit('openDocument', selectedIds[0])"
+          >Open document</button
+        ></header
+      >
+      <div class="batch-toolbar-shell">
+        <div class="batch-review-toolbar">
+          <input
+            type="checkbox"
+            aria-label="Select all filtered documents"
+            :checked="allVisibleSelected"
+            @change="toggleVisible(($event.target as HTMLInputElement).checked)"
+          />
+          <strong :title="`${visibleSelected} visible in this filter`"
+            >{{ selectedIds.length }} selected</strong
+          >
+          <label
+            class="batch-part-select"
+            :title="
+              selectedIds.length
+                ? 'Change the Part for selected documents; then choose Apply.'
+                : 'Select document rows to enable batch changes.'
+            "
+            ><span class="sr-only">Set selected Part</span
+            ><select
+              v-model="batch.part"
+              aria-label="Set selected Part"
+              :disabled="!selectedIds.length || busy || localBusy"
+              ><option value="">Set selected Part…</option
+              ><option v-for="part in parts" :value="part" :key="part"
+                >Part {{ part }}</option
+              ></select
+            ></label
+          >
+          <select
+            class="batch-kind-select"
+            v-model="batch.kind"
+            aria-label="Set selected document type"
+            :title="
+              selectedIds.length
+                ? 'Change the type for selected documents; then choose Apply.'
+                : 'Select document rows to enable batch changes.'
+            "
+            :disabled="!selectedIds.length || busy || localBusy"
+            ><option value="">Set selected type…</option
+            ><option v-for="kind in kinds" :value="kind" :key="kind">{{ kind }}</option></select
+          >
+          <div class="batch-toolbar-middle">
+            <button
+              class="batch-inline-action batch-apply-action"
+              :title="batchActionTitle"
+              :disabled="
+                busy || localBusy || !selectedIds.length || !!dirtyRows.length || !batchPending
+              "
+              @click="applyBatch"
+              >{{ batchActionLabel }}</button
+            >
+            <button
+              class="batch-inline-action batch-review-action"
+              :disabled="!documents.length || !!dirtyRows.length"
+              @click="openSuggestions"
+              >Review title &amp; dates</button
+            >
+            <input
+              v-model="query"
+              class="batch-search"
+              type="search"
+              aria-label="Filter rows"
+              placeholder="Find rows"
+            />
+            <AppPopover
+              v-model:open="filtersOpen"
+              class="batch-popover-anchor"
+              label="Filter documents"
+              content-class="batch-filter-panel"
+              ><template #trigger
+                ><button type="button" class="membership-button secondary batch-filter-trigger"
+                  >Filters<span v-if="activeFilterCount"> · {{ activeFilterCount }}</span></button
+                ></template
+              >
+              <strong>Filter documents</strong
+              ><label
+                >Part<select v-model="filterPart" aria-label="Filter by Part"
+                  ><option value="">All Parts</option
+                  ><option v-for="part in parts" :key="part" :value="String(part)"
+                    >Part {{ part }}</option
+                  ></select
+                ></label
+              ><label
+                >Type<select v-model="filterKind" aria-label="Filter by type"
+                  ><option value="">All types</option
+                  ><option v-for="kind in kinds" :key="kind" :value="kind">{{
+                    kind
+                  }}</option></select
+                ></label
+              ><label
+                >Review status<select v-model="filterStatus" aria-label="Filter by status"
+                  ><option value="">All statuses</option
+                  ><option value="needs_review">Needs date review</option
+                  ><option value="reviewed">Date reviewed</option
+                  ><option value="needs_ocr">OCR needed</option
+                  ><option value="unsaved">Unsaved edits</option></select
+                ></label
+              ><button class="text-tool" :disabled="!activeFilterCount" @click="clearFilters"
+                >Clear filters</button
+              >
+            </AppPopover>
+            <AppPopover
+              v-model:open="batchToolsOpen"
+              class="batch-tools-menu"
+              label="More batch actions"
+              close-on-select
+              ><template #trigger
+                ><button
+                  type="button"
+                  class="icon-btn"
+                  aria-label="More batch actions"
+                  title="More batch actions"
+                  >⋯</button
+                ></template
+              ><button
+                :aria-expanded="advanced"
+                @click="
+                  closeBatchMenu();
+                  advanced = !advanced;
+                "
+                >More tools</button
+              ><button
+                @click="
+                  closeBatchMenu();
+                  emit('close');
+                "
+                >Close table</button
+              ></AppPopover
+            >
+          </div>
+          <AppPopover
+            v-model:open="showColumns"
+            class="batch-popover-anchor"
+            label="Visible columns"
+            content-class="batch-columns"
+            ><template #trigger
+              ><button type="button" class="membership-button secondary batch-columns-trigger"
+                >Columns</button
+              ></template
+            ><strong>Visible columns</strong
+            ><label v-for="name in ['File name', 'Group', 'OCR', 'Status']" :key="name"
+              ><input
+                type="checkbox"
+                :checked="!hiddenColumns.includes(name)"
+                @change="toggleColumn(name)"
+              />{{ name }}</label
+            ><button class="text-tool" @click="resetColumnWidths"
+              >Reset column widths</button
+            ></AppPopover
+          >
+          <button
+            class="membership-button secondary batch-density-trigger"
+            :aria-pressed="compact"
+            @click="compact = !compact"
+            >{{ compact ? 'Compact' : 'Comfortable' }}</button
+          >
+        </div>
+        <div v-if="advanced" ref="advancedRef" class="batch-advanced" aria-label="More batch tools"
+          ><slot name="history" /><button class="text-tool" @click="selectedIds = []"
+            >Clear selection</button
+          ><label
+            ><input v-model="batch.applyGroup" type="checkbox" />Change selected group<input
+              v-model="batch.group_key"
+              maxlength="100"
+              :disabled="!batch.applyGroup" /></label
+          ><button
+            class="text-tool"
+            :disabled="!!dirtyRows.length || !selectedIds.length || !batchPending"
+            @click="applyBatch"
+            >{{ batchActionLabel }}</button
+          >
+          <div class="label-proposal-bar">
+            <div
+              ><strong>Propose labels for the explicit selection</strong
+              ><small
+                >Preview only. Labels stay independent of filenames and page numbers until you
+                confirm the full mapping.</small
+              ></div
+            >
+            <label
+              >Method<select v-model="labelOptions.mode"
+                ><option value="sequential">Sequential</option
+                ><option value="grouped_suffix">Grouped suffix</option
+                ><option value="filename">Conservative filename scan</option></select
+              ></label
+            >
+            <label v-if="labelOptions.mode !== 'filename'"
+              >Prefix<input v-model="labelOptions.prefix" maxlength="20"
+            /></label>
+            <label v-if="labelOptions.mode !== 'filename'"
+              >Start<input v-model.number="labelOptions.start" type="number" min="1" max="9999"
+            /></label>
+            <label
+              >Existing labels<select v-model="labelOptions.existing_label_policy"
+                ><option value="compact">Compact and renumber selection</option
+                ><option value="preserve">Preserve; fill new labels manually</option></select
+              ></label
+            >
+            <template v-if="labelOptions.mode === 'grouped_suffix'">
+              <label
+                >Suffix style<select v-model="labelOptions.group_suffix_style"
+                  ><option value="lower_alpha">a, b, c</option
+                  ><option value="upper_alpha">A, B, C</option
+                  ><option value="numeric">1, 2, 3</option
+                  ><option value="lower_alpha_parenthesized">(a), (b), (c)</option
+                  ><option value="upper_alpha_parenthesized">(A), (B), (C)</option
+                  ><option value="numeric_parenthesized">(1), (2), (3)</option></select
+                ></label
+              >
+              <label
+                >Separator<input
+                  v-model="labelOptions.group_separator"
+                  maxlength="5"
+                  placeholder="None, -, . or /"
+              /></label>
+              <label class="group-base-choice"
+                ><span
+                  ><input v-model="labelOptions.first_member_base" type="checkbox" /> First member
+                  uses base label</span
+                ><small>Uses group order; does not certify a parent document.</small></label
+              >
+            </template>
+            <label
+              >Citation reference<select v-model="labelOptions.reference_document_id"
+                ><option value="">Do not scan</option
+                ><option v-for="doc in documents" :key="doc.id" :value="doc.id">{{
+                  doc.title
+                }}</option></select
+              ></label
+            >
+            <button
+              class="btn secondary small"
+              :disabled="busy || localBusy || !selectedIds.length"
+              @click="previewLabels"
+              >Preview label changes</button
+            >
+          </div>
 
-    <div v-if="labelPreview" class="label-proposal-preview" role="dialog" aria-label="Label proposal preview">
-      <div class="sort-preview-head"><div><strong>Old → proposed label mapping</strong><small>{{labelPreview.policy}}</small></div><button class="btn secondary small" @click="labelPreview=null">Cancel without changes</button></div>
-      <div v-for="warning in labelPreview.warnings" :key="warning" class="notice amber">{{warning}}</div>
-      <div v-for="problem in labelProposalProblems" :key="problem" class="notice error">{{problem}}</div>
-      <div class="label-map-wrap"><table class="label-map"><thead><tr><th>Document identity</th><th>Description</th><th>Existing</th><th>Proposed</th><th>Reason</th></tr></thead><tbody>
-        <tr v-for="row in labelPreview.rows" :key="row.document_id"><td><strong>{{row.title}}</strong><small>{{row.original_name}}<template v-if="row.group_key"> · Group {{row.group_key}} · {{row.group_role}}</template></small></td><td>{{row.description}}</td><td>{{row.old_label || 'Unlabelled'}}<small>{{row.old_status}}</small></td><td><input v-model="row.proposed_label" maxlength="60" :aria-label="'Proposed label for '+row.title"/></td><td><small>{{row.reason}}</small></td></tr>
-      </tbody></table></div>
+          <div
+            v-if="labelPreview"
+            class="label-proposal-preview"
+            role="dialog"
+            aria-label="Label proposal preview"
+          >
+            <div class="sort-preview-head"
+              ><div
+                ><strong>Old → proposed label mapping</strong
+                ><small>{{ labelPreview.policy }}</small></div
+              ><button class="btn secondary small" @click="labelPreview = null"
+                >Cancel without changes</button
+              ></div
+            >
+            <div v-for="warning in labelPreview.warnings" :key="warning" class="notice amber">{{
+              warning
+            }}</div>
+            <div v-for="problem in labelProposalProblems" :key="problem" class="notice error">{{
+              problem
+            }}</div>
+            <div class="label-map-wrap"
+              ><table class="label-map"
+                ><thead
+                  ><tr
+                    ><th>Document identity</th><th>Description</th><th>Existing</th><th>Proposed</th
+                    ><th>Reason</th></tr
+                  ></thead
+                ><tbody>
+                  <tr v-for="row in labelPreview.rows" :key="row.document_id"
+                    ><td
+                      ><strong>{{ row.title }}</strong
+                      ><small
+                        >{{ row.original_name
+                        }}<template v-if="row.group_key">
+                          · Group {{ row.group_key }} · {{ row.group_role }}</template
+                        ></small
+                      ></td
+                    ><td>{{ row.description }}</td
+                    ><td
+                      >{{ row.old_label || 'Unlabelled' }}<small>{{ row.old_status }}</small></td
+                    ><td
+                      ><input
+                        v-model="row.proposed_label"
+                        maxlength="60"
+                        :aria-label="'Proposed label for ' + row.title" /></td
+                    ><td
+                      ><small>{{ row.reason }}</small></td
+                    ></tr
+                  >
+                </tbody></table
+              ></div
+            >
 
-      <section v-if="labelPreview.reference_review" class="citation-review">
-        <h3>Citation review · {{labelPreview.reference_review.title}} revision {{labelPreview.reference_review.revision}}</h3>
-        <p>{{labelPreview.reference_review.searchable_pages}} searchable page(s). Matches are text candidates, not verified legal citations; scanned or OCR-imperfect text may be missed.</p>
-        <ul v-if="labelPreview.reference_review.references.length"><li v-for="(reference,index) in labelPreview.reference_review.references" :key="index"><strong>Page {{reference.page}} · {{reference.raw}}</strong> <span class="date-badge" :class="reference.status==='unmatched'?'ambiguous':'suggested'">{{reference.status.replace('_',' ')}}</span><small>{{reference.snippet}}</small></li></ul>
-        <p v-else>No annexure/exhibit references were found in searchable text. This is not proof that none exist.</p>
-      </section>
+            <section v-if="labelPreview.reference_review" class="citation-review">
+              <h3
+                >Citation review · {{ labelPreview.reference_review.title }} revision
+                {{ labelPreview.reference_review.revision }}</h3
+              >
+              <p
+                >{{ labelPreview.reference_review.searchable_pages }} searchable page(s). Matches
+                are text candidates, not verified legal citations; scanned or OCR-imperfect text may
+                be missed.</p
+              >
+              <ul v-if="labelPreview.reference_review.references.length"
+                ><li
+                  v-for="(reference, index) in labelPreview.reference_review.references"
+                  :key="index"
+                  ><strong>Page {{ reference.page }} · {{ reference.raw }}</strong>
+                  <span
+                    class="date-badge"
+                    :class="reference.status === 'unmatched' ? 'ambiguous' : 'suggested'"
+                    >{{ reference.status.replace('_', ' ') }}</span><small>{{
+                    reference.snippet
+                  }}</small></li
+                ></ul
+              >
+              <p v-else
+                >No annexure/exhibit references were found in searchable text. This is not proof
+                that none exist.</p
+              >
+            </section>
 
-      <div v-if="labelPreview.export_history.has_prior_exports" class="notice amber">
-        <strong>Prior generated builds remain immutable.</strong> {{labelPreview.export_history.prior_uses.length}} build(s) recorded selected labels; {{labelPreview.export_history.unknown_exports.length}} older build(s) lack a label snapshot. Any of them may have circulated.
+            <div v-if="labelPreview.export_history.has_prior_exports" class="notice amber">
+              <strong>Prior generated builds remain immutable.</strong>
+              {{ labelPreview.export_history.prior_uses.length }} build(s) recorded selected labels;
+              {{ labelPreview.export_history.unknown_exports.length }} older build(s) lack a label
+              snapshot. Any of them may have circulated.
+            </div>
+            <div class="label-acknowledgements">
+              <label v-if="changesExistingLabels"
+                ><input v-model="labelAcks.existing" type="checkbox" /> I reviewed every
+                existing-label → new-label change.</label
+              >
+              <label v-if="labelPreview.export_history.has_prior_exports"
+                ><input v-model="labelAcks.exports" type="checkbox" /> I understand prior generated
+                builds are unchanged and may have circulated.</label
+              >
+              <label v-if="needsReferenceAck"
+                ><input v-model="labelAcks.references" type="checkbox" /> I reviewed the citation
+                candidates and will check external references manually.</label
+              >
+            </div>
+            <div class="label-proposal-actions"
+              ><button class="btn secondary small" @click="labelPreview = null">Cancel</button
+              ><button
+                class="btn primary small"
+                :disabled="busy || localBusy || !labelApplyReady"
+                @click="applyLabels"
+                >Apply reviewed mapping</button
+              ></div
+            >
+          </div>
+
+          <div class="sort-bar">
+            <div
+              ><strong>Preview order</strong
+              ><small>Unknown dates go last; equal keys retain current manual order.</small></div
+            >
+            <select v-model="sortMode" aria-label="Order method"
+              ><option value="manual">Current manual order</option
+              ><option value="upload">Upload order</option
+              ><option value="filename">Original filename</option
+              ><option value="document_date">Document date</option></select
+            >
+            <button class="btn secondary small" :disabled="busy || localBusy" @click="previewSort"
+              >Preview order</button
+            >
+          </div>
+
+          <div v-if="sortPreview" class="sort-preview" role="dialog" aria-label="Sort preview">
+            <div class="sort-preview-head"
+              ><div
+                ><strong>Proposed {{ sortPreview.mode.replace('_', ' ') }} order</strong
+                ><small
+                  >Unknown dates: last · ties: {{ sortPreview.stable_ties }} ·
+                  {{ sortPreview.group_policy }}.</small
+                ></div
+              ><div
+                ><button class="btn secondary small" @click="sortPreview = null">Cancel</button
+                ><button class="btn primary small" :disabled="busy || localBusy" @click="applySort"
+                  >Apply order</button
+                ></div
+              ></div
+            >
+            <ol
+              ><li
+                v-for="row in sortPreview.rows"
+                :key="row.id"
+                :class="{ 'sort-moved': row.old_position !== row.new_position }"
+                ><span>{{ row.new_position + 1 }}</span
+                ><div
+                  ><strong>{{ row.title }}</strong
+                  ><small
+                    >{{ row.original_name
+                    }}<template v-if="row.group_key"> · Group {{ row.group_key }}</template></small
+                  ></div
+                ><span class="date-badge" :class="row.date_status"
+                  >{{
+                    row.document_date ||
+                    (row.date_status === 'ambiguous' ? row.date_note : 'Unknown date')
+                  }}
+                  · {{ row.date_status }}</span
+                ><small>#{{ row.old_position + 1 }} → #{{ row.new_position + 1 }}</small></li
+              ></ol
+            >
+          </div>
+        </div>
       </div>
-      <div class="label-acknowledgements">
-        <label v-if="changesExistingLabels"><input v-model="labelAcks.existing" type="checkbox"/> I reviewed every existing-label → new-label change.</label>
-        <label v-if="labelPreview.export_history.has_prior_exports"><input v-model="labelAcks.exports" type="checkbox"/> I understand prior generated builds are unchanged and may have circulated.</label>
-        <label v-if="needsReferenceAck"><input v-model="labelAcks.references" type="checkbox"/> I reviewed the citation candidates and will check external references manually.</label>
-      </div>
-      <div class="label-proposal-actions"><button class="btn secondary small" @click="labelPreview=null">Cancel</button><button class="btn primary small" :disabled="busy || localBusy || !labelApplyReady" @click="applyLabels">Apply reviewed mapping</button></div>
-    </div>
-
-    <div class="sort-bar">
-      <div><strong>Preview order</strong><small>Unknown dates go last; equal keys retain current manual order.</small></div>
-      <select v-model="sortMode" aria-label="Order method"><option value="manual">Current manual order</option><option value="upload">Upload order</option><option value="filename">Original filename</option><option value="document_date">Document date</option></select>
-      <button class="btn secondary small" :disabled="busy || localBusy" @click="previewSort">Preview order</button>
-    </div>
-
-    <div v-if="sortPreview" class="sort-preview" role="dialog" aria-label="Sort preview">
-      <div class="sort-preview-head"><div><strong>Proposed {{sortPreview.mode.replace('_',' ')}} order</strong><small>Unknown dates: last · ties: {{sortPreview.stable_ties}} · {{sortPreview.group_policy}}.</small></div><div><button class="btn secondary small" @click="sortPreview=null">Cancel</button><button class="btn primary small" :disabled="busy || localBusy" @click="applySort">Apply order</button></div></div>
-      <ol><li v-for="row in sortPreview.rows" :key="row.id" :class="{'sort-moved':row.old_position!==row.new_position}"><span>{{row.new_position+1}}</span><div><strong>{{row.title}}</strong><small>{{row.original_name}}<template v-if="row.group_key"> · Group {{row.group_key}}</template></small></div><span class="date-badge" :class="row.date_status">{{row.document_date || (row.date_status==='ambiguous' ? row.date_note : 'Unknown date')}} · {{row.date_status}}</span><small>#{{row.old_position+1}} → #{{row.new_position+1}}</small></li></ol>
-    </div>
+      <div v-if="loadError" role="alert" class="review-error"
+        >{{ loadError }}
+        <button class="text-tool" @click="loadReview(true)"
+          >Discard table drafts and reload</button
+        ></div
+      >
+      <p v-if="message" role="status" class="review-notice">{{ message }}</p>
+      <p v-if="duplicateLabels.size || labelGaps.length" class="review-notice"
+        >Label review: {{ [...duplicateLabels, ...labelGaps].join(', ') }}. No automatic correction
+        made.</p
+      >
+      <div class="batch-table-scroll" :inert="localBusy"
+        ><table
+          :class="['batch-table', { comfortable: !compact }]"
+          :style="{ width: `max(100%, ${tableWidth}px)` }"
+          ><colgroup
+            ><col
+              v-for="column in visibleColumns"
+              :key="column.key"
+              :style="{ width: `${columnWidths[column.key]}px` }"
+          /></colgroup>
+          <thead
+            ><tr
+              ><th
+                v-for="column in visibleColumns"
+                :key="column.key"
+                scope="col"
+                :aria-label="column.key === 'select' ? 'Select rows' : column.label"
+                :class="{
+                  'batch-frozen':
+                    column.key === 'select' || column.key === 'actions' || column.key === 'title',
+                }"
+                :style="
+                  column.key === 'select' || column.key === 'actions' || column.key === 'title'
+                    ? { left: `${frozenLeft(column.key)}px` }
+                    : undefined
+                "
+                ><span>{{
+                  column.key === 'select' ? '' : column.key === 'actions' ? '↕' : column.label
+                }}</span
+                ><button
+                  v-if="column.key !== 'select' && column.key !== 'actions'"
+                  class="batch-column-resize"
+                  :aria-label="`Resize ${column.label} column`"
+                  title="Drag or use arrow keys to resize; double-click to reset"
+                  @pointerdown="startResize(column.key, $event)"
+                  @keydown="resizeColumnByKey(column.key, $event)"
+                  @dblclick="resetColumnWidths"
+                ></button></th></tr
+          ></thead>
+          <tbody
+            ><tr
+              v-for="doc in filtered"
+              :key="doc.id"
+              :class="{ 'row-selected': selectedSet.has(doc.id), 'row-dirty': rowDirty(doc) }"
+              @keydown="escapeCell(doc, $event)"
+              ><td class="batch-frozen" :style="{ left: `${frozenLeft('select')}px` }"
+                ><input
+                  type="checkbox"
+                  :aria-label="'Select ' + doc.title"
+                  :checked="selectedSet.has(doc.id)"
+                  @change="
+                    toggleSelected(doc.id, ($event.target as HTMLInputElement).checked)
+                  " /></td
+              ><td class="batch-frozen" :style="{ left: `${frozenLeft('actions')}px` }"
+                ><AppPopover
+                  :open="rowMenuId === doc.id"
+                  @update:open="rowMenuId = $event ? doc.id : ''"
+                  class="batch-row-menu"
+                  align="start"
+                  :label="'Actions for ' + doc.title"
+                  ><template #trigger
+                    ><button type="button" class="icon-btn" :aria-label="'Actions for ' + doc.title"
+                      >⋮</button
+                    ></template
+                  ><button class="text-tool" @click="emit('openDocument', doc.id)">Preview</button
+                  ><button
+                    class="text-tool"
+                    :disabled="!rowDirty(doc) || localBusy"
+                    @click="saveRow(doc)"
+                    >Save row</button
+                  ><label
+                    >Position<input
+                      v-model.number="moveTargets[doc.id]"
+                      type="number"
+                      min="1"
+                      :max="documents.length" /></label
+                  ><button
+                    class="text-tool"
+                    :disabled="!!dirtyRows.length"
+                    @click="moveDocument(doc)"
+                    >Move</button
+                  ><label
+                    >Hierarchy<select v-model="drafts[doc.id].group_role"
+                      ><option value="member">Member</option
+                      ><option value="parent">Designated parent</option></select
+                    ></label
+                  ></AppPopover
+                ></td
+              ><td class="batch-frozen" :style="{ left: `${frozenLeft('title')}px` }"
+                ><input
+                  v-model="drafts[doc.id].title"
+                  :aria-label="'Title for ' + doc.original_name"
+                  maxlength="250" /></td
+              ><td
+                v-if="!hiddenColumns.includes('File name')"
+                :title="doc.original_name + ' · ' + sourceTimestamp(doc)"
+                >{{ doc.original_name }}</td
+              ><td
+                ><input
+                  v-model="drafts[doc.id].document_date"
+                  :aria-label="'Date for ' + doc.original_name"
+                  type="date"
+                  @input="drafts[doc.id].date_confirmed = true"
+                  :title="dateStatus(doc)" /></td
+              ><td
+                ><select v-model="drafts[doc.id].kind" :aria-label="'Type for ' + doc.original_name"
+                  ><option v-for="kind in kinds" :value="kind" :key="kind">{{
+                    kind
+                  }}</option></select
+                ></td
+              ><td
+                ><select
+                  v-model.number="drafts[doc.id].part"
+                  :aria-label="'Part for ' + doc.original_name"
+                  ><option v-for="part in parts" :value="part" :key="part">{{
+                    part
+                  }}</option></select
+                ></td
+              ><td
+                ><input
+                  v-model="drafts[doc.id].label"
+                  :aria-label="'Label for ' + doc.original_name"
+                  maxlength="60" /></td
+              ><td v-if="!hiddenColumns.includes('Group')"
+                ><input
+                  v-model="drafts[doc.id].group_key"
+                  :aria-label="'Group for ' + doc.original_name"
+                  maxlength="100" /></td
+              ><td>{{ doc.page_count }}</td
+              ><td v-if="!hiddenColumns.includes('OCR')" :title="doc.ocr_status">{{
+                doc.ocr_status === 'native_text' ? 'Text' : doc.ocr_status.split('_').join(' ')
+              }}</td
+              ><td v-if="!hiddenColumns.includes('Status')">{{
+                rowDirty(doc)
+                  ? 'Unsaved'
+                  : doc.date_status === 'confirmed'
+                    ? 'Reviewed'
+                    : 'Review date'
+              }}</td></tr
+            ></tbody
+          > </table
+        ><p v-if="!filtered.length" class="review-empty"
+          >No documents match this filter. Your selection is unchanged.</p
+        ></div
+      >
+      <footer class="batch-savebar"
+        ><span :class="dirtyRows.length ? 'unsaved' : 'saved'">{{
+          dirtyRows.length ? `${dirtyRows.length} unsaved changes` : 'All changes saved'
+        }}</span
+        ><small>Tab moves between fields · Escape reverts the current row</small
+        ><button
+          class="membership-button quiet"
+          :disabled="!dirtyRows.length || localBusy"
+          @click="discard"
+          >Discard changes</button
+        ><button
+          class="membership-button primary"
+          :disabled="!dirtyRows.length || busy || localBusy"
+          @click="save"
+          >{{ localBusy ? 'Saving…' : 'Save changes' }}</button
+        ></footer
+      >
+    </section>
   </div>
-  </div>
-  <div v-if="loadError" role="alert" class="review-error">{{loadError}} <button class="text-tool" @click="loadReview(true)">Discard table drafts and reload</button></div>
-  <p v-if="message" role="status" class="review-notice">{{message}}</p>
-  <p v-if="duplicateLabels.size||labelGaps.length" class="review-notice">Label review: {{[...duplicateLabels,...labelGaps].join(', ')}}. No automatic correction made.</p>
-  <div class="batch-table-scroll" :inert="localBusy"><table :class="['batch-table',{'comfortable':!compact}]" :style="{width:`max(100%, ${tableWidth}px)`}"><colgroup><col v-for="column in visibleColumns" :key="column.key" :style="{width:`${columnWidths[column.key]}px`}"/></colgroup>
-   <thead><tr><th v-for="column in visibleColumns" :key="column.key" scope="col" :aria-label="column.key==='select'?'Select rows':column.label" :class="{'batch-frozen':column.key==='select'||column.key==='actions'||column.key==='title'}" :style="column.key==='select'||column.key==='actions'||column.key==='title'?{left:`${frozenLeft(column.key)}px`}:undefined"><span>{{column.key==='select'?'':column.key==='actions'?'↕':column.label}}</span><button v-if="column.key!=='select'&&column.key!=='actions'" class="batch-column-resize" :aria-label="`Resize ${column.label} column`" title="Drag or use arrow keys to resize; double-click to reset" @pointerdown="startResize(column.key,$event)" @keydown="resizeColumnByKey(column.key,$event)" @dblclick="resetColumnWidths"></button></th></tr></thead>
-   <tbody><tr v-for="doc in filtered" :key="doc.id" :class="{'row-selected':selectedSet.has(doc.id),'row-dirty':rowDirty(doc)}" @keydown="escapeCell(doc,$event)"><td class="batch-frozen" :style="{left:`${frozenLeft('select')}px`}"><input type="checkbox" :aria-label="'Select '+doc.title" :checked="selectedSet.has(doc.id)" @change="toggleSelected(doc.id,($event.target as HTMLInputElement).checked)"/></td><td class="batch-frozen" :style="{left:`${frozenLeft('actions')}px`}"><AppPopover :open="rowMenuId===doc.id" @update:open="rowMenuId=$event?doc.id:''" class="batch-row-menu" align="start" :label="'Actions for '+doc.title"><template #trigger><button type="button" class="icon-btn" :aria-label="'Actions for '+doc.title">⋮</button></template><button class="text-tool" @click="emit('openDocument',doc.id)">Preview</button><button class="text-tool" :disabled="!rowDirty(doc)||localBusy" @click="saveRow(doc)">Save row</button><label>Position<input v-model.number="moveTargets[doc.id]" type="number" min="1" :max="documents.length"/></label><button class="text-tool" :disabled="!!dirtyRows.length" @click="moveDocument(doc)">Move</button><label>Hierarchy<select v-model="drafts[doc.id].group_role"><option value="member">Member</option><option value="parent">Designated parent</option></select></label></AppPopover></td><td class="batch-frozen" :style="{left:`${frozenLeft('title')}px`}"><input v-model="drafts[doc.id].title" :aria-label="'Title for '+doc.original_name" maxlength="250"/></td><td v-if="!hiddenColumns.includes('File name')" :title="doc.original_name+' · '+sourceTimestamp(doc)">{{doc.original_name}}</td><td><input v-model="drafts[doc.id].document_date" :aria-label="'Date for '+doc.original_name" type="date" @input="drafts[doc.id].date_confirmed=true" :title="dateStatus(doc)"/></td><td><select v-model="drafts[doc.id].kind" :aria-label="'Type for '+doc.original_name"><option v-for="kind in kinds" :value="kind" :key="kind">{{kind}}</option></select></td><td><select v-model.number="drafts[doc.id].part" :aria-label="'Part for '+doc.original_name"><option v-for="part in parts" :value="part" :key="part">{{part}}</option></select></td><td><input v-model="drafts[doc.id].label" :aria-label="'Label for '+doc.original_name" maxlength="60"/></td><td v-if="!hiddenColumns.includes('Group')"><input v-model="drafts[doc.id].group_key" :aria-label="'Group for '+doc.original_name" maxlength="100"/></td><td>{{doc.page_count}}</td><td v-if="!hiddenColumns.includes('OCR')" :title="doc.ocr_status">{{doc.ocr_status==='native_text'?'Text':doc.ocr_status.split('_').join(' ')}}</td><td v-if="!hiddenColumns.includes('Status')">{{rowDirty(doc)?'Unsaved':doc.date_status==='confirmed'?'Reviewed':'Review date'}}</td></tr></tbody>
-  </table><p v-if="!filtered.length" class="review-empty">No documents match this filter. Your selection is unchanged.</p></div>
-  <footer class="batch-savebar"><span :class="dirtyRows.length ? 'unsaved' : 'saved'">{{dirtyRows.length ? `${dirtyRows.length} unsaved changes` : 'All changes saved'}}</span><small>Tab moves between fields · Escape reverts the current row</small><button class="membership-button quiet" :disabled="!dirtyRows.length||localBusy" @click="discard">Discard changes</button><button class="membership-button primary" :disabled="!dirtyRows.length||busy||localBusy" @click="save">{{localBusy?'Saving…':'Save changes'}}</button></footer>
- </section>
- </div>
 </template>

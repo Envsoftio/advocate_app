@@ -1,265 +1,474 @@
-import { enterLatestMatter } from './navigation'
-import { closeWorkspaceNavigation, openDocumentActions, openWorkspaceNavigation } from './navigation'
-import {expect,test} from '@playwright/test'
-import {readFile} from 'node:fs/promises'
-import {resolve} from 'node:path'
+import { enterLatestMatter } from './navigation';
+import {
+  closeWorkspaceNavigation,
+  openDocumentActions,
+  openWorkspaceNavigation,
+} from './navigation';
+import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
-test('clicking a saved comment opens its editor properties and on-page read popover',async({page,request})=>{
-  await page.setViewportSize({width:1440,height:900})
-  const matter=await (await request.post(`${base}/matters`,{headers,data:{name:'E2E Comment Properties',court_profile:'general-demo'}})).json()
-  const uploaded=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{
-    files:{name:'01_petition.pdf',mimeType:'application/pdf',buffer:await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))},
-  }})
-  expect(uploaded.ok()).toBe(true)
-  const document=(await uploaded.json())[0]
-  const created=await request.post(`${base}/documents/${document.id}/annotations`,{headers,data:{
-    kind:'comment',page_index:0,expected_revision:document.revision,rect_x:.15,rect_y:.2,
-    rect_width:.06,rect_height:.04,body:'Check this date',color:'yellow',output_scope:'private',
-  }})
-  expect(created.ok()).toBe(true)
-  const box=await request.post(`${base}/documents/${document.id}/annotations`,{headers,data:{
-    kind:'box',page_index:0,expected_revision:document.revision,rect_x:.4,rect_y:.3,
-    rect_width:.15,rect_height:.08,body:'',color:'green',output_scope:'pdf',
-  }})
-  expect(box.ok()).toBe(true)
-  const link=await request.put(`${base}/matters/${matter.id}/links`,{headers,data:{entries:[{
-    id:'f1b2c3d4e5f60718293a4b5c6d7e8f90',title:'Source link',source_document_id:document.id,
-    source_page_index:0,source_revision:document.revision,rect_x:.5,rect_y:.45,
-    rect_width:.18,rect_height:.05,kind:'external',target_document_id:null,
-    target_page_index:null,target_revision:null,uri:'https://example.com',
-  }]}})
-  expect(link.ok()).toBe(true)
-  await page.goto('/');await enterLatestMatter(page)
-  const comment=page.locator('.pdf-review-comment')
-  await expect(comment).toBeVisible()
-  await comment.click()
-  const inspector=page.getByLabel('PDF editing controls')
-  await expect(inspector.getByRole('textbox',{name:'Comment text'})).toHaveValue('Check this date')
-  await page.screenshot({path:test.info().outputPath('comment-editor-properties.png'),animations:'disabled'})
-  await inspector.getByRole('textbox',{name:'Comment text'}).fill('Check this date again')
-  await inspector.getByRole('button',{name:'Update mark'}).click()
-  await expect.poll(async()=>{
-    const marks=await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json()
-    return marks[0]?.body
-  }).toBe('Check this date again')
-  await page.locator('.pdf-review-shape.box:not(.draft)').click()
-  await expect(inspector.getByText('Box',{exact:true}).first()).toBeVisible()
-  await page.locator('.pdf-reviewed-link').click()
-  await expect(inspector.getByRole('textbox',{name:'Readable label'})).toHaveValue('Source link')
-  await inspector.getByRole('textbox',{name:'Readable label'}).fill('Updated source link')
-  await inspector.getByRole('button',{name:'Update link'}).click()
-  await expect.poll(async()=>{
-    const links=await (await request.get(`${base}/matters/${matter.id}/links`,{headers})).json()
-    return links[0]?.title
-  }).toBe('Updated source link')
-  await page.setViewportSize({width:1024,height:768})
-  await comment.click()
-  await expect(inspector.getByRole('textbox',{name:'Comment text'})).toHaveValue('Check this date again')
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true)
-  await page.screenshot({path:test.info().outputPath('comment-editor-compact.png'),animations:'disabled'})
-  await page.getByRole('button',{name:'Browse documents'}).click()
-  const paperWidth=(await page.locator('.pdf-paper').boundingBox())?.width
-  await comment.click()
-  const popover=page.getByRole('dialog',{name:'Comment'})
-  await expect(popover).toContainText('Check this date again')
-  await expect(page.locator('.reader-side-panel')).toHaveCount(0)
-  expect((await page.locator('.pdf-paper').boundingBox())?.width).toBe(paperWidth)
-  await expect(page.getByRole('textbox',{name:'Comment text'})).toHaveCount(0)
-  await openWorkspaceNavigation(page)
-  await page.getByRole('combobox',{name:'Theme'}).selectOption('dark')
-  await closeWorkspaceNavigation(page)
-  await expect(popover).toBeHidden()
-  await comment.click()
-  await expect(popover).toContainText('Check this date again')
-  await page.screenshot({path:test.info().outputPath('comment-document-popover-dark.png'),animations:'disabled'})
-  await comment.click()
-  await expect(popover).toHaveCount(0)
-  await comment.click()
-  await page.keyboard.press('Escape')
-  await expect(popover).toHaveCount(0)
-  await comment.click()
-  const paper=await page.locator('.pdf-paper').boundingBox()
-  expect(paper).toBeTruthy()
-  await page.mouse.click(paper!.x+30,paper!.y+30)
-  await expect(popover).toHaveCount(0)
-  await comment.click()
-  await popover.getByRole('button',{name:'Close comment'}).click()
-  await expect(popover).toHaveCount(0)
-})
+test('clicking a saved comment opens its editor properties and on-page read popover', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const matter = await (
+    await request.post(`${base}/matters`, {
+      headers,
+      data: { name: 'E2E Comment Properties', court_profile: 'general-demo' },
+    })
+  ).json();
+  const uploaded = await request.post(`${base}/matters/${matter.id}/documents?included=true`, {
+    headers,
+    multipart: {
+      files: {
+        name: '01_petition.pdf',
+        mimeType: 'application/pdf',
+        buffer: await readFile(resolve(import.meta.dirname, '../../samples/01_petition.pdf')),
+      },
+    },
+  });
+  expect(uploaded.ok()).toBe(true);
+  const document = (await uploaded.json())[0];
+  const created = await request.post(`${base}/documents/${document.id}/annotations`, {
+    headers,
+    data: {
+      kind: 'comment',
+      page_index: 0,
+      expected_revision: document.revision,
+      rect_x: 0.15,
+      rect_y: 0.2,
+      rect_width: 0.06,
+      rect_height: 0.04,
+      body: 'Check this date',
+      color: 'yellow',
+      output_scope: 'private',
+    },
+  });
+  expect(created.ok()).toBe(true);
+  const box = await request.post(`${base}/documents/${document.id}/annotations`, {
+    headers,
+    data: {
+      kind: 'box',
+      page_index: 0,
+      expected_revision: document.revision,
+      rect_x: 0.4,
+      rect_y: 0.3,
+      rect_width: 0.15,
+      rect_height: 0.08,
+      body: '',
+      color: 'green',
+      output_scope: 'pdf',
+    },
+  });
+  expect(box.ok()).toBe(true);
+  const link = await request.put(`${base}/matters/${matter.id}/links`, {
+    headers,
+    data: {
+      entries: [
+        {
+          id: 'f1b2c3d4e5f60718293a4b5c6d7e8f90',
+          title: 'Source link',
+          source_document_id: document.id,
+          source_page_index: 0,
+          source_revision: document.revision,
+          rect_x: 0.5,
+          rect_y: 0.45,
+          rect_width: 0.18,
+          rect_height: 0.05,
+          kind: 'external',
+          target_document_id: null,
+          target_page_index: null,
+          target_revision: null,
+          uri: 'https://example.com',
+        },
+      ],
+    },
+  });
+  expect(link.ok()).toBe(true);
+  await page.goto('/');
+  await enterLatestMatter(page);
+  const comment = page.locator('.pdf-review-comment');
+  await expect(comment).toBeVisible();
+  await comment.click();
+  const inspector = page.getByLabel('PDF editing controls');
+  await expect(inspector.getByRole('textbox', { name: 'Comment text' })).toHaveValue(
+    'Check this date',
+  );
+  await page.screenshot({
+    path: test.info().outputPath('comment-editor-properties.png'),
+    animations: 'disabled',
+  });
+  await inspector.getByRole('textbox', { name: 'Comment text' }).fill('Check this date again');
+  await inspector.getByRole('button', { name: 'Update mark' }).click();
+  await expect
+    .poll(async () => {
+      const marks = await (
+        await request.get(`${base}/matters/${matter.id}/annotations`, { headers })
+      ).json();
+      return marks[0]?.body;
+    })
+    .toBe('Check this date again');
+  await page.locator('.pdf-review-shape.box:not(.draft)').click();
+  await expect(inspector.getByText('Box', { exact: true }).first()).toBeVisible();
+  await page.locator('.pdf-reviewed-link').click();
+  await expect(inspector.getByRole('textbox', { name: 'Readable label' })).toHaveValue(
+    'Source link',
+  );
+  await inspector.getByRole('textbox', { name: 'Readable label' }).fill('Updated source link');
+  await inspector.getByRole('button', { name: 'Update link' }).click();
+  await expect
+    .poll(async () => {
+      const links = await (
+        await request.get(`${base}/matters/${matter.id}/links`, { headers })
+      ).json();
+      return links[0]?.title;
+    })
+    .toBe('Updated source link');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await comment.click();
+  await expect(inspector.getByRole('textbox', { name: 'Comment text' })).toHaveValue(
+    'Check this date again',
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: test.info().outputPath('comment-editor-compact.png'),
+    animations: 'disabled',
+  });
+  await page.getByRole('button', { name: 'Browse documents' }).click();
+  const paperWidth = (await page.locator('.pdf-paper').boundingBox())?.width;
+  await comment.click();
+  const popover = page.getByRole('dialog', { name: 'Comment' });
+  await expect(popover).toContainText('Check this date again');
+  await expect(page.locator('.reader-side-panel')).toHaveCount(0);
+  expect((await page.locator('.pdf-paper').boundingBox())?.width).toBe(paperWidth);
+  await expect(page.getByRole('textbox', { name: 'Comment text' })).toHaveCount(0);
+  await openWorkspaceNavigation(page);
+  await page.getByRole('combobox', { name: 'Theme' }).selectOption('dark');
+  await closeWorkspaceNavigation(page);
+  await expect(popover).toBeHidden();
+  await comment.click();
+  await expect(popover).toContainText('Check this date again');
+  await page.screenshot({
+    path: test.info().outputPath('comment-document-popover-dark.png'),
+    animations: 'disabled',
+  });
+  await comment.click();
+  await expect(popover).toHaveCount(0);
+  await comment.click();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await comment.click();
+  const paper = await page.locator('.pdf-paper').boundingBox();
+  expect(paper).toBeTruthy();
+  await page.mouse.click(paper!.x + 30, paper!.y + 30);
+  await expect(popover).toHaveCount(0);
+  await comment.click();
+  await popover.getByRole('button', { name: 'Close comment' }).click();
+  await expect(popover).toHaveCount(0);
+});
 
-const base=`http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`
-const headers={Authorization:'Bearer e2e-isolated-token'}
+const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`;
+const headers = { Authorization: 'Bearer e2e-isolated-token' };
 
-async function settledSurface(page:import('@playwright/test').Page) {
+async function settledSurface(page: import('@playwright/test').Page) {
   // Opening a tool changes the available reader width. Wait for its actual
   // raster and geometry before sending coordinates; stale=false alone can
   // still describe the previous painted size before ResizeObserver runs.
-  await expect.poll(()=>page.locator('.pdf-page-surface').evaluate(async el=>{
-    const bounds=()=>JSON.stringify(el.getBoundingClientRect().toJSON())
-    const before=bounds()
-    for(let i=0;i<3;i++)await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()))
-    return el.getAttribute('aria-busy')==='false' && before===bounds()
-  })).toBe(true)
+  await expect
+    .poll(() =>
+      page.locator('.pdf-page-surface').evaluate(async (el) => {
+        const bounds = () => JSON.stringify(el.getBoundingClientRect().toJSON());
+        const before = bounds();
+        for (let i = 0; i < 3; i++)
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        return el.getAttribute('aria-busy') === 'false' && before === bounds();
+      }),
+    )
+    .toBe(true);
 }
 
-test('select, drag, and Delete affect only authored overlays',async({page,request})=>{
-  await page.setViewportSize({width:1440,height:1000})
-  const matter=await (await request.post(`${base}/matters`,{headers,data:{
-    name:'E2E Overlay Selection',court_profile:'general-demo',max_pages_per_volume:10,
-  }})).json()
-  const uploaded=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{
-    files:{name:'01_petition.pdf',mimeType:'application/pdf',buffer:await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))},
-  }})
-  expect(uploaded.ok()).toBeTruthy()
-  const document=(await uploaded.json())[0]
-  const created=await request.post(`${base}/documents/${document.id}/annotations`,{headers,data:{
-    kind:'highlight',page_index:0,expected_revision:document.revision,
-    rect_x:.1,rect_y:.1,rect_width:.18,rect_height:.05,body:'Move me',color:'yellow',
-  }})
-  expect(created.ok()).toBeTruthy()
-  const link=await request.put(`${base}/matters/${matter.id}/links`,{headers,data:{entries:[{
-    id:'a1b2c3d4e5f60718293a4b5c6d7e8f90',title:'Review link',source_document_id:document.id,
-    source_page_index:0,source_revision:document.revision,rect_x:.4,rect_y:.1,
-    rect_width:.18,rect_height:.05,kind:'external',target_document_id:null,
-    target_page_index:null,target_revision:null,uri:'https://example.com',
-  }]}})
-  expect(link.ok()).toBeTruthy()
-  await page.goto('/');await enterLatestMatter(page)
-  await expect(page.getByRole('button', {name:'Open workspaces'})).toContainText('E2E Overlay Selection')
-  const highlight=page.locator('.pdf-review-highlight')
-  const reviewedLink=page.locator('.pdf-reviewed-link')
-  await expect(highlight).toBeVisible()
-  await highlight.click()
-  await expect(highlight).toHaveClass(/selected/)
-  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
-  await settledSurface(page)
-  const before=await highlight.boundingBox()
-  expect(before).toBeTruthy()
-  await page.mouse.move(before!.x+before!.width/2,before!.y+before!.height/2)
-  await page.mouse.down()
-  await page.mouse.move(before!.x+before!.width/2+55,before!.y+before!.height/2+35,{steps:6})
-  await page.mouse.up()
-  await expect.poll(async()=>{
-    const entries=await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json()
-    return entries[0].rect_x
-  }).toBeGreaterThan(.1)
-  await reviewedLink.click()
-  await expect(reviewedLink).toHaveClass(/selected/)
-  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
-  await settledSurface(page)
-  const linkBefore=await reviewedLink.boundingBox()
-  expect(linkBefore).toBeTruthy()
-  await page.mouse.move(linkBefore!.x+linkBefore!.width/2,linkBefore!.y+linkBefore!.height/2)
-  await page.mouse.down()
-  await page.mouse.move(linkBefore!.x+linkBefore!.width/2+38,linkBefore!.y+linkBefore!.height/2+24,{steps:6})
-  await page.mouse.up()
-  await expect.poll(async()=>{
-    const entries=await (await request.get(`${base}/matters/${matter.id}/links`,{headers})).json()
-    return entries[0].rect_x
-  }).toBeGreaterThan(.4)
-  const handle=page.getByRole('button',{name:'Resize selected Reviewed link'})
-  await expect(handle).toBeVisible()
-  const corner=await handle.boundingBox()
-  expect(corner).toBeTruthy()
-  await page.mouse.move(corner!.x+corner!.width/2,corner!.y+corner!.height/2)
-  await page.mouse.down()
-  await page.mouse.move(corner!.x+corner!.width/2+30,corner!.y+corner!.height/2+20,{steps:6})
-  await page.mouse.up()
-  await expect.poll(async()=>{
-    const entries=await (await request.get(`${base}/matters/${matter.id}/links`,{headers})).json()
-    return entries[0].rect_width
-  }).toBeGreaterThan(.18)
-  await reviewedLink.press('Delete')
-  await expect(reviewedLink).toHaveCount(0)
-  await expect.poll(async()=> (await (await request.get(`${base}/matters/${matter.id}/links`,{headers})).json()).length).toBe(0)
-  await highlight.click()
-  await highlight.press('Delete')
-  await expect(highlight).toHaveCount(0)
-  await expect.poll(async()=> (await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json()).length).toBe(0)
-  const refreshed=await (await request.get(`${base}/matters/${matter.id}/documents`,{headers})).json()
-  expect(refreshed[0].revision).toBe(document.revision)
-})
+test('select, drag, and Delete affect only authored overlays', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const matter = await (
+    await request.post(`${base}/matters`, {
+      headers,
+      data: {
+        name: 'E2E Overlay Selection',
+        court_profile: 'general-demo',
+        max_pages_per_volume: 10,
+      },
+    })
+  ).json();
+  const uploaded = await request.post(`${base}/matters/${matter.id}/documents?included=true`, {
+    headers,
+    multipart: {
+      files: {
+        name: '01_petition.pdf',
+        mimeType: 'application/pdf',
+        buffer: await readFile(resolve(import.meta.dirname, '../../samples/01_petition.pdf')),
+      },
+    },
+  });
+  expect(uploaded.ok()).toBeTruthy();
+  const document = (await uploaded.json())[0];
+  const created = await request.post(`${base}/documents/${document.id}/annotations`, {
+    headers,
+    data: {
+      kind: 'highlight',
+      page_index: 0,
+      expected_revision: document.revision,
+      rect_x: 0.1,
+      rect_y: 0.1,
+      rect_width: 0.18,
+      rect_height: 0.05,
+      body: 'Move me',
+      color: 'yellow',
+    },
+  });
+  expect(created.ok()).toBeTruthy();
+  const link = await request.put(`${base}/matters/${matter.id}/links`, {
+    headers,
+    data: {
+      entries: [
+        {
+          id: 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+          title: 'Review link',
+          source_document_id: document.id,
+          source_page_index: 0,
+          source_revision: document.revision,
+          rect_x: 0.4,
+          rect_y: 0.1,
+          rect_width: 0.18,
+          rect_height: 0.05,
+          kind: 'external',
+          target_document_id: null,
+          target_page_index: null,
+          target_revision: null,
+          uri: 'https://example.com',
+        },
+      ],
+    },
+  });
+  expect(link.ok()).toBeTruthy();
+  await page.goto('/');
+  await enterLatestMatter(page);
+  await expect(page.getByRole('button', { name: 'Open workspaces' })).toContainText(
+    'E2E Overlay Selection',
+  );
+  const highlight = page.locator('.pdf-review-highlight');
+  const reviewedLink = page.locator('.pdf-reviewed-link');
+  await expect(highlight).toBeVisible();
+  await highlight.click();
+  await expect(highlight).toHaveClass(/selected/);
+  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/);
+  await settledSurface(page);
+  const before = await highlight.boundingBox();
+  expect(before).toBeTruthy();
+  await page.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(before!.x + before!.width / 2 + 55, before!.y + before!.height / 2 + 35, {
+    steps: 6,
+  });
+  await page.mouse.up();
+  await expect
+    .poll(async () => {
+      const entries = await (
+        await request.get(`${base}/matters/${matter.id}/annotations`, { headers })
+      ).json();
+      return entries[0].rect_x;
+    })
+    .toBeGreaterThan(0.1);
+  await reviewedLink.click();
+  await expect(reviewedLink).toHaveClass(/selected/);
+  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/);
+  await settledSurface(page);
+  const linkBefore = await reviewedLink.boundingBox();
+  expect(linkBefore).toBeTruthy();
+  await page.mouse.move(
+    linkBefore!.x + linkBefore!.width / 2,
+    linkBefore!.y + linkBefore!.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    linkBefore!.x + linkBefore!.width / 2 + 38,
+    linkBefore!.y + linkBefore!.height / 2 + 24,
+    { steps: 6 },
+  );
+  await page.mouse.up();
+  await expect
+    .poll(async () => {
+      const entries = await (
+        await request.get(`${base}/matters/${matter.id}/links`, { headers })
+      ).json();
+      return entries[0].rect_x;
+    })
+    .toBeGreaterThan(0.4);
+  const handle = page.getByRole('button', { name: 'Resize selected Reviewed link' });
+  await expect(handle).toBeVisible();
+  const corner = await handle.boundingBox();
+  expect(corner).toBeTruthy();
+  await page.mouse.move(corner!.x + corner!.width / 2, corner!.y + corner!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(corner!.x + corner!.width / 2 + 30, corner!.y + corner!.height / 2 + 20, {
+    steps: 6,
+  });
+  await page.mouse.up();
+  await expect
+    .poll(async () => {
+      const entries = await (
+        await request.get(`${base}/matters/${matter.id}/links`, { headers })
+      ).json();
+      return entries[0].rect_width;
+    })
+    .toBeGreaterThan(0.18);
+  await reviewedLink.press('Delete');
+  await expect(reviewedLink).toHaveCount(0);
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${base}/matters/${matter.id}/links`, { headers })).json())
+          .length,
+    )
+    .toBe(0);
+  await highlight.click();
+  await highlight.press('Delete');
+  await expect(highlight).toHaveCount(0);
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${base}/matters/${matter.id}/annotations`, { headers })).json())
+          .length,
+    )
+    .toBe(0);
+  const refreshed = await (
+    await request.get(`${base}/matters/${matter.id}/documents`, { headers })
+  ).json();
+  expect(refreshed[0].revision).toBe(document.revision);
+});
 
-test('Annotate and Stamps retain independent editable marks',async({page,request})=>{
-  await page.setViewportSize({width:1440,height:1000})
-  const matter=await (await request.post(`${base}/matters`,{headers,data:{
-    name:'E2E Independent Marks',court_profile:'general-demo',max_pages_per_volume:10,
-  }})).json()
-  const uploaded=await request.post(`${base}/matters/${matter.id}/documents?included=true`,{headers,multipart:{
-    files:{name:'01_petition.pdf',mimeType:'application/pdf',buffer:await readFile(resolve(import.meta.dirname,'../../samples/01_petition.pdf'))},
-  }})
-  expect(uploaded.ok()).toBeTruthy()
-  await page.goto('/');await enterLatestMatter(page)
-  await expect(page.getByRole('button', {name:'Open workspaces'})).toContainText('E2E Independent Marks')
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('tab',{name:'Annotate'}).click()
-  for (const name of ['Highlight','Comment','Draw','Box'])
-    await expect(page.getByRole('button',{name,exact:true})).toBeVisible()
-  await expect(page.getByRole('button',{name:'Underline',exact:true})).toBeDisabled()
-  await expect(page.getByRole('button',{name:'Strikeout',exact:true})).toBeDisabled()
-  await page.getByRole('button',{name:'More annotation tools'}).click()
-  for (const name of ['Ellipse','Line','Arrow'])
-    await expect(page.getByRole('button',{name,exact:true})).toBeVisible()
-  await page.getByRole('button',{name:'More annotation tools'}).click()
-  await page.screenshot({path:test.info().outputPath('annotation-toolbar.png')})
-  await page.getByRole('button',{name:'Box',exact:true}).click()
-  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/)
-  await settledSurface(page)
-  const paper=await page.locator('.pdf-paper').boundingBox()
-  expect(paper).toBeTruthy()
-  await page.mouse.move(paper!.x+80,paper!.y+60)
-  await page.mouse.down()
-  await page.mouse.move(paper!.x+180,paper!.y+115,{steps:5})
-  await page.mouse.up()
-  await expect(page.getByText('This editable mark is included in Save copy and new bundle exports.')).toBeVisible()
-  const boxPageColumn=page.locator('.viewer-page-column')
-  const beforeAddMark=await boxPageColumn.boundingBox()
-  expect(beforeAddMark).toBeTruthy()
-  await page.getByRole('button',{name:'Add mark'}).click()
-  const box=page.locator('.pdf-review-shape.box:not(.draft)')
-  await expect(box).toBeVisible()
-  await expect(page.locator('.viewer-tool-inspector')).toBeVisible()
-  const afterAddMark=await boxPageColumn.boundingBox()
-  expect(afterAddMark).toBeTruthy()
-  expect(Math.abs(afterAddMark!.x-beforeAddMark!.x)).toBeLessThan(1)
-  expect(Math.abs(afterAddMark!.width-beforeAddMark!.width)).toBeLessThan(1)
-  const boxWidth=(await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json())[0].rect_width as number
-  await box.click()
-  await settledSurface(page)
-  const boxHandle=page.getByRole('button',{name:'Resize selected Box'})
-  const boxCorner=await boxHandle.boundingBox()
-  expect(boxCorner).toBeTruthy()
-  await page.mouse.move(boxCorner!.x+boxCorner!.width/2,boxCorner!.y+boxCorner!.height/2)
-  await page.mouse.down()
-  await page.mouse.move(boxCorner!.x+boxCorner!.width/2+25,boxCorner!.y+boxCorner!.height/2+10,{steps:5})
-  await page.mouse.up()
-  await expect.poll(async()=> (await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json())[0].rect_width as number).toBeGreaterThan(boxWidth)
-  await page.getByRole('button',{name:'Draw',exact:true}).click()
-  await settledSurface(page)
-  const drawPaper=await page.locator('.pdf-paper').boundingBox()
-  expect(drawPaper).toBeTruthy()
-  await page.mouse.move(drawPaper!.x+100,drawPaper!.y+160)
-  await page.mouse.down()
-  await page.mouse.move(drawPaper!.x+145,drawPaper!.y+185,{steps:8})
-  await page.mouse.move(drawPaper!.x+205,drawPaper!.y+165,{steps:8})
-  await page.mouse.up()
-  await page.getByRole('button',{name:'Add mark'}).click()
-  const drawing=page.locator('.pdf-review-shape.draw:not(.draft)')
-  await expect(drawing).toBeVisible()
-  await openDocumentActions(page)
-  await closeWorkspaceNavigation(page)
-  await page.getByRole('tab',{name:'Stamps'}).click()
-  await expect(page.getByText('no verified signature or form filling')).toBeVisible()
-  await expect(page.getByRole('button',{name:'Check',exact:true})).toBeVisible()
-  await expect(page.getByRole('button',{name:'Date',exact:true})).toBeVisible()
-  await page.reload();await enterLatestMatter(page)
-  await expect(box).toBeVisible()
-  await expect(drawing).toBeVisible()
-  await box.click()
-  await box.press('Delete')
-  await expect(box).toHaveCount(0)
-  await drawing.click()
-  await drawing.press('Delete')
-  await expect(drawing).toHaveCount(0)
-  await expect.poll(async()=> (await (await request.get(`${base}/matters/${matter.id}/annotations`,{headers})).json()).length).toBe(0)
-})
+test('Annotate and Stamps retain independent editable marks', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const matter = await (
+    await request.post(`${base}/matters`, {
+      headers,
+      data: {
+        name: 'E2E Independent Marks',
+        court_profile: 'general-demo',
+        max_pages_per_volume: 10,
+      },
+    })
+  ).json();
+  const uploaded = await request.post(`${base}/matters/${matter.id}/documents?included=true`, {
+    headers,
+    multipart: {
+      files: {
+        name: '01_petition.pdf',
+        mimeType: 'application/pdf',
+        buffer: await readFile(resolve(import.meta.dirname, '../../samples/01_petition.pdf')),
+      },
+    },
+  });
+  expect(uploaded.ok()).toBeTruthy();
+  await page.goto('/');
+  await enterLatestMatter(page);
+  await expect(page.getByRole('button', { name: 'Open workspaces' })).toContainText(
+    'E2E Independent Marks',
+  );
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('tab', { name: 'Annotate' }).click();
+  for (const name of ['Highlight', 'Comment', 'Draw', 'Box'])
+    await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Underline', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Strikeout', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'More annotation tools' }).click();
+  for (const name of ['Ellipse', 'Line', 'Arrow'])
+    await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'More annotation tools' }).click();
+  await page.screenshot({ path: test.info().outputPath('annotation-toolbar.png') });
+  await page.getByRole('button', { name: 'Box', exact: true }).click();
+  await expect(page.locator('.pdf-placement-surface')).not.toHaveClass(/is-stale/);
+  await settledSurface(page);
+  const paper = await page.locator('.pdf-paper').boundingBox();
+  expect(paper).toBeTruthy();
+  await page.mouse.move(paper!.x + 80, paper!.y + 60);
+  await page.mouse.down();
+  await page.mouse.move(paper!.x + 180, paper!.y + 115, { steps: 5 });
+  await page.mouse.up();
+  await expect(
+    page.getByText('This editable mark is included in Save copy and new bundle exports.'),
+  ).toBeVisible();
+  const boxPageColumn = page.locator('.viewer-page-column');
+  const beforeAddMark = await boxPageColumn.boundingBox();
+  expect(beforeAddMark).toBeTruthy();
+  await page.getByRole('button', { name: 'Add mark' }).click();
+  const box = page.locator('.pdf-review-shape.box:not(.draft)');
+  await expect(box).toBeVisible();
+  await expect(page.locator('.viewer-tool-inspector')).toBeVisible();
+  const afterAddMark = await boxPageColumn.boundingBox();
+  expect(afterAddMark).toBeTruthy();
+  expect(Math.abs(afterAddMark!.x - beforeAddMark!.x)).toBeLessThan(1);
+  expect(Math.abs(afterAddMark!.width - beforeAddMark!.width)).toBeLessThan(1);
+  const boxWidth = (
+    await (await request.get(`${base}/matters/${matter.id}/annotations`, { headers })).json()
+  )[0].rect_width as number;
+  await box.click();
+  await settledSurface(page);
+  const boxHandle = page.getByRole('button', { name: 'Resize selected Box' });
+  const boxCorner = await boxHandle.boundingBox();
+  expect(boxCorner).toBeTruthy();
+  await page.mouse.move(boxCorner!.x + boxCorner!.width / 2, boxCorner!.y + boxCorner!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    boxCorner!.x + boxCorner!.width / 2 + 25,
+    boxCorner!.y + boxCorner!.height / 2 + 10,
+    { steps: 5 },
+  );
+  await page.mouse.up();
+  await expect
+    .poll(
+      async () =>
+        (
+          await (await request.get(`${base}/matters/${matter.id}/annotations`, { headers })).json()
+        )[0].rect_width as number,
+    )
+    .toBeGreaterThan(boxWidth);
+  await page.getByRole('button', { name: 'Draw', exact: true }).click();
+  await settledSurface(page);
+  const drawPaper = await page.locator('.pdf-paper').boundingBox();
+  expect(drawPaper).toBeTruthy();
+  await page.mouse.move(drawPaper!.x + 100, drawPaper!.y + 160);
+  await page.mouse.down();
+  await page.mouse.move(drawPaper!.x + 145, drawPaper!.y + 185, { steps: 8 });
+  await page.mouse.move(drawPaper!.x + 205, drawPaper!.y + 165, { steps: 8 });
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Add mark' }).click();
+  const drawing = page.locator('.pdf-review-shape.draw:not(.draft)');
+  await expect(drawing).toBeVisible();
+  await openDocumentActions(page);
+  await closeWorkspaceNavigation(page);
+  await page.getByRole('tab', { name: 'Stamps' }).click();
+  await expect(page.getByText('no verified signature or form filling')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Check', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Date', exact: true })).toBeVisible();
+  await page.reload();
+  await enterLatestMatter(page);
+  await expect(box).toBeVisible();
+  await expect(drawing).toBeVisible();
+  await box.click();
+  await box.press('Delete');
+  await expect(box).toHaveCount(0);
+  await drawing.click();
+  await drawing.press('Delete');
+  await expect(drawing).toHaveCount(0);
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${base}/matters/${matter.id}/annotations`, { headers })).json())
+          .length,
+    )
+    .toBe(0);
+});

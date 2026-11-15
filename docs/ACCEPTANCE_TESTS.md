@@ -1293,3 +1293,12 @@ Local-only evidence: [light View popup](ui-evidence/popovers/view-1440-light-100
 - `git diff --check` passed. Existing staged work and the licensing/pricing PRD were preserved.
 
 Local-only evidence: [membership pixel comparison](ui-evidence/reka/comparison.json), [desktop membership](ui-evidence/reka/BU05-1440-light.png), [compact dark membership](ui-evidence/reka/BU05-1024-dark.png), [metadata filters](ui-evidence/reka/06D-1440-light-100.png), [reader choices](ui-evidence/reka/reader-choice-1440-dark.png). Reka behavior follows its [ToggleGroup guidance](https://reka-ui.com/docs/components/toggle-group); the existing CSS remains the visual source.
+
+
+## EI. Prettier formatting scripts — 16 November 2026
+
+Added pinned `prettier` **3.10.1** to frontend development dependencies with `npm run format` (write) and `npm run format:check` (check only). The explicit file patterns cover Vue/TS/JS/CSS source, TS browser tests, frontend root configuration and HTML. Generated outputs and the package lock are excluded. Configuration uses two spaces, single quotes, 100-column wrapping, semicolons and strict HTML whitespace handling. Project instructions document the commands. Ran formatting across the configured files; existing staged work remains staged independently of these working-tree changes.
+
+Final checks: `npm run format:check`, `npm run build`, `npm run test` (**48/48**) and `git diff --check` passed. The existing Vite chunk-size advisory remains. The initial semicolon-free configuration exposed Vue compiler rejection of multiline event statements; enabling semicolons corrected the issue before final verification.
+
+Browser smoke command: `MATTERDRAFT_E2E_VITE_PORT=1436 npm run test:e2e -- popover-consistency.spec.ts document-state.spec.ts --output=/private/tmp/matterdraft-prettier-browser` — **6/6 passed**, no retries, **48.7 seconds**. Checks include working/original/generated readers, Save failure/Cancel/Discard, stale responses, parent-close draft guards, Reka keyboard controls and popup appearance. Desktop light View screenshot matches the pre-format capture exactly; compact dark/125% differs by one pixel. This is scoped smoke coverage, not a full browser-suite run. Backend and native builds/interactions were not rerun for formatting.

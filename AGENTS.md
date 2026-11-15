@@ -8,7 +8,7 @@
 - PDF index, bookmarks, volume page numbers, CSV ranges and combined offsets must all derive from one deterministic page map (`backend/app/engine.py`). Add pytest cases for every new volume/index rule.
 - Keep backend processing UI-independent. Avoid adding cloud dependencies for core features.
 - Python tests: `cd backend && python -m pytest -q`. Use the configured backend virtual environment; record current results in `docs/ACCEPTANCE_TESTS.md`.
-- Frontend: `cd frontend && npm run build && npm run test`; install dependencies with `npm install` if missing. Browser checks use `npm run test:e2e` with synthetic data.
+- Frontend: `cd frontend && npm run build && npm run test`; install dependencies with `npm install` if missing. Browser checks use `npm run test:e2e` with synthetic data. Format frontend source/configuration and browser tests with `cd frontend && npm run format`; use `npm run format:check` to verify formatting without rewriting files. Prettier is a pinned development dependency.
 - Rust/Tauri: native build requires matching PyInstaller sidecar in `frontend/src-tauri/binaries/`; create via `python backend/scripts/build_sidecar.py`, then `cd frontend && npm run tauri:build -- --bundles app` on macOS. Local Apple Silicon builds have been verified; consult the acceptance log for remaining target-device checks.
 - First priority: real Mac/Windows compile, browser UI runtime verification, native export/save testing. Do not infer those tests passed.
 - Work with synthetic files in `samples/`, not actual confidential matters. Source hashes and signed documents require extra caution.

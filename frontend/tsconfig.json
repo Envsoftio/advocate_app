@@ -6,6 +6,6 @@
     "composite": true,
     "types": ["vite/client", "vitest/globals"],
     "noUncheckedIndexedAccess": false,
-    "paths": {"@/*": ["./src/*"]}
+    "paths": { "@/*": ["./src/*"] }
   }
 }

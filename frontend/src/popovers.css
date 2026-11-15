@@ -1,21 +1,134 @@
-.app-shell.design-shell{position:relative}
+.app-shell.design-shell {
+  position: relative;
+}
 /* One surface for lightweight menus and setting popovers, backed by Reka UI. */
-.app-popover-anchor{display:inline-flex;align-items:center;flex-shrink:0}
-.app-popover{z-index:150;box-sizing:border-box;display:flex;flex-direction:column;gap:6px;width:280px;max-width:calc(100vw - 24px);max-height:var(--reka-popover-content-available-height);overflow:auto;padding:8px;border:1px solid var(--cb-control-border);border-radius:10px;background:var(--cb-surface);color:var(--cb-text);box-shadow:0 12px 32px #0003;font:13px/20px Inter,sans-serif;outline:none}
-.app-popover>button,.app-popover .popup-tabs>button,.app-popover .popup-action{display:flex;align-items:center;justify-content:flex-start;gap:10px;min-height:36px;width:100%;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:var(--cb-text);font:inherit;text-align:left;cursor:pointer}
-.app-popover button:hover:not(:disabled){background:var(--cb-selected)}
-.app-popover button:disabled{opacity:.5;cursor:default}
-.app-popover :focus-visible{outline:2px solid var(--cb-focus);outline-offset:2px}
-.app-popover>label{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:6px;color:var(--cb-text);font-size:12px}
-.app-popover select,.app-popover input:not([type=checkbox]){min-width:0;max-width:100%;height:34px;padding:0 8px;border:1px solid var(--cb-control-border);border-radius:6px;background:var(--cb-surface);color:var(--cb-text);font:inherit}
-.app-popover select{flex:1}
-.app-popover>strong{padding:6px;color:var(--cb-text)}
-.app-popover.batch-filter-panel>label{flex-direction:column;align-items:stretch}
-.app-popover.batch-columns>label{justify-content:flex-start}
-.app-popover .popup-divider{height:1px;background:var(--cb-border);margin:2px 0}
-.reader-view-trigger{display:flex;align-items:center;justify-content:center;gap:8px;height:34px;min-width:94px;border:1px solid var(--cb-control-border);border-radius:8px;background:var(--cb-surface);color:var(--cb-text);font:600 13px Inter,sans-serif;cursor:pointer}
+.app-popover-anchor {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.app-popover {
+  z-index: 150;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 280px;
+  max-width: calc(100vw - 24px);
+  max-height: var(--reka-popover-content-available-height);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--cb-control-border);
+  border-radius: 10px;
+  background: var(--cb-surface);
+  color: var(--cb-text);
+  box-shadow: 0 12px 32px #0003;
+  font:
+    13px/20px Inter,
+    sans-serif;
+  outline: none;
+}
+.app-popover > button,
+.app-popover .popup-tabs > button,
+.app-popover .popup-action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-height: 36px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cb-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.app-popover button:hover:not(:disabled) {
+  background: var(--cb-selected);
+}
+.app-popover button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.app-popover :focus-visible {
+  outline: 2px solid var(--cb-focus);
+  outline-offset: 2px;
+}
+.app-popover > label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px;
+  color: var(--cb-text);
+  font-size: 12px;
+}
+.app-popover select,
+.app-popover input:not([type='checkbox']) {
+  min-width: 0;
+  max-width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--cb-control-border);
+  border-radius: 6px;
+  background: var(--cb-surface);
+  color: var(--cb-text);
+  font: inherit;
+}
+.app-popover select {
+  flex: 1;
+}
+.app-popover > strong {
+  padding: 6px;
+  color: var(--cb-text);
+}
+.app-popover.batch-filter-panel > label {
+  flex-direction: column;
+  align-items: stretch;
+}
+.app-popover.batch-columns > label {
+  justify-content: flex-start;
+}
+.app-popover .popup-divider {
+  height: 1px;
+  background: var(--cb-border);
+  margin: 2px 0;
+}
+.reader-view-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  min-width: 94px;
+  border: 1px solid var(--cb-control-border);
+  border-radius: 8px;
+  background: var(--cb-surface);
+  color: var(--cb-text);
+  font:
+    600 13px Inter,
+    sans-serif;
+  cursor: pointer;
+}
 :root .design-shell .finding-recheck,
-:root .design-shell .finding-recheck :is(strong,p,svg){color:var(--cb-text-onPale)!important}
+:root .design-shell .finding-recheck :is(strong, p, svg) {
+  color: var(--cb-text-onPale) !important;
+}
 
-.batch-row-menu>button{width:24px;height:26px;min-height:0;padding:0;border:0;font-size:20px}
-.batch-tools-menu>button{width:30px;height:34px;padding:0;font-size:24px}
+.batch-row-menu > button {
+  width: 24px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  font-size: 20px;
+}
+.batch-tools-menu > button {
+  width: 30px;
+  height: 34px;
+  padding: 0;
+  font-size: 24px;
+}

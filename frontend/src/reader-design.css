@@ -103,7 +103,7 @@
   background: var(--cb-nav-raised);
   color: var(--cb-nav-activeText);
 }
-.matter-rail button[aria-current="page"] {
+.matter-rail button[aria-current='page'] {
   background: var(--cb-nav-selected);
   color: var(--cb-nav-activeIcon);
 }
@@ -207,7 +207,7 @@
   white-space: nowrap;
   font-size: 12px;
 }
-.design-shell[data-documents="true"] .workspace-page {
+.design-shell[data-documents='true'] .workspace-page {
   padding: 0;
   flex: 1;
   min-height: 0;
@@ -215,9 +215,8 @@
   display: flex;
   flex-direction: column;
 }
-.design-shell[data-documents="true"] .documents-workspace,
-.design-shell[data-editor-expanded="true"][data-documents="true"]
-  .documents-workspace {
+.design-shell[data-documents='true'] .documents-workspace,
+.design-shell[data-editor-expanded='true'][data-documents='true'] .documents-workspace {
   position: relative;
   display: flex;
   flex: 1;
@@ -229,7 +228,7 @@
   grid-template-columns: none;
   border: 0;
 }
-.design-shell[data-documents="true"] .documents-workspace > .preview-panel {
+.design-shell[data-documents='true'] .documents-workspace > .preview-panel {
   display: flex;
   flex: 1;
   min-width: 0;
@@ -241,7 +240,7 @@
   overflow: hidden;
   container-type: normal;
 }
-.design-shell[data-documents="true"] .documents-workspace > .docs-panel {
+.design-shell[data-documents='true'] .documents-workspace > .docs-panel {
   position: absolute;
   inset: 0 auto 0 0;
   width: min(360px, 85%);
@@ -263,7 +262,7 @@
   right: 6px;
   top: 10px;
 }
-.design-shell[data-documents="true"] .documents-workspace > .metadata-panel {
+.design-shell[data-documents='true'] .documents-workspace > .metadata-panel {
   position: absolute;
   right: 0;
   top: 64px;
@@ -409,7 +408,7 @@
   color: var(--cb-text);
 }
 .design-shell .reader-tool-navigation .pdf-tool-tabs > button.active:after {
-  content: "";
+  content: '';
   position: absolute;
   left: 8px;
   right: 8px;
@@ -517,10 +516,7 @@
   appearance: textfield;
   -moz-appearance: textfield;
 }
-.design-shell
-  .reader-navigation
-  .page-counter
-  input::-webkit-inner-spin-button {
+.design-shell .reader-navigation .page-counter input::-webkit-inner-spin-button {
   appearance: none;
 }
 .design-shell .reader-navigation select {
@@ -544,9 +540,7 @@
   overflow: hidden;
   background: var(--cb-canvas);
 }
-.design-shell
-  .read-workspace
-  .viewer-edit-workspace:has(> .virtual-thumbnail-rail),
+.design-shell .read-workspace .viewer-edit-workspace:has(> .virtual-thumbnail-rail),
 .design-shell .read-workspace .viewer-edit-workspace:has(> .reader-side-panel) {
   grid-template-columns: 200px minmax(0, 1fr);
 }
@@ -558,23 +552,17 @@
   .viewer-edit-workspace.has-tool-inspector:has(> .virtual-thumbnail-rail) {
   grid-template-columns: 200px 250px minmax(0, 1fr);
 }
-.design-shell
-  .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(> .reader-side-panel) {
+.design-shell .read-workspace .viewer-edit-workspace.has-tool-inspector:has(> .reader-side-panel) {
   grid-template-columns: 200px 250px minmax(0, 1fr);
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(
-    > .viewer-tool-inspector .page-annotation-panel
-  ) {
+  .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector .page-annotation-panel) {
   grid-template-columns: 232px minmax(0, 1fr) 292px;
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(
-    > .viewer-tool-inspector .page-annotation-panel
-  )
+  .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector .page-annotation-panel)
   > .viewer-tool-inspector {
   grid-column: 3;
   grid-row: 1/-1;
@@ -584,18 +572,14 @@
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(
-    > .viewer-tool-inspector .page-annotation-panel
-  )
+  .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector .page-annotation-panel)
   > .viewer-page-column {
   grid-column: 2;
   grid-row: 1/-1;
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(
-    > .viewer-tool-inspector .page-annotation-panel
-  )
+  .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector .page-annotation-panel)
   > .reader-panel-tabs {
   grid-column: 1;
 }
@@ -605,19 +589,18 @@
 .design-shell .read-workspace .viewer-edit-workspace > .reader-side-panel {
   width: 232px;
 }
-.design-shell .read-workspace > .page-editbar:has([aria-label="Review PDF"]) {
+.design-shell .read-workspace > .page-editbar:has([aria-label='Review PDF']) {
   height: 44px;
   min-height: 44px;
   padding: 5px 16px;
   background: var(--cb-surface);
 }
 @media (min-width: 1101px) {
-  .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"]) {
+  .design-shell .read-workspace:has(.editor-tool-group[aria-label='Review PDF']) {
     position: relative;
   }
   .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"])
+    .read-workspace:has(.editor-tool-group[aria-label='Review PDF'])
     > .reader-navigation {
     position: absolute;
     top: 108px;
@@ -633,50 +616,47 @@
     overflow: visible;
   }
   .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"])
+    .read-workspace:has(.editor-tool-group[aria-label='Review PDF'])
     > .reader-navigation
     > :nth-child(4),
   .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"])
+    .read-workspace:has(.editor-tool-group[aria-label='Review PDF'])
     > .reader-navigation
     > :nth-child(6),
   .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"])
+    .read-workspace:has(.editor-tool-group[aria-label='Review PDF'])
     > .reader-navigation
     > :nth-child(7),
   .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"])
+    .read-workspace:has(.editor-tool-group[aria-label='Review PDF'])
     > .reader-navigation
     > :nth-child(8),
   .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"])
+    .read-workspace:has(.editor-tool-group[aria-label='Review PDF'])
     > .reader-navigation
     > :nth-child(9),
   .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"])
+    .read-workspace:has(.editor-tool-group[aria-label='Review PDF'])
     > .reader-navigation
     > :nth-child(10),
   .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"])
+    .read-workspace:has(.editor-tool-group[aria-label='Review PDF'])
     > .reader-navigation
     > :nth-child(11) {
     display: none;
   }
   .design-shell
-    .read-workspace:has(.editor-tool-group[aria-label="Review PDF"])
+    .read-workspace:has(.editor-tool-group[aria-label='Review PDF'])
     > .reader-navigation
     .reader-view-menu {
     display: none;
   }
 }
-.design-shell .read-workspace .editor-tool-group[aria-label="Review PDF"] {
+.design-shell .read-workspace .editor-tool-group[aria-label='Review PDF'] {
   width: 100%;
   gap: 6px;
 }
-.design-shell
-  .read-workspace
-  .editor-tool-group[aria-label="Review PDF"]
-  > .text-tool,
+.design-shell .read-workspace .editor-tool-group[aria-label='Review PDF'] > .text-tool,
 .design-shell .read-workspace .annotation-more > summary {
   height: 34px;
   min-height: 34px;
@@ -695,16 +675,13 @@
 }
 .design-shell
   .read-workspace
-  .editor-tool-group[aria-label="Review PDF"]
-  > .text-tool[aria-pressed="true"] {
+  .editor-tool-group[aria-label='Review PDF']
+  > .text-tool[aria-pressed='true'] {
   background: var(--cb-selected);
   border-color: var(--cb-link);
   color: var(--cb-link);
 }
-.design-shell
-  .read-workspace
-  .editor-tool-group[aria-label="Review PDF"]
-  > .text-tool:disabled {
+.design-shell .read-workspace .editor-tool-group[aria-label='Review PDF'] > .text-tool:disabled {
   opacity: 0.55;
 }
 .annotation-more {
@@ -823,21 +800,17 @@
   color: var(--cb-muted);
 }
 @media (max-width: 900px) {
-  .design-shell .read-workspace .editor-tool-group[aria-label="Review PDF"] {
+  .design-shell .read-workspace .editor-tool-group[aria-label='Review PDF'] {
     min-width: max-content;
   }
   .design-shell
     .read-workspace
-    .viewer-edit-workspace.has-tool-inspector:has(
-      > .viewer-tool-inspector .page-annotation-panel
-    ) {
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector .page-annotation-panel) {
     grid-template-columns: 160px minmax(0, 1fr) 240px;
   }
   .design-shell
     .read-workspace
-    .viewer-edit-workspace.has-tool-inspector:has(
-      > .viewer-tool-inspector .page-annotation-panel
-    )
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector .page-annotation-panel)
     > .viewer-tool-inspector {
     width: 240px;
   }
@@ -870,7 +843,7 @@
   color: var(--cb-link);
 }
 .reader-panel-tabs > .active:after {
-  content: "";
+  content: '';
   position: absolute;
   bottom: -3px;
   left: 0;
@@ -880,9 +853,7 @@
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace:not(
-    :has(> .virtual-thumbnail-rail, > .reader-side-panel)
-  )
+  .viewer-edit-workspace:not(:has(> .virtual-thumbnail-rail, > .reader-side-panel))
   > .reader-panel-tabs {
   grid-row: 1/-1;
   flex-direction: column;
@@ -1093,12 +1064,8 @@
   .design-shell .reader-mode-actions .index-trigger {
     display: none;
   }
-  .design-shell
-    .read-workspace
-    .viewer-edit-workspace:has(> .virtual-thumbnail-rail),
-  .design-shell
-    .read-workspace
-    .viewer-edit-workspace:has(> .reader-side-panel) {
+  .design-shell .read-workspace .viewer-edit-workspace:has(> .virtual-thumbnail-rail),
+  .design-shell .read-workspace .viewer-edit-workspace:has(> .reader-side-panel) {
     grid-template-columns: 160px minmax(0, 1fr);
   }
   .design-shell .read-workspace .virtual-thumbnail-rail,
@@ -1113,19 +1080,19 @@
   }
 }
 /* The preparation page's centered max-width must not constrain the editor. */
-.design-shell[data-documents="true"] .workspace-page {
+.design-shell[data-documents='true'] .workspace-page {
   width: 100%;
   max-width: none;
   margin: 0;
 }
-.design-shell[data-documents="true"] .documents-workspace {
+.design-shell[data-documents='true'] .documents-workspace {
   border-radius: 0;
 }
 .design-shell .read-workspace .thumbnail-rail-heading {
   flex-direction: row;
   gap: 8px;
 }
-.design-shell[data-documents="true"] .documents-workspace > .inspector-panel {
+.design-shell[data-documents='true'] .documents-workspace > .inspector-panel {
   position: absolute;
   inset: 64px 0 0 auto;
   width: min(340px, 45%);
@@ -1161,28 +1128,22 @@ body:has(.design-shell) {
   width: auto;
   font-size: 11px;
 }
-.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category="read"] {
+.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category='read'] {
   min-width: 90px;
 }
-.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category="edit"] {
+.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category='edit'] {
   min-width: 86px;
 }
-.design-shell
-  .reader-tool-navigation
-  .pdf-tool-tabs
-  > [data-category="review"] {
+.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category='review'] {
   min-width: 114px;
 }
-.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category="pages"] {
+.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category='pages'] {
   min-width: 96px;
 }
-.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category="ocr"] {
+.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category='ocr'] {
   min-width: 84px;
 }
-.design-shell
-  .reader-tool-navigation
-  .pdf-tool-tabs
-  > [data-category="redact"] {
+.design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category='redact'] {
   min-width: 102px;
 }
 .reader-view-menu {
@@ -1205,7 +1166,7 @@ body:has(.design-shell) {
   cursor: pointer;
 }
 .reader-view-menu > summary:before {
-  content: "⌄";
+  content: '⌄';
   color: var(--cb-muted);
 }
 .reader-view-menu > summary::-webkit-details-marker {
@@ -1239,7 +1200,7 @@ body:has(.design-shell) {
 .design-shell .reader-navigation .reader-info-trigger {
   order: 2;
 }
-.design-shell[data-documents="true"] .documents-workspace > .inspector-panel {
+.design-shell[data-documents='true'] .documents-workspace > .inspector-panel {
   top: 152px;
   width: 280px;
   bottom: 0;
@@ -1251,7 +1212,7 @@ body:has(.design-shell) {
   .design-shell .reader-tool-navigation .pdf-tool-tabs > [data-category] {
     min-width: 0;
   }
-  .design-shell[data-documents="true"] .documents-workspace > .inspector-panel {
+  .design-shell[data-documents='true'] .documents-workspace > .inspector-panel {
     width: 240px;
   }
   .design-shell .documents-workspace.details-open .viewer-edit-workspace {
@@ -1425,9 +1386,7 @@ body:has(.design-shell) {
   flex-basis: 232px;
   width: 232px;
 }
-.design-shell
-  .export-review:has(.artifact-modebar)
-  .artifact-navigation:has(.original-panel-tabs) {
+.design-shell .export-review:has(.artifact-modebar) .artifact-navigation:has(.original-panel-tabs) {
   display: flex;
   flex-direction: column;
 }
@@ -1464,16 +1423,10 @@ body:has(.design-shell) {
   background: var(--cb-selected);
   color: var(--cb-link);
 }
-.design-shell
-  .export-review:has(.artifact-modebar)
-  .virtual-thumbnail-rail
-  .thumbnail-rail-window {
+.design-shell .export-review:has(.artifact-modebar) .virtual-thumbnail-rail .thumbnail-rail-window {
   margin-top: 10px;
 }
-.design-shell
-  .export-review:has(.artifact-modebar)
-  .virtual-thumbnail-rail
-  .thumbnail-button {
+.design-shell .export-review:has(.artifact-modebar) .virtual-thumbnail-rail .thumbnail-button {
   left: 14px;
   width: 144px;
 }
@@ -1509,10 +1462,7 @@ body:has(.design-shell) {
   padding-bottom: 18px;
   margin-bottom: 18px;
 }
-.design-shell
-  .export-review:has(.artifact-modebar)
-  .artifact-info-panel
-  > p:first-of-type {
+.design-shell .export-review:has(.artifact-modebar) .artifact-info-panel > p:first-of-type {
   display: inline-flex;
   background: var(--cb-surface2);
   border-radius: 13px;
@@ -1521,17 +1471,11 @@ body:has(.design-shell) {
   font-weight: 600;
   margin: 0 0 24px;
 }
-.design-shell
-  .export-review:has(.artifact-modebar)
-  .artifact-info-panel
-  > .btn {
+.design-shell .export-review:has(.artifact-modebar) .artifact-info-panel > .btn {
   width: 100%;
   justify-content: center;
 }
-.design-shell
-  .export-review:has(.artifact-modebar)
-  .artifact-info-panel.original-info
-  > h3 {
+.design-shell .export-review:has(.artifact-modebar) .artifact-info-panel.original-info > h3 {
   padding-bottom: 31px;
 }
 .artifact-info-panel.original-info .original-source-heading {
@@ -1630,7 +1574,7 @@ body:has(.design-shell) {
 }
 /* Override the old compact preparation grid explicitly: Details docks beside
    the canvas at every desktop scale instead of replacing the entire reader. */
-.app-shell.design-shell[data-documents="true"]
+.app-shell.design-shell[data-documents='true']
   .documents-workspace.details-open
   > .inspector-panel {
   position: absolute;
@@ -1643,7 +1587,7 @@ body:has(.design-shell) {
   border-right: 0;
 }
 @media (max-width: 900px) {
-  .app-shell.design-shell[data-documents="true"]
+  .app-shell.design-shell[data-documents='true']
     .documents-workspace.details-open
     > .inspector-panel {
     width: 240px;
@@ -1672,20 +1616,20 @@ body:has(.design-shell) {
 .table-history {
   margin-left: auto;
 }
-.app-shell.design-shell[data-editor-expanded="true"] {
+.app-shell.design-shell[data-editor-expanded='true'] {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
 }
-.design-shell[data-editor-expanded="true"] > .application-bar,
-.design-shell[data-editor-expanded="true"] > .matter-rail,
-.design-shell[data-editor-expanded="true"] > .application-status {
+.design-shell[data-editor-expanded='true'] > .application-bar,
+.design-shell[data-editor-expanded='true'] > .matter-rail,
+.design-shell[data-editor-expanded='true'] > .application-status {
   display: none;
 }
-.design-shell[data-editor-expanded="true"] > .app-main {
+.design-shell[data-editor-expanded='true'] > .app-main {
   grid-column: 1;
   grid-row: 1;
 }
-.design-shell[data-editor-expanded="true"] .export-review[open] {
+.design-shell[data-editor-expanded='true'] .export-review[open] {
   inset: 0;
   width: calc(100vw / var(--ui-scale));
   height: calc(100dvh / var(--ui-scale));
@@ -1699,11 +1643,7 @@ body:has(.design-shell) {
   pointer-events: auto;
 }
 
-.design-shell
-  .documents-workspace
-  .read-workspace
-  .virtual-thumbnail-rail
-  .thumbnail-button {
+.design-shell .documents-workspace .read-workspace .virtual-thumbnail-rail .thumbnail-button {
   height: 180px;
   min-height: 180px;
   padding: 10px 12px 8px;
@@ -1719,10 +1659,7 @@ body:has(.design-shell) {
 /* ED02–ED06: edit tools share the supplied 44 px row and a contextual right panel. */
 .design-shell
   .read-workspace
-  > .page-editbar:has(
-    [aria-label="Edit PDF"],
-    [aria-label="PDF history tools"]
-  ) {
+  > .page-editbar:has([aria-label='Edit PDF'], [aria-label='PDF history tools']) {
   height: 44px;
   min-height: 44px;
   padding: 5px 16px;
@@ -1730,19 +1667,13 @@ body:has(.design-shell) {
 }
 .design-shell
   .read-workspace
-  .editor-tool-group:is(
-    [aria-label="Edit PDF"],
-    [aria-label="PDF history tools"]
-  ) {
+  .editor-tool-group:is([aria-label='Edit PDF'], [aria-label='PDF history tools']) {
   width: 100%;
   gap: 6px;
 }
 .design-shell
   .read-workspace
-  .editor-tool-group:is(
-    [aria-label="Edit PDF"],
-    [aria-label="PDF history tools"]
-  )
+  .editor-tool-group:is([aria-label='Edit PDF'], [aria-label='PDF history tools'])
   > .text-tool {
   height: 34px;
   min-height: 34px;
@@ -1761,27 +1692,20 @@ body:has(.design-shell) {
 }
 .design-shell
   .read-workspace
-  .editor-tool-group:is(
-    [aria-label="Edit PDF"],
-    [aria-label="PDF history tools"]
-  )
-  > .text-tool[aria-pressed="true"] {
+  .editor-tool-group:is([aria-label='Edit PDF'], [aria-label='PDF history tools'])
+  > .text-tool[aria-pressed='true'] {
   background: var(--cb-selected);
   border-color: var(--cb-link);
   color: var(--cb-link);
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(
-    > .viewer-tool-inspector.edit-mode-inspector
-  ) {
+  .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector.edit-mode-inspector) {
   grid-template-columns: 232px minmax(0, 1fr) 292px;
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(
-    > .viewer-tool-inspector.edit-mode-inspector
-  )
+  .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector.edit-mode-inspector)
   > .viewer-tool-inspector {
   position: static;
   grid-column: 3;
@@ -1795,26 +1719,20 @@ body:has(.design-shell) {
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(
-    > .viewer-tool-inspector.edit-mode-inspector
-  )
+  .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector.edit-mode-inspector)
   > .viewer-page-column {
   grid-column: 2;
   grid-row: 1/-1;
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(
-    > .viewer-tool-inspector.edit-mode-inspector
-  )
+  .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector.edit-mode-inspector)
   > .reader-panel-tabs {
   grid-column: 1;
 }
 .design-shell
   .read-workspace
-  .viewer-edit-workspace.has-tool-inspector:has(
-    > .viewer-tool-inspector.edit-mode-inspector
-  )
+  .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector.edit-mode-inspector)
   > .virtual-thumbnail-rail {
   width: 232px;
 }
@@ -1967,7 +1885,7 @@ body:has(.design-shell) {
   gap: 5px;
 }
 .pdf-editor-history li::before {
-  content: "";
+  content: '';
   position: absolute;
   left: 8px;
   top: 20px;
@@ -2048,7 +1966,7 @@ body:has(.design-shell) {
   border-radius: 7px;
   min-width: 32px;
 }
-.pdf-editor-align-actions > button[aria-pressed="true"] {
+.pdf-editor-align-actions > button[aria-pressed='true'] {
   background: var(--cb-selected);
   border-color: var(--cb-link);
   color: var(--cb-link);
@@ -2130,7 +2048,7 @@ body:has(.design-shell) {
   text-align: left;
   overflow-wrap: anywhere;
 }
-.pdf-editor-review-row[aria-current="page"] {
+.pdf-editor-review-row[aria-current='page'] {
   border-color: var(--cb-link);
   background: var(--cb-selected);
 }
@@ -2142,11 +2060,18 @@ body:has(.design-shell) {
 .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector {
   grid-template-columns: 48px minmax(0, 1fr) 292px;
 }
-.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector:has(> .virtual-thumbnail-rail),
-.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector:has(> .reader-side-panel) {
+.design-shell
+  .read-workspace:not(.preparation-preview)
+  .viewer-edit-workspace.has-tool-inspector:has(> .virtual-thumbnail-rail),
+.design-shell
+  .read-workspace:not(.preparation-preview)
+  .viewer-edit-workspace.has-tool-inspector:has(> .reader-side-panel) {
   grid-template-columns: 232px minmax(0, 1fr) 292px;
 }
-.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .viewer-tool-inspector {
+.design-shell
+  .read-workspace:not(.preparation-preview)
+  .viewer-edit-workspace.has-tool-inspector
+  > .viewer-tool-inspector {
   grid-column: 3;
   grid-row: 1 / -1;
   width: 292px;
@@ -2157,31 +2082,56 @@ body:has(.design-shell) {
   border-radius: 0;
   box-shadow: none;
 }
-.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .viewer-page-column {
+.design-shell
+  .read-workspace:not(.preparation-preview)
+  .viewer-edit-workspace.has-tool-inspector
+  > .viewer-page-column {
   grid-column: 2;
   grid-row: 1 / -1;
 }
-.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .reader-panel-tabs,
-.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .virtual-thumbnail-rail,
-.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .reader-side-panel {
+.design-shell
+  .read-workspace:not(.preparation-preview)
+  .viewer-edit-workspace.has-tool-inspector
+  > .reader-panel-tabs,
+.design-shell
+  .read-workspace:not(.preparation-preview)
+  .viewer-edit-workspace.has-tool-inspector
+  > .virtual-thumbnail-rail,
+.design-shell
+  .read-workspace:not(.preparation-preview)
+  .viewer-edit-workspace.has-tool-inspector
+  > .reader-side-panel {
   grid-column: 1;
 }
 @media (max-width: 900px) {
-  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector:has(> .virtual-thumbnail-rail),
-  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector:has(> .reader-side-panel) {
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector:has(> .virtual-thumbnail-rail),
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector:has(> .reader-side-panel) {
     grid-template-columns: 160px minmax(0, 1fr) 240px;
   }
-  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .viewer-tool-inspector {
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector
+    > .viewer-tool-inspector {
     width: 240px;
   }
-  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .virtual-thumbnail-rail,
-  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .reader-side-panel {
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector
+    > .virtual-thumbnail-rail,
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector
+    > .reader-side-panel {
     width: 160px;
   }
 }
 .design-shell
   .read-workspace
-  .editor-tool-group[aria-label="Edit PDF"]
+  .editor-tool-group[aria-label='Edit PDF']
   > .text-tool:has(.lucide-undo-2) {
   margin-left: auto;
 }
@@ -2205,10 +2155,7 @@ body:has(.design-shell) {
 .design-shell .tab-discard-dialog.pdf-editor-save-dialog .tab-discard-actions {
   margin-top: 34px;
 }
-.design-shell
-  .tab-discard-dialog.pdf-editor-save-dialog
-  .tab-discard-actions
-  > .btn {
+.design-shell .tab-discard-dialog.pdf-editor-save-dialog .tab-discard-actions > .btn {
   min-width: 86px;
   min-height: 34px;
 }
@@ -2234,19 +2181,13 @@ body:has(.design-shell) {
 @media (min-width: 1101px) {
   .design-shell
     .read-workspace:has(
-      .editor-tool-group:is(
-        [aria-label="Edit PDF"],
-        [aria-label="PDF history tools"]
-      )
+      .editor-tool-group:is([aria-label='Edit PDF'], [aria-label='PDF history tools'])
     ) {
     position: relative;
   }
   .design-shell
     .read-workspace:has(
-      .editor-tool-group:is(
-        [aria-label="Edit PDF"],
-        [aria-label="PDF history tools"]
-      )
+      .editor-tool-group:is([aria-label='Edit PDF'], [aria-label='PDF history tools'])
     )
     > .reader-navigation {
     position: absolute;
@@ -2264,10 +2205,7 @@ body:has(.design-shell) {
   }
   .design-shell
     .read-workspace:has(
-      .editor-tool-group:is(
-        [aria-label="Edit PDF"],
-        [aria-label="PDF history tools"]
-      )
+      .editor-tool-group:is([aria-label='Edit PDF'], [aria-label='PDF history tools'])
     )
     > .reader-navigation
     > :nth-child(n + 4):not(.zoom-select) {
@@ -2275,23 +2213,18 @@ body:has(.design-shell) {
   }
   .design-shell
     .read-workspace:has(
-      .editor-tool-group:is(
-        [aria-label="Edit PDF"],
-        [aria-label="PDF history tools"]
-      )
+      .editor-tool-group:is([aria-label='Edit PDF'], [aria-label='PDF history tools'])
     )
     > .reader-navigation
     .reader-view-menu {
     display: none;
   }
 }
-.design-shell
-  .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"])
-  .viewer-page-column {
+.design-shell .read-workspace:has(.editor-tool-group[aria-label='Edit PDF']) .viewer-page-column {
   position: relative;
 }
 .design-shell
-  .read-workspace:has(.editor-tool-group[aria-label="Edit PDF"])
+  .read-workspace:has(.editor-tool-group[aria-label='Edit PDF'])
   .viewer-page-column
   > .pdf-tool-hint {
   position: absolute;
@@ -2307,29 +2240,23 @@ body:has(.design-shell) {
   box-shadow: 0 1px 3px #13243b12;
 }
 @media (max-width: 900px) {
-  .design-shell .read-workspace .editor-tool-group[aria-label="Edit PDF"] {
+  .design-shell .read-workspace .editor-tool-group[aria-label='Edit PDF'] {
     min-width: max-content;
   }
   .design-shell
     .read-workspace
-    .viewer-edit-workspace.has-tool-inspector:has(
-      > .viewer-tool-inspector.edit-mode-inspector
-    ) {
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector.edit-mode-inspector) {
     grid-template-columns: 160px minmax(0, 1fr) 240px;
   }
   .design-shell
     .read-workspace
-    .viewer-edit-workspace.has-tool-inspector:has(
-      > .viewer-tool-inspector.edit-mode-inspector
-    )
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector.edit-mode-inspector)
     > .viewer-tool-inspector {
     width: 240px;
   }
   .design-shell
     .read-workspace
-    .viewer-edit-workspace.has-tool-inspector:has(
-      > .viewer-tool-inspector.edit-mode-inspector
-    )
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector.edit-mode-inspector)
     > .virtual-thumbnail-rail {
     width: 160px;
   }
@@ -2436,25 +2363,109 @@ body:has(.design-shell) {
   color: var(--cb-muted);
 }
 
-.design-shell .edit-mode-inspector>.viewer-tool-inspector-heading {min-height:56px;padding:16px 20px;font-size:14px}
-.design-shell .edit-mode-inspector>.pdf-selected-overlay-actions {display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:12px 16px;border:0;border-bottom:1px solid var(--cb-border);font-size:11px}
-.design-shell .edit-mode-inspector>.pdf-selected-overlay-actions>span {flex:1 0 100%;line-height:1.45}
-.design-shell .document-information-panel .reader-document-information {padding:20px;flex:1;min-height:0}
+.design-shell .edit-mode-inspector > .viewer-tool-inspector-heading {
+  min-height: 56px;
+  padding: 16px 20px;
+  font-size: 14px;
+}
+.design-shell .edit-mode-inspector > .pdf-selected-overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--cb-border);
+  font-size: 11px;
+}
+.design-shell .edit-mode-inspector > .pdf-selected-overlay-actions > span {
+  flex: 1 0 100%;
+  line-height: 1.45;
+}
+.design-shell .document-information-panel .reader-document-information {
+  padding: 20px;
+  flex: 1;
+  min-height: 0;
+}
 
 /* FLOW / 06: live review context, with the PDF and its saved page retained. */
-.review-context-banner {padding:8px 12px;border:1px solid var(--cb-border);border-radius:8px;background:var(--cb-surface);color:var(--cb-muted);font-size:12px;line-height:18px}
-.read-workspace>.review-context-banner {position:absolute;z-index:5;top:168px;left:248px;right:308px;pointer-events:none}
-.read-workspace>.focus-context {top:84px;left:24px;right:24px}
-.read-workspace>.stale-context {background:var(--cb-warningBg);color:var(--cb-status-warning-text)}
-.bundle-impact-panel h3 {font-size:14px;margin:24px 0 12px}
-.bundle-impact-panel p {font-size:13px;line-height:20px;color:var(--cb-muted);overflow-wrap:anywhere}
-.bundle-impact-panel .pdf-editor-inspector-content>button {width:100%;margin-top:12px}
-.design-shell:has(.focused-reading) .finding-review-panel {display:none}
-.design-shell[data-finding=true]:has(.focused-reading) .read-workspace {margin-right:0;padding-bottom:0}
-@media(max-width:1100px){.read-workspace>.review-context-banner:not(.focus-context) {left:24px;right:256px}}
-@media(max-width:850px){.read-workspace>.review-context-banner:not(.focus-context) {left:12px;right:12px;font-size:11px;top:168px}}
-.design-shell .bundle-impact-panel>.viewer-tool-inspector-heading {min-height:56px;padding:16px 20px;font-size:14px}
-.bundle-impact-panel .pdf-editor-inspector-content {gap:12px}
-.bundle-impact-panel h3 {margin:12px 0 0}
-.bundle-impact-panel .finding-recheck {margin-top:4px}
-@media(max-width:1100px){.read-workspace>.stale-context {display:none}}
+.review-context-banner {
+  padding: 8px 12px;
+  border: 1px solid var(--cb-border);
+  border-radius: 8px;
+  background: var(--cb-surface);
+  color: var(--cb-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.read-workspace > .review-context-banner {
+  position: absolute;
+  z-index: 5;
+  top: 168px;
+  left: 248px;
+  right: 308px;
+  pointer-events: none;
+}
+.read-workspace > .focus-context {
+  top: 84px;
+  left: 24px;
+  right: 24px;
+}
+.read-workspace > .stale-context {
+  background: var(--cb-warningBg);
+  color: var(--cb-status-warning-text);
+}
+.bundle-impact-panel h3 {
+  font-size: 14px;
+  margin: 24px 0 12px;
+}
+.bundle-impact-panel p {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--cb-muted);
+  overflow-wrap: anywhere;
+}
+.bundle-impact-panel .pdf-editor-inspector-content > button {
+  width: 100%;
+  margin-top: 12px;
+}
+.design-shell:has(.focused-reading) .finding-review-panel {
+  display: none;
+}
+.design-shell[data-finding='true']:has(.focused-reading) .read-workspace {
+  margin-right: 0;
+  padding-bottom: 0;
+}
+@media (max-width: 1100px) {
+  .read-workspace > .review-context-banner:not(.focus-context) {
+    left: 24px;
+    right: 256px;
+  }
+}
+@media (max-width: 850px) {
+  .read-workspace > .review-context-banner:not(.focus-context) {
+    left: 12px;
+    right: 12px;
+    font-size: 11px;
+    top: 168px;
+  }
+}
+.design-shell .bundle-impact-panel > .viewer-tool-inspector-heading {
+  min-height: 56px;
+  padding: 16px 20px;
+  font-size: 14px;
+}
+.bundle-impact-panel .pdf-editor-inspector-content {
+  gap: 12px;
+}
+.bundle-impact-panel h3 {
+  margin: 12px 0 0;
+}
+.bundle-impact-panel .finding-recheck {
+  margin-top: 4px;
+}
+@media (max-width: 1100px) {
+  .read-workspace > .stale-context {
+    display: none;
+  }
+}

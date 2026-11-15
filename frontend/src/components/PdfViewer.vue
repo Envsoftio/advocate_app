@@ -1,2363 +1,6373 @@
 <script setup lang="ts">
-import AppPopover from './ui/AppPopover.vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ArrowLeft, Save, Shield, PanelLeft, CheckCircle2, Ellipsis, Maximize2, Minimize2, Archive, BookMarked, ChevronLeft, ChevronRight, RotateCcw, RotateCw, Trash2, FileSearch, FilePenLine, FilePlus2, LayoutGrid, LoaderCircle, Type, Pencil, ScanText, PanelRightOpen, PanelRightClose, Link2, Stamp, ExternalLink, Images, Highlighter, MessageSquare, Eraser, Undo2, Redo2, X, Search, Square, Circle, Minus, ArrowUpRight, Check, CalendarDays, Printer, BookOpen, Info, Focus, AlignLeft, AlignCenter, AlignRight, AlignJustify } from 'lucide-vue-next'
-import type { PDFDocumentProxy } from 'pdfjs-dist'
-import type { Job, MatterDocument, OutputMarkPreview, OutputMarks, PageAnnotation, ReviewedLink } from '../lib/types'
-import { ApiError, api, downloadWorkingPdf, inTauri, pageAnnotationAsset, pdfDocumentSource, uploadPageAnnotationImage } from '../lib/api'
-import { engineBlocked, engineState } from '../lib/engineConnection'
-import { friendlyError } from '../lib/format'
-import { confirmSignatureTransformation } from '../lib/signatures'
+import AppPopover from './ui/AppPopover.vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import {
+  ArrowLeft,
+  Save,
+  Shield,
+  PanelLeft,
+  CheckCircle2,
+  Ellipsis,
+  Maximize2,
+  Minimize2,
+  Archive,
+  BookMarked,
+  ChevronLeft,
+  ChevronRight,
+  RotateCcw,
+  RotateCw,
+  Trash2,
+  FileSearch,
+  FilePenLine,
+  FilePlus2,
+  LayoutGrid,
+  LoaderCircle,
+  Type,
+  Pencil,
+  ScanText,
+  PanelRightOpen,
+  PanelRightClose,
+  Link2,
+  Stamp,
+  ExternalLink,
+  Images,
+  Highlighter,
+  MessageSquare,
+  Eraser,
+  Undo2,
+  Redo2,
+  X,
+  Search,
+  Square,
+  Circle,
+  Minus,
+  ArrowUpRight,
+  Check,
+  CalendarDays,
+  Printer,
+  BookOpen,
+  Info,
+  Focus,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+} from 'lucide-vue-next';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type {
+  Job,
+  MatterDocument,
+  OutputMarkPreview,
+  OutputMarks,
+  PageAnnotation,
+  ReviewedLink,
+} from '../lib/types';
+import {
+  ApiError,
+  api,
+  downloadWorkingPdf,
+  inTauri,
+  pageAnnotationAsset,
+  pdfDocumentSource,
+  uploadPageAnnotationImage,
+} from '../lib/api';
+import { engineBlocked, engineState } from '../lib/engineConnection';
+import { friendlyError } from '../lib/format';
+import { confirmSignatureTransformation } from '../lib/signatures';
 
-import PdfReaderViewport from './PdfReaderViewport.vue'
-import PdfReaderControls from './PdfReaderControls.vue'
-import PdfThumbnailRail from './PdfThumbnailRail.vue'
-import PageOrganizer from './PageOrganizer.vue'
-import { usePdfDocument, nextZoom, rememberReadingPosition, loadReadingPosition, flushReadingPositions, readingPositionError, type ReaderMode, type ReaderPosition } from '../lib/pdfReader'
-import { usePdfSearch } from '../lib/pdfSearch'
-import { readPdfSourceOutline, type PdfSourceOutlineEntry } from '../lib/pdfNavigation'
-const pdfOwner = usePdfDocument()
-const readerPdf = pdfOwner.pdf
-const readerViewport = ref<InstanceType<typeof PdfReaderViewport> | null>(null)
-const readerMode = ref<ReaderMode>('single')
-const zoomChoice = ref('fit-width')
-const viewRotation = ref(0)
-const readingHistory = ref<ReaderPosition[]>([])
-type ReadPanel = 'search' | 'outline' | 'comments' | 'page-bookmarks' | 'information' | null
-const readPanel = ref<ReadPanel>(null)
-const panelElement = ref<HTMLElement | null>(null)
-const viewerElement = ref<HTMLElement | null>(null)
-let panelTrigger: HTMLElement | null = null
-const focusedReading = ref(false)
-const headerSaving = ref(false)
+import PdfReaderViewport from './PdfReaderViewport.vue';
+import PdfReaderControls from './PdfReaderControls.vue';
+import PdfThumbnailRail from './PdfThumbnailRail.vue';
+import PageOrganizer from './PageOrganizer.vue';
+import {
+  usePdfDocument,
+  nextZoom,
+  rememberReadingPosition,
+  loadReadingPosition,
+  flushReadingPositions,
+  readingPositionError,
+  type ReaderMode,
+  type ReaderPosition,
+} from '../lib/pdfReader';
+import { usePdfSearch } from '../lib/pdfSearch';
+import { readPdfSourceOutline, type PdfSourceOutlineEntry } from '../lib/pdfNavigation';
+const pdfOwner = usePdfDocument();
+const readerPdf = pdfOwner.pdf;
+const readerViewport = ref<InstanceType<typeof PdfReaderViewport> | null>(null);
+const readerMode = ref<ReaderMode>('single');
+const zoomChoice = ref('fit-width');
+const viewRotation = ref(0);
+const readingHistory = ref<ReaderPosition[]>([]);
+type ReadPanel = 'search' | 'outline' | 'comments' | 'page-bookmarks' | 'information' | null;
+const readPanel = ref<ReadPanel>(null);
+const panelElement = ref<HTMLElement | null>(null);
+const viewerElement = ref<HTMLElement | null>(null);
+let panelTrigger: HTMLElement | null = null;
+const focusedReading = ref(false);
+const headerSaving = ref(false);
 async function saveHeaderDraft() {
-  if (headerSaving.value) return
-  headerSaving.value = true
-  try { if (!(await savePendingDraft())) emit('error','Finish the current tool draft before saving. Your draft is retained.') }
-  finally { headerSaving.value = false }
+  if (headerSaving.value) return;
+  headerSaving.value = true;
+  try {
+    if (!(await savePendingDraft()))
+      emit('error', 'Finish the current tool draft before saving. Your draft is retained.');
+  } finally {
+    headerSaving.value = false;
+  }
 }
-let focusWasExpanded = false
-let focusTrigger: HTMLElement | null = null
+let focusWasExpanded = false;
+let focusTrigger: HTMLElement | null = null;
 function panelFlag(name: ReadPanel) {
-  return computed({get: () => readPanel.value === name, set: (open: boolean) => {
-    if (open) readPanel.value = name
-    else if (readPanel.value === name) readPanel.value = null
-  }})
+  return computed({
+    get: () => readPanel.value === name,
+    set: (open: boolean) => {
+      if (open) readPanel.value = name;
+      else if (readPanel.value === name) readPanel.value = null;
+    },
+  });
 }
-const outlineOpen = panelFlag('outline')
+const outlineOpen = panelFlag('outline');
 async function closeReadPanel() {
-  readPanel.value = null
-  await nextTick()
-  ;(panelTrigger?.isConnected ? panelTrigger : viewerElement.value)?.focus({preventScroll:true})
+  readPanel.value = null;
+  await nextTick();
+  (panelTrigger?.isConnected ? panelTrigger : viewerElement.value)?.focus({ preventScroll: true });
 }
 async function openReadPanel(panel: ReadPanel, event?: Event) {
-  if (readPanel.value === panel) { await closeReadPanel(); return }
-  panelTrigger = event?.currentTarget instanceof HTMLElement ? event.currentTarget : window.document.activeElement as HTMLElement
-  readPanel.value = panel
-  await nextTick()
-  if (panel === 'search') findInput.value?.focus({preventScroll:true})
-  else panelElement.value?.querySelector<HTMLButtonElement>('button')?.focus({preventScroll:true})
+  if (readPanel.value === panel) {
+    await closeReadPanel();
+    return;
+  }
+  panelTrigger =
+    event?.currentTarget instanceof HTMLElement
+      ? event.currentTarget
+      : (window.document.activeElement as HTMLElement);
+  readPanel.value = panel;
+  await nextTick();
+  if (panel === 'search') findInput.value?.focus({ preventScroll: true });
+  else
+    panelElement.value?.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
 }
 async function toggleFocusedReading(event?: Event) {
   if (!focusedReading.value) {
-    focusTrigger = event?.currentTarget instanceof HTMLElement ? event.currentTarget : window.document.activeElement as HTMLElement
-    focusWasExpanded = !!props.expanded
-    focusedReading.value = true
-    if (!props.preparation && !props.expanded) emit('toggleExpanded')
-    await nextTick()
-    viewerElement.value?.querySelector<HTMLButtonElement>('.document-header [aria-label="Exit focused reading"]')?.focus({preventScroll:true})
+    focusTrigger =
+      event?.currentTarget instanceof HTMLElement
+        ? event.currentTarget
+        : (window.document.activeElement as HTMLElement);
+    focusWasExpanded = !!props.expanded;
+    focusedReading.value = true;
+    if (!props.preparation && !props.expanded) emit('toggleExpanded');
+    await nextTick();
+    viewerElement.value
+      ?.querySelector<HTMLButtonElement>('.document-header [aria-label="Exit focused reading"]')
+      ?.focus({ preventScroll: true });
   } else {
-    focusedReading.value = false
-    if (!props.preparation && !focusWasExpanded && props.expanded) emit('toggleExpanded')
-    await nextTick()
-    ;(focusTrigger?.isConnected ? focusTrigger : viewerElement.value)?.focus({preventScroll:true})
+    focusedReading.value = false;
+    if (!props.preparation && !focusWasExpanded && props.expanded) emit('toggleExpanded');
+    await nextTick();
+    (focusTrigger?.isConnected ? focusTrigger : viewerElement.value)?.focus({
+      preventScroll: true,
+    });
   }
 }
 function resultKey(event: KeyboardEvent, index: number) {
-  const target = event.key === 'ArrowDown' ? Math.min(index+1,findMatches.value.length-1) :
-    event.key === 'ArrowUp' ? Math.max(index-1,0) : event.key === 'Home' ? 0 :
-    event.key === 'End' ? findMatches.value.length-1 : null
-  if (target === null) return
-  event.preventDefault();event.stopPropagation()
-  chooseFind(target)
-  panelElement.value?.querySelectorAll<HTMLButtonElement>('.pdf-find-results button')[target]?.focus({preventScroll:true})
+  const target =
+    event.key === 'ArrowDown'
+      ? Math.min(index + 1, findMatches.value.length - 1)
+      : event.key === 'ArrowUp'
+        ? Math.max(index - 1, 0)
+        : event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? findMatches.value.length - 1
+            : null;
+  if (target === null) return;
+  event.preventDefault();
+  event.stopPropagation();
+  chooseFind(target);
+  panelElement.value
+    ?.querySelectorAll<HTMLButtonElement>('.pdf-find-results button')
+    [target]?.focus({ preventScroll: true });
 }
 
-const sourceOutline = ref<Array<{title:string,page:number|null,url:string|null,level:number}>>([])
-const outlineError = ref('')
-const outlineLoading = ref(false)
-const commentsOpen = panelFlag('comments')
-const commentQuery = ref('')
-const viewedCommentId = ref<string | null>(null)
-const pageBookmarksOpen = panelFlag('page-bookmarks')
-const organizerOpen = ref(false)
-const workingSaveBusy = ref(false)
-const workingSaveNotice = ref('')
-const workingSaveError = ref('')
+const sourceOutline = ref<
+  Array<{ title: string; page: number | null; url: string | null; level: number }>
+>([]);
+const outlineError = ref('');
+const outlineLoading = ref(false);
+const commentsOpen = panelFlag('comments');
+const commentQuery = ref('');
+const viewedCommentId = ref<string | null>(null);
+const pageBookmarksOpen = panelFlag('page-bookmarks');
+const organizerOpen = ref(false);
+const workingSaveBusy = ref(false);
+const workingSaveNotice = ref('');
+const workingSaveError = ref('');
 async function saveWorkingCopy() {
-  const document = props.document
-  if (!document || workingSaveBusy.value || props.disabled || editing.value || loading.value) return
-  workingSaveBusy.value = true
-  workingSaveNotice.value = ''
-  workingSaveError.value = ''
+  const document = props.document;
+  if (!document || workingSaveBusy.value || props.disabled || editing.value || loading.value)
+    return;
+  workingSaveBusy.value = true;
+  workingSaveNotice.value = '';
+  workingSaveError.value = '';
   try {
-    const hasPdfMarks = pageAnnotations.value.some(item => item.document_id===document.id &&
-      item.output_scope==='pdf' && item.resolved)
+    const hasPdfMarks = pageAnnotations.value.some(
+      (item) => item.document_id === document.id && item.output_scope === 'pdf' && item.resolved,
+    );
     const signature = hasPdfMarks
       ? confirmSignatureTransformation([document], 'Saving a PDF with editable marks')
-      : {proceed:true,acknowledged:false}
-    if (!signature.proceed) return
-    const saved = await downloadWorkingPdf(document.id, document.revision, document.title,
-      signature.acknowledged)
+      : { proceed: true, acknowledged: false };
+    if (!signature.proceed) return;
+    const saved = await downloadWorkingPdf(
+      document.id,
+      document.revision,
+      document.title,
+      signature.acknowledged,
+    );
     workingSaveNotice.value = saved
       ? `${inTauri() ? 'Saved' : 'Download started for'} “${document.title}”, working revision ${document.revision}, with editable PDF marks flattened and staged redactions applied. Private notes are omitted.`
-      : 'Save cancelled. No file was written.'
-  } catch (cause) { workingSaveError.value = friendlyError(cause) }
-  finally { workingSaveBusy.value = false }
+      : 'Save cancelled. No file was written.';
+  } catch (cause) {
+    workingSaveError.value = friendlyError(cause);
+  } finally {
+    workingSaveBusy.value = false;
+  }
 }
 function printWorkingCopy() {
-  const document = props.document
-  if (!document || props.disabled || editing.value || loading.value) return
-  const hasPdfMarks = pageAnnotations.value.some(item => item.document_id===document.id &&
-    item.output_scope==='pdf' && item.resolved)
+  const document = props.document;
+  if (!document || props.disabled || editing.value || loading.value) return;
+  const hasPdfMarks = pageAnnotations.value.some(
+    (item) => item.document_id === document.id && item.output_scope === 'pdf' && item.resolved,
+  );
   const signature = hasPdfMarks
     ? confirmSignatureTransformation([document], 'Printing a PDF with editable marks')
-    : {proceed:true,acknowledged:false}
-  if (signature.proceed) emit('printWorking', {
-    documentId:document.id, revision:document.revision, title:document.title,
-    acknowledged:signature.acknowledged,
-  })
+    : { proceed: true, acknowledged: false };
+  if (signature.proceed)
+    emit('printWorking', {
+      documentId: document.id,
+      revision: document.revision,
+      title: document.title,
+      acknowledged: signature.acknowledged,
+    });
 }
-function rememberPosition(position?:ReaderPosition) {
-  const key = activeDocumentId && displayedRevision.value ? `${activeDocumentId}:${displayedRevision.value}` : ''
-  const at = position || readerViewport.value?.capture()
-  if (at) rememberReadingPosition(key,{...at,zoom:zoomChoice.value,mode:readerMode.value})
+function rememberPosition(position?: ReaderPosition) {
+  const key =
+    activeDocumentId && displayedRevision.value
+      ? `${activeDocumentId}:${displayedRevision.value}`
+      : '';
+  const at = position || readerViewport.value?.capture();
+  if (at) rememberReadingPosition(key, { ...at, zoom: zoomChoice.value, mode: readerMode.value });
 }
-function navigateToPage(page:number, record=true) {
-  if (!Number.isInteger(page) || page<1 || page>total.value) return false
+function navigateToPage(page: number, record = true) {
+  if (!Number.isInteger(page) || page < 1 || page > total.value) return false;
   if (page !== current.value && hasPendingDraft()) {
-    if (!window.confirm('Discard the unfinished PDF tool draft and change pages? Choose Cancel to keep editing.')) return false
-    discardPendingDraft()
+    if (
+      !window.confirm(
+        'Discard the unfinished PDF tool draft and change pages? Choose Cancel to keep editing.',
+      )
+    )
+      return false;
+    discardPendingDraft();
   }
   if (record) {
-    const at=readerViewport.value?.capture()
-    if(at) readingHistory.value=[...readingHistory.value.slice(-49),at]
+    const at = readerViewport.value?.capture();
+    if (at) readingHistory.value = [...readingHistory.value.slice(-49), at];
   }
-  current.value=page
-  return true
+  current.value = page;
+  return true;
 }
 async function goBack() {
-  const at=readingHistory.value.pop()
-  if (!at) return
-  current.value=at.page
-  await nextTick(); await readerViewport.value?.restore(at)
+  const at = readingHistory.value.pop();
+  if (!at) return;
+  current.value = at.page;
+  await nextTick();
+  await readerViewport.value?.restore(at);
 }
-function pageRendered(data:{page:number,scale:number,width:number,height:number}) {
-  if(data.page!==current.value)return
-  canvas.value=readerViewport.value?.getCanvas() || null
-  pageZoom.value=data.scale
-  if (data.scale > 0) pageSizePt.value={width:data.width/data.scale,height:data.height/data.scale}
-  displayedPage.value=data.page
-  switchingPage.value=false
-  viewerError.value=''
+function pageRendered(data: { page: number; scale: number; width: number; height: number }) {
+  if (data.page !== current.value) return;
+  canvas.value = readerViewport.value?.getCanvas() || null;
+  pageZoom.value = data.scale;
+  if (data.scale > 0)
+    pageSizePt.value = { width: data.width / data.scale, height: data.height / data.scale };
+  displayedPage.value = data.page;
+  switchingPage.value = false;
+  viewerError.value = '';
 }
-async function loadOutline(document:PDFDocumentProxy, call:number) {
-  outlineLoading.value=true
+async function loadOutline(document: PDFDocumentProxy, call: number) {
+  outlineLoading.value = true;
   try {
-    const result=await readPdfSourceOutline(document,{isCancelled:()=>call!==epoch})
-    if(call!==epoch)return
-    const rows:Array<{title:string,page:number|null,url:string|null,level:number}>=[]
-    function flatten(items:PdfSourceOutlineEntry[],level:number){for(const item of items){rows.push({...item,level});flatten(item.children,level+1)}}
-    flatten(result.entries,0);sourceOutline.value=rows
-    if(result.truncated)outlineError.value='Showing the first available outline entries.'
-  }catch{if(call===epoch)outlineError.value='The source PDF outline could not be read.'}
-  finally{if(call===epoch)outlineLoading.value=false}
+    const result = await readPdfSourceOutline(document, { isCancelled: () => call !== epoch });
+    if (call !== epoch) return;
+    const rows: Array<{ title: string; page: number | null; url: string | null; level: number }> =
+      [];
+    function flatten(items: PdfSourceOutlineEntry[], level: number) {
+      for (const item of items) {
+        rows.push({ ...item, level });
+        flatten(item.children, level + 1);
+      }
+    }
+    flatten(result.entries, 0);
+    sourceOutline.value = rows;
+    if (result.truncated) outlineError.value = 'Showing the first available outline entries.';
+  } catch {
+    if (call === epoch) outlineError.value = 'The source PDF outline could not be read.';
+  } finally {
+    if (call === epoch) outlineLoading.value = false;
+  }
 }
-function tabKey(event:KeyboardEvent, category:EditorCategory) {
-  const categories:EditorCategory[]=['read','edit','review','pages','ocr','redact']
-  let index=categories.indexOf(category)
-  if(event.key==='ArrowRight')index=(index+1)%categories.length
-  else if(event.key==='ArrowLeft')index=(index+categories.length-1)%categories.length
-  else if(event.key==='Home')index=0
-  else if(event.key==='End')index=categories.length-1
-  else return
-  event.preventDefault();selectCategory(categories[index])
-  ;(event.currentTarget as HTMLElement).parentElement?.querySelector<HTMLButtonElement>(`[data-category="${categories[index]}"]`)?.focus()
+function tabKey(event: KeyboardEvent, category: EditorCategory) {
+  const categories: EditorCategory[] = ['read', 'edit', 'review', 'pages', 'ocr', 'redact'];
+  let index = categories.indexOf(category);
+  if (event.key === 'ArrowRight') index = (index + 1) % categories.length;
+  else if (event.key === 'ArrowLeft') index = (index + categories.length - 1) % categories.length;
+  else if (event.key === 'Home') index = 0;
+  else if (event.key === 'End') index = categories.length - 1;
+  else return;
+  event.preventDefault();
+  selectCategory(categories[index]);
+  (event.currentTarget as HTMLElement).parentElement
+    ?.querySelector<HTMLButtonElement>(`[data-category="${categories[index]}"]`)
+    ?.focus();
 }
 
-const props = defineProps<{ staleBuild?: {id:string; revision?:number}, findingContext?:string, preparation?:boolean, artifactOptions?: Array<{value:string,label:string}>, expanded?: boolean, focusMode?: boolean, document: MatterDocument | null, documents?: MatterDocument[], ocrJob?: Job | null, busy?: boolean, disabled?: boolean, canUndo?: boolean, canRedo?: boolean, undoLabel?: string | null, redoLabel?: string | null, recentActions?: Array<{label:string,applied:boolean}>, detailsOpen?: boolean, detailsDirty?: boolean, bookmarkRefreshKey?: number, pageTarget?: {documentId:string, page:number, sequence:number, revision?:number} }>()
-const emit = defineEmits<{ rebuild:[], reviewPrevious:[], openEditor:[], showDocumentList:[], browseDocuments: [], saveDetails: [], retryReader: [], reviewEngine: [], artifact: [value:string], toggleExpanded: [], toggleFocus: [], modified: [], undo: [], redo: [], error: [message: string], pageTools: [task?:'insert'|'crop'|'extract',pages?:number[],side?:'before'|'after'], reviewPageMap:[], toggleDetails: [], openBookmarks: [], ocr: [language: 'eng' | 'hin' | 'eng+hin', pageIndex:number], ocrPage: [pageIndex:number,language:'eng'|'hin'|'eng+hin'], ocrRerun:[pageIndex:number,language:'eng'|'hin'|'eng+hin'], cancelOcr: [], archiveDocument: [], openInternalLink: [documentId:string,page:number], openExternalLink: [uri:string], printWorking: [request:{documentId:string,revision:number,title:string,acknowledged:boolean}] }>()
-const undoDescription = computed(() => props.undoLabel
-  ? `Undo: ${props.undoLabel}. Applies to the last change anywhere in this matter.`
-  : 'Undo last matter change. No change available.')
-const redoDescription = computed(() => props.redoLabel
-  ? `Redo: ${props.redoLabel}. Restores the next undone change anywhere in this matter.`
-  : 'Redo matter change. No change available.')
-const ocrLanguage = ref<'eng' | 'hin' | 'eng+hin'>('eng')
-const dismissedOcrPrompt = ref('')
-const activeOcrJob = computed(() => props.ocrJob?.kind === 'ocr' && props.ocrJob.target_id === props.document?.id && ['queued','running'].includes(props.ocrJob.status) ? props.ocrJob : null)
-const needsOcrPrompt = computed(() => props.preparation && !!props.document &&
-  props.document.ocr_status === 'needs_ocr' &&
-  !activeOcrJob.value && dismissedOcrPrompt.value !== `${props.document.id}:${props.document.revision}`)
-const needsOcrReview = computed(() => props.document?.ocr_status === 'processed' && !activeOcrJob.value)
-const current = ref(1)
-type OcrReview = {document_id:string,revision:number,page_index:number,available:boolean,confidence:number|null,
-  regions:Array<{text:string,confidence:number,rect:number[]}>,message:string,accepted_at:string|null,
-  language:'eng'|'hin'|'eng+hin',can_rerun:boolean}
-const ocrReview = ref<OcrReview|null>(null)
-const ocrReviewBusy = ref(false)
-const ocrReviewError = ref('')
-let ocrReviewSequence = 0
-watch(() => [needsOcrReview.value,props.document?.id,props.document?.revision,current.value] as const, async () => {
-  const sequence=++ocrReviewSequence
-  ocrReview.value=null;ocrReviewError.value=''
-  if(!needsOcrReview.value || !props.document)return
-  try {
-    const result=await api<OcrReview>(`/documents/${props.document.id}/ocr-review?page_index=${current.value-1}&revision=${props.document.revision}`, 'GET', undefined, 120_000)
-    if(sequence===ocrReviewSequence)ocrReview.value=result
-  } catch(error) {if(sequence===ocrReviewSequence)ocrReviewError.value=friendlyError(error)}
-},{immediate:true})
+const props = defineProps<{
+  staleBuild?: { id: string; revision?: number };
+  findingContext?: string;
+  preparation?: boolean;
+  artifactOptions?: Array<{ value: string; label: string }>;
+  expanded?: boolean;
+  focusMode?: boolean;
+  document: MatterDocument | null;
+  documents?: MatterDocument[];
+  ocrJob?: Job | null;
+  busy?: boolean;
+  disabled?: boolean;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  undoLabel?: string | null;
+  redoLabel?: string | null;
+  recentActions?: Array<{ label: string; applied: boolean }>;
+  detailsOpen?: boolean;
+  detailsDirty?: boolean;
+  bookmarkRefreshKey?: number;
+  pageTarget?: { documentId: string; page: number; sequence: number; revision?: number };
+}>();
+const emit = defineEmits<{
+  rebuild: [];
+  reviewPrevious: [];
+  openEditor: [];
+  showDocumentList: [];
+  browseDocuments: [];
+  saveDetails: [];
+  retryReader: [];
+  reviewEngine: [];
+  artifact: [value: string];
+  toggleExpanded: [];
+  toggleFocus: [];
+  modified: [];
+  undo: [];
+  redo: [];
+  error: [message: string];
+  pageTools: [task?: 'insert' | 'crop' | 'extract', pages?: number[], side?: 'before' | 'after'];
+  reviewPageMap: [];
+  toggleDetails: [];
+  openBookmarks: [];
+  ocr: [language: 'eng' | 'hin' | 'eng+hin', pageIndex: number];
+  ocrPage: [pageIndex: number, language: 'eng' | 'hin' | 'eng+hin'];
+  ocrRerun: [pageIndex: number, language: 'eng' | 'hin' | 'eng+hin'];
+  cancelOcr: [];
+  archiveDocument: [];
+  openInternalLink: [documentId: string, page: number];
+  openExternalLink: [uri: string];
+  printWorking: [
+    request: { documentId: string; revision: number; title: string; acknowledged: boolean },
+  ];
+}>();
+const undoDescription = computed(() =>
+  props.undoLabel
+    ? `Undo: ${props.undoLabel}. Applies to the last change anywhere in this matter.`
+    : 'Undo last matter change. No change available.',
+);
+const redoDescription = computed(() =>
+  props.redoLabel
+    ? `Redo: ${props.redoLabel}. Restores the next undone change anywhere in this matter.`
+    : 'Redo matter change. No change available.',
+);
+const ocrLanguage = ref<'eng' | 'hin' | 'eng+hin'>('eng');
+const dismissedOcrPrompt = ref('');
+const activeOcrJob = computed(() =>
+  props.ocrJob?.kind === 'ocr' &&
+  props.ocrJob.target_id === props.document?.id &&
+  ['queued', 'running'].includes(props.ocrJob.status)
+    ? props.ocrJob
+    : null,
+);
+const needsOcrPrompt = computed(
+  () =>
+    props.preparation &&
+    !!props.document &&
+    props.document.ocr_status === 'needs_ocr' &&
+    !activeOcrJob.value &&
+    dismissedOcrPrompt.value !== `${props.document.id}:${props.document.revision}`,
+);
+const needsOcrReview = computed(
+  () => props.document?.ocr_status === 'processed' && !activeOcrJob.value,
+);
+const current = ref(1);
+type OcrReview = {
+  document_id: string;
+  revision: number;
+  page_index: number;
+  available: boolean;
+  confidence: number | null;
+  regions: Array<{ text: string; confidence: number; rect: number[] }>;
+  message: string;
+  accepted_at: string | null;
+  language: 'eng' | 'hin' | 'eng+hin';
+  can_rerun: boolean;
+};
+const ocrReview = ref<OcrReview | null>(null);
+const ocrReviewBusy = ref(false);
+const ocrReviewError = ref('');
+let ocrReviewSequence = 0;
+watch(
+  () =>
+    [needsOcrReview.value, props.document?.id, props.document?.revision, current.value] as const,
+  async () => {
+    const sequence = ++ocrReviewSequence;
+    ocrReview.value = null;
+    ocrReviewError.value = '';
+    if (!needsOcrReview.value || !props.document) return;
+    try {
+      const result = await api<OcrReview>(
+        `/documents/${props.document.id}/ocr-review?page_index=${current.value - 1}&revision=${props.document.revision}`,
+        'GET',
+        undefined,
+        120_000,
+      );
+      if (sequence === ocrReviewSequence) ocrReview.value = result;
+    } catch (error) {
+      if (sequence === ocrReviewSequence) ocrReviewError.value = friendlyError(error);
+    }
+  },
+  { immediate: true },
+);
 async function acceptOcrReview() {
-  const document=props.document, review=ocrReview.value
-  if(!document || !review || ocrReviewBusy.value)return
-  ocrReviewBusy.value=true;ocrReviewError.value=''
+  const document = props.document,
+    review = ocrReview.value;
+  if (!document || !review || ocrReviewBusy.value) return;
+  ocrReviewBusy.value = true;
+  ocrReviewError.value = '';
   try {
-    const result=await api<{accepted_at:string}>(`/documents/${document.id}/ocr-review/accept`,'POST',
-      {expected_revision:document.revision,page_index:current.value-1})
-    if(props.document?.id===document.id && props.document?.revision===document.revision && ocrReview.value===review)
-      ocrReview.value={...review,accepted_at:result.accepted_at}
-  }catch(error){ocrReviewError.value=friendlyError(error)}
-  finally{ocrReviewBusy.value=false}
+    const result = await api<{ accepted_at: string }>(
+      `/documents/${document.id}/ocr-review/accept`,
+      'POST',
+      { expected_revision: document.revision, page_index: current.value - 1 },
+    );
+    if (
+      props.document?.id === document.id &&
+      props.document?.revision === document.revision &&
+      ocrReview.value === review
+    )
+      ocrReview.value = { ...review, accepted_at: result.accepted_at };
+  } catch (error) {
+    ocrReviewError.value = friendlyError(error);
+  } finally {
+    ocrReviewBusy.value = false;
+  }
 }
-const clockNow = ref(Date.now())
-let ocrClock:ReturnType<typeof setInterval>|null=null
-onMounted(()=>{ocrClock=setInterval(()=>clockNow.value=Date.now(),1000)})
-onBeforeUnmount(()=>{if(ocrClock)clearInterval(ocrClock)})
-const ocrElapsed = computed(()=>{
-  const started=activeOcrJob.value?.started_at
-  if(!started)return ''
-  const seconds=Math.max(0,Math.floor((clockNow.value-Date.parse(started))/1000))
-  if(!Number.isFinite(seconds))return ''
-  return `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`
-})
-const canvas = ref<HTMLCanvasElement | null>(null)
-const loading = ref(false)
-const editing = ref(false)
-const switchingPage = ref(false)
-const rotatingPage = ref(false)
-const viewerError = ref('')
-function zoomBy(step:number) { zoomChoice.value=nextZoom(zoomChoice.value,pageZoom.value,step) }
+const clockNow = ref(Date.now());
+let ocrClock: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  ocrClock = setInterval(() => (clockNow.value = Date.now()), 1000);
+});
+onBeforeUnmount(() => {
+  if (ocrClock) clearInterval(ocrClock);
+});
+const ocrElapsed = computed(() => {
+  const started = activeOcrJob.value?.started_at;
+  if (!started) return '';
+  const seconds = Math.max(0, Math.floor((clockNow.value - Date.parse(started)) / 1000));
+  if (!Number.isFinite(seconds)) return '';
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+});
+const canvas = ref<HTMLCanvasElement | null>(null);
+const loading = ref(false);
+const editing = ref(false);
+const switchingPage = ref(false);
+const rotatingPage = ref(false);
+const viewerError = ref('');
+function zoomBy(step: number) {
+  zoomChoice.value = nextZoom(zoomChoice.value, pageZoom.value, step);
+}
 function toggleExpandedView() {
-  if (!props.expanded) zoomChoice.value = 'fit-page'
-  emit('toggleExpanded')
+  if (!props.expanded) zoomChoice.value = 'fit-page';
+  emit('toggleExpanded');
 }
-const pageZoom = ref(1)
-const pageSizePt = ref({width:612,height:792})
-const showThumbnails = ref(true)
-const thumbnailsVisible = computed(() => showThumbnails.value && !readPanel.value && !focusedReading.value)
+const pageZoom = ref(1);
+const pageSizePt = ref({ width: 612, height: 792 });
+const showThumbnails = ref(true);
+const thumbnailsVisible = computed(
+  () => showThumbnails.value && !readPanel.value && !focusedReading.value,
+);
 function toggleThumbnails() {
-  if(readPanel.value) { readPanel.value=null;showThumbnails.value=true }
-  else showThumbnails.value=!showThumbnails.value
+  if (readPanel.value) {
+    readPanel.value = null;
+    showThumbnails.value = true;
+  } else showThumbnails.value = !showThumbnails.value;
 }
-type EditorCategory = 'read' | 'edit' | 'review' | 'stamps' | 'pages' | 'output' | 'ocr' | 'redact'
-const activeCategory = ref<EditorCategory>('read')
-watch(()=>props.preparation,preparing=>{
-  viewRotation.value=0
-  viewedCommentId.value=null
-  if(preparing) { selectCategory('read');readPanel.value=null;focusedReading.value=false }
-})
-const findOpen = panelFlag('search')
-const findInput = ref<HTMLInputElement | null>(null)
-const findQuery = ref('')
-const {matches:findMatches,selectedIndex:findIndex,busy:findBusy,error:findError,truncated:findTruncated,select:selectFind,step:advanceFind} = usePdfSearch(readerPdf,findQuery)
-function chooseFind(index:number){
-  selectFind(index)
-  const match=findMatches.value[index]
-  if(match){navigateToPage(match.page);void nextTick(()=>readerViewport.value?.scrollToMatch(index))}
+type EditorCategory = 'read' | 'edit' | 'review' | 'stamps' | 'pages' | 'output' | 'ocr' | 'redact';
+const activeCategory = ref<EditorCategory>('read');
+watch(
+  () => props.preparation,
+  (preparing) => {
+    viewRotation.value = 0;
+    viewedCommentId.value = null;
+    if (preparing) {
+      selectCategory('read');
+      readPanel.value = null;
+      focusedReading.value = false;
+    }
+  },
+);
+const findOpen = panelFlag('search');
+const findInput = ref<HTMLInputElement | null>(null);
+const findQuery = ref('');
+const {
+  matches: findMatches,
+  selectedIndex: findIndex,
+  busy: findBusy,
+  error: findError,
+  truncated: findTruncated,
+  select: selectFind,
+  step: advanceFind,
+} = usePdfSearch(readerPdf, findQuery);
+function chooseFind(index: number) {
+  selectFind(index);
+  const match = findMatches.value[index];
+  if (match) {
+    navigateToPage(match.page);
+    void nextTick(() => readerViewport.value?.scrollToMatch(index));
+  }
 }
-function stepFind(step:number){advanceFind(step);chooseFind(findIndex.value)}
-const draggingPage = ref<number | null>(null)
-const dropTargetPage = ref<number | null>(null)
-type ManualBookmark = {id:string,title:string,document_id:string,page_index:number,target_revision:number,parent_id:string|null,resolved:boolean}
-const manualBookmarks = ref<ManualBookmark[]>([])
-const bookmarksLoading = ref(false), bookmarksError = ref('')
-const documentBookmarks = computed(() => manualBookmarks.value.filter(item => item.document_id === props.document?.id))
-const bookmarkOpen = ref(false)
-const bookmarkTitle = ref('')
-const bookmarkSaving = ref(false)
-const bookmarkError = ref('')
-const bookmarkNotice = ref('')
-let bookmarkNoticeTimer: ReturnType<typeof setTimeout> | null = null
-let bookmarkLoadSequence = 0
-const pageBookmarks = computed(() => manualBookmarks.value.filter(item =>
-  item.document_id === props.document?.id && item.page_index === current.value - 1))
-const loadedPageCount = ref(0)
-type EditorTool = 'select' | 'add-text' | 'edit-text' | 'redact' | 'notes' | 'links' | 'marks'
-const activeTool = ref<EditorTool>('select')
-const textMode = computed(() => activeTool.value === 'add-text')
-const editTextMode = computed(() => activeTool.value === 'edit-text')
-const historyOpen = ref(false)
-const engineInspectorOpen = ref(true)
-const diagnosticsOpen = ref(false)
-watch(engineBlocked, blocked => { if (blocked) engineInspectorOpen.value = true })
-const movingRun = ref<TextRun | null>(null)
-const horizontalOffset = ref(0)
-const verticalOffset = ref(0)
-const pendingMove = ref(false)
-let pointerRun: TextRun | null = null
-let pointerId: number | null = null
-let dragStartX = 0
-let dragStartY = 0
-let suppressNextClick = false
-const overlayText = ref('')
-const overlaySize = ref(12)
-const overlayFont = ref<'helv'|'tiro'|'cour'>('helv')
-const overlayBold = ref(false)
-const overlayAlignment = ref<'left'|'center'|'right'|'justify'>('left')
+function stepFind(step: number) {
+  advanceFind(step);
+  chooseFind(findIndex.value);
+}
+const draggingPage = ref<number | null>(null);
+const dropTargetPage = ref<number | null>(null);
+type ManualBookmark = {
+  id: string;
+  title: string;
+  document_id: string;
+  page_index: number;
+  target_revision: number;
+  parent_id: string | null;
+  resolved: boolean;
+};
+const manualBookmarks = ref<ManualBookmark[]>([]);
+const bookmarksLoading = ref(false),
+  bookmarksError = ref('');
+const documentBookmarks = computed(() =>
+  manualBookmarks.value.filter((item) => item.document_id === props.document?.id),
+);
+const bookmarkOpen = ref(false);
+const bookmarkTitle = ref('');
+const bookmarkSaving = ref(false);
+const bookmarkError = ref('');
+const bookmarkNotice = ref('');
+let bookmarkNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+let bookmarkLoadSequence = 0;
+const pageBookmarks = computed(() =>
+  manualBookmarks.value.filter(
+    (item) => item.document_id === props.document?.id && item.page_index === current.value - 1,
+  ),
+);
+const loadedPageCount = ref(0);
+type EditorTool = 'select' | 'add-text' | 'edit-text' | 'redact' | 'notes' | 'links' | 'marks';
+const activeTool = ref<EditorTool>('select');
+const textMode = computed(() => activeTool.value === 'add-text');
+const editTextMode = computed(() => activeTool.value === 'edit-text');
+const historyOpen = ref(false);
+const engineInspectorOpen = ref(true);
+const diagnosticsOpen = ref(false);
+watch(engineBlocked, (blocked) => {
+  if (blocked) engineInspectorOpen.value = true;
+});
+const movingRun = ref<TextRun | null>(null);
+const horizontalOffset = ref(0);
+const verticalOffset = ref(0);
+const pendingMove = ref(false);
+let pointerRun: TextRun | null = null;
+let pointerId: number | null = null;
+let dragStartX = 0;
+let dragStartY = 0;
+let suppressNextClick = false;
+const overlayText = ref('');
+const overlaySize = ref(12);
+const overlayFont = ref<'helv' | 'tiro' | 'cour'>('helv');
+const overlayBold = ref(false);
+const overlayAlignment = ref<'left' | 'center' | 'right' | 'justify'>('left');
 const overlayValidation = computed(() => {
-  if (!overlayText.value.trim()) return 'Enter text to add.'
-  if (/[^\x20-\x7E\n]/.test(overlayText.value)) return 'Add text currently supports printable ASCII and line breaks only.'
+  if (!overlayText.value.trim()) return 'Enter text to add.';
+  if (/[^\x20-\x7E\n]/.test(overlayText.value))
+    return 'Add text currently supports printable ASCII and line breaks only.';
   if (!Number.isFinite(overlaySize.value) || overlaySize.value < 6 || overlaySize.value > 36)
-    return 'Choose a font size from 6 to 36 pt.'
-  return ''
-})
-let lastOverlayValidation = ''
+    return 'Choose a font size from 6 to 36 pt.';
+  return '';
+});
+let lastOverlayValidation = '';
 watch([overlayText, overlaySize], () => {
-  const validation = overlayText.value ? overlayValidation.value : ''
-  if (validation && validation !== lastOverlayValidation) emit('error', validation)
-  lastOverlayValidation = validation
-})
-const placement = ref<{x:number,y:number,page:number} | null>(null)
-const inlineAddInput = ref<HTMLTextAreaElement | null>(null)
+  const validation = overlayText.value ? overlayValidation.value : '';
+  if (validation && validation !== lastOverlayValidation) emit('error', validation);
+  lastOverlayValidation = validation;
+});
+const placement = ref<{ x: number; y: number; page: number } | null>(null);
+const inlineAddInput = ref<HTMLTextAreaElement | null>(null);
 const inlineAddStyle = computed(() => {
-  const point = placement.value
-  if (!point) return {}
+  const point = placement.value;
+  if (!point) return {};
   return {
     left: `${Math.min(point.x * 100, 60)}%`,
-    ...(point.y > .65 ? {bottom:`${Math.max(0,(1-point.y)*100)}%`} : {top:`${Math.min(95,point.y*100+3)}%`}),
-  }
-})
-type TextRun = { index:number, text:string, relative_bbox:[number,number,number,number] }
-const textRuns = ref<TextRun[]>([])
-const runsRevision = ref(0)
-const runsError = ref('')
-const editNotice = ref('')
-const selectedRun = ref<TextRun | null>(null)
-const replacement = ref('')
-const selectedParagraph = ref('')
-let paragraphPreviewSequence = 0
-const replacementEngine = ref<'pymupdf' | 'pdfium-trial'>('pymupdf')
-const paragraphTrialAvailable = ref(false)
-const inlineReplacementInput = ref<HTMLTextAreaElement | null>(null)
-const editSnapshot = ref('')
-const editSnapshotFading = ref(false)
-const replacingText = ref(false)
-const linkPanelOpen = computed(() => activeTool.value === 'links')
-const linkDrawing = ref(false)
-const linkRegion = ref<{x:number,y:number,width:number,height:number} | null>(null)
-let linkStart: {x:number,y:number} | null = null
-let linkPointerId: number | null = null
-const reviewedLinks = ref<ReviewedLink[]>([])
-const linksBusy = ref(false)
-const linkError = ref('')
-const linkNotice = ref('')
-const linkDraft = reactive({title:'',kind:'internal' as 'internal'|'external',target_document_id:'',target_page:1,uri:''})
-const editingLinkId = ref<string | null>(null)
-const currentPageLinks = computed(() => reviewedLinks.value.filter(item =>
-  item.source_document_id === props.document?.id && item.source_page_index === current.value - 1))
-type SelectedOverlay = {kind:'annotation'|'link',id:string}
-const selectedOverlay = ref<SelectedOverlay | null>(null)
+    ...(point.y > 0.65
+      ? { bottom: `${Math.max(0, (1 - point.y) * 100)}%` }
+      : { top: `${Math.min(95, point.y * 100 + 3)}%` }),
+  };
+});
+type TextRun = { index: number; text: string; relative_bbox: [number, number, number, number] };
+const textRuns = ref<TextRun[]>([]);
+const runsRevision = ref(0);
+const runsError = ref('');
+const editNotice = ref('');
+const selectedRun = ref<TextRun | null>(null);
+const replacement = ref('');
+const selectedParagraph = ref('');
+let paragraphPreviewSequence = 0;
+const replacementEngine = ref<'pymupdf' | 'pdfium-trial'>('pymupdf');
+const paragraphTrialAvailable = ref(false);
+const inlineReplacementInput = ref<HTMLTextAreaElement | null>(null);
+const editSnapshot = ref('');
+const editSnapshotFading = ref(false);
+const replacingText = ref(false);
+const linkPanelOpen = computed(() => activeTool.value === 'links');
+const linkDrawing = ref(false);
+const linkRegion = ref<{ x: number; y: number; width: number; height: number } | null>(null);
+let linkStart: { x: number; y: number } | null = null;
+let linkPointerId: number | null = null;
+const reviewedLinks = ref<ReviewedLink[]>([]);
+const linksBusy = ref(false);
+const linkError = ref('');
+const linkNotice = ref('');
+const linkDraft = reactive({
+  title: '',
+  kind: 'internal' as 'internal' | 'external',
+  target_document_id: '',
+  target_page: 1,
+  uri: '',
+});
+const editingLinkId = ref<string | null>(null);
+const currentPageLinks = computed(() =>
+  reviewedLinks.value.filter(
+    (item) =>
+      item.source_document_id === props.document?.id &&
+      item.source_page_index === current.value - 1,
+  ),
+);
+type SelectedOverlay = { kind: 'annotation' | 'link'; id: string };
+const selectedOverlay = ref<SelectedOverlay | null>(null);
 const selectedOverlayLabel = computed(() => {
-  const selected=selectedOverlay.value
-  if (!selected) return ''
-  if (selected.kind==='link') return 'Reviewed link'
-  const item=pageAnnotations.value.find(entry=>entry.id===selected.id)
-  return item ? annotationKindLabel(item.kind) : 'Page mark'
-})
-const overlayOffset = ref({x:0,y:0})
-const overlayResizeSize = ref<{width:number,height:number}|null>(null)
-const selectedOverlayItem = computed<PageAnnotation|ReviewedLink|null>(() => {
-  const selected=selectedOverlay.value
-  return selected?.kind==='annotation'
-    ? pageAnnotations.value.find(item=>item.id===selected.id) || null
-    : selected?.kind==='link' ? reviewedLinks.value.find(item=>item.id===selected.id) || null : null
-})
-const selectedTextAnnotation = computed(() => selectedOverlayItem.value && 'kind' in selectedOverlayItem.value &&
-  selectedOverlayItem.value.kind === 'text' ? selectedOverlayItem.value as PageAnnotation : null)
-const textObjectDraft = reactive({body:'',font_family:'helv' as 'helv'|'tiro'|'cour',font_size:12,bold:false,
-  alignment:'left' as 'left'|'center'|'right'|'justify',x:0,y:0,width:0,height:0})
-const textObjectError = ref('')
-const textObjectBusy = ref(false)
+  const selected = selectedOverlay.value;
+  if (!selected) return '';
+  if (selected.kind === 'link') return 'Reviewed link';
+  const item = pageAnnotations.value.find((entry) => entry.id === selected.id);
+  return item ? annotationKindLabel(item.kind) : 'Page mark';
+});
+const overlayOffset = ref({ x: 0, y: 0 });
+const overlayResizeSize = ref<{ width: number; height: number } | null>(null);
+const selectedOverlayItem = computed<PageAnnotation | ReviewedLink | null>(() => {
+  const selected = selectedOverlay.value;
+  return selected?.kind === 'annotation'
+    ? pageAnnotations.value.find((item) => item.id === selected.id) || null
+    : selected?.kind === 'link'
+      ? reviewedLinks.value.find((item) => item.id === selected.id) || null
+      : null;
+});
+const selectedTextAnnotation = computed(() =>
+  selectedOverlayItem.value &&
+  'kind' in selectedOverlayItem.value &&
+  selectedOverlayItem.value.kind === 'text'
+    ? (selectedOverlayItem.value as PageAnnotation)
+    : null,
+);
+const textObjectDraft = reactive({
+  body: '',
+  font_family: 'helv' as 'helv' | 'tiro' | 'cour',
+  font_size: 12,
+  bold: false,
+  alignment: 'left' as 'left' | 'center' | 'right' | 'justify',
+  x: 0,
+  y: 0,
+  width: 0,
+  height: 0,
+});
+const textObjectError = ref('');
+const textObjectBusy = ref(false);
 const textObjectDirty = computed(() => {
-  const item=selectedTextAnnotation.value
-  if (!item) return false
-  const style=item.text_style || {}, size=pageSizePt.value
-  return textObjectDraft.body!==item.body || textObjectDraft.font_family!==(style.font_family || 'helv') ||
-    textObjectDraft.font_size!==(style.font_size || 12) || textObjectDraft.bold!==!!style.bold ||
-    textObjectDraft.alignment!==(style.alignment || 'left') ||
-    textObjectDraft.x!==Math.round(item.rect_x*size.width) || textObjectDraft.y!==Math.round(item.rect_y*size.height) ||
-    textObjectDraft.width!==Math.round(item.rect_width*size.width) || textObjectDraft.height!==Math.round(item.rect_height*size.height)
-})
-watch([selectedTextAnnotation,pageSizePt], ([item,size]) => {
-  textObjectError.value=''
-  if (!item) return
-  const style=item.text_style || {}
-  textObjectDraft.body=item.body
-  textObjectDraft.font_family=style.font_family || 'helv'
-  textObjectDraft.font_size=style.font_size || 12
-  textObjectDraft.bold=!!style.bold
-  textObjectDraft.alignment=style.alignment || 'left'
-  textObjectDraft.x=Math.round(item.rect_x*size.width)
-  textObjectDraft.y=Math.round(item.rect_y*size.height)
-  textObjectDraft.width=Math.round(item.rect_width*size.width)
-  textObjectDraft.height=Math.round(item.rect_height*size.height)
-},{immediate:true})
+  const item = selectedTextAnnotation.value;
+  if (!item) return false;
+  const style = item.text_style || {},
+    size = pageSizePt.value;
+  return (
+    textObjectDraft.body !== item.body ||
+    textObjectDraft.font_family !== (style.font_family || 'helv') ||
+    textObjectDraft.font_size !== (style.font_size || 12) ||
+    textObjectDraft.bold !== !!style.bold ||
+    textObjectDraft.alignment !== (style.alignment || 'left') ||
+    textObjectDraft.x !== Math.round(item.rect_x * size.width) ||
+    textObjectDraft.y !== Math.round(item.rect_y * size.height) ||
+    textObjectDraft.width !== Math.round(item.rect_width * size.width) ||
+    textObjectDraft.height !== Math.round(item.rect_height * size.height)
+  );
+});
+watch(
+  [selectedTextAnnotation, pageSizePt],
+  ([item, size]) => {
+    textObjectError.value = '';
+    if (!item) return;
+    const style = item.text_style || {};
+    textObjectDraft.body = item.body;
+    textObjectDraft.font_family = style.font_family || 'helv';
+    textObjectDraft.font_size = style.font_size || 12;
+    textObjectDraft.bold = !!style.bold;
+    textObjectDraft.alignment = style.alignment || 'left';
+    textObjectDraft.x = Math.round(item.rect_x * size.width);
+    textObjectDraft.y = Math.round(item.rect_y * size.height);
+    textObjectDraft.width = Math.round(item.rect_width * size.width);
+    textObjectDraft.height = Math.round(item.rect_height * size.height);
+  },
+  { immediate: true },
+);
 async function saveTextObject() {
-  const item=selectedTextAnnotation.value, doc=props.document
-  if (!item || !doc || props.disabled || textObjectBusy.value) return false
-  const {x,y,width,height}=textObjectDraft, page=pageSizePt.value
-  if (!textObjectDraft.body.trim() || /[^\x20-\x7E\n]/.test(textObjectDraft.body) ||
-      ![x,y,width,height].every(Number.isFinite) || x<0 || y<0 || width<=0 || height<=0 ||
-      x+width>page.width || y+height>page.height) {
-    textObjectError.value='Enter printable text and a box inside the current page.';return false
+  const item = selectedTextAnnotation.value,
+    doc = props.document;
+  if (!item || !doc || props.disabled || textObjectBusy.value) return false;
+  const { x, y, width, height } = textObjectDraft,
+    page = pageSizePt.value;
+  if (
+    !textObjectDraft.body.trim() ||
+    /[^\x20-\x7E\n]/.test(textObjectDraft.body) ||
+    ![x, y, width, height].every(Number.isFinite) ||
+    x < 0 ||
+    y < 0 ||
+    width <= 0 ||
+    height <= 0 ||
+    x + width > page.width ||
+    y + height > page.height
+  ) {
+    textObjectError.value = 'Enter printable text and a box inside the current page.';
+    return false;
   }
-  textObjectBusy.value=true;textObjectError.value=''
+  textObjectBusy.value = true;
+  textObjectError.value = '';
   try {
-    pageAnnotations.value=await api<PageAnnotation[]>(`/annotations/${item.id}`,'PATCH',{
-      expected_revision:doc.revision,rect_x:x/page.width,rect_y:y/page.height,
-      rect_width:width/page.width,rect_height:height/page.height,body:textObjectDraft.body,
-      color:item.color,text_style:{font_family:textObjectDraft.font_family,font_size:textObjectDraft.font_size,
-        bold:textObjectDraft.bold,alignment:textObjectDraft.alignment},
-    })
-    emit('modified')
-    return true
-  } catch(error) {textObjectError.value=friendlyError(error);return false}
-  finally {textObjectBusy.value=false}
+    pageAnnotations.value = await api<PageAnnotation[]>(`/annotations/${item.id}`, 'PATCH', {
+      expected_revision: doc.revision,
+      rect_x: x / page.width,
+      rect_y: y / page.height,
+      rect_width: width / page.width,
+      rect_height: height / page.height,
+      body: textObjectDraft.body,
+      color: item.color,
+      text_style: {
+        font_family: textObjectDraft.font_family,
+        font_size: textObjectDraft.font_size,
+        bold: textObjectDraft.bold,
+        alignment: textObjectDraft.alignment,
+      },
+    });
+    emit('modified');
+    return true;
+  } catch (error) {
+    textObjectError.value = friendlyError(error);
+    return false;
+  } finally {
+    textObjectBusy.value = false;
+  }
 }
-let overlayDrag: {pointerId:number,startX:number,startY:number,item:PageAnnotation|ReviewedLink,kind:SelectedOverlay['kind']} | null = null
-let overlayResize: {pointerId:number,startX:number,startY:number,item:PageAnnotation|ReviewedLink,kind:SelectedOverlay['kind']} | null = null
-let suppressOverlayClick = false
-function overlaySelected(kind:SelectedOverlay['kind'],id:string) {
-  return selectedOverlay.value?.kind===kind && selectedOverlay.value.id===id
+let overlayDrag: {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  item: PageAnnotation | ReviewedLink;
+  kind: SelectedOverlay['kind'];
+} | null = null;
+let overlayResize: {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  item: PageAnnotation | ReviewedLink;
+  kind: SelectedOverlay['kind'];
+} | null = null;
+let suppressOverlayClick = false;
+function overlaySelected(kind: SelectedOverlay['kind'], id: string) {
+  return selectedOverlay.value?.kind === kind && selectedOverlay.value.id === id;
 }
-function overlayStyle(kind:SelectedOverlay['kind'],id:string) {
-  if (!overlaySelected(kind,id) || !canvas.value) return {}
-  const box=canvas.value.getBoundingClientRect()
-  return {transform:`translate(${overlayOffset.value.x*box.width}px, ${overlayOffset.value.y*box.height}px)`,
-    ...(overlayResizeSize.value?{width:`${overlayResizeSize.value.width*100}%`,height:`${overlayResizeSize.value.height*100}%`}:{})}
+function overlayStyle(kind: SelectedOverlay['kind'], id: string) {
+  if (!overlaySelected(kind, id) || !canvas.value) return {};
+  const box = canvas.value.getBoundingClientRect();
+  return {
+    transform: `translate(${overlayOffset.value.x * box.width}px, ${overlayOffset.value.y * box.height}px)`,
+    ...(overlayResizeSize.value
+      ? {
+          width: `${overlayResizeSize.value.width * 100}%`,
+          height: `${overlayResizeSize.value.height * 100}%`,
+        }
+      : {}),
+  };
 }
-function textOverlayStyle(item:PageAnnotation) {
-  const style=item.text_style || {}
-  return {fontFamily:style.font_family==='cour'?'Courier, monospace':style.font_family==='tiro'?'Times New Roman, serif':'Helvetica, Arial, sans-serif',
-    fontSize:`${(style.font_size || 12)*pageZoom.value*4/3}px`,fontWeight:style.bold?'700':'400',
-    textAlign:style.alignment || 'left'}
+function textOverlayStyle(item: PageAnnotation) {
+  const style = item.text_style || {};
+  return {
+    fontFamily:
+      style.font_family === 'cour'
+        ? 'Courier, monospace'
+        : style.font_family === 'tiro'
+          ? 'Times New Roman, serif'
+          : 'Helvetica, Arial, sans-serif',
+    fontSize: `${((style.font_size || 12) * pageZoom.value * 4) / 3}px`,
+    fontWeight: style.bold ? '700' : '400',
+    textAlign: style.alignment || 'left',
+  };
 }
 function clearOverlaySelection() {
-  selectedOverlay.value=null
-  overlayOffset.value={x:0,y:0}
-  overlayResizeSize.value=null
-  overlayDrag=null
-  overlayResize=null
+  selectedOverlay.value = null;
+  overlayOffset.value = { x: 0, y: 0 };
+  overlayResizeSize.value = null;
+  overlayDrag = null;
+  overlayResize = null;
 }
 function closeSelectedProperties() {
-  clearOverlaySelection()
-  if (editingAnnotationId.value) { resetAnnotationDraft(); activeTool.value='select' }
-  if (editingLinkId.value) { editingLinkId.value=null; linkRegion.value=null; activeTool.value='select' }
-}
-function beginOverlayDrag(event:PointerEvent,kind:SelectedOverlay['kind'],item:PageAnnotation|ReviewedLink) {
-  if (event.button!==0 || props.preparation || props.disabled || editing.value || !pageReady.value || !item.resolved) return
-  event.stopPropagation()
-  selectedOverlay.value={kind,id:item.id}
-  overlayOffset.value={x:0,y:0}
-  overlayDrag={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,item,kind}
-  ;(event.currentTarget as HTMLElement).focus()
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-}
-function updateOverlayDrag(event:PointerEvent) {
-  const drag=overlayDrag
-  if (!drag || drag.pointerId!==event.pointerId || !canvas.value) return
-  const box=canvas.value.getBoundingClientRect()
-  if (!box.width || !box.height) return
-  const dx=(event.clientX-drag.startX)/box.width
-  const dy=(event.clientY-drag.startY)/box.height
-  overlayOffset.value={
-    x:Math.max(-drag.item.rect_x,Math.min(1-drag.item.rect_x-drag.item.rect_width,dx)),
-    y:Math.max(-drag.item.rect_y,Math.min(1-drag.item.rect_y-drag.item.rect_height,dy)),
+  clearOverlaySelection();
+  if (editingAnnotationId.value) {
+    resetAnnotationDraft();
+    activeTool.value = 'select';
   }
-  event.preventDefault()
-}
-async function finishOverlayDrag(event:PointerEvent) {
-  const drag=overlayDrag
-  if (!drag || drag.pointerId!==event.pointerId) return
-  overlayDrag=null
-  const {x,y}=overlayOffset.value
-  if (event.type!=='pointerup' || Math.hypot(x,y)<.0001) { overlayOffset.value={x:0,y:0}; return }
-  suppressOverlayClick=true
-  window.setTimeout(()=>{suppressOverlayClick=false},0)
-  await persistOverlayRect(drag.kind,drag.item,{
-    x:drag.item.rect_x+x,y:drag.item.rect_y+y,
-    width:drag.item.rect_width,height:drag.item.rect_height})
-  overlayOffset.value={x:0,y:0}
-}
-function beginOverlayResize(event:PointerEvent) {
-  const selected=selectedOverlay.value,item=selectedOverlayItem.value
-  if (!selected || !item || !item.resolved || event.button!==0 || props.disabled || editing.value || !pageReady.value) return
-  overlayResize={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,item,kind:selected.kind}
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  event.stopPropagation()
-}
-function updateOverlayResize(event:PointerEvent) {
-  const drag=overlayResize
-  if (!drag || drag.pointerId!==event.pointerId || !canvas.value) return
-  const box=canvas.value.getBoundingClientRect()
-  if (!box.width || !box.height) return
-  overlayResizeSize.value={
-    width:Math.max(.01,Math.min(1-drag.item.rect_x,drag.item.rect_width+(event.clientX-drag.startX)/box.width)),
-    height:Math.max(.01,Math.min(1-drag.item.rect_y,drag.item.rect_height+(event.clientY-drag.startY)/box.height)),
+  if (editingLinkId.value) {
+    editingLinkId.value = null;
+    linkRegion.value = null;
+    activeTool.value = 'select';
   }
-  event.preventDefault()
 }
-async function finishOverlayResize(event:PointerEvent) {
-  const drag=overlayResize
-  if (!drag || drag.pointerId!==event.pointerId) return
-  overlayResize=null
-  const size=overlayResizeSize.value
-  if (event.type==='pointerup' && size &&
-      (Math.abs(size.width-drag.item.rect_width)>.0001 || Math.abs(size.height-drag.item.rect_height)>.0001)) {
-    await persistOverlayRect(drag.kind,drag.item,{
-      x:drag.item.rect_x,y:drag.item.rect_y,width:size.width,height:size.height})
+function beginOverlayDrag(
+  event: PointerEvent,
+  kind: SelectedOverlay['kind'],
+  item: PageAnnotation | ReviewedLink,
+) {
+  if (
+    event.button !== 0 ||
+    props.preparation ||
+    props.disabled ||
+    editing.value ||
+    !pageReady.value ||
+    !item.resolved
+  )
+    return;
+  event.stopPropagation();
+  selectedOverlay.value = { kind, id: item.id };
+  overlayOffset.value = { x: 0, y: 0 };
+  overlayDrag = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    item,
+    kind,
+  };
+  (event.currentTarget as HTMLElement).focus();
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+}
+function updateOverlayDrag(event: PointerEvent) {
+  const drag = overlayDrag;
+  if (!drag || drag.pointerId !== event.pointerId || !canvas.value) return;
+  const box = canvas.value.getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  const dx = (event.clientX - drag.startX) / box.width;
+  const dy = (event.clientY - drag.startY) / box.height;
+  overlayOffset.value = {
+    x: Math.max(-drag.item.rect_x, Math.min(1 - drag.item.rect_x - drag.item.rect_width, dx)),
+    y: Math.max(-drag.item.rect_y, Math.min(1 - drag.item.rect_y - drag.item.rect_height, dy)),
+  };
+  event.preventDefault();
+}
+async function finishOverlayDrag(event: PointerEvent) {
+  const drag = overlayDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  overlayDrag = null;
+  const { x, y } = overlayOffset.value;
+  if (event.type !== 'pointerup' || Math.hypot(x, y) < 0.0001) {
+    overlayOffset.value = { x: 0, y: 0 };
+    return;
   }
-  overlayResizeSize.value=null
+  suppressOverlayClick = true;
+  window.setTimeout(() => {
+    suppressOverlayClick = false;
+  }, 0);
+  await persistOverlayRect(drag.kind, drag.item, {
+    x: drag.item.rect_x + x,
+    y: drag.item.rect_y + y,
+    width: drag.item.rect_width,
+    height: drag.item.rect_height,
+  });
+  overlayOffset.value = { x: 0, y: 0 };
 }
-async function persistOverlayRect(kind:SelectedOverlay['kind'],item:PageAnnotation|ReviewedLink,
-    rect:{x:number,y:number,width:number,height:number}) {
-  const doc=props.document
-  if (!doc || props.disabled) return
+function beginOverlayResize(event: PointerEvent) {
+  const selected = selectedOverlay.value,
+    item = selectedOverlayItem.value;
+  if (
+    !selected ||
+    !item ||
+    !item.resolved ||
+    event.button !== 0 ||
+    props.disabled ||
+    editing.value ||
+    !pageReady.value
+  )
+    return;
+  overlayResize = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    item,
+    kind: selected.kind,
+  };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.stopPropagation();
+}
+function updateOverlayResize(event: PointerEvent) {
+  const drag = overlayResize;
+  if (!drag || drag.pointerId !== event.pointerId || !canvas.value) return;
+  const box = canvas.value.getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  overlayResizeSize.value = {
+    width: Math.max(
+      0.01,
+      Math.min(
+        1 - drag.item.rect_x,
+        drag.item.rect_width + (event.clientX - drag.startX) / box.width,
+      ),
+    ),
+    height: Math.max(
+      0.01,
+      Math.min(
+        1 - drag.item.rect_y,
+        drag.item.rect_height + (event.clientY - drag.startY) / box.height,
+      ),
+    ),
+  };
+  event.preventDefault();
+}
+async function finishOverlayResize(event: PointerEvent) {
+  const drag = overlayResize;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  overlayResize = null;
+  const size = overlayResizeSize.value;
+  if (
+    event.type === 'pointerup' &&
+    size &&
+    (Math.abs(size.width - drag.item.rect_width) > 0.0001 ||
+      Math.abs(size.height - drag.item.rect_height) > 0.0001)
+  ) {
+    await persistOverlayRect(drag.kind, drag.item, {
+      x: drag.item.rect_x,
+      y: drag.item.rect_y,
+      width: size.width,
+      height: size.height,
+    });
+  }
+  overlayResizeSize.value = null;
+}
+async function persistOverlayRect(
+  kind: SelectedOverlay['kind'],
+  item: PageAnnotation | ReviewedLink,
+  rect: { x: number; y: number; width: number; height: number },
+) {
+  const doc = props.document;
+  if (!doc || props.disabled) return;
   try {
-    if (kind==='annotation') {
-      annotationBusy.value=true
-      pageAnnotations.value=await api<PageAnnotation[]>(`/annotations/${item.id}`,'PATCH',{
-        expected_revision:doc.revision,rect_x:rect.x,rect_y:rect.y,
-        rect_width:rect.width,rect_height:rect.height,
-        body:(item as PageAnnotation).body,color:(item as PageAnnotation).color,
-      })
-      if (editingAnnotationId.value===item.id) annotationRegion.value={...rect}
+    if (kind === 'annotation') {
+      annotationBusy.value = true;
+      pageAnnotations.value = await api<PageAnnotation[]>(`/annotations/${item.id}`, 'PATCH', {
+        expected_revision: doc.revision,
+        rect_x: rect.x,
+        rect_y: rect.y,
+        rect_width: rect.width,
+        rect_height: rect.height,
+        body: (item as PageAnnotation).body,
+        color: (item as PageAnnotation).color,
+      });
+      if (editingAnnotationId.value === item.id) annotationRegion.value = { ...rect };
     } else {
-      linksBusy.value=true
-      const existing=await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`)
-      if (props.document?.id!==doc.id || props.document.revision!==doc.revision) throw new Error('Document changed. Select the link again.')
-      reviewedLinks.value=await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`,'PUT',{
-        entries:existing.map(entry=>entry.id===item.id?{
-          ...linkPayload(entry),rect_x:rect.x,rect_y:rect.y,
-          rect_width:rect.width,rect_height:rect.height,
-        }:linkPayload(entry)),
-      })
-      if (editingLinkId.value===item.id) linkRegion.value={...rect}
+      linksBusy.value = true;
+      const existing = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`);
+      if (props.document?.id !== doc.id || props.document.revision !== doc.revision)
+        throw new Error('Document changed. Select the link again.');
+      reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`, 'PUT', {
+        entries: existing.map((entry) =>
+          entry.id === item.id
+            ? {
+                ...linkPayload(entry),
+                rect_x: rect.x,
+                rect_y: rect.y,
+                rect_width: rect.width,
+                rect_height: rect.height,
+              }
+            : linkPayload(entry),
+        ),
+      });
+      if (editingLinkId.value === item.id) linkRegion.value = { ...rect };
     }
-    emit('modified')
-  } catch (err) {emit('error',friendlyError(err))}
-  finally {annotationBusy.value=false;linksBusy.value=false}
+    emit('modified');
+  } catch (err) {
+    emit('error', friendlyError(err));
+  } finally {
+    annotationBusy.value = false;
+    linksBusy.value = false;
+  }
 }
 async function deleteSelectedOverlay() {
-  const selected=selectedOverlay.value
-  if (!selected || props.preparation || props.disabled || editing.value || annotationBusy.value || linksBusy.value) return
-  const annotation=selected.kind==='annotation'?pageAnnotations.value.find(item=>item.id===selected.id):null
-  const link=selected.kind==='link'?reviewedLinks.value.find(item=>item.id===selected.id):null
-  if (!annotation && !link) {clearOverlaySelection();return}
+  const selected = selectedOverlay.value;
+  if (
+    !selected ||
+    props.preparation ||
+    props.disabled ||
+    editing.value ||
+    annotationBusy.value ||
+    linksBusy.value
+  )
+    return;
+  const annotation =
+    selected.kind === 'annotation'
+      ? pageAnnotations.value.find((item) => item.id === selected.id)
+      : null;
+  const link =
+    selected.kind === 'link' ? reviewedLinks.value.find((item) => item.id === selected.id) : null;
+  if (!annotation && !link) {
+    clearOverlaySelection();
+    return;
+  }
   // Only authored overlays are removed here. Working-PDF pixels and original content use guarded edit tools.
   try {
     if (annotation) {
-      annotationBusy.value=true
-      pageAnnotations.value=await api<PageAnnotation[]>(`/annotations/${annotation.id}`,'DELETE')
-      await loadCurrentAnnotationImages()
+      annotationBusy.value = true;
+      pageAnnotations.value = await api<PageAnnotation[]>(
+        `/annotations/${annotation.id}`,
+        'DELETE',
+      );
+      await loadCurrentAnnotationImages();
     } else if (link && props.document) {
-      linksBusy.value=true
-      const doc=props.document
-      const existing=await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`)
-      reviewedLinks.value=await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`,'PUT',
-        {entries:existing.filter(item=>item.id!==link.id).map(linkPayload)})
+      linksBusy.value = true;
+      const doc = props.document;
+      const existing = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`);
+      reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`, 'PUT', {
+        entries: existing.filter((item) => item.id !== link.id).map(linkPayload),
+      });
     }
-    clearOverlaySelection()
-    emit('modified')
-  } catch (err) {emit('error',friendlyError(err))}
-  finally {annotationBusy.value=false;linksBusy.value=false}
-}
-const annotationPanelOpen = computed(() => activeTool.value === 'notes')
-const redactionOpen = computed(() => activeTool.value === 'redact')
-const redactionCorners = ['nw','ne','sw','se'] as const
-type AppliedRedaction = {id:string,document_id:string,page_index:number,rect_x:number,rect_y:number,
-  rect_width:number,rect_height:number,restore_x:number,restore_y:number,
-  restore_width:number,restore_height:number,before_revision:number,after_revision:number,
-  structure_changed:number}
-const appliedRedactions = ref<AppliedRedaction[]>([])
-const selectedRedactionId = ref<string | null>(null)
-const selectedRedaction = computed(() => appliedRedactions.value.find(item => item.id === selectedRedactionId.value) || null)
-const redactionRegion = ref<{x:number,y:number,width:number,height:number} | null>(null)
-const redactionBusy = ref(false)
-const redactionError = ref('')
-const redactionNotice = ref('')
-let redactionStart: {x:number,y:number} | null = null
-let redactionPointerId: number | null = null
-let redactionResize: {pointerId:number,anchor:{x:number,y:number}} | null = null
-let redactionMove: {pointerId:number,start:{x:number,y:number},region:{x:number,y:number,width:number,height:number}} | null = null
-let redactionRevision = 0
-const annotationDrawing = ref(false)
-const annotationRegion = ref<{x:number,y:number,width:number,height:number} | null>(null)
-const annotationDrawPoints = ref<Array<{x:number,y:number}>>([])
-let annotationStart: {x:number,y:number} | null = null
-let annotationPointerId: number | null = null
-const pageAnnotations = ref<PageAnnotation[]>([])
-const annotationBusy = ref(false)
-const annotationError = ref('')
-const annotationNotice = ref('')
-const annotationImage = ref<File | null>(null)
-const annotationPreviewUrl = ref('')
-const annotationFileInput = ref<HTMLInputElement | null>(null)
-const annotationImageUrls = reactive<Record<string,string>>({})
-const annotationDraft = reactive({kind:'highlight' as PageAnnotation['kind'], body:'', color:'yellow' as PageAnnotation['color']})
-const annotationOutputScope = ref<'private'|'pdf'>('pdf')
-const editingAnnotationId = ref<string | null>(null)
-watch(pageAnnotations, entries => {
-  if (editingAnnotationId.value && !entries.some(item=>item.id===editingAnnotationId.value)) {
-    resetAnnotationDraft()
-    activeTool.value = 'select'
+    clearOverlaySelection();
+    emit('modified');
+  } catch (err) {
+    emit('error', friendlyError(err));
+  } finally {
+    annotationBusy.value = false;
+    linksBusy.value = false;
   }
-  if (selectedOverlay.value?.kind === 'annotation' && !entries.some(item=>item.id===selectedOverlay.value?.id))
-    clearOverlaySelection()
-})
-const currentPageAnnotations = computed(() => pageAnnotations.value.filter(item =>
-  item.document_id === props.document?.id && item.page_index === current.value - 1))
-const documentComments = computed(()=>pageAnnotations.value.filter(item=>item.document_id===props.document?.id && item.kind==='comment'))
-const pendingRedactions = computed(() => pageAnnotations.value.filter(item =>
-  item.document_id === props.document?.id && item.kind === 'redaction' && item.resolved)
-  .sort((a,b) => a.page_index-b.page_index || a.rect_y-b.rect_y))
-const viewedComment = computed(() => documentComments.value.find(item=>item.id===viewedCommentId.value) || null)
+}
+const annotationPanelOpen = computed(() => activeTool.value === 'notes');
+const redactionOpen = computed(() => activeTool.value === 'redact');
+const redactionCorners = ['nw', 'ne', 'sw', 'se'] as const;
+type AppliedRedaction = {
+  id: string;
+  document_id: string;
+  page_index: number;
+  rect_x: number;
+  rect_y: number;
+  rect_width: number;
+  rect_height: number;
+  restore_x: number;
+  restore_y: number;
+  restore_width: number;
+  restore_height: number;
+  before_revision: number;
+  after_revision: number;
+  structure_changed: number;
+};
+const appliedRedactions = ref<AppliedRedaction[]>([]);
+const selectedRedactionId = ref<string | null>(null);
+const selectedRedaction = computed(
+  () => appliedRedactions.value.find((item) => item.id === selectedRedactionId.value) || null,
+);
+const redactionRegion = ref<{ x: number; y: number; width: number; height: number } | null>(null);
+const redactionBusy = ref(false);
+const redactionError = ref('');
+const redactionNotice = ref('');
+let redactionStart: { x: number; y: number } | null = null;
+let redactionPointerId: number | null = null;
+let redactionResize: { pointerId: number; anchor: { x: number; y: number } } | null = null;
+let redactionMove: {
+  pointerId: number;
+  start: { x: number; y: number };
+  region: { x: number; y: number; width: number; height: number };
+} | null = null;
+let redactionRevision = 0;
+const annotationDrawing = ref(false);
+const annotationRegion = ref<{ x: number; y: number; width: number; height: number } | null>(null);
+const annotationDrawPoints = ref<Array<{ x: number; y: number }>>([]);
+let annotationStart: { x: number; y: number } | null = null;
+let annotationPointerId: number | null = null;
+const pageAnnotations = ref<PageAnnotation[]>([]);
+const annotationBusy = ref(false);
+const annotationError = ref('');
+const annotationNotice = ref('');
+const annotationImage = ref<File | null>(null);
+const annotationPreviewUrl = ref('');
+const annotationFileInput = ref<HTMLInputElement | null>(null);
+const annotationImageUrls = reactive<Record<string, string>>({});
+const annotationDraft = reactive({
+  kind: 'highlight' as PageAnnotation['kind'],
+  body: '',
+  color: 'yellow' as PageAnnotation['color'],
+});
+const annotationOutputScope = ref<'private' | 'pdf'>('pdf');
+const editingAnnotationId = ref<string | null>(null);
+watch(pageAnnotations, (entries) => {
+  if (editingAnnotationId.value && !entries.some((item) => item.id === editingAnnotationId.value)) {
+    resetAnnotationDraft();
+    activeTool.value = 'select';
+  }
+  if (
+    selectedOverlay.value?.kind === 'annotation' &&
+    !entries.some((item) => item.id === selectedOverlay.value?.id)
+  )
+    clearOverlaySelection();
+});
+const currentPageAnnotations = computed(() =>
+  pageAnnotations.value.filter(
+    (item) => item.document_id === props.document?.id && item.page_index === current.value - 1,
+  ),
+);
+const documentComments = computed(() =>
+  pageAnnotations.value.filter(
+    (item) => item.document_id === props.document?.id && item.kind === 'comment',
+  ),
+);
+const pendingRedactions = computed(() =>
+  pageAnnotations.value
+    .filter(
+      (item) =>
+        item.document_id === props.document?.id && item.kind === 'redaction' && item.resolved,
+    )
+    .sort((a, b) => a.page_index - b.page_index || a.rect_y - b.rect_y),
+);
+const viewedComment = computed(
+  () => documentComments.value.find((item) => item.id === viewedCommentId.value) || null,
+);
 const viewedCommentStyle = computed(() => {
-  const item=viewedComment.value
-  if (!item) return {}
+  const item = viewedComment.value;
+  if (!item) return {};
   return {
-    left:`clamp(8px, ${(item.rect_x+item.rect_width/2)*100}%, calc(100% - 288px))`,
-    ...(item.rect_y>.55
-      ? {bottom:`calc(${(1-item.rect_y)*100}% + 12px)`}
-      : {top:`calc(${(item.rect_y+item.rect_height)*100}% + 12px)`}),
-  }
-})
-function dismissReadComment(event:PointerEvent){
- if(viewedCommentId.value && !(event.target as Element)?.closest('.pdf-comment-popover,.pdf-review-comment'))closeViewedComment()
+    left: `clamp(8px, ${(item.rect_x + item.rect_width / 2) * 100}%, calc(100% - 288px))`,
+    ...(item.rect_y > 0.55
+      ? { bottom: `calc(${(1 - item.rect_y) * 100}% + 12px)` }
+      : { top: `calc(${(item.rect_y + item.rect_height) * 100}% + 12px)` }),
+  };
+});
+function dismissReadComment(event: PointerEvent) {
+  if (
+    viewedCommentId.value &&
+    !(event.target as Element)?.closest('.pdf-comment-popover,.pdf-review-comment')
+  )
+    closeViewedComment();
 }
-onMounted(()=>window.document.addEventListener('pointerdown',dismissReadComment,true))
-onBeforeUnmount(()=>window.document.removeEventListener('pointerdown',dismissReadComment,true))
+onMounted(() => window.document.addEventListener('pointerdown', dismissReadComment, true));
+onBeforeUnmount(() => window.document.removeEventListener('pointerdown', dismissReadComment, true));
 function closeViewedComment() {
-  viewerElement.value?.querySelector<HTMLElement>('.pdf-review-comment.selected')?.focus({preventScroll:true})
-  viewedCommentId.value=null
-  clearOverlaySelection()
+  viewerElement.value
+    ?.querySelector<HTMLElement>('.pdf-review-comment.selected')
+    ?.focus({ preventScroll: true });
+  viewedCommentId.value = null;
+  clearOverlaySelection();
 }
 const filteredComments = computed(() => {
-  const query = commentQuery.value.trim().toLocaleLowerCase()
-  return documentComments.value.filter(item => !query ||
-    item.body.toLocaleLowerCase().includes(query) || String(item.page_index + 1).includes(query))
-    .sort((a,b) => a.page_index - b.page_index)
-})
-const marksPanelOpen = computed(() => activeTool.value === 'marks')
+  const query = commentQuery.value.trim().toLocaleLowerCase();
+  return documentComments.value
+    .filter(
+      (item) =>
+        !query ||
+        item.body.toLocaleLowerCase().includes(query) ||
+        String(item.page_index + 1).includes(query),
+    )
+    .sort((a, b) => a.page_index - b.page_index);
+});
+const marksPanelOpen = computed(() => activeTool.value === 'marks');
 const linkDirty = computed(() => {
-  const item=reviewedLinks.value.find(entry=>entry.id===editingLinkId.value)
-  const region=linkRegion.value
-  return !!(item && region && (item.title!==linkDraft.title || item.kind!==linkDraft.kind ||
-    (item.target_document_id || '')!==linkDraft.target_document_id ||
-    (item.target_page_index === null ? 1 : item.target_page_index+1)!==linkDraft.target_page ||
-    item.uri!==linkDraft.uri || item.rect_x!==region.x || item.rect_y!==region.y ||
-    item.rect_width!==region.width || item.rect_height!==region.height))
-})
-const objectSelectionOpen = computed(() => !props.preparation && activeCategory.value==='edit' && activeTool.value==='select' && !selectedTextAnnotation.value && !historyOpen.value && !readPanel.value)
-const bundleImpactVisible = computed(() => !!props.staleBuild && !props.preparation && !props.findingContext && !focusedReading.value && activeCategory.value==='read' && !readPanel.value && !inspectorVisible.value)
-const inspectorVisible = computed(() => objectSelectionOpen.value || marksPanelOpen.value ||
-  (!props.preparation && activeCategory.value === 'ocr') ||
-  (!props.preparation && !!selectedTextAnnotation.value) ||
-  (!props.preparation && engineBlocked.value && engineInspectorOpen.value) || historyOpen.value ||
-  textMode.value || editTextMode.value ||
-  redactionOpen.value || annotationPanelOpen.value ||
-  linkPanelOpen.value)
-const toolHint = computed(() => ({
-  'add-text': 'Click where text should appear, type in the box, then choose Apply text.',
-  'edit-text': 'Click selectable text to edit it; drag a highlighted run in any direction to preview a move.',
-  redact: 'Drag over content, add the mark, then move or resize it before saving a redacted PDF.',
-  notes: annotationDraft.kind === 'image' ? 'Choose an image, then drag its size and position on the page.' : `Drag on the page to place a ${annotationKindLabel(annotationDraft.kind).toLowerCase()} mark.`,
-  links: 'Drag a rectangle on the page to create a link.',
-  marks: 'Preview output marks on this page; new builds will include saved settings.',
-  select: '',
-})[activeTool.value])
-const toolFeedback = computed(() => activeTool.value === 'redact' ? (redactionError.value || redactionNotice.value) :
-  activeTool.value === 'notes' ? annotationError.value :
-  activeTool.value === 'links' ? (linkError.value || linkNotice.value) :
-  activeTool.value === 'edit-text' ? (runsError.value || editNotice.value) : '')
-const marksBusy = ref(false)
-const marksError = ref('')
-const marksNotice = ref('')
-const markPreview = ref<OutputMarkPreview[]>([])
+  const item = reviewedLinks.value.find((entry) => entry.id === editingLinkId.value);
+  const region = linkRegion.value;
+  return !!(
+    item &&
+    region &&
+    (item.title !== linkDraft.title ||
+      item.kind !== linkDraft.kind ||
+      (item.target_document_id || '') !== linkDraft.target_document_id ||
+      (item.target_page_index === null ? 1 : item.target_page_index + 1) !==
+        linkDraft.target_page ||
+      item.uri !== linkDraft.uri ||
+      item.rect_x !== region.x ||
+      item.rect_y !== region.y ||
+      item.rect_width !== region.width ||
+      item.rect_height !== region.height)
+  );
+});
+const objectSelectionOpen = computed(
+  () =>
+    !props.preparation &&
+    activeCategory.value === 'edit' &&
+    activeTool.value === 'select' &&
+    !selectedTextAnnotation.value &&
+    !historyOpen.value &&
+    !readPanel.value,
+);
+const bundleImpactVisible = computed(
+  () =>
+    !!props.staleBuild &&
+    !props.preparation &&
+    !props.findingContext &&
+    !focusedReading.value &&
+    activeCategory.value === 'read' &&
+    !readPanel.value &&
+    !inspectorVisible.value,
+);
+const inspectorVisible = computed(
+  () =>
+    objectSelectionOpen.value ||
+    marksPanelOpen.value ||
+    (!props.preparation && activeCategory.value === 'ocr') ||
+    (!props.preparation && !!selectedTextAnnotation.value) ||
+    (!props.preparation && engineBlocked.value && engineInspectorOpen.value) ||
+    historyOpen.value ||
+    textMode.value ||
+    editTextMode.value ||
+    redactionOpen.value ||
+    annotationPanelOpen.value ||
+    linkPanelOpen.value,
+);
+const toolHint = computed(
+  () =>
+    ({
+      'add-text': 'Click where text should appear, type in the box, then choose Apply text.',
+      'edit-text':
+        'Click selectable text to edit it; drag a highlighted run in any direction to preview a move.',
+      redact:
+        'Drag over content, add the mark, then move or resize it before saving a redacted PDF.',
+      notes:
+        annotationDraft.kind === 'image'
+          ? 'Choose an image, then drag its size and position on the page.'
+          : `Drag on the page to place a ${annotationKindLabel(annotationDraft.kind).toLowerCase()} mark.`,
+      links: 'Drag a rectangle on the page to create a link.',
+      marks: 'Preview output marks on this page; new builds will include saved settings.',
+      select: '',
+    })[activeTool.value],
+);
+const toolFeedback = computed(() =>
+  activeTool.value === 'redact'
+    ? redactionError.value || redactionNotice.value
+    : activeTool.value === 'notes'
+      ? annotationError.value
+      : activeTool.value === 'links'
+        ? linkError.value || linkNotice.value
+        : activeTool.value === 'edit-text'
+          ? runsError.value || editNotice.value
+          : '',
+);
+const marksBusy = ref(false);
+const marksError = ref('');
+const marksNotice = ref('');
+const markPreview = ref<OutputMarkPreview[]>([]);
 const defaultMarks: OutputMarks = {
-  volume_max_bytes:null,volume_splits:{},processing_quality:'original',cleanup_metadata:false,print_layout:'screen',office_docx:false,office_xlsx:false,office_pptx:false,
-  numbering_style:'arabic',numbering_restart:'volume',numbering_start:1,numbering_prefix:'',numbering_position:'bottom_center',numbering_front_matter:'physical',numbering_pdf_labels:true,numbering_linked_index:true,numbering_back_link:false,
-  index_style:'compact',part_extracts_enabled:false,front_matter:'index_only',index_date:false,cover_heading:'',cover_reference:'',cover_title:'',
-  watermark_enabled:false,watermark_text:'DRAFT',watermark_position:'center',
-  watermark_font_size:32,watermark_opacity:.16,timestamp_enabled:false,
-  timestamp_format:'datetime',timestamp_timezone:'UTC',timestamp_position:'bottom_right',
-  timestamp_font_size:8,timestamp_prefix:'Built',
-  bates_enabled:false,bates_prefix:'',bates_start:1,bates_padding:6,
-  bates_position:'bottom_left',bates_font_size:8,bates_include_index:false,
-  bates_include_separator:false,bates_restart_per_volume:false,
-  annexure_mode:'none',annexure_stamp_scope:'first',
-  annexure_stamp_position:'top_right',annexure_stamp_font_size:10,
-  annexure_overrides:{},
-}
-const markSettings = reactive<OutputMarks>({...defaultMarks})
-const savedMarks = ref(JSON.stringify(defaultMarks))
-let markPreviewTimer: ReturnType<typeof setTimeout> | null = null
-let markLoadSequence = 0
-let markPreviewSequence = 0
+  volume_max_bytes: null,
+  volume_splits: {},
+  processing_quality: 'original',
+  cleanup_metadata: false,
+  print_layout: 'screen',
+  office_docx: false,
+  office_xlsx: false,
+  office_pptx: false,
+  numbering_style: 'arabic',
+  numbering_restart: 'volume',
+  numbering_start: 1,
+  numbering_prefix: '',
+  numbering_position: 'bottom_center',
+  numbering_front_matter: 'physical',
+  numbering_pdf_labels: true,
+  numbering_linked_index: true,
+  numbering_back_link: false,
+  index_style: 'compact',
+  part_extracts_enabled: false,
+  front_matter: 'index_only',
+  index_date: false,
+  cover_heading: '',
+  cover_reference: '',
+  cover_title: '',
+  watermark_enabled: false,
+  watermark_text: 'DRAFT',
+  watermark_position: 'center',
+  watermark_font_size: 32,
+  watermark_opacity: 0.16,
+  timestamp_enabled: false,
+  timestamp_format: 'datetime',
+  timestamp_timezone: 'UTC',
+  timestamp_position: 'bottom_right',
+  timestamp_font_size: 8,
+  timestamp_prefix: 'Built',
+  bates_enabled: false,
+  bates_prefix: '',
+  bates_start: 1,
+  bates_padding: 6,
+  bates_position: 'bottom_left',
+  bates_font_size: 8,
+  bates_include_index: false,
+  bates_include_separator: false,
+  bates_restart_per_volume: false,
+  annexure_mode: 'none',
+  annexure_stamp_scope: 'first',
+  annexure_stamp_position: 'top_right',
+  annexure_stamp_font_size: 10,
+  annexure_overrides: {},
+};
+const markSettings = reactive<OutputMarks>({ ...defaultMarks });
+const savedMarks = ref(JSON.stringify(defaultMarks));
+let markPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+let markLoadSequence = 0;
+let markPreviewSequence = 0;
 const marksDirty = computed(() => {
-  const saved = JSON.parse(savedMarks.value) as OutputMarks
-  return (Object.keys(markSettings) as Array<keyof OutputMarks>).some(key => JSON.stringify(markSettings[key]) !== JSON.stringify(saved[key]))
-})
+  const saved = JSON.parse(savedMarks.value) as OutputMarks;
+  return (Object.keys(markSettings) as Array<keyof OutputMarks>).some(
+    (key) => JSON.stringify(markSettings[key]) !== JSON.stringify(saved[key]),
+  );
+});
 const markPositions = [
-  ['top_left','Top left'],['top_center','Top centre'],['top_right','Top right'],
-  ['center','Centre'],['bottom_left','Bottom left'],['bottom_center','Bottom centre'],
-  ['bottom_right','Bottom right'],
-] as const
+  ['top_left', 'Top left'],
+  ['top_center', 'Top centre'],
+  ['top_right', 'Top right'],
+  ['center', 'Centre'],
+  ['bottom_left', 'Bottom left'],
+  ['bottom_center', 'Bottom centre'],
+  ['bottom_right', 'Bottom right'],
+] as const;
 const inlineEditorStyle = computed(() => {
-  const box = selectedRun.value?.relative_bbox
-  if (!box) return {}
+  const box = selectedRun.value?.relative_bbox;
+  if (!box) return {};
   return {
-    ...(box[0] > .5 ? { right: `${(1 - box[2]) * 100}%` } : { left: `${box[0] * 100}%` }),
-    ...(box[1] > .62 ? { bottom: `${(1 - box[3]) * 100}%` } : { top: `${box[1] * 100}%` }),
-  }
-})
-let runsSequence = 0
-let pdf: PDFDocumentProxy | null = null
-let epoch = 0
-let activeDocumentId: string | null = null
-const displayedRevision = ref<number | null>(null)
-const displayedPage = ref(0)
-const pageReady = computed(() => !loading.value && !switchingPage.value &&
-  displayedPage.value === current.value && displayedRevision.value === props.document?.revision &&
-  activeDocumentId === props.document?.id)
+    ...(box[0] > 0.5 ? { right: `${(1 - box[2]) * 100}%` } : { left: `${box[0] * 100}%` }),
+    ...(box[1] > 0.62 ? { bottom: `${(1 - box[3]) * 100}%` } : { top: `${box[1] * 100}%` }),
+  };
+});
+let runsSequence = 0;
+let pdf: PDFDocumentProxy | null = null;
+let epoch = 0;
+let activeDocumentId: string | null = null;
+const displayedRevision = ref<number | null>(null);
+const displayedPage = ref(0);
+const pageReady = computed(
+  () =>
+    !loading.value &&
+    !switchingPage.value &&
+    displayedPage.value === current.value &&
+    displayedRevision.value === props.document?.revision &&
+    activeDocumentId === props.document?.id,
+);
 function closeDraftWithEscape(event: KeyboardEvent) {
-  if (viewedCommentId.value) { viewedCommentId.value=null; clearOverlaySelection() }
-  else if (focusedReading.value) void toggleFocusedReading()
-  else if (readPanel.value) void closeReadPanel()
-  else if (selectedOverlay.value) clearOverlaySelection()
-  else if (selectedRun.value) cancelReplacement()
-  else if (pendingMove.value) cancelMove()
-  else if (activeTool.value !== 'select') toggleTool(activeTool.value)
-  else return
-  event.preventDefault()
-  event.stopPropagation()
+  if (viewedCommentId.value) {
+    viewedCommentId.value = null;
+    clearOverlaySelection();
+  } else if (focusedReading.value) void toggleFocusedReading();
+  else if (readPanel.value) void closeReadPanel();
+  else if (selectedOverlay.value) clearOverlaySelection();
+  else if (selectedRun.value) cancelReplacement();
+  else if (pendingMove.value) cancelMove();
+  else if (activeTool.value !== 'select') toggleTool(activeTool.value);
+  else return;
+  event.preventDefault();
+  event.stopPropagation();
 }
 function handleViewerKeydown(event: KeyboardEvent) {
-  if ((event.ctrlKey || event.metaKey) && ['+','=','-','0'].includes(event.key)) {
-    event.preventDefault()
-    event.stopPropagation()
-    if (event.key === '0') zoomChoice.value = 'fit-width'
-    else zoomBy(event.key === '-' ? -1 : 1)
-    return
+  if ((event.ctrlKey || event.metaKey) && ['+', '=', '-', '0'].includes(event.key)) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === '0') zoomChoice.value = 'fit-width';
+    else zoomBy(event.key === '-' ? -1 : 1);
+    return;
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
-    event.preventDefault()
-    event.stopPropagation()
-    if(focusedReading.value) void toggleFocusedReading().then(() => openReadPanel('search', event))
-    else if(findOpen.value) findInput.value?.focus()
-    else void openReadPanel('search',event)
-    return
+    event.preventDefault();
+    event.stopPropagation();
+    if (focusedReading.value)
+      void toggleFocusedReading().then(() => openReadPanel('search', event));
+    else if (findOpen.value) findInput.value?.focus();
+    else void openReadPanel('search', event);
+    return;
   }
-  if (event.key === 'Escape') { closeDraftWithEscape(event); return }
-  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
-      (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]'))) return
-  if ((event.key==='Delete' || event.key==='Backspace') && selectedOverlay.value && !props.preparation) {
-    event.preventDefault()
-    event.stopPropagation()
-    void deleteSelectedOverlay()
-    return
+  if (event.key === 'Escape') {
+    closeDraftWithEscape(event);
+    return;
   }
-  if (['PageDown','PageUp','Home','End'].includes(event.key)) {
-    event.preventDefault()
-    navigateToPage(event.key==='Home'?1:event.key==='End'?total.value:Math.max(1,Math.min(total.value,current.value+(event.key==='PageDown'?1:-1))))
-    return
+  if (
+    event.ctrlKey ||
+    event.metaKey ||
+    event.altKey ||
+    event.shiftKey ||
+    (event.target instanceof HTMLElement &&
+      event.target.closest('input, textarea, select, [contenteditable="true"]'))
+  )
+    return;
+  if (
+    (event.key === 'Delete' || event.key === 'Backspace') &&
+    selectedOverlay.value &&
+    !props.preparation
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    void deleteSelectedOverlay();
+    return;
   }
-  if (focusedReading.value) return
-  if(props.preparation && ['v','e','t','h'].includes(event.key.toLowerCase())) emit('openEditor')
+  if (['PageDown', 'PageUp', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    navigateToPage(
+      event.key === 'Home'
+        ? 1
+        : event.key === 'End'
+          ? total.value
+          : Math.max(1, Math.min(total.value, current.value + (event.key === 'PageDown' ? 1 : -1))),
+    );
+    return;
+  }
+  if (focusedReading.value) return;
+  if (props.preparation && ['v', 'e', 't', 'h'].includes(event.key.toLowerCase()))
+    emit('openEditor');
   switch (event.key.toLowerCase()) {
-    case 'v': activeCategory.value = 'edit'; activeTool.value = 'select'; break
-    case 'e': activeCategory.value = 'edit'; if (activeTool.value !== 'edit-text') toggleTool('edit-text'); break
-    case 't': activeCategory.value = 'edit'; if (activeTool.value !== 'add-text') toggleTool('add-text'); break
-    case 'h': activeCategory.value = 'review'; if (activeTool.value !== 'notes' || annotationDraft.kind !== 'highlight') openAnnotationTool('highlight'); break
-    default: return
+    case 'v':
+      activeCategory.value = 'edit';
+      activeTool.value = 'select';
+      break;
+    case 'e':
+      activeCategory.value = 'edit';
+      if (activeTool.value !== 'edit-text') toggleTool('edit-text');
+      break;
+    case 't':
+      activeCategory.value = 'edit';
+      if (activeTool.value !== 'add-text') toggleTool('add-text');
+      break;
+    case 'h':
+      activeCategory.value = 'review';
+      if (activeTool.value !== 'notes' || annotationDraft.kind !== 'highlight')
+        openAnnotationTool('highlight');
+      break;
+    default:
+      return;
   }
-  event.preventDefault()
+  event.preventDefault();
 }
 function selectCategory(category: EditorCategory) {
-  if(focusedReading.value && category!=='read') void toggleFocusedReading()
-  if (activeCategory.value === category) return
+  if (focusedReading.value && category !== 'read') void toggleFocusedReading();
+  if (activeCategory.value === category) return;
   if (category === 'read' && hasPendingDraft()) {
-    if (!window.confirm('Discard the unfinished PDF tool draft and return to Read?')) return
-    discardPendingDraft()
+    if (!window.confirm('Discard the unfinished PDF tool draft and return to Read?')) return;
+    discardPendingDraft();
   }
-  activeCategory.value = category
-  historyOpen.value = false
-  if (activeTool.value !== 'select') toggleTool(activeTool.value)
-  if (category === 'redact') toggleTool('redact')
+  activeCategory.value = category;
+  historyOpen.value = false;
+  if (activeTool.value !== 'select') toggleTool(activeTool.value);
+  if (category === 'redact') toggleTool('redact');
 }
-function showFind(event?: Event) { void openReadPanel('search',event) }
-async function openReviewComment(item:PageAnnotation) {
-  if (!navigateToPage(item.page_index+1)) return
-  if (props.preparation) { viewedCommentId.value=item.id; readPanel.value=null; return }
-  commentsOpen.value=false
-  activeCategory.value='review'
-  await nextTick()
-  activeTool.value='notes'
-  resetAnnotationDraft()
-  annotationDraft.kind='comment'
-  editPageAnnotation(item)
+function showFind(event?: Event) {
+  void openReadPanel('search', event);
+}
+async function openReviewComment(item: PageAnnotation) {
+  if (!navigateToPage(item.page_index + 1)) return;
+  if (props.preparation) {
+    viewedCommentId.value = item.id;
+    readPanel.value = null;
+    return;
+  }
+  commentsOpen.value = false;
+  activeCategory.value = 'review';
+  await nextTick();
+  activeTool.value = 'notes';
+  resetAnnotationDraft();
+  annotationDraft.kind = 'comment';
+  editPageAnnotation(item);
 }
 function toggleTool(tool: EditorTool) {
-  historyOpen.value = false
-  clearOverlaySelection()
-  activeTool.value = activeTool.value === tool ? 'select' : tool
+  historyOpen.value = false;
+  clearOverlaySelection();
+  activeTool.value = activeTool.value === tool ? 'select' : tool;
   // Editing handles need enough room even when opening the inspector shrinks
   // the page after the tool switch. Numeric zoom choices remain intact.
   if (activeTool.value !== 'select' && zoomChoice.value === 'fit-page')
-    zoomChoice.value = 'fit-width'
-  replacementEngine.value = 'pymupdf'
-  placement.value = null
-  selectedRun.value = null
-  paragraphPreviewSequence++
-  cancelMove()
-  linkRegion.value = null
-  editingLinkId.value = null
-  redactionRegion.value = null
-  resetAnnotationDraft()
+    zoomChoice.value = 'fit-width';
+  replacementEngine.value = 'pymupdf';
+  placement.value = null;
+  selectedRun.value = null;
+  paragraphPreviewSequence++;
+  cancelMove();
+  linkRegion.value = null;
+  editingLinkId.value = null;
+  redactionRegion.value = null;
+  resetAnnotationDraft();
   if (activeTool.value === 'links' && props.document)
-    linkDraft.target_document_id ||= props.document.id
+    linkDraft.target_document_id ||= props.document.id;
 }
 function openAnnotationTool(kind: PageAnnotation['kind']) {
   if (activeTool.value === 'notes' && annotationDraft.kind === kind) {
-    toggleTool('notes')
-    return
+    toggleTool('notes');
+    return;
   }
-  if (activeTool.value === 'notes') resetAnnotationDraft()
-  else toggleTool('notes')
-  annotationNotice.value = ''
-  annotationDraft.kind = kind
-  annotationOutputScope.value = kind==='highlight' || kind==='comment'?'private':'pdf'
-  if (kind==='date') {
-    const today=new Date()
-    annotationDraft.body=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`
+  if (activeTool.value === 'notes') resetAnnotationDraft();
+  else toggleTool('notes');
+  annotationNotice.value = '';
+  annotationDraft.kind = kind;
+  annotationOutputScope.value = kind === 'highlight' || kind === 'comment' ? 'private' : 'pdf';
+  if (kind === 'date') {
+    const today = new Date();
+    annotationDraft.body = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   }
 }
-function annotationKindLabel(kind:PageAnnotation['kind']) {
-  return ({image:'Image overlay',highlight:'Highlight',comment:'Comment',draw:'Draw',box:'Box',
-    ellipse:'Ellipse',line:'Line',arrow:'Arrow',check:'Check',cross:'Cross',date:'Date mark',
-    text:'Text',redaction:'Redaction'})[kind]
+function annotationKindLabel(kind: PageAnnotation['kind']) {
+  return {
+    image: 'Image overlay',
+    highlight: 'Highlight',
+    comment: 'Comment',
+    draw: 'Draw',
+    box: 'Box',
+    ellipse: 'Ellipse',
+    line: 'Line',
+    arrow: 'Arrow',
+    check: 'Check',
+    cross: 'Cross',
+    date: 'Date mark',
+    text: 'Text',
+    redaction: 'Redaction',
+  }[kind];
 }
-function annotationTime(item:PageAnnotation) {
-  const timestamp=item.updated_at || item.created_at
-  if (!timestamp) return 'Time not recorded'
-  const date=new Date(timestamp)
-  return Number.isNaN(date.getTime()) ? 'Time not recorded' :
-    new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(date)
+function annotationTime(item: PageAnnotation) {
+  const timestamp = item.updated_at || item.created_at;
+  if (!timestamp) return 'Time not recorded';
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime())
+    ? 'Time not recorded'
+    : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
-function drawPolyline(body:string) {
+function drawPolyline(body: string) {
   try {
-    const data=JSON.parse(body) as {v:number,points:number[][]}
-    if (data.v!==1 || !Array.isArray(data.points)) return ''
-    return data.points.filter(point=>Array.isArray(point) && point.length===2 &&
-      point.every(value=>typeof value==='number' && Number.isFinite(value) && value>=0 && value<=1))
-      .slice(0,160).map(([x,y])=>`${x*100},${y*100}`).join(' ')
-  } catch {return ''}
-}
-const toolTitle = computed(() => ({
-  'add-text': 'Add text',
-  'edit-text': 'Edit text',
-  redact: 'Redact',
-  notes: annotationKindLabel(annotationDraft.kind),
-  links: 'Reviewed links',
-  marks: 'Output marks',
-  select: 'PDF tool',
-})[activeTool.value])
-const total = computed(() => loadedPageCount.value || props.document?.page_count || 0)
-async function loadPdf(doc: MatterDocument | null, force = false) {
-  if (!force && doc && pdf && doc.id === activeDocumentId && doc.revision === displayedRevision.value) return
-  rememberPosition()
-  const call = ++epoch
-  const sameDocument = doc?.id === activeDocumentId
-  const retainedPage = sameDocument ? current.value : 1
-  if (!sameDocument) {
-    activeTool.value='select';readingHistory.value=[]
-    editSnapshot.value='';editSnapshotFading.value=false
+    const data = JSON.parse(body) as { v: number; points: number[][] };
+    if (data.v !== 1 || !Array.isArray(data.points)) return '';
+    return data.points
+      .filter(
+        (point) =>
+          Array.isArray(point) &&
+          point.length === 2 &&
+          point.every(
+            (value) =>
+              typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1,
+          ),
+      )
+      .slice(0, 160)
+      .map(([x, y]) => `${x * 100},${y * 100}`)
+      .join(' ');
+  } catch {
+    return '';
   }
-  activeDocumentId = doc?.id ?? null
-  loading.value = true
-  switchingPage.value = true
-  viewerError.value = ''
-  current.value = retainedPage
-  loadedPageCount.value = 0
-  placement.value = null
-  selectedRun.value = null
-  paragraphPreviewSequence++
-  cancelMove()
-  canvas.value = null
-  draggingPage.value=null;dropTargetPage.value=null
-  pdf = null
-  sourceOutline.value=[];outlineError.value='';outlineLoading.value=false
-  displayedRevision.value = null
-  displayedPage.value = 0
+}
+const toolTitle = computed(
+  () =>
+    ({
+      'add-text': 'Add text',
+      'edit-text': 'Edit text',
+      redact: 'Redact',
+      notes: annotationKindLabel(annotationDraft.kind),
+      links: 'Reviewed links',
+      marks: 'Output marks',
+      select: 'PDF tool',
+    })[activeTool.value],
+);
+const total = computed(() => loadedPageCount.value || props.document?.page_count || 0);
+async function loadPdf(doc: MatterDocument | null, force = false) {
+  if (
+    !force &&
+    doc &&
+    pdf &&
+    doc.id === activeDocumentId &&
+    doc.revision === displayedRevision.value
+  )
+    return;
+  rememberPosition();
+  const call = ++epoch;
+  const sameDocument = doc?.id === activeDocumentId;
+  const retainedPage = sameDocument ? current.value : 1;
+  if (!sameDocument) {
+    activeTool.value = 'select';
+    readingHistory.value = [];
+    editSnapshot.value = '';
+    editSnapshotFading.value = false;
+  }
+  activeDocumentId = doc?.id ?? null;
+  loading.value = true;
+  switchingPage.value = true;
+  viewerError.value = '';
+  current.value = retainedPage;
+  loadedPageCount.value = 0;
+  placement.value = null;
+  selectedRun.value = null;
+  paragraphPreviewSequence++;
+  cancelMove();
+  canvas.value = null;
+  draggingPage.value = null;
+  dropTargetPage.value = null;
+  pdf = null;
+  sourceOutline.value = [];
+  outlineError.value = '';
+  outlineLoading.value = false;
+  displayedRevision.value = null;
+  displayedPage.value = 0;
   // Invalidate the previous PDF, search, and canvases before navigation metadata
   // can wait on I/O. The viewport retains layout for a same-document edit snapshot.
-  void pdfOwner.close()
-  if (!doc) { loading.value=false; return }
-  const saved = await loadReadingPosition(`${doc.id}:${doc.revision}`)
-  if(call!==epoch)return
-  current.value=saved?.page || retainedPage
-  if(saved){zoomChoice.value=saved.zoom;readerMode.value=saved.mode}
-  else if(!sameDocument){zoomChoice.value='fit-width';readerMode.value='single'}
-  try {
-    const loaded = await pdfOwner.open(() => pdfDocumentSource(doc.id, doc.revision))
-    if(call!==epoch || !loaded){if(call===epoch)viewerError.value=pdfOwner.error.value;return}
-    pdf = loaded
-    loadedPageCount.value = loaded.numPages
-    current.value = Math.min(current.value, loaded.numPages)
-    displayedRevision.value=doc.revision
-    if (props.pageTarget?.documentId === doc.id && props.pageTarget.sequence !== consumedPageTarget) {
-      const target = props.pageTarget
-      consumedPageTarget = target.sequence
-      if ((target.revision !== undefined && target.revision !== doc.revision) || target.page < 1 || target.page > loaded.numPages) {
-        viewerError.value = 'The requested finding page or revision is unavailable. Return to Preflight and run checks again.'
-        pdf = null; void pdfOwner.close(); return
-      }
-      current.value = target.page
-    }
-    void loadOutline(loaded,call)
-    await nextTick()
-    if(call!==epoch)return
-    if(saved && (!props.pageTarget || props.pageTarget.documentId!==doc.id)) await readerViewport.value?.restore(saved)
-    if(call!==epoch)return
-    const painted=await readerViewport.value?.waitForPage(current.value)
-    if(call===epoch && !painted && !viewerError.value)viewerError.value='The page could not finish rendering. Reopen the document to retry.'
-  } catch (err) { if (call === epoch) viewerError.value = friendlyError(err) }
-  finally { if (call === epoch) loading.value = false }
-}
-watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}`, () => void loadPdf(props.document), { immediate: true })
-watch(() => props.document?.id, async id => {
-  paragraphTrialAvailable.value = false
-  replacementEngine.value = 'pymupdf'
-  if (!id) return
-  try {
-    const status = await api<{available:boolean}>('/pdfium-paragraph-trial/status')
-    if (props.document?.id === id) paragraphTrialAvailable.value = status.available
-  } catch { /* ordinary text replacement remains available */ }
-}, {immediate:true})
-let consumedPageTarget = -1
-watch(() => props.pageTarget?.sequence, () => {
-  const target = props.pageTarget
-  if (target && target.documentId === props.document?.id && pdf) {
-    consumedPageTarget = target.sequence
-    if ((target.revision !== undefined && target.revision !== displayedRevision.value) || target.page < 1 || target.page > total.value) {
-      emit('error', 'The requested finding page or revision is unavailable. Run checks again.'); return
-    }
-    navigateToPage(target.page)
+  void pdfOwner.close();
+  if (!doc) {
+    loading.value = false;
+    return;
   }
-})
-watch(current, () => {switchingPage.value=true;canvas.value=null})
-watch(current, () => { placement.value = null; selectedRun.value = null; cancelMove(); clearOverlaySelection() })
-watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}`, clearOverlaySelection)
+  const saved = await loadReadingPosition(`${doc.id}:${doc.revision}`);
+  if (call !== epoch) return;
+  current.value = saved?.page || retainedPage;
+  if (saved) {
+    zoomChoice.value = saved.zoom;
+    readerMode.value = saved.mode;
+  } else if (!sameDocument) {
+    zoomChoice.value = 'fit-width';
+    readerMode.value = 'single';
+  }
+  try {
+    const loaded = await pdfOwner.open(() => pdfDocumentSource(doc.id, doc.revision));
+    if (call !== epoch || !loaded) {
+      if (call === epoch) viewerError.value = pdfOwner.error.value;
+      return;
+    }
+    pdf = loaded;
+    loadedPageCount.value = loaded.numPages;
+    current.value = Math.min(current.value, loaded.numPages);
+    displayedRevision.value = doc.revision;
+    if (
+      props.pageTarget?.documentId === doc.id &&
+      props.pageTarget.sequence !== consumedPageTarget
+    ) {
+      const target = props.pageTarget;
+      consumedPageTarget = target.sequence;
+      if (
+        (target.revision !== undefined && target.revision !== doc.revision) ||
+        target.page < 1 ||
+        target.page > loaded.numPages
+      ) {
+        viewerError.value =
+          'The requested finding page or revision is unavailable. Return to Preflight and run checks again.';
+        pdf = null;
+        void pdfOwner.close();
+        return;
+      }
+      current.value = target.page;
+    }
+    void loadOutline(loaded, call);
+    await nextTick();
+    if (call !== epoch) return;
+    if (saved && (!props.pageTarget || props.pageTarget.documentId !== doc.id))
+      await readerViewport.value?.restore(saved);
+    if (call !== epoch) return;
+    const painted = await readerViewport.value?.waitForPage(current.value);
+    if (call === epoch && !painted && !viewerError.value)
+      viewerError.value = 'The page could not finish rendering. Reopen the document to retry.';
+  } catch (err) {
+    if (call === epoch) viewerError.value = friendlyError(err);
+  } finally {
+    if (call === epoch) loading.value = false;
+  }
+}
+watch(
+  () => `${props.document?.id || ''}|${props.document?.revision || ''}`,
+  () => void loadPdf(props.document),
+  { immediate: true },
+);
+watch(
+  () => props.document?.id,
+  async (id) => {
+    paragraphTrialAvailable.value = false;
+    replacementEngine.value = 'pymupdf';
+    if (!id) return;
+    try {
+      const status = await api<{ available: boolean }>('/pdfium-paragraph-trial/status');
+      if (props.document?.id === id) paragraphTrialAvailable.value = status.available;
+    } catch {
+      /* ordinary text replacement remains available */
+    }
+  },
+  { immediate: true },
+);
+let consumedPageTarget = -1;
+watch(
+  () => props.pageTarget?.sequence,
+  () => {
+    const target = props.pageTarget;
+    if (target && target.documentId === props.document?.id && pdf) {
+      consumedPageTarget = target.sequence;
+      if (
+        (target.revision !== undefined && target.revision !== displayedRevision.value) ||
+        target.page < 1 ||
+        target.page > total.value
+      ) {
+        emit('error', 'The requested finding page or revision is unavailable. Run checks again.');
+        return;
+      }
+      navigateToPage(target.page);
+    }
+  },
+);
+watch(current, () => {
+  switchingPage.value = true;
+  canvas.value = null;
+});
+watch(current, () => {
+  placement.value = null;
+  selectedRun.value = null;
+  cancelMove();
+  clearOverlaySelection();
+});
+watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}`, clearOverlaySelection);
 watch(placement, (point, previous) => {
-  if (point && !previous) void nextTick(() => inlineAddInput.value?.focus())
-})
-watch([current, () => props.document?.id, () => props.document?.revision, editTextMode], async () => {
-  const sequence = ++runsSequence
-  textRuns.value = []
-  selectedRun.value = null
-  movingRun.value = null
-  verticalOffset.value = 0
-  pointerRun = null
-  pointerId = null
-  runsError.value = ''
-  if (!editTextMode.value || !props.document) return
-  try {
-    const result = await api<{revision:number,runs:TextRun[]}>(`/documents/${props.document.id}/pages/${current.value-1}/text-runs`)
-    if (sequence !== runsSequence) return
-    runsRevision.value = result.revision
-    textRuns.value = result.runs
-  } catch (err) { if (sequence === runsSequence) runsError.value = friendlyError(err) }
-})
-watch([current, () => props.document?.id, editTextMode], () => { editNotice.value = '' })
-watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}`, () => {
-  bookmarkOpen.value = false
-  pageBookmarksOpen.value = false
-  bookmarkTitle.value = ''
-  bookmarkNotice.value = ''
-})
-watch(() => props.document?.id, () => {
-  // Search stays open across document changes; usePdfSearch clears stale matches
-  // as soon as the old PDF closes, before position metadata can wait on I/O.
-  activeCategory.value='read'
-  outlineOpen.value = false
-  commentsOpen.value = false
-  commentQuery.value = ''
-  viewedCommentId.value = null
-})
-watch(() => `${props.document?.id || ''}|${props.document?.revision || ''}|${props.bookmarkRefreshKey || 0}`, async () => {
-  const sequence = ++bookmarkLoadSequence
-  const doc = props.document
-  if (!doc) { manualBookmarks.value = []; return }
-  bookmarksLoading.value=true;bookmarksError.value='';manualBookmarks.value=[]
-  try {
-    const entries = await api<ManualBookmark[]>(`/matters/${doc.matter_id}/bookmarks`)
-    if (sequence === bookmarkLoadSequence) manualBookmarks.value = entries
-  } catch { if (sequence === bookmarkLoadSequence) bookmarksError.value='Manual bookmarks could not be loaded. Reopen the document to retry.' }
-  finally { if(sequence === bookmarkLoadSequence) bookmarksLoading.value=false }
-}, {immediate:true})
-let linksLoadSequence = 0
-watch(() => `${props.document?.matter_id || ''}|${(props.documents || []).map(item => `${item.id}:${item.revision}:${item.archived_at || ''}`).join(',')}|${props.bookmarkRefreshKey || 0}`, async () => {
-  const call = ++linksLoadSequence
-  const doc = props.document
-  reviewedLinks.value = []
-  if (!doc) return
-  try { const result = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`); if(call === linksLoadSequence) reviewedLinks.value = result }
-  catch { if(call === linksLoadSequence) reviewedLinks.value = [] }
-}, {immediate:true})
-watch(() => `${props.document?.matter_id || ''}|${props.document?.revision || ''}|${props.bookmarkRefreshKey || 0}`, () => void loadPageAnnotations(), {immediate:true})
-watch([current, pageAnnotations], () => void loadCurrentAnnotationImages())
-let marksMatterId = ''
-watch(() => [props.document?.matter_id || '', props.bookmarkRefreshKey || 0] as const, async ([matterId]) => {
-  const sequence = ++markLoadSequence
-  if (marksMatterId !== matterId) { Object.assign(markSettings, defaultMarks); savedMarks.value = JSON.stringify(defaultMarks); marksMatterId = matterId }
-  if (!matterId) { Object.assign(markSettings, defaultMarks); savedMarks.value = JSON.stringify(defaultMarks); return }
-  try {
-    const settings = await api<OutputMarks>(`/matters/${matterId}/output-marks`)
-    if (sequence !== markLoadSequence || marksDirty.value) return
-    Object.assign(markSettings, settings)
-    savedMarks.value = JSON.stringify(settings)
-  } catch (err) { if (sequence === markLoadSequence) marksError.value = friendlyError(err) }
-}, {immediate:true})
-watch(() => [marksPanelOpen.value, props.document?.id, props.document?.revision, current.value,
-  JSON.stringify(markSettings)] as const, () => scheduleMarkPreview())
-watch(current, () => { bookmarkOpen.value = false; pageBookmarksOpen.value = false; viewedCommentId.value=null; bookmarkError.value = ''; bookmarkNotice.value = '' })
-watch(current, () => { linkRegion.value = null; linkDrawing.value = false; linkError.value = ''; linkNotice.value = ''; resetAnnotationDraft(false) })
+  if (point && !previous) void nextTick(() => inlineAddInput.value?.focus());
+});
+watch(
+  [current, () => props.document?.id, () => props.document?.revision, editTextMode],
+  async () => {
+    const sequence = ++runsSequence;
+    textRuns.value = [];
+    selectedRun.value = null;
+    movingRun.value = null;
+    verticalOffset.value = 0;
+    pointerRun = null;
+    pointerId = null;
+    runsError.value = '';
+    if (!editTextMode.value || !props.document) return;
+    try {
+      const result = await api<{ revision: number; runs: TextRun[] }>(
+        `/documents/${props.document.id}/pages/${current.value - 1}/text-runs`,
+      );
+      if (sequence !== runsSequence) return;
+      runsRevision.value = result.revision;
+      textRuns.value = result.runs;
+    } catch (err) {
+      if (sequence === runsSequence) runsError.value = friendlyError(err);
+    }
+  },
+);
+watch([current, () => props.document?.id, editTextMode], () => {
+  editNotice.value = '';
+});
+watch(
+  () => `${props.document?.id || ''}|${props.document?.revision || ''}`,
+  () => {
+    bookmarkOpen.value = false;
+    pageBookmarksOpen.value = false;
+    bookmarkTitle.value = '';
+    bookmarkNotice.value = '';
+  },
+);
+watch(
+  () => props.document?.id,
+  () => {
+    // Search stays open across document changes; usePdfSearch clears stale matches
+    // as soon as the old PDF closes, before position metadata can wait on I/O.
+    activeCategory.value = 'read';
+    outlineOpen.value = false;
+    commentsOpen.value = false;
+    commentQuery.value = '';
+    viewedCommentId.value = null;
+  },
+);
+watch(
+  () =>
+    `${props.document?.id || ''}|${props.document?.revision || ''}|${props.bookmarkRefreshKey || 0}`,
+  async () => {
+    const sequence = ++bookmarkLoadSequence;
+    const doc = props.document;
+    if (!doc) {
+      manualBookmarks.value = [];
+      return;
+    }
+    bookmarksLoading.value = true;
+    bookmarksError.value = '';
+    manualBookmarks.value = [];
+    try {
+      const entries = await api<ManualBookmark[]>(`/matters/${doc.matter_id}/bookmarks`);
+      if (sequence === bookmarkLoadSequence) manualBookmarks.value = entries;
+    } catch {
+      if (sequence === bookmarkLoadSequence)
+        bookmarksError.value =
+          'Manual bookmarks could not be loaded. Reopen the document to retry.';
+    } finally {
+      if (sequence === bookmarkLoadSequence) bookmarksLoading.value = false;
+    }
+  },
+  { immediate: true },
+);
+let linksLoadSequence = 0;
+watch(
+  () =>
+    `${props.document?.matter_id || ''}|${(props.documents || []).map((item) => `${item.id}:${item.revision}:${item.archived_at || ''}`).join(',')}|${props.bookmarkRefreshKey || 0}`,
+  async () => {
+    const call = ++linksLoadSequence;
+    const doc = props.document;
+    reviewedLinks.value = [];
+    if (!doc) return;
+    try {
+      const result = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`);
+      if (call === linksLoadSequence) reviewedLinks.value = result;
+    } catch {
+      if (call === linksLoadSequence) reviewedLinks.value = [];
+    }
+  },
+  { immediate: true },
+);
+watch(
+  () =>
+    `${props.document?.matter_id || ''}|${props.document?.revision || ''}|${props.bookmarkRefreshKey || 0}`,
+  () => void loadPageAnnotations(),
+  { immediate: true },
+);
+watch([current, pageAnnotations], () => void loadCurrentAnnotationImages());
+let marksMatterId = '';
+watch(
+  () => [props.document?.matter_id || '', props.bookmarkRefreshKey || 0] as const,
+  async ([matterId]) => {
+    const sequence = ++markLoadSequence;
+    if (marksMatterId !== matterId) {
+      Object.assign(markSettings, defaultMarks);
+      savedMarks.value = JSON.stringify(defaultMarks);
+      marksMatterId = matterId;
+    }
+    if (!matterId) {
+      Object.assign(markSettings, defaultMarks);
+      savedMarks.value = JSON.stringify(defaultMarks);
+      return;
+    }
+    try {
+      const settings = await api<OutputMarks>(`/matters/${matterId}/output-marks`);
+      if (sequence !== markLoadSequence || marksDirty.value) return;
+      Object.assign(markSettings, settings);
+      savedMarks.value = JSON.stringify(settings);
+    } catch (err) {
+      if (sequence === markLoadSequence) marksError.value = friendlyError(err);
+    }
+  },
+  { immediate: true },
+);
+watch(
+  () =>
+    [
+      marksPanelOpen.value,
+      props.document?.id,
+      props.document?.revision,
+      current.value,
+      JSON.stringify(markSettings),
+    ] as const,
+  () => scheduleMarkPreview(),
+);
+watch(current, () => {
+  bookmarkOpen.value = false;
+  pageBookmarksOpen.value = false;
+  viewedCommentId.value = null;
+  bookmarkError.value = '';
+  bookmarkNotice.value = '';
+});
+watch(current, () => {
+  linkRegion.value = null;
+  linkDrawing.value = false;
+  linkError.value = '';
+  linkNotice.value = '';
+  resetAnnotationDraft(false);
+});
 watch([current, () => props.document?.id, () => props.document?.revision], () => {
-  redactionRegion.value = null; redactionError.value = ''
-  selectedRedactionId.value = null
-})
-watch(() => [props.document?.id, props.document?.revision] as const, async ([docId]) => {
-  appliedRedactions.value = []
-  if (!docId) return
-  try {
-    const items = await api<AppliedRedaction[]>(`/documents/${docId}/pages/redactions`)
-    if (props.document?.id === docId) appliedRedactions.value = items
-  } catch { /* The viewer can still display legacy PDFs without redaction records. */ }
-}, {immediate:true})
+  redactionRegion.value = null;
+  redactionError.value = '';
+  selectedRedactionId.value = null;
+});
+watch(
+  () => [props.document?.id, props.document?.revision] as const,
+  async ([docId]) => {
+    appliedRedactions.value = [];
+    if (!docId) return;
+    try {
+      const items = await api<AppliedRedaction[]>(`/documents/${docId}/pages/redactions`);
+      if (props.document?.id === docId) appliedRedactions.value = items;
+    } catch {
+      /* The viewer can still display legacy PDFs without redaction records. */
+    }
+  },
+  { immediate: true },
+);
 function hasPendingAnnotationDraft() {
   if (editingAnnotationId.value) {
-    const saved=pageAnnotations.value.find(item=>item.id===editingAnnotationId.value)
-    const region=annotationRegion.value
-    if (!saved || !region) return true
-    return saved.rect_x!==region.x || saved.rect_y!==region.y ||
-      saved.rect_width!==region.width || saved.rect_height!==region.height ||
-      saved.body!==annotationDraft.body || saved.color!==annotationDraft.color ||
-      saved.output_scope!==annotationOutputScope.value
+    const saved = pageAnnotations.value.find((item) => item.id === editingAnnotationId.value);
+    const region = annotationRegion.value;
+    if (!saved || !region) return true;
+    return (
+      saved.rect_x !== region.x ||
+      saved.rect_y !== region.y ||
+      saved.rect_width !== region.width ||
+      saved.rect_height !== region.height ||
+      saved.body !== annotationDraft.body ||
+      saved.color !== annotationDraft.color ||
+      saved.output_scope !== annotationOutputScope.value
+    );
   }
-  return !!(annotationRegion.value || annotationImage.value ||
-    ((annotationDraft.kind==='highlight' || annotationDraft.kind==='comment') && annotationDraft.body.trim()))
+  return !!(
+    annotationRegion.value ||
+    annotationImage.value ||
+    ((annotationDraft.kind === 'highlight' || annotationDraft.kind === 'comment') &&
+      annotationDraft.body.trim())
+  );
 }
 function hasPendingDraft() {
-  return !!(marksDirty.value || textObjectDirty.value || overlayText.value.trim() || placement.value || replacement.value.trim() ||
-    pendingMove.value || redactionRegion.value || hasPendingAnnotationDraft() ||
-    (editingLinkId.value ? linkDirty.value : !!linkRegion.value) || (bookmarkOpen.value && bookmarkTitle.value.trim()))
+  return !!(
+    marksDirty.value ||
+    textObjectDirty.value ||
+    overlayText.value.trim() ||
+    placement.value ||
+    replacement.value.trim() ||
+    pendingMove.value ||
+    redactionRegion.value ||
+    hasPendingAnnotationDraft() ||
+    (editingLinkId.value ? linkDirty.value : !!linkRegion.value) ||
+    (bookmarkOpen.value && bookmarkTitle.value.trim())
+  );
 }
 function discardPendingDraft() {
-  clearOverlaySelection()
-  Object.assign(markSettings, JSON.parse(savedMarks.value))
-  overlayText.value=''; placement.value=null; replacement.value=''; selectedRun.value=null
-  cancelMove(); redactionRegion.value=null; annotationRegion.value=null
-  annotationImage.value=null; annotationDraft.body=''; editingAnnotationId.value=null
-  linkRegion.value=null; editingLinkId.value=null; bookmarkTitle.value=''
-  if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value)
-  annotationPreviewUrl.value=''
+  clearOverlaySelection();
+  Object.assign(markSettings, JSON.parse(savedMarks.value));
+  overlayText.value = '';
+  placement.value = null;
+  replacement.value = '';
+  selectedRun.value = null;
+  cancelMove();
+  redactionRegion.value = null;
+  annotationRegion.value = null;
+  annotationImage.value = null;
+  annotationDraft.body = '';
+  editingAnnotationId.value = null;
+  linkRegion.value = null;
+  editingLinkId.value = null;
+  bookmarkTitle.value = '';
+  if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value);
+  annotationPreviewUrl.value = '';
 }
 async function savePendingDraft() {
   // An incomplete tool has no valid commit yet; keep its draft and origin open.
-  if (textObjectDirty.value && !(await saveTextObject())) return false
-  if (marksDirty.value) { await saveMarks(); if (marksDirty.value) return false }
-  if (pendingMove.value && movingRun.value) await applyMove(movingRun.value, horizontalOffset.value, verticalOffset.value)
-  else if (placement.value && overlayText.value.trim()) await placeText()
-  else if (selectedRun.value && replacement.value.trim() && !pendingMove.value) await applyReplacement()
-  else if (redactionRegion.value) await applyRedaction()
-  else if (hasPendingAnnotationDraft() && (annotationRegion.value || editingAnnotationId.value)) await savePageAnnotation()
-  else if (linkRegion.value && (!editingLinkId.value || linkDirty.value)) await saveReviewedLink()
-  else if (bookmarkOpen.value && bookmarkTitle.value.trim()) await addPageBookmark()
-  return !hasPendingDraft()
+  if (textObjectDirty.value && !(await saveTextObject())) return false;
+  if (marksDirty.value) {
+    await saveMarks();
+    if (marksDirty.value) return false;
+  }
+  if (pendingMove.value && movingRun.value)
+    await applyMove(movingRun.value, horizontalOffset.value, verticalOffset.value);
+  else if (placement.value && overlayText.value.trim()) await placeText();
+  else if (selectedRun.value && replacement.value.trim() && !pendingMove.value)
+    await applyReplacement();
+  else if (redactionRegion.value) await applyRedaction();
+  else if (hasPendingAnnotationDraft() && (annotationRegion.value || editingAnnotationId.value))
+    await savePageAnnotation();
+  else if (linkRegion.value && (!editingLinkId.value || linkDirty.value)) await saveReviewedLink();
+  else if (bookmarkOpen.value && bookmarkTitle.value.trim()) await addPageBookmark();
+  return !hasPendingDraft();
 }
-const historyBusy = computed(() => editing.value || headerSaving.value || annotationBusy.value || linksBusy.value || redactionBusy.value)
-defineExpose({historyBusy, hasPendingDraft, discardPendingDraft, savePendingDraft, reloadReader: () => loadPdf(props.document,true)})
-onBeforeUnmount(() => { rememberPosition(); void flushReadingPositions(); epoch++; if (bookmarkNoticeTimer) clearTimeout(bookmarkNoticeTimer); if (markPreviewTimer) clearTimeout(markPreviewTimer); clearAnnotationImageUrls(); if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value) })
+const historyBusy = computed(
+  () =>
+    editing.value ||
+    headerSaving.value ||
+    annotationBusy.value ||
+    linksBusy.value ||
+    redactionBusy.value,
+);
+defineExpose({
+  historyBusy,
+  hasPendingDraft,
+  discardPendingDraft,
+  savePendingDraft,
+  reloadReader: () => loadPdf(props.document, true),
+});
+onBeforeUnmount(() => {
+  rememberPosition();
+  void flushReadingPositions();
+  epoch++;
+  if (bookmarkNoticeTimer) clearTimeout(bookmarkNoticeTimer);
+  if (markPreviewTimer) clearTimeout(markPreviewTimer);
+  clearAnnotationImageUrls();
+  if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value);
+});
 
 async function addPageBookmark() {
-  const doc = props.document
-  const title = bookmarkTitle.value.trim()
-  const pageIndex = current.value - 1
-  if (!doc || !title || bookmarkSaving.value || props.disabled) return
-  bookmarkSaving.value = true
-  bookmarkError.value = ''
+  const doc = props.document;
+  const title = bookmarkTitle.value.trim();
+  const pageIndex = current.value - 1;
+  if (!doc || !title || bookmarkSaving.value || props.disabled) return;
+  bookmarkSaving.value = true;
+  bookmarkError.value = '';
   try {
-    const existing = await api<ManualBookmark[]>(`/matters/${doc.matter_id}/bookmarks`)
-    const entries = existing.map(({id,title,document_id,page_index,target_revision,parent_id}) =>
-      ({id,title,document_id,page_index,target_revision,parent_id}))
-    entries.push({id:crypto.randomUUID().replace(/-/g,''),title,
-      document_id:doc.id,page_index:pageIndex,target_revision:doc.revision,parent_id:null})
-    manualBookmarks.value = await api<ManualBookmark[]>(`/matters/${doc.matter_id}/bookmarks`, 'PUT', {entries})
-    bookmarkOpen.value = false
-    bookmarkTitle.value = ''
-    bookmarkNotice.value = `Bookmarked page ${pageIndex + 1}. Review its destination under Index & bookmarks.`
-    if (bookmarkNoticeTimer) clearTimeout(bookmarkNoticeTimer)
-    bookmarkNoticeTimer = setTimeout(() => { bookmarkNotice.value = ''; bookmarkNoticeTimer = null }, 5000)
-    emit('modified')
-  } catch (err) { bookmarkError.value = friendlyError(err) }
-  finally { bookmarkSaving.value = false }
+    const existing = await api<ManualBookmark[]>(`/matters/${doc.matter_id}/bookmarks`);
+    const entries = existing.map(
+      ({ id, title, document_id, page_index, target_revision, parent_id }) => ({
+        id,
+        title,
+        document_id,
+        page_index,
+        target_revision,
+        parent_id,
+      }),
+    );
+    entries.push({
+      id: crypto.randomUUID().replace(/-/g, ''),
+      title,
+      document_id: doc.id,
+      page_index: pageIndex,
+      target_revision: doc.revision,
+      parent_id: null,
+    });
+    manualBookmarks.value = await api<ManualBookmark[]>(
+      `/matters/${doc.matter_id}/bookmarks`,
+      'PUT',
+      { entries },
+    );
+    bookmarkOpen.value = false;
+    bookmarkTitle.value = '';
+    bookmarkNotice.value = `Bookmarked page ${pageIndex + 1}. Review its destination under Index & bookmarks.`;
+    if (bookmarkNoticeTimer) clearTimeout(bookmarkNoticeTimer);
+    bookmarkNoticeTimer = setTimeout(() => {
+      bookmarkNotice.value = '';
+      bookmarkNoticeTimer = null;
+    }, 5000);
+    emit('modified');
+  } catch (err) {
+    bookmarkError.value = friendlyError(err);
+  } finally {
+    bookmarkSaving.value = false;
+  }
 }
 
 function linkPayload(item: ReviewedLink) {
   return {
-    id:item.id,title:item.title,source_document_id:item.source_document_id,
-    source_page_index:item.source_page_index,source_revision:item.source_revision,
-    rect_x:item.rect_x,rect_y:item.rect_y,rect_width:item.rect_width,
-    rect_height:item.rect_height,kind:item.kind,target_document_id:item.target_document_id,
-    target_page_index:item.target_page_index,target_revision:item.target_revision,uri:item.uri,
-  }
+    id: item.id,
+    title: item.title,
+    source_document_id: item.source_document_id,
+    source_page_index: item.source_page_index,
+    source_revision: item.source_revision,
+    rect_x: item.rect_x,
+    rect_y: item.rect_y,
+    rect_width: item.rect_width,
+    rect_height: item.rect_height,
+    kind: item.kind,
+    target_document_id: item.target_document_id,
+    target_page_index: item.target_page_index,
+    target_revision: item.target_revision,
+    uri: item.uri,
+  };
 }
 
 function normalizedPointer(event: PointerEvent) {
-  const rect = canvas.value?.getBoundingClientRect()
-  if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height) ||
-      rect.width <= 0 || rect.height <= 0) return null
-  const x = (event.clientX-rect.left)/rect.width
-  const y = (event.clientY-rect.top)/rect.height
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
-  return {x:Math.max(0,Math.min(1,x)), y:Math.max(0,Math.min(1,y))}
+  const rect = canvas.value?.getBoundingClientRect();
+  if (
+    !rect ||
+    !Number.isFinite(rect.width) ||
+    !Number.isFinite(rect.height) ||
+    rect.width <= 0 ||
+    rect.height <= 0
+  )
+    return null;
+  const x = (event.clientX - rect.left) / rect.width;
+  const y = (event.clientY - rect.top) / rect.height;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
 }
 function beginLinkRegion(event: PointerEvent) {
-  if (!pageReady.value || !linkPanelOpen.value || props.disabled || editing.value || event.button !== 0) return
-  const point = normalizedPointer(event)
-  if (!point) return
-  linkNotice.value = ''
-  linkStart = point
-  linkPointerId = event.pointerId
-  linkDrawing.value = true
-  linkRegion.value = {x:point.x,y:point.y,width:0,height:0}
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  event.preventDefault()
+  if (
+    !pageReady.value ||
+    !linkPanelOpen.value ||
+    props.disabled ||
+    editing.value ||
+    event.button !== 0
+  )
+    return;
+  const point = normalizedPointer(event);
+  if (!point) return;
+  linkNotice.value = '';
+  linkStart = point;
+  linkPointerId = event.pointerId;
+  linkDrawing.value = true;
+  linkRegion.value = { x: point.x, y: point.y, width: 0, height: 0 };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.preventDefault();
 }
 function updateLinkRegion(event: PointerEvent) {
-  if (!linkDrawing.value || linkPointerId !== event.pointerId || !linkStart) return
-  const point = normalizedPointer(event)
-  if (!point) return
-  linkRegion.value = {x:Math.min(linkStart.x,point.x),y:Math.min(linkStart.y,point.y),
-    width:Math.abs(point.x-linkStart.x),height:Math.abs(point.y-linkStart.y)}
-  event.preventDefault()
+  if (!linkDrawing.value || linkPointerId !== event.pointerId || !linkStart) return;
+  const point = normalizedPointer(event);
+  if (!point) return;
+  linkRegion.value = {
+    x: Math.min(linkStart.x, point.x),
+    y: Math.min(linkStart.y, point.y),
+    width: Math.abs(point.x - linkStart.x),
+    height: Math.abs(point.y - linkStart.y),
+  };
+  event.preventDefault();
 }
 function finishLinkRegion(event: PointerEvent) {
-  if (linkPointerId !== event.pointerId) return
-  linkDrawing.value = false
-  linkPointerId = null
-  linkStart = null
-  if (!linkRegion.value || linkRegion.value.width < .01 || linkRegion.value.height < .01) {
-    linkRegion.value = null
-    linkError.value = 'Drag a visible rectangular link area on the page.'
-  } else linkError.value = ''
+  if (linkPointerId !== event.pointerId) return;
+  linkDrawing.value = false;
+  linkPointerId = null;
+  linkStart = null;
+  if (!linkRegion.value || linkRegion.value.width < 0.01 || linkRegion.value.height < 0.01) {
+    linkRegion.value = null;
+    linkError.value = 'Drag a visible rectangular link area on the page.';
+  } else linkError.value = '';
 }
 
 function beginAnnotationRegion(event: PointerEvent) {
-  if (!pageReady.value || !annotationPanelOpen.value || props.disabled || annotationBusy.value || event.button !== 0) return
-  const point = normalizedPointer(event)
-  if (!point) return
-  annotationNotice.value = ''
-  annotationStart = point
-  if (annotationDraft.kind==='draw') {annotationDrawPoints.value=[point];annotationDraft.body=''}
-  annotationPointerId = event.pointerId
-  annotationDrawing.value = true
-  annotationRegion.value = {x:point.x,y:point.y,width:0,height:0}
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  event.preventDefault()
+  if (
+    !pageReady.value ||
+    !annotationPanelOpen.value ||
+    props.disabled ||
+    annotationBusy.value ||
+    event.button !== 0
+  )
+    return;
+  const point = normalizedPointer(event);
+  if (!point) return;
+  annotationNotice.value = '';
+  annotationStart = point;
+  if (annotationDraft.kind === 'draw') {
+    annotationDrawPoints.value = [point];
+    annotationDraft.body = '';
+  }
+  annotationPointerId = event.pointerId;
+  annotationDrawing.value = true;
+  annotationRegion.value = { x: point.x, y: point.y, width: 0, height: 0 };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.preventDefault();
 }
 function updateAnnotationRegion(event: PointerEvent) {
-  if (!annotationDrawing.value || annotationPointerId !== event.pointerId || !annotationStart) return
-  const point = normalizedPointer(event)
-  if (!point) return
-  if (annotationDraft.kind==='draw' && annotationDrawPoints.value.length<160) {
-    const last=annotationDrawPoints.value[annotationDrawPoints.value.length-1]
-    if (!last || Math.hypot(point.x-last.x,point.y-last.y)>.002)
-      annotationDrawPoints.value=[...annotationDrawPoints.value,point]
+  if (!annotationDrawing.value || annotationPointerId !== event.pointerId || !annotationStart)
+    return;
+  const point = normalizedPointer(event);
+  if (!point) return;
+  if (annotationDraft.kind === 'draw' && annotationDrawPoints.value.length < 160) {
+    const last = annotationDrawPoints.value[annotationDrawPoints.value.length - 1];
+    if (!last || Math.hypot(point.x - last.x, point.y - last.y) > 0.002)
+      annotationDrawPoints.value = [...annotationDrawPoints.value, point];
   }
-  annotationRegion.value = {x:Math.min(annotationStart.x,point.x),y:Math.min(annotationStart.y,point.y),
-    width:Math.abs(point.x-annotationStart.x),height:Math.abs(point.y-annotationStart.y)}
-  event.preventDefault()
+  annotationRegion.value = {
+    x: Math.min(annotationStart.x, point.x),
+    y: Math.min(annotationStart.y, point.y),
+    width: Math.abs(point.x - annotationStart.x),
+    height: Math.abs(point.y - annotationStart.y),
+  };
+  event.preventDefault();
 }
 function finishAnnotationRegion(event: PointerEvent) {
-  if (annotationPointerId !== event.pointerId) return
-  annotationDrawing.value = false
-  annotationPointerId = null
-  annotationStart = null
-  if (event.type==='pointercancel') {
-    annotationRegion.value=null
-    annotationDrawPoints.value=[]
-    annotationDraft.body=''
-    return
+  if (annotationPointerId !== event.pointerId) return;
+  annotationDrawing.value = false;
+  annotationPointerId = null;
+  annotationStart = null;
+  if (event.type === 'pointercancel') {
+    annotationRegion.value = null;
+    annotationDrawPoints.value = [];
+    annotationDraft.body = '';
+    return;
   }
-  if (annotationDraft.kind==='draw' && annotationDrawPoints.value.length>=2) {
-    const points=annotationDrawPoints.value
-    const x=Math.max(0,Math.min(.99,Math.min(...points.map(point=>point.x))-.002))
-    const y=Math.max(0,Math.min(.99,Math.min(...points.map(point=>point.y))-.002))
-    const width=Math.min(1-x,Math.max(.01,Math.max(...points.map(point=>point.x))-x+.002))
-    const height=Math.min(1-y,Math.max(.01,Math.max(...points.map(point=>point.y))-y+.002))
-    annotationRegion.value={x,y,width,height}
-    annotationDraft.body=JSON.stringify({v:1,points:points.map(point=>[
-      Math.round(Math.max(0,Math.min(1,(point.x-x)/width))*10000)/10000,
-      Math.round(Math.max(0,Math.min(1,(point.y-y)/height))*10000)/10000])})
+  if (annotationDraft.kind === 'draw' && annotationDrawPoints.value.length >= 2) {
+    const points = annotationDrawPoints.value;
+    const x = Math.max(0, Math.min(0.99, Math.min(...points.map((point) => point.x)) - 0.002));
+    const y = Math.max(0, Math.min(0.99, Math.min(...points.map((point) => point.y)) - 0.002));
+    const width = Math.min(
+      1 - x,
+      Math.max(0.01, Math.max(...points.map((point) => point.x)) - x + 0.002),
+    );
+    const height = Math.min(
+      1 - y,
+      Math.max(0.01, Math.max(...points.map((point) => point.y)) - y + 0.002),
+    );
+    annotationRegion.value = { x, y, width, height };
+    annotationDraft.body = JSON.stringify({
+      v: 1,
+      points: points.map((point) => [
+        Math.round(Math.max(0, Math.min(1, (point.x - x) / width)) * 10000) / 10000,
+        Math.round(Math.max(0, Math.min(1, (point.y - y) / height)) * 10000) / 10000,
+      ]),
+    });
   }
-  if (!annotationRegion.value || annotationRegion.value.width < .01 || annotationRegion.value.height < .01) {
-    annotationRegion.value = null
-    annotationError.value = 'Drag a visible rectangular area on the page.'
-  } else annotationError.value = ''
+  if (
+    !annotationRegion.value ||
+    annotationRegion.value.width < 0.01 ||
+    annotationRegion.value.height < 0.01
+  ) {
+    annotationRegion.value = null;
+    annotationError.value = 'Drag a visible rectangular area on the page.';
+  } else annotationError.value = '';
 }
 function beginRedactionRegion(event: PointerEvent) {
-  if (!pageReady.value || !redactionOpen.value || props.disabled || editing.value || loading.value ||
-      switchingPage.value || event.button !== 0) return
-  const point = normalizedPointer(event)
-  if (!point) return
-  redactionNotice.value = ''
-  redactionStart = point
-  redactionPointerId = event.pointerId
-  redactionRegion.value = {x:point.x,y:point.y,width:0,height:0}
-  redactionRevision = props.document?.revision || 0
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  event.preventDefault()
+  if (
+    !pageReady.value ||
+    !redactionOpen.value ||
+    props.disabled ||
+    editing.value ||
+    loading.value ||
+    switchingPage.value ||
+    event.button !== 0
+  )
+    return;
+  const point = normalizedPointer(event);
+  if (!point) return;
+  redactionNotice.value = '';
+  redactionStart = point;
+  redactionPointerId = event.pointerId;
+  redactionRegion.value = { x: point.x, y: point.y, width: 0, height: 0 };
+  redactionRevision = props.document?.revision || 0;
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.preventDefault();
 }
 function updateRedactionRegion(event: PointerEvent) {
-  if (redactionPointerId !== event.pointerId || !redactionStart) return
-  const point = normalizedPointer(event)
-  if (!point) return
-  redactionRegion.value = {x:Math.min(redactionStart.x,point.x),y:Math.min(redactionStart.y,point.y),
-    width:Math.abs(point.x-redactionStart.x),height:Math.abs(point.y-redactionStart.y)}
-  event.preventDefault()
+  if (redactionPointerId !== event.pointerId || !redactionStart) return;
+  const point = normalizedPointer(event);
+  if (!point) return;
+  redactionRegion.value = {
+    x: Math.min(redactionStart.x, point.x),
+    y: Math.min(redactionStart.y, point.y),
+    width: Math.abs(point.x - redactionStart.x),
+    height: Math.abs(point.y - redactionStart.y),
+  };
+  event.preventDefault();
 }
 function finishRedactionRegion(event: PointerEvent) {
-  if (redactionPointerId !== event.pointerId) return
-  redactionPointerId = null
-  redactionStart = null
-  if (!redactionRegion.value || !Number.isFinite(redactionRegion.value.x) ||
-      !Number.isFinite(redactionRegion.value.y) || !Number.isFinite(redactionRegion.value.width) ||
-      !Number.isFinite(redactionRegion.value.height) || redactionRegion.value.width < .01 ||
-      redactionRegion.value.height < .01) {
-    redactionRegion.value = null
-    redactionError.value = 'Drag a visible rectangular area on the page.'
-  } else redactionError.value = ''
+  if (redactionPointerId !== event.pointerId) return;
+  redactionPointerId = null;
+  redactionStart = null;
+  if (
+    !redactionRegion.value ||
+    !Number.isFinite(redactionRegion.value.x) ||
+    !Number.isFinite(redactionRegion.value.y) ||
+    !Number.isFinite(redactionRegion.value.width) ||
+    !Number.isFinite(redactionRegion.value.height) ||
+    redactionRegion.value.width < 0.01 ||
+    redactionRegion.value.height < 0.01
+  ) {
+    redactionRegion.value = null;
+    redactionError.value = 'Drag a visible rectangular area on the page.';
+  } else redactionError.value = '';
 }
-function beginRedactionMove(event:PointerEvent) {
-  if (!redactionRegion.value || redactionBusy.value || props.disabled || event.button!==0) return
-  const point=normalizedPointer(event)
-  if (!point) return
-  redactionMove={pointerId:event.pointerId,start:point,region:{...redactionRegion.value}}
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  event.stopPropagation()
+function beginRedactionMove(event: PointerEvent) {
+  if (!redactionRegion.value || redactionBusy.value || props.disabled || event.button !== 0) return;
+  const point = normalizedPointer(event);
+  if (!point) return;
+  redactionMove = {
+    pointerId: event.pointerId,
+    start: point,
+    region: { ...redactionRegion.value },
+  };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.stopPropagation();
 }
-function updateRedactionMove(event:PointerEvent) {
-  const drag=redactionMove
-  if (!drag || drag.pointerId!==event.pointerId) return
-  const point=normalizedPointer(event)
-  if (!point) return
-  redactionRegion.value={...drag.region,
-    x:Math.max(0,Math.min(1-drag.region.width,drag.region.x+point.x-drag.start.x)),
-    y:Math.max(0,Math.min(1-drag.region.height,drag.region.y+point.y-drag.start.y))}
-  event.preventDefault()
+function updateRedactionMove(event: PointerEvent) {
+  const drag = redactionMove;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const point = normalizedPointer(event);
+  if (!point) return;
+  redactionRegion.value = {
+    ...drag.region,
+    x: Math.max(0, Math.min(1 - drag.region.width, drag.region.x + point.x - drag.start.x)),
+    y: Math.max(0, Math.min(1 - drag.region.height, drag.region.y + point.y - drag.start.y)),
+  };
+  event.preventDefault();
 }
-function finishRedactionMove(event:PointerEvent) {
-  if (redactionMove?.pointerId===event.pointerId) redactionMove=null
+function finishRedactionMove(event: PointerEvent) {
+  if (redactionMove?.pointerId === event.pointerId) redactionMove = null;
 }
 function beginRedactionResize(event: PointerEvent, corner: 'nw' | 'ne' | 'sw' | 'se') {
-  const region = redactionRegion.value
-  if (!region || props.disabled || editing.value || redactionBusy.value || event.button !== 0) return
-  const anchor = {x:corner.includes('w') ? region.x + region.width : region.x,
-    y:corner.includes('n') ? region.y + region.height : region.y}
-  redactionResize = {pointerId:event.pointerId,anchor}
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
-  event.stopPropagation()
-  event.preventDefault()
+  const region = redactionRegion.value;
+  if (!region || props.disabled || editing.value || redactionBusy.value || event.button !== 0)
+    return;
+  const anchor = {
+    x: corner.includes('w') ? region.x + region.width : region.x,
+    y: corner.includes('n') ? region.y + region.height : region.y,
+  };
+  redactionResize = { pointerId: event.pointerId, anchor };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.stopPropagation();
+  event.preventDefault();
 }
 function updateRedactionResize(event: PointerEvent) {
-  if (redactionResize?.pointerId !== event.pointerId) return
-  const point = normalizedPointer(event)
-  if (!point) return
-  const anchor = redactionResize.anchor
-  redactionRegion.value = {x:Math.min(anchor.x,point.x),y:Math.min(anchor.y,point.y),
-    width:Math.abs(anchor.x-point.x),height:Math.abs(anchor.y-point.y)}
-  redactionError.value = ''
-  event.stopPropagation()
-  event.preventDefault()
+  if (redactionResize?.pointerId !== event.pointerId) return;
+  const point = normalizedPointer(event);
+  if (!point) return;
+  const anchor = redactionResize.anchor;
+  redactionRegion.value = {
+    x: Math.min(anchor.x, point.x),
+    y: Math.min(anchor.y, point.y),
+    width: Math.abs(anchor.x - point.x),
+    height: Math.abs(anchor.y - point.y),
+  };
+  redactionError.value = '';
+  event.stopPropagation();
+  event.preventDefault();
 }
 function finishRedactionResize(event: PointerEvent) {
-  if (redactionResize?.pointerId !== event.pointerId) return
-  redactionResize = null
-  if (!redactionRegion.value || redactionRegion.value.width < .01 || redactionRegion.value.height < .01) {
-    redactionRegion.value = null
-    redactionError.value = 'Drag a visible rectangular area on the page.'
+  if (redactionResize?.pointerId !== event.pointerId) return;
+  redactionResize = null;
+  if (
+    !redactionRegion.value ||
+    redactionRegion.value.width < 0.01 ||
+    redactionRegion.value.height < 0.01
+  ) {
+    redactionRegion.value = null;
+    redactionError.value = 'Drag a visible rectangular area on the page.';
   }
-  event.stopPropagation()
+  event.stopPropagation();
 }
 async function applyRedaction() {
-  const doc = props.document
-  const region = redactionRegion.value
-  if (!doc || !region || redactionBusy.value || props.disabled) return
-  if (!Number.isFinite(region.x) || !Number.isFinite(region.y) ||
-      !Number.isFinite(region.width) || !Number.isFinite(region.height) ||
-      region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0 ||
-      region.x + region.width > 1 || region.y + region.height > 1 ||
-      !Number.isInteger(redactionRevision) || redactionRevision < 1) {
-    redactionError.value = 'The marked area is no longer valid. Reload the page and draw it again.'
-    return
+  const doc = props.document;
+  const region = redactionRegion.value;
+  if (!doc || !region || redactionBusy.value || props.disabled) return;
+  if (
+    !Number.isFinite(region.x) ||
+    !Number.isFinite(region.y) ||
+    !Number.isFinite(region.width) ||
+    !Number.isFinite(region.height) ||
+    region.x < 0 ||
+    region.y < 0 ||
+    region.width <= 0 ||
+    region.height <= 0 ||
+    region.x + region.width > 1 ||
+    region.y + region.height > 1 ||
+    !Number.isInteger(redactionRevision) ||
+    redactionRevision < 1
+  ) {
+    redactionError.value = 'The marked area is no longer valid. Reload the page and draw it again.';
+    return;
   }
-  redactionBusy.value = true
-  redactionError.value = ''
+  redactionBusy.value = true;
+  redactionError.value = '';
   try {
-    pageAnnotations.value = await api<PageAnnotation[]>(`/documents/${doc.id}/annotations`, 'POST', {
-      kind:'redaction',page_index:current.value-1,expected_revision:redactionRevision,
-      rect_x: region.x, rect_y: region.y, rect_width: region.width, rect_height: region.height,
-      body:'',color:'yellow',output_scope:'pdf',
-    })
-    redactionRegion.value = null
-    redactionNotice.value = 'Redaction mark saved. Drag it to move or resize it; Save copy and new bundle exports remove the covered PDF content. The editor’s underlying working revision still contains it.'
-    emit('modified')
+    pageAnnotations.value = await api<PageAnnotation[]>(
+      `/documents/${doc.id}/annotations`,
+      'POST',
+      {
+        kind: 'redaction',
+        page_index: current.value - 1,
+        expected_revision: redactionRevision,
+        rect_x: region.x,
+        rect_y: region.y,
+        rect_width: region.width,
+        rect_height: region.height,
+        body: '',
+        color: 'yellow',
+        output_scope: 'pdf',
+      },
+    );
+    redactionRegion.value = null;
+    redactionNotice.value =
+      'Redaction mark saved. Drag it to move or resize it; Save copy and new bundle exports remove the covered PDF content. The editor’s underlying working revision still contains it.';
+    emit('modified');
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
-      redactionError.value = 'The working PDF changed. This draft was retained; cancel navigation and review before redrawing.'
-    } else redactionError.value = friendlyError(err)
+      redactionError.value =
+        'The working PDF changed. This draft was retained; cancel navigation and review before redrawing.';
+    } else redactionError.value = friendlyError(err);
+  } finally {
+    redactionBusy.value = false;
   }
-  finally { redactionBusy.value = false }
 }
 async function removeSelectedRedaction() {
-  const doc = props.document
-  const selected = selectedRedaction.value
-  if (!doc || !selected || redactionBusy.value || props.disabled) return
-  redactionBusy.value = true
-  editing.value = true
-  redactionError.value = ''
+  const doc = props.document;
+  const selected = selectedRedaction.value;
+  if (!doc || !selected || redactionBusy.value || props.disabled) return;
+  redactionBusy.value = true;
+  editing.value = true;
+  redactionError.value = '';
   try {
-    const signature = await currentTextEditSignature(doc.id, doc.matter_id, doc.revision,
+    const signature = await currentTextEditSignature(
+      doc.id,
+      doc.matter_id,
+      doc.revision,
       'Restoring content in a previously redacted area',
-      'The working PDF changed. Reload the document and select the redaction again.')
-    if (!signature.proceed) return
+      'The working PDF changed. Reload the document and select the redaction again.',
+    );
+    if (!signature.proceed) return;
     if (props.document?.id !== doc.id || props.document.revision !== doc.revision) {
-      throw new Error('The working PDF changed. Select the redaction again.')
+      throw new Error('The working PDF changed. Select the redaction again.');
     }
     const result = await submitReviewedTextEdit<MatterDocument>(
       `/documents/${doc.id}/pages/redactions/${selected.id}/remove`,
-      {expected_revision:doc.revision}, signature.acknowledged, doc.title,
-      'Restoring a redacted area', 120_000)
-    if (!result) return
-    selectedRedactionId.value = null
-    await loadPdf(result)
-    appliedRedactions.value = await api<AppliedRedaction[]>(`/documents/${doc.id}/pages/redactions`)
-    redactionNotice.value = 'Selected area restored as page pixels in a new working revision. Inspect it and rebuild exports.'
-    emit('modified')
+      { expected_revision: doc.revision },
+      signature.acknowledged,
+      doc.title,
+      'Restoring a redacted area',
+      120_000,
+    );
+    if (!result) return;
+    selectedRedactionId.value = null;
+    await loadPdf(result);
+    appliedRedactions.value = await api<AppliedRedaction[]>(
+      `/documents/${doc.id}/pages/redactions`,
+    );
+    redactionNotice.value =
+      'Selected area restored as page pixels in a new working revision. Inspect it and rebuild exports.';
+    emit('modified');
   } catch (err) {
-    redactionError.value = friendlyError(err)
-  } finally { editing.value = false; redactionBusy.value = false }
+    redactionError.value = friendlyError(err);
+  } finally {
+    editing.value = false;
+    redactionBusy.value = false;
+  }
 }
 function clearAnnotationImageUrls() {
-  for (const url of Object.values(annotationImageUrls)) URL.revokeObjectURL(url)
-  for (const key of Object.keys(annotationImageUrls)) delete annotationImageUrls[key]
+  for (const url of Object.values(annotationImageUrls)) URL.revokeObjectURL(url);
+  for (const key of Object.keys(annotationImageUrls)) delete annotationImageUrls[key];
 }
 async function loadPageAnnotations() {
-  const doc = props.document
-  if (!doc) { pageAnnotations.value = []; clearAnnotationImageUrls(); return }
+  const doc = props.document;
+  if (!doc) {
+    pageAnnotations.value = [];
+    clearAnnotationImageUrls();
+    return;
+  }
   try {
-    pageAnnotations.value = await api<PageAnnotation[]>(`/matters/${doc.matter_id}/annotations`)
-    await loadCurrentAnnotationImages()
-  } catch { pageAnnotations.value = []; clearAnnotationImageUrls() }
+    pageAnnotations.value = await api<PageAnnotation[]>(`/matters/${doc.matter_id}/annotations`);
+    await loadCurrentAnnotationImages();
+  } catch {
+    pageAnnotations.value = [];
+    clearAnnotationImageUrls();
+  }
 }
 async function loadCurrentAnnotationImages() {
-  const ids = new Set(currentPageAnnotations.value.filter(item => item.kind === 'image' && item.resolved).map(item => item.id))
-  for (const [id,url] of Object.entries(annotationImageUrls)) {
-    if (!ids.has(id)) { URL.revokeObjectURL(url); delete annotationImageUrls[id] }
+  const ids = new Set(
+    currentPageAnnotations.value
+      .filter((item) => item.kind === 'image' && item.resolved)
+      .map((item) => item.id),
+  );
+  for (const [id, url] of Object.entries(annotationImageUrls)) {
+    if (!ids.has(id)) {
+      URL.revokeObjectURL(url);
+      delete annotationImageUrls[id];
+    }
   }
-  await Promise.all([...ids].map(async id => {
-    if (annotationImageUrls[id]) return
-    try { annotationImageUrls[id] = URL.createObjectURL(await pageAnnotationAsset(id)) } catch { /* list shows missing asset */ }
-  }))
+  await Promise.all(
+    [...ids].map(async (id) => {
+      if (annotationImageUrls[id]) return;
+      try {
+        annotationImageUrls[id] = URL.createObjectURL(await pageAnnotationAsset(id));
+      } catch {
+        /* list shows missing asset */
+      }
+    }),
+  );
 }
 function resetAnnotationDraft(clearKind = true) {
-  if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value)
-  annotationPreviewUrl.value = ''
-  annotationRegion.value = null
-  annotationDrawPoints.value = []
-  annotationDrawing.value = false
-  annotationPointerId = null
-  annotationStart = null
-  annotationDraft.body = ''
-  annotationDraft.color = 'yellow'
-  if (clearKind) annotationDraft.kind = 'highlight'
-  else if (annotationDraft.kind==='date') {
-    const today=new Date()
-    annotationDraft.body=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`
+  if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value);
+  annotationPreviewUrl.value = '';
+  annotationRegion.value = null;
+  annotationDrawPoints.value = [];
+  annotationDrawing.value = false;
+  annotationPointerId = null;
+  annotationStart = null;
+  annotationDraft.body = '';
+  annotationDraft.color = 'yellow';
+  if (clearKind) annotationDraft.kind = 'highlight';
+  else if (annotationDraft.kind === 'date') {
+    const today = new Date();
+    annotationDraft.body = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   }
-  annotationOutputScope.value = annotationDraft.kind==='highlight'||annotationDraft.kind==='comment'?'private':'pdf'
-  annotationImage.value = null
-  if (annotationFileInput.value) annotationFileInput.value.value = ''
-  editingAnnotationId.value = null
-  annotationError.value = ''
+  annotationOutputScope.value =
+    annotationDraft.kind === 'highlight' || annotationDraft.kind === 'comment' ? 'private' : 'pdf';
+  annotationImage.value = null;
+  if (annotationFileInput.value) annotationFileInput.value.value = '';
+  editingAnnotationId.value = null;
+  annotationError.value = '';
 }
-function setImageGeometry(field:'x'|'y'|'width'|'height', event:Event) {
-  const region=annotationRegion.value
-  if (!region) return
-  const input=event.target as HTMLInputElement
-  const extent=field==='x'||field==='width'?pageSizePt.value.width:pageSizePt.value.height
-  const value=Number(input.value)/extent
-  if (!Number.isFinite(value) || !input.value) return
-  const maximum=field==='x'?1-region.width:field==='y'?1-region.height:field==='width'?1-region.x:1-region.y
-  region[field]=Math.min(maximum,Math.max(field==='width'||field==='height'?1/extent:0,value))
-  input.value=String(Math.round(region[field]*extent))
+function setImageGeometry(field: 'x' | 'y' | 'width' | 'height', event: Event) {
+  const region = annotationRegion.value;
+  if (!region) return;
+  const input = event.target as HTMLInputElement;
+  const extent =
+    field === 'x' || field === 'width' ? pageSizePt.value.width : pageSizePt.value.height;
+  const value = Number(input.value) / extent;
+  if (!Number.isFinite(value) || !input.value) return;
+  const maximum =
+    field === 'x'
+      ? 1 - region.width
+      : field === 'y'
+        ? 1 - region.height
+        : field === 'width'
+          ? 1 - region.x
+          : 1 - region.y;
+  region[field] = Math.min(
+    maximum,
+    Math.max(field === 'width' || field === 'height' ? 1 / extent : 0, value),
+  );
+  input.value = String(Math.round(region[field] * extent));
 }
 function chooseAnnotationImage(event: Event) {
-  if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value)
-  annotationImage.value = (event.target as HTMLInputElement).files?.[0] || null
-  annotationPreviewUrl.value = annotationImage.value ? URL.createObjectURL(annotationImage.value) : ''
+  if (annotationPreviewUrl.value) URL.revokeObjectURL(annotationPreviewUrl.value);
+  annotationImage.value = (event.target as HTMLInputElement).files?.[0] || null;
+  annotationPreviewUrl.value = annotationImage.value
+    ? URL.createObjectURL(annotationImage.value)
+    : '';
 }
 function editPageAnnotation(item: PageAnnotation) {
-  if (!item.resolved) { annotationError.value = 'This annotation needs review because the document revision changed.'; return }
-  readPanel.value = null
-  historyOpen.value = false
-  activeCategory.value = item.kind==='image' ? 'edit' : ['check','cross','date'].includes(item.kind) ? 'stamps'
-    : item.kind==='redaction' ? 'redact' : 'review'
-  activeTool.value = 'notes'
-  editingAnnotationId.value = item.id
-  annotationDraft.kind = item.kind
-  annotationDraft.body = item.body
-  annotationDraft.color = item.color
-  annotationOutputScope.value = item.output_scope
-  annotationRegion.value = {x:item.rect_x,y:item.rect_y,width:item.rect_width,height:item.rect_height}
-  annotationNotice.value = ''
+  if (!item.resolved) {
+    annotationError.value = 'This annotation needs review because the document revision changed.';
+    return;
+  }
+  readPanel.value = null;
+  historyOpen.value = false;
+  activeCategory.value =
+    item.kind === 'image'
+      ? 'edit'
+      : ['check', 'cross', 'date'].includes(item.kind)
+        ? 'stamps'
+        : item.kind === 'redaction'
+          ? 'redact'
+          : 'review';
+  activeTool.value = 'notes';
+  editingAnnotationId.value = item.id;
+  annotationDraft.kind = item.kind;
+  annotationDraft.body = item.body;
+  annotationDraft.color = item.color;
+  annotationOutputScope.value = item.output_scope;
+  annotationRegion.value = {
+    x: item.rect_x,
+    y: item.rect_y,
+    width: item.rect_width,
+    height: item.rect_height,
+  };
+  annotationNotice.value = '';
 }
 async function savePageAnnotation() {
-  const doc = props.document
-  const region = annotationRegion.value
-  if (!doc || !region || annotationBusy.value) return
+  const doc = props.document;
+  const region = annotationRegion.value;
+  if (!doc || !region || annotationBusy.value) return;
   if (annotationDraft.kind === 'comment' && !annotationDraft.body.trim()) {
-    annotationError.value = 'Enter comment text.'; return
+    annotationError.value = 'Enter comment text.';
+    return;
   }
   if (annotationDraft.kind === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(annotationDraft.body)) {
-    annotationError.value = 'Choose a valid date.'; return
+    annotationError.value = 'Choose a valid date.';
+    return;
   }
   if (annotationDraft.kind === 'image' && !editingAnnotationId.value && !annotationImage.value) {
-    annotationError.value = 'Choose a PNG or JPEG image.'; return
+    annotationError.value = 'Choose a PNG or JPEG image.';
+    return;
   }
-  annotationBusy.value = true
-  annotationError.value = ''
+  annotationBusy.value = true;
+  annotationError.value = '';
   try {
     if (editingAnnotationId.value) {
-      pageAnnotations.value = await api<PageAnnotation[]>(`/annotations/${editingAnnotationId.value}`, 'PATCH', {
-        expected_revision:doc.revision,rect_x:region.x,rect_y:region.y,
-        rect_width:region.width,rect_height:region.height,
-        body:annotationDraft.body,color:annotationDraft.color,
-        output_scope:annotationOutputScope.value,
-      })
-      annotationNotice.value = 'Annotation updated. Existing exports remain unchanged.'
+      pageAnnotations.value = await api<PageAnnotation[]>(
+        `/annotations/${editingAnnotationId.value}`,
+        'PATCH',
+        {
+          expected_revision: doc.revision,
+          rect_x: region.x,
+          rect_y: region.y,
+          rect_width: region.width,
+          rect_height: region.height,
+          body: annotationDraft.body,
+          color: annotationDraft.color,
+          output_scope: annotationOutputScope.value,
+        },
+      );
+      annotationNotice.value = 'Annotation updated. Existing exports remain unchanged.';
     } else if (annotationDraft.kind === 'image' && annotationImage.value) {
       pageAnnotations.value = await uploadPageAnnotationImage(doc.id, annotationImage.value, {
-        page_index:current.value-1,expected_revision:doc.revision,rect_x:region.x,
-        rect_y:region.y,rect_width:region.width,rect_height:region.height,
-      })
-      annotationNotice.value = 'Image mark saved. Move or resize it before Save copy or building a bundle.'
+        page_index: current.value - 1,
+        expected_revision: doc.revision,
+        rect_x: region.x,
+        rect_y: region.y,
+        rect_width: region.width,
+        rect_height: region.height,
+      });
+      annotationNotice.value =
+        'Image mark saved. Move or resize it before Save copy or building a bundle.';
     } else {
-      pageAnnotations.value = await api<PageAnnotation[]>(`/documents/${doc.id}/annotations`, 'POST', {
-        kind:annotationDraft.kind,page_index:current.value-1,expected_revision:doc.revision,
-        rect_x:region.x,rect_y:region.y,rect_width:region.width,rect_height:region.height,
-        body:annotationDraft.body,color:annotationDraft.color,
-        output_scope:annotationOutputScope.value,
-      })
-      annotationNotice.value = annotationOutputScope.value==='private'
-        ? `${annotationKindLabel(annotationDraft.kind)} saved as a private review annotation.`
-        : `${annotationKindLabel(annotationDraft.kind)} saved as an editable PDF mark. Save copy or rebuild exports to include it.`
+      pageAnnotations.value = await api<PageAnnotation[]>(
+        `/documents/${doc.id}/annotations`,
+        'POST',
+        {
+          kind: annotationDraft.kind,
+          page_index: current.value - 1,
+          expected_revision: doc.revision,
+          rect_x: region.x,
+          rect_y: region.y,
+          rect_width: region.width,
+          rect_height: region.height,
+          body: annotationDraft.body,
+          color: annotationDraft.color,
+          output_scope: annotationOutputScope.value,
+        },
+      );
+      annotationNotice.value =
+        annotationOutputScope.value === 'private'
+          ? `${annotationKindLabel(annotationDraft.kind)} saved as a private review annotation.`
+          : `${annotationKindLabel(annotationDraft.kind)} saved as an editable PDF mark. Save copy or rebuild exports to include it.`;
     }
-    resetAnnotationDraft(false)
-    await loadCurrentAnnotationImages()
-    emit('modified')
-  } catch (err) { annotationError.value = friendlyError(err) }
-  finally { annotationBusy.value = false }
+    resetAnnotationDraft(false);
+    await loadCurrentAnnotationImages();
+    emit('modified');
+  } catch (err) {
+    annotationError.value = friendlyError(err);
+  } finally {
+    annotationBusy.value = false;
+  }
 }
 async function removePageAnnotation(item: PageAnnotation) {
-  if (annotationBusy.value || !window.confirm(`Remove this ${item.kind}?`)) return
-  annotationBusy.value = true
-  annotationError.value = ''
+  if (annotationBusy.value || !window.confirm(`Remove this ${item.kind}?`)) return;
+  annotationBusy.value = true;
+  annotationError.value = '';
   try {
-    pageAnnotations.value = await api<PageAnnotation[]>(`/annotations/${item.id}`, 'DELETE')
-    resetAnnotationDraft()
-    await loadCurrentAnnotationImages()
-    emit('modified')
-  } catch (err) { annotationError.value = friendlyError(err) }
-  finally { annotationBusy.value = false }
+    pageAnnotations.value = await api<PageAnnotation[]>(`/annotations/${item.id}`, 'DELETE');
+    resetAnnotationDraft();
+    await loadCurrentAnnotationImages();
+    emit('modified');
+  } catch (err) {
+    annotationError.value = friendlyError(err);
+  } finally {
+    annotationBusy.value = false;
+  }
 }
 async function saveReviewedLink() {
-  const doc = props.document
-  const region = linkRegion.value
-  if (!doc || !region || !linkDraft.title.trim() || linksBusy.value) return
-  linkError.value = ''
-  linksBusy.value = true
+  const doc = props.document;
+  const region = linkRegion.value;
+  if (!doc || !region || !linkDraft.title.trim() || linksBusy.value) return;
+  linkError.value = '';
+  linksBusy.value = true;
   try {
-    const existing = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`)
-    let target: MatterDocument | undefined
+    const existing = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`);
+    let target: MatterDocument | undefined;
     if (linkDraft.kind === 'internal') {
-      target = (props.documents || []).find(item => item.id === linkDraft.target_document_id)
-      if (!target) throw new Error('Choose a target document.')
-      if (!Number.isInteger(linkDraft.target_page) || linkDraft.target_page < 1 || linkDraft.target_page > target.page_count)
-        throw new Error(`Choose target page 1 to ${target.page_count}.`)
+      target = (props.documents || []).find((item) => item.id === linkDraft.target_document_id);
+      if (!target) throw new Error('Choose a target document.');
+      if (
+        !Number.isInteger(linkDraft.target_page) ||
+        linkDraft.target_page < 1 ||
+        linkDraft.target_page > target.page_count
+      )
+        throw new Error(`Choose target page 1 to ${target.page_count}.`);
     }
-    const wasEditing=!!editingLinkId.value
-    const entries = existing.map(linkPayload)
-    const entry = {id:editingLinkId.value || crypto.randomUUID().replace(/-/g,''),title:linkDraft.title.trim(),
-      source_document_id:doc.id,source_page_index:current.value-1,source_revision:doc.revision,
-      rect_x:region.x,rect_y:region.y,rect_width:region.width,rect_height:region.height,
-      kind:linkDraft.kind,target_document_id:target?.id || null,
-      target_page_index:target ? linkDraft.target_page-1 : null,
-      target_revision:target?.revision || null,
-      uri:linkDraft.kind === 'external' ? linkDraft.uri.trim() : ''}
+    const wasEditing = !!editingLinkId.value;
+    const entries = existing.map(linkPayload);
+    const entry = {
+      id: editingLinkId.value || crypto.randomUUID().replace(/-/g, ''),
+      title: linkDraft.title.trim(),
+      source_document_id: doc.id,
+      source_page_index: current.value - 1,
+      source_revision: doc.revision,
+      rect_x: region.x,
+      rect_y: region.y,
+      rect_width: region.width,
+      rect_height: region.height,
+      kind: linkDraft.kind,
+      target_document_id: target?.id || null,
+      target_page_index: target ? linkDraft.target_page - 1 : null,
+      target_revision: target?.revision || null,
+      uri: linkDraft.kind === 'external' ? linkDraft.uri.trim() : '',
+    };
     if (editingLinkId.value) {
-      const index=entries.findIndex(item=>item.id===editingLinkId.value)
-      if (index<0) throw new Error('The selected link no longer exists. Select it again.')
-      entries[index]=entry
-    } else entries.push(entry)
-    reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`, 'PUT', {entries})
-    linkRegion.value = null
-    editingLinkId.value = null
-    if (wasEditing) { activeTool.value='select'; clearOverlaySelection() }
-    linkDraft.title = ''; linkDraft.uri = ''
-    linkNotice.value = 'Reviewed link saved. It will export only while its revision-anchored endpoints resolve.'
-    emit('modified')
-  } catch (err) { linkError.value = friendlyError(err) }
-  finally { linksBusy.value = false }
+      const index = entries.findIndex((item) => item.id === editingLinkId.value);
+      if (index < 0) throw new Error('The selected link no longer exists. Select it again.');
+      entries[index] = entry;
+    } else entries.push(entry);
+    reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`, 'PUT', {
+      entries,
+    });
+    linkRegion.value = null;
+    editingLinkId.value = null;
+    if (wasEditing) {
+      activeTool.value = 'select';
+      clearOverlaySelection();
+    }
+    linkDraft.title = '';
+    linkDraft.uri = '';
+    linkNotice.value =
+      'Reviewed link saved. It will export only while its revision-anchored endpoints resolve.';
+    emit('modified');
+  } catch (err) {
+    linkError.value = friendlyError(err);
+  } finally {
+    linksBusy.value = false;
+  }
 }
 async function removeReviewedLink(id: string) {
-  const doc = props.document
-  if (!doc || linksBusy.value || !window.confirm('Remove this reviewed link?')) return
-  linksBusy.value = true
+  const doc = props.document;
+  if (!doc || linksBusy.value || !window.confirm('Remove this reviewed link?')) return;
+  linksBusy.value = true;
   try {
-    const existing = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`)
-    reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`, 'PUT',
-      {entries:existing.filter(item => item.id !== id).map(linkPayload)})
-    emit('modified')
-  } catch (err) { linkError.value = friendlyError(err) }
-  finally { linksBusy.value = false }
+    const existing = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`);
+    reviewedLinks.value = await api<ReviewedLink[]>(`/matters/${doc.matter_id}/links`, 'PUT', {
+      entries: existing.filter((item) => item.id !== id).map(linkPayload),
+    });
+    emit('modified');
+  } catch (err) {
+    linkError.value = friendlyError(err);
+  } finally {
+    linksBusy.value = false;
+  }
 }
 function followReviewedLink(item: ReviewedLink) {
-  if (!item.resolved) { linkError.value = 'This link needs review because a source or target revision changed.'; return }
-  if (item.kind === 'external') emit('openExternalLink', item.uri)
+  if (!item.resolved) {
+    linkError.value = 'This link needs review because a source or target revision changed.';
+    return;
+  }
+  if (item.kind === 'external') emit('openExternalLink', item.uri);
   else if (item.target_document_id !== null && item.target_page_index !== null)
-    emit('openInternalLink', item.target_document_id, item.target_page_index + 1)
+    emit('openInternalLink', item.target_document_id, item.target_page_index + 1);
 }
-function clickOverlay(kind:SelectedOverlay['kind'],item:PageAnnotation|ReviewedLink) {
-  if (suppressOverlayClick) {suppressOverlayClick=false;return}
-  if (!props.preparation && !props.disabled &&
-      ((editingAnnotationId.value!==item.id && hasPendingAnnotationDraft()) ||
-       (editingLinkId.value && editingLinkId.value!==item.id && linkDirty.value) ||
-       (linkRegion.value && !editingLinkId.value))) {
+function clickOverlay(kind: SelectedOverlay['kind'], item: PageAnnotation | ReviewedLink) {
+  if (suppressOverlayClick) {
+    suppressOverlayClick = false;
+    return;
+  }
+  if (
+    !props.preparation &&
+    !props.disabled &&
+    ((editingAnnotationId.value !== item.id && hasPendingAnnotationDraft()) ||
+      (editingLinkId.value && editingLinkId.value !== item.id && linkDirty.value) ||
+      (linkRegion.value && !editingLinkId.value))
+  ) {
     if (!window.confirm('Discard the unfinished properties and select another element?')) {
-      selectedOverlay.value=editingAnnotationId.value ? {kind:'annotation',id:editingAnnotationId.value}
-        : editingLinkId.value ? {kind:'link',id:editingLinkId.value} : null
-      return
+      selectedOverlay.value = editingAnnotationId.value
+        ? { kind: 'annotation', id: editingAnnotationId.value }
+        : editingLinkId.value
+          ? { kind: 'link', id: editingLinkId.value }
+          : null;
+      return;
     }
-    resetAnnotationDraft()
-    editingLinkId.value=null
-    linkRegion.value=null
+    resetAnnotationDraft();
+    editingLinkId.value = null;
+    linkRegion.value = null;
   }
-  selectedOverlay.value={kind,id:item.id}
+  selectedOverlay.value = { kind, id: item.id };
   if (props.preparation || props.disabled) {
-    if (kind==='annotation' && (item as PageAnnotation).kind==='comment') {
-      viewedCommentId.value=viewedCommentId.value===item.id ? null : item.id
-      selectedOverlay.value=viewedCommentId.value ? {kind,id:item.id} : null
-      if (props.preparation) readPanel.value=null
-    } else viewedCommentId.value=null
-    return
+    if (kind === 'annotation' && (item as PageAnnotation).kind === 'comment') {
+      viewedCommentId.value = viewedCommentId.value === item.id ? null : item.id;
+      selectedOverlay.value = viewedCommentId.value ? { kind, id: item.id } : null;
+      if (props.preparation) readPanel.value = null;
+    } else viewedCommentId.value = null;
+    return;
   }
-  if (kind==='annotation') {
-    const annotation=item as PageAnnotation
-    editingLinkId.value=null
-    linkRegion.value=null
-    if (annotation.kind==='text') { resetAnnotationDraft(); readPanel.value=null; activeCategory.value='edit'; activeTool.value='select'; return }
-    editPageAnnotation(annotation)
-    return
+  if (kind === 'annotation') {
+    const annotation = item as PageAnnotation;
+    editingLinkId.value = null;
+    linkRegion.value = null;
+    if (annotation.kind === 'text') {
+      resetAnnotationDraft();
+      readPanel.value = null;
+      activeCategory.value = 'edit';
+      activeTool.value = 'select';
+      return;
+    }
+    editPageAnnotation(annotation);
+    return;
   }
-  const link=item as ReviewedLink
-  resetAnnotationDraft()
-  readPanel.value=null
-  historyOpen.value=false
-  activeCategory.value='edit'
-  activeTool.value='links'
-  editingLinkId.value=link.id
-  linkDraft.title=link.title
-  linkDraft.kind=link.kind
-  linkDraft.target_document_id=link.target_document_id || ''
-  linkDraft.target_page=(link.target_page_index ?? 0)+1
-  linkDraft.uri=link.uri
-  linkRegion.value={x:link.rect_x,y:link.rect_y,width:link.rect_width,height:link.rect_height}
+  const link = item as ReviewedLink;
+  resetAnnotationDraft();
+  readPanel.value = null;
+  historyOpen.value = false;
+  activeCategory.value = 'edit';
+  activeTool.value = 'links';
+  editingLinkId.value = link.id;
+  linkDraft.title = link.title;
+  linkDraft.kind = link.kind;
+  linkDraft.target_document_id = link.target_document_id || '';
+  linkDraft.target_page = (link.target_page_index ?? 0) + 1;
+  linkDraft.uri = link.uri;
+  linkRegion.value = {
+    x: link.rect_x,
+    y: link.rect_y,
+    width: link.rect_width,
+    height: link.rect_height,
+  };
 }
-function clickPageSurface(event:MouseEvent) {
-  clearOverlaySelection()
-  viewedCommentId.value=null
-  choosePlacement(event)
+function clickPageSurface(event: MouseEvent) {
+  clearOverlaySelection();
+  viewedCommentId.value = null;
+  choosePlacement(event);
 }
 
 function scheduleMarkPreview() {
-  if (markPreviewTimer) clearTimeout(markPreviewTimer)
-  if (!marksPanelOpen.value || !props.document) { markPreview.value = []; return }
-  markPreviewTimer = setTimeout(() => void previewMarks(), 250)
+  if (markPreviewTimer) clearTimeout(markPreviewTimer);
+  if (!marksPanelOpen.value || !props.document) {
+    markPreview.value = [];
+    return;
+  }
+  markPreviewTimer = setTimeout(() => void previewMarks(), 250);
 }
 async function previewMarks() {
-  const doc = props.document
-  if (!doc || !marksPanelOpen.value) return
-  const sequence = ++markPreviewSequence
-  marksError.value = ''
+  const doc = props.document;
+  if (!doc || !marksPanelOpen.value) return;
+  const sequence = ++markPreviewSequence;
+  marksError.value = '';
   try {
-    const result = await api<{revision:number,marks:OutputMarkPreview[]}>(
-      `/documents/${doc.id}/pages/${current.value-1}/output-marks-preview`, 'POST', {...markSettings})
-    if (sequence === markPreviewSequence && result.revision === doc.revision) markPreview.value = result.marks
-  } catch (err) { if (sequence === markPreviewSequence) { markPreview.value = []; marksError.value = friendlyError(err) } }
+    const result = await api<{ revision: number; marks: OutputMarkPreview[] }>(
+      `/documents/${doc.id}/pages/${current.value - 1}/output-marks-preview`,
+      'POST',
+      { ...markSettings },
+    );
+    if (sequence === markPreviewSequence && result.revision === doc.revision)
+      markPreview.value = result.marks;
+  } catch (err) {
+    if (sequence === markPreviewSequence) {
+      markPreview.value = [];
+      marksError.value = friendlyError(err);
+    }
+  }
 }
 async function saveMarks() {
-  const doc = props.document
-  if (!doc || marksBusy.value) return
-  marksBusy.value = true
-  marksError.value = ''
-  const draft = JSON.stringify(markSettings)
+  const doc = props.document;
+  if (!doc || marksBusy.value) return;
+  marksBusy.value = true;
+  marksError.value = '';
+  const draft = JSON.stringify(markSettings);
   try {
-    const saved = await api<OutputMarks>(`/matters/${doc.matter_id}/output-marks`, 'PUT', JSON.parse(draft))
-    if (props.document?.matter_id !== doc.matter_id) return
-    if (JSON.stringify(markSettings) === draft) Object.assign(markSettings, saved)
-    savedMarks.value = JSON.stringify(saved)
-    marksNotice.value = 'Output marks saved. Existing exports remain unchanged; rebuild to apply them.'
-    emit('modified')
-  } catch (err) { marksError.value = friendlyError(err) }
-  finally { marksBusy.value = false }
+    const saved = await api<OutputMarks>(
+      `/matters/${doc.matter_id}/output-marks`,
+      'PUT',
+      JSON.parse(draft),
+    );
+    if (props.document?.matter_id !== doc.matter_id) return;
+    if (JSON.stringify(markSettings) === draft) Object.assign(markSettings, saved);
+    savedMarks.value = JSON.stringify(saved);
+    marksNotice.value =
+      'Output marks saved. Existing exports remain unchanged; rebuild to apply them.';
+    emit('modified');
+  } catch (err) {
+    marksError.value = friendlyError(err);
+  } finally {
+    marksBusy.value = false;
+  }
 }
 
-async function edit(action: 'rotate' | 'delete' | 'reorder', params: unknown, focusPage?: number): Promise<boolean> {
-  if (!props.document || editing.value) return false
-  const signature = confirmSignatureTransformation([props.document],
-    action === 'rotate' ? 'Rotating a page' : action === 'delete' ? 'Deleting a page' : 'Reordering pages')
-  if (!signature.proceed) return false
-  const rotating = action === 'rotate'
-  const startedAt = performance.now()
-  editing.value = true
-  if (rotating) rotatingPage.value = true
+async function edit(
+  action: 'rotate' | 'delete' | 'reorder',
+  params: unknown,
+  focusPage?: number,
+): Promise<boolean> {
+  if (!props.document || editing.value) return false;
+  const signature = confirmSignatureTransformation(
+    [props.document],
+    action === 'rotate'
+      ? 'Rotating a page'
+      : action === 'delete'
+        ? 'Deleting a page'
+        : 'Reordering pages',
+  );
+  if (!signature.proceed) return false;
+  const rotating = action === 'rotate';
+  const startedAt = performance.now();
+  editing.value = true;
+  if (rotating) rotatingPage.value = true;
   try {
-    const updated = await api<MatterDocument>(`/documents/${props.document.id}/pages/${action}`, 'POST', {
-      ...(params as Record<string, unknown>), expected_revision:props.document.revision, acknowledge_signature_risk: signature.acknowledged,
-    })
+    const updated = await api<MatterDocument>(
+      `/documents/${props.document.id}/pages/${action}`,
+      'POST',
+      {
+        ...(params as Record<string, unknown>),
+        expected_revision: props.document.revision,
+        acknowledge_signature_risk: signature.acknowledged,
+      },
+    );
     if (rotating) {
-      const remaining = 220 - (performance.now() - startedAt)
+      const remaining = 220 - (performance.now() - startedAt);
       if (remaining > 0 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-        await new Promise(resolve => window.setTimeout(resolve, remaining))
-      await loadPdf(updated)
+        await new Promise((resolve) => window.setTimeout(resolve, remaining));
+      await loadPdf(updated);
     }
-    if (focusPage) current.value = focusPage
-    emit('modified')
-    return true
-  } catch (err) { emit('error', friendlyError(err)); return false }
-  finally { editing.value = false; if (rotating) rotatingPage.value = false }
+    if (focusPage) current.value = focusPage;
+    emit('modified');
+    return true;
+  } catch (err) {
+    emit('error', friendlyError(err));
+    return false;
+  } finally {
+    editing.value = false;
+    if (rotating) rotatingPage.value = false;
+  }
 }
 function move(step: number) {
-  if (!props.document || total.value < 2) return
-  const from = current.value - 1
-  const to = from + step
-  if (to < 0 || to >= total.value) return
-  const order = Array.from({ length: total.value }, (_, i) => i)
-  ;[order[from], order[to]] = [order[to], order[from]]
-  void edit('reorder', { order }, to + 1)
+  if (!props.document || total.value < 2) return;
+  const from = current.value - 1;
+  const to = from + step;
+  if (to < 0 || to >= total.value) return;
+  const order = Array.from({ length: total.value }, (_, i) => i);
+  [order[from], order[to]] = [order[to], order[from]];
+  void edit('reorder', { order }, to + 1);
 }
 function startPageDrag(event: DragEvent, number: number) {
-  if (editing.value || loading.value || props.disabled) { event.preventDefault(); return }
-  draggingPage.value = number
-  event.dataTransfer?.setData('text/plain', String(number))
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+  if (editing.value || loading.value || props.disabled) {
+    event.preventDefault();
+    return;
+  }
+  draggingPage.value = number;
+  event.dataTransfer?.setData('text/plain', String(number));
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
 }
 function overPage(event: DragEvent, number: number) {
-  if (!draggingPage.value || draggingPage.value === number) return
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-  dropTargetPage.value = number
+  if (!draggingPage.value || draggingPage.value === number) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  dropTargetPage.value = number;
 }
 function dropPage(event: DragEvent, target: number) {
-  const source = draggingPage.value || Number(event.dataTransfer?.getData('text/plain'))
-  draggingPage.value = null
-  dropTargetPage.value = null
-  reorderThumbnailPage(source,target)
+  const source = draggingPage.value || Number(event.dataTransfer?.getData('text/plain'));
+  draggingPage.value = null;
+  dropTargetPage.value = null;
+  reorderThumbnailPage(source, target);
 }
-function reorderThumbnailPage(source:number,target:number) {
-  if (editing.value || loading.value || props.disabled || !Number.isInteger(source) || source < 1 || source > total.value ||
-      !Number.isInteger(target) || target < 1 || target > total.value || source === target) return
-  const order = Array.from({length: total.value}, (_, index) => index)
-  order.splice(source - 1, 1)
-  const targetIndex = order.indexOf(target - 1)
-  order.splice(targetIndex + (source < target ? 1 : 0), 0, source - 1)
-  void edit('reorder', {order}, target)
+function reorderThumbnailPage(source: number, target: number) {
+  if (
+    editing.value ||
+    loading.value ||
+    props.disabled ||
+    !Number.isInteger(source) ||
+    source < 1 ||
+    source > total.value ||
+    !Number.isInteger(target) ||
+    target < 1 ||
+    target > total.value ||
+    source === target
+  )
+    return;
+  const order = Array.from({ length: total.value }, (_, index) => index);
+  order.splice(source - 1, 1);
+  const targetIndex = order.indexOf(target - 1);
+  order.splice(targetIndex + (source < target ? 1 : 0), 0, source - 1);
+  void edit('reorder', { order }, target);
 }
 function deleteCurrent() {
-  if (total.value <= 1 || !window.confirm(`Remove page ${current.value} from the working copy? The original remains intact.`)) return
-  void edit('delete', { page_index: current.value - 1 })
+  if (
+    total.value <= 1 ||
+    !window.confirm(
+      `Remove page ${current.value} from the working copy? The original remains intact.`,
+    )
+  )
+    return;
+  void edit('delete', { page_index: current.value - 1 });
 }
 function choosePlacement(event: MouseEvent) {
-  if (!pageReady.value || !textMode.value || linkPanelOpen.value || props.disabled || editing.value || loading.value || !canvas.value) return
-  const rect = canvas.value.getBoundingClientRect()
-  const x = (event.clientX - rect.left) / rect.width
-  const y = (event.clientY - rect.top) / rect.height
+  if (
+    !pageReady.value ||
+    !textMode.value ||
+    linkPanelOpen.value ||
+    props.disabled ||
+    editing.value ||
+    loading.value ||
+    !canvas.value
+  )
+    return;
+  const rect = canvas.value.getBoundingClientRect();
+  const x = (event.clientX - rect.left) / rect.width;
+  const y = (event.clientY - rect.top) / rect.height;
   if (x >= 0 && x < 1 && y >= 0 && y < 1) {
-    placement.value = { x, y, page: current.value }
+    placement.value = { x, y, page: current.value };
   }
 }
-type TextEditReviewResponse = {review_required: true, detail: string}
-type TextPlacementRejected = {placement_rejected: true, detail: string}
+type TextEditReviewResponse = { review_required: true; detail: string };
+type TextPlacementRejected = { placement_rejected: true; detail: string };
 function confirmUnexpectedTextRisk(title: string, action = 'Editing'): boolean {
-  return window.confirm(`${action} “${title}” may invalidate signature protections. Certificate validity is unverified. The imported original remains unchanged. Continue?`)
+  return window.confirm(
+    `${action} “${title}” may invalidate signature protections. Certificate validity is unverified. The imported original remains unchanged. Continue?`,
+  );
 }
-async function submitReviewedTextEdit<T extends object>(endpoint: string,
-    payload: Record<string, unknown>, acknowledged: boolean, title: string,
-    action = 'Editing', timeoutMs?: number): Promise<T | null> {
-  const submit = (approved: boolean) => api<T | TextEditReviewResponse | TextPlacementRejected>(endpoint, 'POST',
-    {...payload, acknowledge_signature_risk: approved}, timeoutMs,
-    {'X-CourtBundle-Review-Protocol': 'challenge'})
-  let result: T | TextEditReviewResponse | TextPlacementRejected
+async function submitReviewedTextEdit<T extends object>(
+  endpoint: string,
+  payload: Record<string, unknown>,
+  acknowledged: boolean,
+  title: string,
+  action = 'Editing',
+  timeoutMs?: number,
+): Promise<T | null> {
+  const submit = (approved: boolean) =>
+    api<T | TextEditReviewResponse | TextPlacementRejected>(
+      endpoint,
+      'POST',
+      { ...payload, acknowledge_signature_risk: approved },
+      timeoutMs,
+      { 'X-CourtBundle-Review-Protocol': 'challenge' },
+    );
+  let result: T | TextEditReviewResponse | TextPlacementRejected;
   try {
-    result = await submit(acknowledged)
+    result = await submit(acknowledged);
   } catch (err) {
-    if (!(err instanceof ApiError) || err.status !== 409 ||
-        !err.message.startsWith('Signature-risk acknowledgment required') || acknowledged) throw err
+    if (
+      !(err instanceof ApiError) ||
+      err.status !== 409 ||
+      !err.message.startsWith('Signature-risk acknowledgment required') ||
+      acknowledged
+    )
+      throw err;
     // A previously installed local engine may still use the 409 review contract.
-    if (!confirmUnexpectedTextRisk(title, action)) return null
-    result = await submit(true)
+    if (!confirmUnexpectedTextRisk(title, action)) return null;
+    result = await submit(true);
   }
   if ('review_required' in result) {
-    if (!confirmUnexpectedTextRisk(title, action)) return null
-    result = await submit(true)
-    if ('review_required' in result) throw new Error('Signature review was not accepted. The working copy was not changed.')
+    if (!confirmUnexpectedTextRisk(title, action)) return null;
+    result = await submit(true);
+    if ('review_required' in result)
+      throw new Error('Signature review was not accepted. The working copy was not changed.');
   }
-  if ('placement_rejected' in result) throw new Error(result.detail)
-  return result
+  if ('placement_rejected' in result) throw new Error(result.detail);
+  return result;
 }
-async function currentTextEditSignature(documentId: string, matterId: string,
-    expectedRevision: number, action: string,
-    staleMessage = 'Document changed. Reload the page and select text again.') {
-  const documents = await api<MatterDocument[]>(`/matters/${matterId}/documents`)
-  const currentDocument = documents.find(item => item.id === documentId)
-  if (!currentDocument) throw new Error(staleMessage)
-  if (currentDocument.revision !== expectedRevision)
-    throw new Error(staleMessage)
-  return confirmSignatureTransformation([currentDocument], action)
+async function currentTextEditSignature(
+  documentId: string,
+  matterId: string,
+  expectedRevision: number,
+  action: string,
+  staleMessage = 'Document changed. Reload the page and select text again.',
+) {
+  const documents = await api<MatterDocument[]>(`/matters/${matterId}/documents`);
+  const currentDocument = documents.find((item) => item.id === documentId);
+  if (!currentDocument) throw new Error(staleMessage);
+  if (currentDocument.revision !== expectedRevision) throw new Error(staleMessage);
+  return confirmSignatureTransformation([currentDocument], action);
 }
 function conciseTextEditError(err: unknown): string {
-  const message = friendlyError(err)
+  const message = friendlyError(err);
   if (message.startsWith('Signature-risk acknowledgment required'))
-    return 'Signature review is required. Select the text and try again.'
+    return 'Signature review is required. Select the text and try again.';
   if (message.includes('cannot fit in clear space'))
-    return 'No clear room for this replacement. Try Edit whole paragraph or shorten the text.'
+    return 'No clear room for this replacement. Try Edit whole paragraph or shorten the text.';
   if (message.includes('Replacement paragraph would overlap another text object'))
-    return 'The new paragraph would cover nearby text. Shorten it or move the text to a clear area first.'
+    return 'The new paragraph would cover nearby text. Shorten it or move the text to a clear area first.';
   if (message.includes('Following text cannot fit on this page after reflow'))
-    return 'The paragraph needs more room than this page has below it. Shorten the text or use a larger page.'
-  if (message.includes('Replacement would cover text outside this paragraph flow') ||
-      message.includes('Following text cannot be moved without covering other text'))
-    return 'This page has text outside the paragraph flow that cannot be moved safely. Review its layout before editing.'
+    return 'The paragraph needs more room than this page has below it. Shorten the text or use a larger page.';
+  if (
+    message.includes('Replacement would cover text outside this paragraph flow') ||
+    message.includes('Following text cannot be moved without covering other text')
+  )
+    return 'This page has text outside the paragraph flow that cannot be moved safely. Review its layout before editing.';
   if (message.startsWith('Document changed'))
-    return 'Document changed. Reload the page and select text again.'
-  return message.length > 140 ? `${message.slice(0, 137)}…` : message
+    return 'Document changed. Reload the page and select text again.';
+  return message.length > 140 ? `${message.slice(0, 137)}…` : message;
 }
 async function placeText() {
-  if (!props.document || !placement.value || editing.value || props.disabled) return
-  if (overlayValidation.value) { emit('error', overlayValidation.value); return }
-  if (!canvas.value) return
-  editing.value = true
+  if (!props.document || !placement.value || editing.value || props.disabled) return;
+  if (overlayValidation.value) {
+    emit('error', overlayValidation.value);
+    return;
+  }
+  if (!canvas.value) return;
+  editing.value = true;
   try {
-    const doc=props.document
-    const canvasBox=canvas.value.getBoundingClientRect()
-    const lines=overlayText.value.split('\n')
-    const width=Math.min(1-placement.value.x,(Math.max(...lines.map(line=>line.length))*overlaySize.value*.9*pageZoom.value*4/3+20)/canvasBox.width)
-    const height=Math.min(1-placement.value.y,(lines.length*overlaySize.value*1.9*pageZoom.value*4/3+14)/canvasBox.height)
-    if (width<.01 || height<.01) throw new Error('Text does not fit here. Choose a position farther from the page edge.')
-    const previousIds=new Set(pageAnnotations.value.map(item=>item.id))
-    pageAnnotations.value=await api<PageAnnotation[]>(`/documents/${doc.id}/annotations`,'POST',{
-      kind:'text',page_index:placement.value.page-1,expected_revision:doc.revision,
-      rect_x:placement.value.x,rect_y:placement.value.y,rect_width:width,rect_height:height,
-      body:overlayText.value,color:'blue',output_scope:'pdf',
-      text_style:{font_family:overlayFont.value,font_size:overlaySize.value,
-        bold:overlayBold.value,alignment:overlayAlignment.value},
-    })
-    const created=pageAnnotations.value.find(item=>!previousIds.has(item.id) && item.kind==='text')
-    placement.value = null
-    overlayText.value = ''
-    if (created) selectedOverlay.value={kind:'annotation',id:created.id}
-    emit('modified')
-  } catch (err) { emit('error', conciseTextEditError(err)) }
-  finally { editing.value = false }
+    const doc = props.document;
+    const canvasBox = canvas.value.getBoundingClientRect();
+    const lines = overlayText.value.split('\n');
+    const width = Math.min(
+      1 - placement.value.x,
+      ((Math.max(...lines.map((line) => line.length)) *
+        overlaySize.value *
+        0.9 *
+        pageZoom.value *
+        4) /
+        3 +
+        20) /
+        canvasBox.width,
+    );
+    const height = Math.min(
+      1 - placement.value.y,
+      ((lines.length * overlaySize.value * 1.9 * pageZoom.value * 4) / 3 + 14) / canvasBox.height,
+    );
+    if (width < 0.01 || height < 0.01)
+      throw new Error('Text does not fit here. Choose a position farther from the page edge.');
+    const previousIds = new Set(pageAnnotations.value.map((item) => item.id));
+    pageAnnotations.value = await api<PageAnnotation[]>(
+      `/documents/${doc.id}/annotations`,
+      'POST',
+      {
+        kind: 'text',
+        page_index: placement.value.page - 1,
+        expected_revision: doc.revision,
+        rect_x: placement.value.x,
+        rect_y: placement.value.y,
+        rect_width: width,
+        rect_height: height,
+        body: overlayText.value,
+        color: 'blue',
+        output_scope: 'pdf',
+        text_style: {
+          font_family: overlayFont.value,
+          font_size: overlaySize.value,
+          bold: overlayBold.value,
+          alignment: overlayAlignment.value,
+        },
+      },
+    );
+    const created = pageAnnotations.value.find(
+      (item) => !previousIds.has(item.id) && item.kind === 'text',
+    );
+    placement.value = null;
+    overlayText.value = '';
+    if (created) selectedOverlay.value = { kind: 'annotation', id: created.id };
+    emit('modified');
+  } catch (err) {
+    emit('error', conciseTextEditError(err));
+  } finally {
+    editing.value = false;
+  }
 }
 async function selectRun(run: TextRun) {
-  if (!pageReady.value || props.disabled || editing.value || pendingMove.value) return
-  const previewSequence = ++paragraphPreviewSequence
-  selectedRun.value = run
-  replacement.value = run.text
-  selectedParagraph.value = ''
-  runsError.value = ''
-  editNotice.value = ''
+  if (!pageReady.value || props.disabled || editing.value || pendingMove.value) return;
+  const previewSequence = ++paragraphPreviewSequence;
+  selectedRun.value = run;
+  replacement.value = run.text;
+  selectedParagraph.value = '';
+  runsError.value = '';
+  editNotice.value = '';
   if (replacementEngine.value === 'pdfium-trial' && props.document) {
-    const documentId = props.document.id
-    const revision = runsRevision.value
-    const page = current.value
+    const documentId = props.document.id;
+    const revision = runsRevision.value;
+    const page = current.value;
     try {
-      const preview = await api<{text:string}>(`/documents/${documentId}/pages/paragraph-trial-preview`, 'POST', {
-        page_index:page-1, span_index:run.index, expected_revision:revision, expected_text:run.text,
-      })
-      if (previewSequence !== paragraphPreviewSequence || selectedRun.value?.index !== run.index || props.document?.id !== documentId ||
-          current.value !== page || runsRevision.value !== revision || replacementEngine.value !== 'pdfium-trial') return
-      selectedParagraph.value = preview.text
-      replacement.value = preview.text
-    } catch (err) { if (previewSequence === paragraphPreviewSequence && selectedRun.value?.index === run.index) runsError.value = friendlyError(err) }
+      const preview = await api<{ text: string }>(
+        `/documents/${documentId}/pages/paragraph-trial-preview`,
+        'POST',
+        {
+          page_index: page - 1,
+          span_index: run.index,
+          expected_revision: revision,
+          expected_text: run.text,
+        },
+      );
+      if (
+        previewSequence !== paragraphPreviewSequence ||
+        selectedRun.value?.index !== run.index ||
+        props.document?.id !== documentId ||
+        current.value !== page ||
+        runsRevision.value !== revision ||
+        replacementEngine.value !== 'pdfium-trial'
+      )
+        return;
+      selectedParagraph.value = preview.text;
+      replacement.value = preview.text;
+    } catch (err) {
+      if (previewSequence === paragraphPreviewSequence && selectedRun.value?.index === run.index)
+        runsError.value = friendlyError(err);
+    }
   }
-  await nextTick()
-  inlineReplacementInput.value?.focus()
-  inlineReplacementInput.value?.select()
+  await nextTick();
+  inlineReplacementInput.value?.focus();
+  inlineReplacementInput.value?.select();
 }
 function cancelReplacement() {
-  paragraphPreviewSequence++
-  selectedRun.value = null
-  replacement.value = ''
-  selectedParagraph.value = ''
-  runsError.value = ''
+  paragraphPreviewSequence++;
+  selectedRun.value = null;
+  replacement.value = '';
+  selectedParagraph.value = '';
+  runsError.value = '';
 }
-watch(replacementEngine, () => { if (selectedRun.value) void selectRun(selectedRun.value) })
+watch(replacementEngine, () => {
+  if (selectedRun.value) void selectRun(selectedRun.value);
+});
 function beginMove(event: PointerEvent, run: TextRun) {
-  if (!pageReady.value || event.button !== 0 || pendingMove.value || props.disabled || editing.value || loading.value || !canvas.value) return
-  pointerRun = run
-  pointerId = event.pointerId
-  dragStartX = event.clientX
-  dragStartY = event.clientY
-  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  if (
+    !pageReady.value ||
+    event.button !== 0 ||
+    pendingMove.value ||
+    props.disabled ||
+    editing.value ||
+    loading.value ||
+    !canvas.value
+  )
+    return;
+  pointerRun = run;
+  pointerId = event.pointerId;
+  dragStartX = event.clientX;
+  dragStartY = event.clientY;
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 }
 function updateMove(event: PointerEvent) {
-  if (!pointerRun || pointerId !== event.pointerId || !canvas.value) return
-  if (!movingRun.value && Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY) < 5) return
+  if (!pointerRun || pointerId !== event.pointerId || !canvas.value) return;
+  if (!movingRun.value && Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY) < 5)
+    return;
   if (!movingRun.value) {
-    movingRun.value = pointerRun
-    selectedRun.value = null
-    runsError.value = ''
-    editNotice.value = ''
+    movingRun.value = pointerRun;
+    selectedRun.value = null;
+    runsError.value = '';
+    editNotice.value = '';
   }
-  const box = pointerRun.relative_bbox
-  const offsetX = (event.clientX - dragStartX) / canvas.value.getBoundingClientRect().width
-  const offset = (event.clientY - dragStartY) / canvas.value.getBoundingClientRect().height
-  horizontalOffset.value = Math.max(-box[0], Math.min(1 - box[2], offsetX))
-  verticalOffset.value = Math.max(-box[1], Math.min(1 - box[3], offset))
-  event.preventDefault()
+  const box = pointerRun.relative_bbox;
+  const offsetX = (event.clientX - dragStartX) / canvas.value.getBoundingClientRect().width;
+  const offset = (event.clientY - dragStartY) / canvas.value.getBoundingClientRect().height;
+  horizontalOffset.value = Math.max(-box[0], Math.min(1 - box[2], offsetX));
+  verticalOffset.value = Math.max(-box[1], Math.min(1 - box[3], offset));
+  event.preventDefault();
 }
 function finishMove(event: PointerEvent) {
-  if (pointerId !== event.pointerId) return
-  pointerId = null
-  pointerRun = null
-  if (!movingRun.value) return
-  suppressNextClick = true
-  window.setTimeout(() => { suppressNextClick = false }, 0)
-  if (event.type === 'pointerup' && Math.hypot(horizontalOffset.value, verticalOffset.value) >= .0001)
-    pendingMove.value = true
-  else cancelMove()
+  if (pointerId !== event.pointerId) return;
+  pointerId = null;
+  pointerRun = null;
+  if (!movingRun.value) return;
+  suppressNextClick = true;
+  window.setTimeout(() => {
+    suppressNextClick = false;
+  }, 0);
+  if (
+    event.type === 'pointerup' &&
+    Math.hypot(horizontalOffset.value, verticalOffset.value) >= 0.0001
+  )
+    pendingMove.value = true;
+  else cancelMove();
 }
 function cancelMove() {
-  movingRun.value = null
-  horizontalOffset.value = 0
-  verticalOffset.value = 0
-  pendingMove.value = false
+  movingRun.value = null;
+  horizontalOffset.value = 0;
+  verticalOffset.value = 0;
+  pendingMove.value = false;
 }
 function confirmMove() {
   if (movingRun.value && pendingMove.value)
-    void applyMove(movingRun.value, horizontalOffset.value, verticalOffset.value)
+    void applyMove(movingRun.value, horizontalOffset.value, verticalOffset.value);
 }
 function clickRun(run: TextRun) {
-  if (suppressNextClick) { suppressNextClick = false; return }
-  if (pendingMove.value) return
-  void selectRun(run)
+  if (suppressNextClick) {
+    suppressNextClick = false;
+    return;
+  }
+  if (pendingMove.value) return;
+  void selectRun(run);
 }
 async function applyMove(run: TextRun, offsetX: number, offsetY: number) {
-  if (!props.document || editing.value || props.disabled) return
-  const documentId = props.document.id
-  const matterId = props.document.matter_id
-  const title = props.document.title
-  const expectedRevision = runsRevision.value
-  try { editSnapshot.value = canvas.value?.toDataURL('image/png') || '' } catch { editSnapshot.value = '' }
-  editSnapshotFading.value = false
-  replacingText.value = true
-  editing.value = true
-  runsError.value = ''
+  if (!props.document || editing.value || props.disabled) return;
+  const documentId = props.document.id;
+  const matterId = props.document.matter_id;
+  const title = props.document.title;
+  const expectedRevision = runsRevision.value;
   try {
-    const signature = await currentTextEditSignature(documentId, matterId,
-      expectedRevision, 'Moving visible text')
-    if (!signature.proceed) return
-    const updated = await submitReviewedTextEdit<MatterDocument>(`/documents/${documentId}/pages/move-text-run`, {
-      page_index: current.value - 1, span_index: run.index,
-      expected_revision: expectedRevision, expected_text: run.text,
-      horizontal_offset: offsetX, vertical_offset: offsetY,
-    }, signature.acknowledged, title)
-    if (!updated) return
-    await loadPdf(updated)
+    editSnapshot.value = canvas.value?.toDataURL('image/png') || '';
+  } catch {
+    editSnapshot.value = '';
+  }
+  editSnapshotFading.value = false;
+  replacingText.value = true;
+  editing.value = true;
+  runsError.value = '';
+  try {
+    const signature = await currentTextEditSignature(
+      documentId,
+      matterId,
+      expectedRevision,
+      'Moving visible text',
+    );
+    if (!signature.proceed) return;
+    const updated = await submitReviewedTextEdit<MatterDocument>(
+      `/documents/${documentId}/pages/move-text-run`,
+      {
+        page_index: current.value - 1,
+        span_index: run.index,
+        expected_revision: expectedRevision,
+        expected_text: run.text,
+        horizontal_offset: offsetX,
+        vertical_offset: offsetY,
+      },
+      signature.acknowledged,
+      title,
+    );
+    if (!updated) return;
+    await loadPdf(updated);
     if (!viewerError.value && editSnapshot.value) {
-      editSnapshotFading.value = true
+      editSnapshotFading.value = true;
       if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-        await new Promise(resolve => window.setTimeout(resolve, 200))
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
     }
-    editNotice.value = 'Text moved by removing and redrawing the selected glyphs in the working copy. Review font and position; Undo can restore the prior revision.'
-    emit('modified')
-  } catch (err) { emit('error', conciseTextEditError(err)) }
-  finally { editing.value = false; replacingText.value = false; editSnapshot.value = '' }
+    editNotice.value =
+      'Text moved by removing and redrawing the selected glyphs in the working copy. Review font and position; Undo can restore the prior revision.';
+    emit('modified');
+  } catch (err) {
+    emit('error', conciseTextEditError(err));
+  } finally {
+    editing.value = false;
+    replacingText.value = false;
+    editSnapshot.value = '';
+  }
 }
 async function applyReplacement() {
-  if (!props.document || !selectedRun.value || !replacement.value.trim() || props.disabled || editing.value) return
+  if (
+    !props.document ||
+    !selectedRun.value ||
+    !replacement.value.trim() ||
+    props.disabled ||
+    editing.value
+  )
+    return;
   if (replacementEngine.value === 'pdfium-trial' && !selectedParagraph.value) {
-    emit('error', 'Wait for the whole paragraph to load before applying the edit.')
-    return
+    emit('error', 'Wait for the whole paragraph to load before applying the edit.');
+    return;
   }
-  const documentId = props.document.id
-  const matterId = props.document.matter_id
-  const title = props.document.title
-  const expectedRevision = runsRevision.value
-  const run = selectedRun.value
-  editing.value = true
-  replacingText.value = true
-  runsError.value = ''
+  const documentId = props.document.id;
+  const matterId = props.document.matter_id;
+  const title = props.document.title;
+  const expectedRevision = runsRevision.value;
+  const run = selectedRun.value;
+  editing.value = true;
+  replacingText.value = true;
+  runsError.value = '';
   try {
-    const signature = await currentTextEditSignature(documentId, matterId,
-      expectedRevision, 'Replacing visible text')
-    if (!signature.proceed) return
-    const trial = replacementEngine.value === 'pdfium-trial'
-    const result = await submitReviewedTextEdit<MatterDocument & {edit_layout:{font_size?:number,line_count?:number,font_size_reduced?:boolean,edit_method:string,font_substituted?:boolean,font_name?:string,following_text_objects_moved?:number}}>(`/documents/${documentId}/pages/${trial ? 'paragraph-trial' : 'replace-text-run'}`, {
-      page_index: current.value - 1, span_index: run.index,
-      expected_revision: expectedRevision, expected_text: run.text,
-      ...(trial ? {expected_paragraph:selectedParagraph.value} : {}),
-      replacement: replacement.value,
-    }, signature.acknowledged, title)
-    if (!result) return
+    const signature = await currentTextEditSignature(
+      documentId,
+      matterId,
+      expectedRevision,
+      'Replacing visible text',
+    );
+    if (!signature.proceed) return;
+    const trial = replacementEngine.value === 'pdfium-trial';
+    const result = await submitReviewedTextEdit<
+      MatterDocument & {
+        edit_layout: {
+          font_size?: number;
+          line_count?: number;
+          font_size_reduced?: boolean;
+          edit_method: string;
+          font_substituted?: boolean;
+          font_name?: string;
+          following_text_objects_moved?: number;
+        };
+      }
+    >(
+      `/documents/${documentId}/pages/${trial ? 'paragraph-trial' : 'replace-text-run'}`,
+      {
+        page_index: current.value - 1,
+        span_index: run.index,
+        expected_revision: expectedRevision,
+        expected_text: run.text,
+        ...(trial ? { expected_paragraph: selectedParagraph.value } : {}),
+        replacement: replacement.value,
+      },
+      signature.acknowledged,
+      title,
+    );
+    if (!result) return;
     editNotice.value = trial
       ? `Whole paragraph updated in ${result.edit_layout.line_count} line(s)${result.edit_layout.following_text_objects_moved ? `; ${result.edit_layout.following_text_objects_moved} following text line(s) moved down to make room` : ''}${result.edit_layout.font_substituted ? ` with substituted ${result.edit_layout.font_name}` : ''}. Inspect the page, extraction, and export.`
-      : `Removed and redrew selected text in ${result.edit_layout.line_count} line(s) at ${result.edit_layout.font_size} pt${result.edit_layout.font_size_reduced ? ' (reduced to fit)' : ''}. Review font, layout and extraction.`
-    selectedRun.value = null
-    replacement.value = ''
-    try { editSnapshot.value = canvas.value?.toDataURL('image/png') || '' } catch { editSnapshot.value = '' }
-    editSnapshotFading.value = false
-    await loadPdf(result)
-    if (!viewerError.value && editSnapshot.value) {
-      editSnapshotFading.value = true
-      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-        await new Promise(resolve => window.setTimeout(resolve, 200))
+      : `Removed and redrew selected text in ${result.edit_layout.line_count} line(s) at ${result.edit_layout.font_size} pt${result.edit_layout.font_size_reduced ? ' (reduced to fit)' : ''}. Review font, layout and extraction.`;
+    selectedRun.value = null;
+    replacement.value = '';
+    try {
+      editSnapshot.value = canvas.value?.toDataURL('image/png') || '';
+    } catch {
+      editSnapshot.value = '';
     }
-    editSnapshot.value = ''
-    emit('modified')
-  } catch (err) { emit('error', conciseTextEditError(err)) }
-  finally { editing.value = false; replacingText.value = false; editSnapshot.value = '' }
+    editSnapshotFading.value = false;
+    await loadPdf(result);
+    if (!viewerError.value && editSnapshot.value) {
+      editSnapshotFading.value = true;
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
+    }
+    editSnapshot.value = '';
+    emit('modified');
+  } catch (err) {
+    emit('error', conciseTextEditError(err));
+  } finally {
+    editing.value = false;
+    replacingText.value = false;
+    editSnapshot.value = '';
+  }
 }
 </script>
 
 <template>
-  <div ref="viewerElement" class="viewer-root read-workspace" :class="{'focused-reading':focusedReading, 'preparation-preview':preparation}" tabindex="0" @keydown="handleViewerKeydown">
+  <div
+    ref="viewerElement"
+    class="viewer-root read-workspace"
+    :class="{ 'focused-reading': focusedReading, 'preparation-preview': preparation }"
+    tabindex="0"
+    @keydown="handleViewerKeydown"
+  >
     <template v-if="document">
       <div class="viewer-toolbar document-header">
-        <button v-if="!preparation" class="btn secondary small document-browser-trigger" aria-label="Browse documents" @click="emit('browseDocuments')"><ArrowLeft :size="16"/> Documents</button>
-        <button v-if="preparation" class="icon-btn small preparation-list-toggle" aria-label="Toggle documents panel" title="Toggle documents panel" @click="emit('showDocumentList')"><PanelLeft :size="16"/></button>
-        <div class="toolbar-group reader-document"><div><strong :title="document.title">{{document.title}}</strong><div class="document-version-line"><select v-if="artifactOptions" class="artifact-select" aria-label="Document version" value="working" :disabled="editing || loading" @change="emit('artifact',($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value='working'"><option v-for="option in artifactOptions" :key="option.value" :value="option.value">{{preparation && option.value==='working' ? 'Working Copy' : option.label}}</option></select><span v-else>Working Copy · Editable</span><span class="document-revision">Revision {{document.revision}} · {{preparation ? 'Original preserved' : `${document.page_count} source pages`}}</span></div></div></div>
-        <template v-if="preparation && !focusedReading"><button class="btn secondary small open-editor" @click="emit('openEditor')">Open editor</button><button class="icon-btn small" aria-label="Document details" :aria-expanded="!!detailsOpen" aria-controls="document-details-panel" title="Document details" @click="emit('toggleDetails')"><PanelRightOpen :size="16"/></button></template>
-        <button v-if="preparation && !focusedReading" class="icon-btn small" aria-label="Focused reading" title="Focused reading" @click="toggleFocusedReading"><Maximize2 :size="16"/></button>
-        <button v-if="focusedReading" class="btn secondary small" aria-label="Exit focused reading" @click="toggleFocusedReading"><Minimize2 :size="16"/> Exit focus</button>
-        <span v-if="!preparation" class="document-save-state" role="status"><CheckCircle2 v-if="!hasPendingDraft() && !detailsDirty && !editing && !headerSaving" :size="14"/>{{editing || headerSaving ? 'Saving…' : hasPendingDraft() || detailsDirty ? 'Unsaved changes' : 'Saved locally'}}</span>
-        <button v-if="!preparation" class="btn primary small document-save" :disabled="busy || headerSaving || engineBlocked || editing || loading || (!detailsDirty && (!hasPendingDraft() || disabled))" @click="detailsDirty ? emit('saveDetails') : saveHeaderDraft()"><Save :size="15"/> Save</button>
+        <button
+          v-if="!preparation"
+          class="btn secondary small document-browser-trigger"
+          aria-label="Browse documents"
+          @click="emit('browseDocuments')"
+          ><ArrowLeft :size="16" /> Documents</button
+        >
+        <button
+          v-if="preparation"
+          class="icon-btn small preparation-list-toggle"
+          aria-label="Toggle documents panel"
+          title="Toggle documents panel"
+          @click="emit('showDocumentList')"
+          ><PanelLeft :size="16"
+        /></button>
+        <div class="toolbar-group reader-document"
+          ><div
+            ><strong :title="document.title">{{ document.title }}</strong
+            ><div class="document-version-line"
+              ><select
+                v-if="artifactOptions"
+                class="artifact-select"
+                aria-label="Document version"
+                value="working"
+                :disabled="editing || loading"
+                @change="
+                  emit('artifact', ($event.target as HTMLSelectElement).value);
+                  ($event.target as HTMLSelectElement).value = 'working';
+                "
+                ><option
+                  v-for="option in artifactOptions"
+                  :key="option.value"
+                  :value="option.value"
+                  >{{
+                    preparation && option.value === 'working' ? 'Working Copy' : option.label
+                  }}</option
+                ></select
+              ><span v-else>Working Copy · Editable</span
+              ><span class="document-revision"
+                >Revision {{ document.revision }} ·
+                {{
+                  preparation ? 'Original preserved' : `${document.page_count} source pages`
+                }}</span
+              ></div
+            ></div
+          ></div
+        >
+        <template v-if="preparation && !focusedReading"
+          ><button class="btn secondary small open-editor" @click="emit('openEditor')"
+            >Open editor</button
+          ><button
+            class="icon-btn small"
+            aria-label="Document details"
+            :aria-expanded="!!detailsOpen"
+            aria-controls="document-details-panel"
+            title="Document details"
+            @click="emit('toggleDetails')"
+            ><PanelRightOpen :size="16" /></button
+        ></template>
+        <button
+          v-if="preparation && !focusedReading"
+          class="icon-btn small"
+          aria-label="Focused reading"
+          title="Focused reading"
+          @click="toggleFocusedReading"
+          ><Maximize2 :size="16"
+        /></button>
+        <button
+          v-if="focusedReading"
+          class="btn secondary small"
+          aria-label="Exit focused reading"
+          @click="toggleFocusedReading"
+          ><Minimize2 :size="16" /> Exit focus</button
+        >
+        <span v-if="!preparation" class="document-save-state" role="status"
+          ><CheckCircle2
+            v-if="!hasPendingDraft() && !detailsDirty && !editing && !headerSaving"
+            :size="14"
+          />{{
+            editing || headerSaving
+              ? 'Saving…'
+              : hasPendingDraft() || detailsDirty
+                ? 'Unsaved changes'
+                : 'Saved locally'
+          }}</span
+        >
+        <button
+          v-if="!preparation"
+          class="btn primary small document-save"
+          :disabled="
+            busy ||
+            headerSaving ||
+            engineBlocked ||
+            editing ||
+            loading ||
+            (!detailsDirty && (!hasPendingDraft() || disabled))
+          "
+          @click="detailsDirty ? emit('saveDetails') : saveHeaderDraft()"
+          ><Save :size="15" /> Save</button
+        >
       </div>
-      <div v-if="workingSaveNotice || workingSaveError" class="preview-status" :class="{'error-msg':!!workingSaveError}" :role="workingSaveError ? 'alert' : 'status'">{{workingSaveError || workingSaveNotice}}<button class="icon-btn small" aria-label="Dismiss save notice" @click="workingSaveNotice='';workingSaveError=''"><X :size="14"/></button></div>
+      <div
+        v-if="workingSaveNotice || workingSaveError"
+        class="preview-status"
+        :class="{ 'error-msg': !!workingSaveError }"
+        :role="workingSaveError ? 'alert' : 'status'"
+        >{{ workingSaveError || workingSaveNotice
+        }}<button
+          class="icon-btn small"
+          aria-label="Dismiss save notice"
+          @click="
+            workingSaveNotice = '';
+            workingSaveError = '';
+          "
+          ><X :size="14" /></button
+      ></div>
       <div v-show="!preparation" class="reader-tool-navigation">
         <div class="pdf-tool-tabs" role="tablist" aria-label="PDF tools">
-          <button v-for="category in (['read','edit','review','pages','ocr','redact'] as const)" :key="category" role="tab" :aria-selected="activeCategory===category" :class="{active:activeCategory===category}" :data-category="category" :id="`pdf-tab-${category}`" :tabindex="activeCategory===category?0:-1" aria-controls="pdf-tool-panel" @keydown="tabKey($event,category)" @click="selectCategory(category)"><component :is="category==='read'?BookOpen:category==='edit'?Pencil:category==='review'?Highlighter:category==='pages'?LayoutGrid:category==='ocr'?ScanText:Shield" :size="15"/>{{category==='read'?'Read':category==='edit'?'Edit':category==='review'?'Annotate':category==='pages'?'Pages':category==='ocr'?'OCR':'Redact'}}</button>
+          <button
+            v-for="category in ['read', 'edit', 'review', 'pages', 'ocr', 'redact'] as const"
+            :key="category"
+            role="tab"
+            :aria-selected="activeCategory === category"
+            :class="{ active: activeCategory === category }"
+            :data-category="category"
+            :id="`pdf-tab-${category}`"
+            :tabindex="activeCategory === category ? 0 : -1"
+            aria-controls="pdf-tool-panel"
+            @keydown="tabKey($event, category)"
+            @click="selectCategory(category)"
+            ><component
+              :is="
+                category === 'read'
+                  ? BookOpen
+                  : category === 'edit'
+                    ? Pencil
+                    : category === 'review'
+                      ? Highlighter
+                      : category === 'pages'
+                        ? LayoutGrid
+                        : category === 'ocr'
+                          ? ScanText
+                          : Shield
+              "
+              :size="15"
+            />{{
+              category === 'read'
+                ? 'Read'
+                : category === 'edit'
+                  ? 'Edit'
+                  : category === 'review'
+                    ? 'Annotate'
+                    : category === 'pages'
+                      ? 'Pages'
+                      : category === 'ocr'
+                        ? 'OCR'
+                        : 'Redact'
+            }}</button
+          >
         </div>
         <div class="reader-mode-actions">
-          <button class="icon-btn small" aria-label="Undo last matter change" :title="undoDescription" :aria-description="undoDescription" :disabled="!canUndo || disabled || editing || headerSaving" @click="emit('undo')"><Undo2 :size="16"/></button>
-          <button class="icon-btn small" aria-label="Redo last matter change" :title="redoDescription" :aria-description="redoDescription" :disabled="!canRedo || disabled || editing || headerSaving" @click="emit('redo')"><Redo2 :size="16"/></button>
-          <button class="icon-btn small" :aria-label="focusedReading ? 'Exit focused reading' : 'Focused reading'" :title="focusedReading ? 'Exit focused reading' : 'Focused reading'" @click="toggleFocusedReading"><Maximize2 :size="16"/></button>
-          <button class="btn secondary small index-trigger" aria-label="Open bundle index" @click="emit('openBookmarks')">Index &amp; Bookmarks</button>
-          <AppPopover class="reader-more" label="Additional PDF tools" close-on-select><template #trigger><button type="button" class="icon-btn small" aria-label="More document actions" title="More document actions"><Ellipsis :size="17"/></button></template>
-            <div class="popup-tabs" role="tablist" aria-label="Additional PDF tools"><button class="text-tool" role="tab" :aria-selected="activeCategory==='stamps'" data-category="stamps" id="pdf-tab-stamps" @click="selectCategory('stamps')"><Stamp :size="15"/> Stamps</button>
-            <button class="text-tool" role="tab" :aria-selected="activeCategory==='output'" data-category="output" id="pdf-tab-output" @click="selectCategory('output')"><FilePenLine :size="15"/> Output</button></div>
-            <button class="text-tool" aria-label="Save working copy" :disabled="workingSaveBusy || disabled || editing || loading" @click="saveWorkingCopy"><Save :size="15"/> {{workingSaveBusy ? 'Saving…' : 'Save copy'}}</button>
-            <button class="text-tool" aria-label="Print working copy" :disabled="disabled || editing || loading" @click="printWorkingCopy"><Printer :size="15"/> Print</button>
-            <button class="text-tool" :disabled="editing || loading || disabled" aria-label="Archive document" @click="emit('archiveDocument')"><Archive :size="15"/> Archive document</button>
-            <button class="text-tool" aria-label="Document details" :aria-expanded="!!detailsOpen" aria-controls="document-details-panel" @click="emit('toggleDetails')"><PanelRightOpen :size="15"/> Details</button>
-            <button class="text-tool" :aria-label="expanded ? 'Exit full screen' : 'Full screen'" @click="toggleExpandedView"><Maximize2 :size="15"/> {{expanded ? 'Exit expanded editor' : 'Expand editor'}}</button>
+          <button
+            class="icon-btn small"
+            aria-label="Undo last matter change"
+            :title="undoDescription"
+            :aria-description="undoDescription"
+            :disabled="!canUndo || disabled || editing || headerSaving"
+            @click="emit('undo')"
+            ><Undo2 :size="16"
+          /></button>
+          <button
+            class="icon-btn small"
+            aria-label="Redo last matter change"
+            :title="redoDescription"
+            :aria-description="redoDescription"
+            :disabled="!canRedo || disabled || editing || headerSaving"
+            @click="emit('redo')"
+            ><Redo2 :size="16"
+          /></button>
+          <button
+            class="icon-btn small"
+            :aria-label="focusedReading ? 'Exit focused reading' : 'Focused reading'"
+            :title="focusedReading ? 'Exit focused reading' : 'Focused reading'"
+            @click="toggleFocusedReading"
+            ><Maximize2 :size="16"
+          /></button>
+          <button
+            class="btn secondary small index-trigger"
+            aria-label="Open bundle index"
+            @click="emit('openBookmarks')"
+            >Index &amp; Bookmarks</button
+          >
+          <AppPopover class="reader-more" label="Additional PDF tools" close-on-select
+            ><template #trigger
+              ><button
+                type="button"
+                class="icon-btn small"
+                aria-label="More document actions"
+                title="More document actions"
+                ><Ellipsis :size="17" /></button
+            ></template>
+            <div class="popup-tabs" role="tablist" aria-label="Additional PDF tools"
+              ><button
+                class="text-tool"
+                role="tab"
+                :aria-selected="activeCategory === 'stamps'"
+                data-category="stamps"
+                id="pdf-tab-stamps"
+                @click="selectCategory('stamps')"
+                ><Stamp :size="15" /> Stamps</button
+              >
+              <button
+                class="text-tool"
+                role="tab"
+                :aria-selected="activeCategory === 'output'"
+                data-category="output"
+                id="pdf-tab-output"
+                @click="selectCategory('output')"
+                ><FilePenLine :size="15" /> Output</button
+              ></div
+            >
+            <button
+              class="text-tool"
+              aria-label="Save working copy"
+              :disabled="workingSaveBusy || disabled || editing || loading"
+              @click="saveWorkingCopy"
+              ><Save :size="15" /> {{ workingSaveBusy ? 'Saving…' : 'Save copy' }}</button
+            >
+            <button
+              class="text-tool"
+              aria-label="Print working copy"
+              :disabled="disabled || editing || loading"
+              @click="printWorkingCopy"
+              ><Printer :size="15" /> Print</button
+            >
+            <button
+              class="text-tool"
+              :disabled="editing || loading || disabled"
+              aria-label="Archive document"
+              @click="emit('archiveDocument')"
+              ><Archive :size="15" /> Archive document</button
+            >
+            <button
+              class="text-tool"
+              aria-label="Document details"
+              :aria-expanded="!!detailsOpen"
+              aria-controls="document-details-panel"
+              @click="emit('toggleDetails')"
+              ><PanelRightOpen :size="15" /> Details</button
+            >
+            <button
+              class="text-tool"
+              :aria-label="expanded ? 'Exit full screen' : 'Full screen'"
+              @click="toggleExpandedView"
+              ><Maximize2 :size="15" />
+              {{ expanded ? 'Exit expanded editor' : 'Expand editor' }}</button
+            >
           </AppPopover>
         </div>
       </div>
-      <div v-show="!focusedReading && !preparation && activeCategory!=='read'" id="pdf-tool-panel" class="page-editbar" role="tabpanel" :aria-labelledby="`pdf-tab-${activeCategory}`">
-        <div v-if="activeCategory==='ocr'" class="document-actionbar" role="group" aria-label="Document tools"><label for="ocr-language">OCR language</label><select id="ocr-language" v-model="ocrLanguage" :disabled="editing || loading || disabled"><option value="eng">English</option><option value="hin">Hindi</option><option value="eng+hin">English + Hindi</option></select><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocr', ocrLanguage, current-1)"><ScanText :size="15"/> Run {{ocrLanguage==='eng'?'English':ocrLanguage==='hin'?'Hindi':'English + Hindi'}} OCR</button><button class="text-tool" :disabled="editing || loading || disabled" @click="emit('ocrPage',current-1,ocrLanguage)">OCR current page if unprocessed</button><span>Review recognized text before use.</span></div>
-        <div v-if="activeCategory==='edit' && historyOpen" class="editor-tool-group" role="group" aria-label="PDF history tools">
-          <button class="text-tool" :disabled="!canUndo || disabled || editing" @click="emit('undo')"><Undo2 :size="15"/> Undo</button>
-          <button class="text-tool" :disabled="!canRedo || disabled || editing" @click="emit('redo')"><Redo2 :size="15"/> Redo</button>
-          <button class="text-tool" aria-pressed="true" @click="historyOpen=false"><BookOpen :size="15"/> History</button>
+      <div
+        v-show="!focusedReading && !preparation && activeCategory !== 'read'"
+        id="pdf-tool-panel"
+        class="page-editbar"
+        role="tabpanel"
+        :aria-labelledby="`pdf-tab-${activeCategory}`"
+      >
+        <div
+          v-if="activeCategory === 'ocr'"
+          class="document-actionbar"
+          role="group"
+          aria-label="Document tools"
+          ><label for="ocr-language">OCR language</label
+          ><select
+            id="ocr-language"
+            v-model="ocrLanguage"
+            :disabled="editing || loading || disabled"
+            ><option value="eng">English</option
+            ><option value="hin">Hindi</option
+            ><option value="eng+hin">English + Hindi</option></select
+          ><button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            @click="emit('ocr', ocrLanguage, current - 1)"
+            ><ScanText :size="15" /> Run
+            {{
+              ocrLanguage === 'eng'
+                ? 'English'
+                : ocrLanguage === 'hin'
+                  ? 'Hindi'
+                  : 'English + Hindi'
+            }}
+            OCR</button
+          ><button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            @click="emit('ocrPage', current - 1, ocrLanguage)"
+            >OCR current page if unprocessed</button
+          ><span>Review recognized text before use.</span></div
+        >
+        <div
+          v-if="activeCategory === 'edit' && historyOpen"
+          class="editor-tool-group"
+          role="group"
+          aria-label="PDF history tools"
+        >
+          <button
+            class="text-tool"
+            :disabled="!canUndo || disabled || editing"
+            @click="emit('undo')"
+            ><Undo2 :size="15" /> Undo</button
+          >
+          <button
+            class="text-tool"
+            :disabled="!canRedo || disabled || editing"
+            @click="emit('redo')"
+            ><Redo2 :size="15" /> Redo</button
+          >
+          <button class="text-tool" aria-pressed="true" @click="historyOpen = false"
+            ><BookOpen :size="15" /> History</button
+          >
         </div>
-        <div v-if="activeCategory==='edit' && !historyOpen" class="editor-tool-group" role="group" aria-label="Edit PDF">
-        <button class="text-tool" aria-label="Edit text" :disabled="editing || loading || disabled" :aria-pressed="editTextMode" @click="toggleTool('edit-text')"><Type :size="15"/> Text</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="textMode" @click="toggleTool('add-text')"><Type :size="15"/> Add text</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='image'" @click="openAnnotationTool('image')"><Images :size="15"/> Image</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="toggleTool('links')"><Link2 :size="15"/> Link</button>
-        <button class="text-tool" aria-label="Select object" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="activeTool!=='select' && toggleTool(activeTool)"><Pencil :size="15"/> Select object</button>
-        <button class="text-tool" :aria-pressed="historyOpen" @click="historyOpen=!historyOpen; if(historyOpen && activeTool!=='select') toggleTool(activeTool), historyOpen=true"><Undo2 :size="15"/> History</button>
-        </div><div v-if="activeCategory==='review'" class="editor-tool-group" role="group" aria-label="Review PDF">
-        <button class="text-tool" :disabled="editing || loading || disabled" title="Private review highlight" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='highlight'" @click="openAnnotationTool('highlight')"><Highlighter :size="15"/> Highlight<span v-if="currentPageAnnotations.some(item=>item.kind==='highlight')" class="page-bookmark-count">{{currentPageAnnotations.filter(item=>item.kind==='highlight').length}}</span></button>
-        <button class="text-tool" disabled title="Underline is planned for Phase 03B"><Minus :size="15"/> Underline</button>
-        <button class="text-tool" disabled title="Strikeout is planned for Phase 03B"><Minus :size="15"/> Strikeout</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" title="Private review comment" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='comment'" @click="openAnnotationTool('comment')"><MessageSquare :size="15"/> Comment</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='draw'" @click="openAnnotationTool('draw')"><Pencil :size="15"/> Draw</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='box'" @click="openAnnotationTool('box')"><Square :size="15"/> Box</button>
-        <AppPopover class="annotation-more" label="More annotation tools" close-on-select><template #trigger><button type="button" class="text-tool" aria-label="More annotation tools"><Ellipsis :size="15"/> More</button></template>
-          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
-          <button class="text-tool" :disabled="editing || loading || disabled" :aria-expanded="bookmarkOpen" @click="bookmarkOpen=!bookmarkOpen;bookmarkTitle=document?.title+' — page '+current;bookmarkError=''"><BookMarked :size="15"/> Bookmark page</button>
-          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='ellipse'" @click="openAnnotationTool('ellipse')"><Circle :size="15"/> Ellipse</button>
-          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='line'" @click="openAnnotationTool('line')"><Minus :size="15"/> Line</button>
-          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='arrow'" @click="openAnnotationTool('arrow')"><ArrowUpRight :size="15"/> Arrow</button>
-          <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="linkPanelOpen" @click="toggleTool('links')"><Link2 :size="15"/> Links</button>
-        </AppPopover>
-        </div><div v-if="activeCategory==='stamps'" class="editor-tool-group" role="group" aria-label="Visual stamps">
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="activeTool==='select'" @click="toggleTool('select')">Select</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='image'" @click="openAnnotationTool('image')"><Images :size="15"/> Image / stamp</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='check'" @click="openAnnotationTool('check')"><Check :size="15"/> Check</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='cross'" @click="openAnnotationTool('cross')"><X :size="15"/> Cross</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="annotationPanelOpen && annotationDraft.kind==='date'" @click="openAnnotationTool('date')"><CalendarDays :size="15"/> Date</button>
-        <span class="stamp-scope-hint">Visual marks only · no verified signature or form filling</span>
-        </div><div v-if="activeCategory==='output'" class="editor-tool-group" role="group" aria-label="Output PDF">
-        <button class="text-tool" :disabled="editing || loading || disabled" :aria-pressed="marksPanelOpen" @click="toggleTool('marks')"><Stamp :size="15"/> Output marks<span v-if="marksDirty" class="details-unsaved-indicator">Unsaved</span></button>
-        </div><div v-if="activeCategory==='pages'" class="editor-tool-group" role="group" aria-label="Change pages">
-        <button class="text-tool" :disabled="editing || loading || disabled" title="Copy pages from a document in this matter into this PDF" @click="emit('pageTools')"><FilePlus2 :size="15"/> Add pages</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" title="Select, reorder, rotate or delete several pages" @click="organizerOpen=true"><LayoutGrid :size="15"/> Organize pages</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" title="Replace, crop, extract, split or compress pages" @click="emit('pageTools')"><FilePenLine :size="15"/> Page tools</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" title="Rotate this page 90° counterclockwise in the working PDF" @click="edit('rotate', {page_index:current-1,degrees:270})"><RotateCcw :size="16"/> Rotate left</button>
-        <button class="text-tool" :disabled="editing || loading || disabled" title="Rotate this page 90° clockwise in the working PDF" @click="edit('rotate', {page_index:current-1,degrees:90})"><RotateCw :size="16"/> Rotate right</button>
-        <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || current<=1" aria-label="Move page left" title="Move page left" @click="move(-1)"><ChevronLeft :size="16"/></button>
-        <button class="text-tool page-icon-tool" :disabled="editing || loading || disabled || current>=total" aria-label="Move page right" title="Move page right" @click="move(1)"><ChevronRight :size="16"/></button>
-        <button class="text-tool danger" :disabled="editing || loading || disabled || total<=1" :title="total<=1 ? 'A PDF must keep at least one page' : `Delete page ${current} from the editable copy`" @click="deleteCurrent"><Trash2 :size="16"/> Delete page {{current}}</button>
+        <div
+          v-if="activeCategory === 'edit' && !historyOpen"
+          class="editor-tool-group"
+          role="group"
+          aria-label="Edit PDF"
+        >
+          <button
+            class="text-tool"
+            aria-label="Edit text"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="editTextMode"
+            @click="toggleTool('edit-text')"
+            ><Type :size="15" /> Text</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="textMode"
+            @click="toggleTool('add-text')"
+            ><Type :size="15" /> Add text</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'image'"
+            @click="openAnnotationTool('image')"
+            ><Images :size="15" /> Image</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="linkPanelOpen"
+            @click="toggleTool('links')"
+            ><Link2 :size="15" /> Link</button
+          >
+          <button
+            class="text-tool"
+            aria-label="Select object"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="activeTool === 'select'"
+            @click="activeTool !== 'select' && toggleTool(activeTool)"
+            ><Pencil :size="15" /> Select object</button
+          >
+          <button
+            class="text-tool"
+            :aria-pressed="historyOpen"
+            @click="
+              historyOpen = !historyOpen;
+              if (historyOpen && activeTool !== 'select')
+                (toggleTool(activeTool), (historyOpen = true));
+            "
+            ><Undo2 :size="15" /> History</button
+          > </div
+        ><div
+          v-if="activeCategory === 'review'"
+          class="editor-tool-group"
+          role="group"
+          aria-label="Review PDF"
+        >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            title="Private review highlight"
+            :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'highlight'"
+            @click="openAnnotationTool('highlight')"
+            ><Highlighter :size="15" /> Highlight<span
+              v-if="currentPageAnnotations.some((item) => item.kind === 'highlight')"
+              class="page-bookmark-count"
+              >{{ currentPageAnnotations.filter((item) => item.kind === 'highlight').length }}</span
+            ></button
+          >
+          <button class="text-tool" disabled title="Underline is planned for Phase 03B"
+            ><Minus :size="15" /> Underline</button
+          >
+          <button class="text-tool" disabled title="Strikeout is planned for Phase 03B"
+            ><Minus :size="15" /> Strikeout</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            title="Private review comment"
+            :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'comment'"
+            @click="openAnnotationTool('comment')"
+            ><MessageSquare :size="15" /> Comment</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'draw'"
+            @click="openAnnotationTool('draw')"
+            ><Pencil :size="15" /> Draw</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'box'"
+            @click="openAnnotationTool('box')"
+            ><Square :size="15" /> Box</button
+          >
+          <AppPopover class="annotation-more" label="More annotation tools" close-on-select
+            ><template #trigger
+              ><button type="button" class="text-tool" aria-label="More annotation tools"
+                ><Ellipsis :size="15" /> More</button
+              ></template
+            >
+            <button
+              class="text-tool"
+              :disabled="editing || loading || disabled"
+              :aria-pressed="activeTool === 'select'"
+              @click="toggleTool('select')"
+              >Select</button
+            >
+            <button
+              class="text-tool"
+              :disabled="editing || loading || disabled"
+              :aria-expanded="bookmarkOpen"
+              @click="
+                bookmarkOpen = !bookmarkOpen;
+                bookmarkTitle = document?.title + ' — page ' + current;
+                bookmarkError = '';
+              "
+              ><BookMarked :size="15" /> Bookmark page</button
+            >
+            <button
+              class="text-tool"
+              :disabled="editing || loading || disabled"
+              :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'ellipse'"
+              @click="openAnnotationTool('ellipse')"
+              ><Circle :size="15" /> Ellipse</button
+            >
+            <button
+              class="text-tool"
+              :disabled="editing || loading || disabled"
+              :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'line'"
+              @click="openAnnotationTool('line')"
+              ><Minus :size="15" /> Line</button
+            >
+            <button
+              class="text-tool"
+              :disabled="editing || loading || disabled"
+              :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'arrow'"
+              @click="openAnnotationTool('arrow')"
+              ><ArrowUpRight :size="15" /> Arrow</button
+            >
+            <button
+              class="text-tool"
+              :disabled="editing || loading || disabled"
+              :aria-pressed="linkPanelOpen"
+              @click="toggleTool('links')"
+              ><Link2 :size="15" /> Links</button
+            >
+          </AppPopover> </div
+        ><div
+          v-if="activeCategory === 'stamps'"
+          class="editor-tool-group"
+          role="group"
+          aria-label="Visual stamps"
+        >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="activeTool === 'select'"
+            @click="toggleTool('select')"
+            >Select</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'image'"
+            @click="openAnnotationTool('image')"
+            ><Images :size="15" /> Image / stamp</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'check'"
+            @click="openAnnotationTool('check')"
+            ><Check :size="15" /> Check</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'cross'"
+            @click="openAnnotationTool('cross')"
+            ><X :size="15" /> Cross</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="annotationPanelOpen && annotationDraft.kind === 'date'"
+            @click="openAnnotationTool('date')"
+            ><CalendarDays :size="15" /> Date</button
+          >
+          <span class="stamp-scope-hint"
+            >Visual marks only · no verified signature or form filling</span
+          > </div
+        ><div
+          v-if="activeCategory === 'output'"
+          class="editor-tool-group"
+          role="group"
+          aria-label="Output PDF"
+        >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            :aria-pressed="marksPanelOpen"
+            @click="toggleTool('marks')"
+            ><Stamp :size="15" /> Output marks<span
+              v-if="marksDirty"
+              class="details-unsaved-indicator"
+              >Unsaved</span
+            ></button
+          > </div
+        ><div
+          v-if="activeCategory === 'pages'"
+          class="editor-tool-group"
+          role="group"
+          aria-label="Change pages"
+        >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            title="Copy pages from a document in this matter into this PDF"
+            @click="emit('pageTools')"
+            ><FilePlus2 :size="15" /> Add pages</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            title="Select, reorder, rotate or delete several pages"
+            @click="organizerOpen = true"
+            ><LayoutGrid :size="15" /> Organize pages</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            title="Replace, crop, extract, split or compress pages"
+            @click="emit('pageTools')"
+            ><FilePenLine :size="15" /> Page tools</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            title="Rotate this page 90° counterclockwise in the working PDF"
+            @click="edit('rotate', { page_index: current - 1, degrees: 270 })"
+            ><RotateCcw :size="16" /> Rotate left</button
+          >
+          <button
+            class="text-tool"
+            :disabled="editing || loading || disabled"
+            title="Rotate this page 90° clockwise in the working PDF"
+            @click="edit('rotate', { page_index: current - 1, degrees: 90 })"
+            ><RotateCw :size="16" /> Rotate right</button
+          >
+          <button
+            class="text-tool page-icon-tool"
+            :disabled="editing || loading || disabled || current <= 1"
+            aria-label="Move page left"
+            title="Move page left"
+            @click="move(-1)"
+            ><ChevronLeft :size="16"
+          /></button>
+          <button
+            class="text-tool page-icon-tool"
+            :disabled="editing || loading || disabled || current >= total"
+            aria-label="Move page right"
+            title="Move page right"
+            @click="move(1)"
+            ><ChevronRight :size="16"
+          /></button>
+          <button
+            class="text-tool danger"
+            :disabled="editing || loading || disabled || total <= 1"
+            :title="
+              total <= 1
+                ? 'A PDF must keep at least one page'
+                : `Delete page ${current} from the editable copy`
+            "
+            @click="deleteCurrent"
+            ><Trash2 :size="16" /> Delete page {{ current }}</button
+          >
         </div>
       </div>
-      <div v-if="!preparation && activeCategory!=='edit' && selectedOverlayItem && !selectedTextAnnotation" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="closeSelectedProperties"><X :size="14"/></button></div>
-      <p v-if="activeCategory==='pages'" class="page-action-guidance">Changes here affect the editable copy; the imported original stays unchanged. Drag page thumbnails to reorder, or use Organize pages for arrow controls.</p>
+      <div
+        v-if="
+          !preparation &&
+          activeCategory !== 'edit' &&
+          selectedOverlayItem &&
+          !selectedTextAnnotation
+        "
+        class="pdf-selected-overlay-actions"
+        role="status"
+        ><span
+          >{{ selectedOverlayLabel }} selected · drag to move · drag corner to resize · Delete to
+          remove</span
+        ><button
+          class="btn secondary small"
+          :disabled="annotationBusy || linksBusy || disabled"
+          @click="deleteSelectedOverlay"
+          >Remove selected</button
+        ><button
+          class="icon-btn small"
+          aria-label="Clear selection"
+          @click="closeSelectedProperties"
+          ><X :size="14" /></button
+      ></div>
+      <p v-if="activeCategory === 'pages'" class="page-action-guidance"
+        >Changes here affect the editable copy; the imported original stays unchanged. Drag page
+        thumbnails to reorder, or use Organize pages for arrow controls.</p
+      >
       <div v-if="bookmarkOpen" class="page-bookmark-editor" aria-label="Bookmark current page">
-        <strong>Bookmark {{document.title}}, page {{current}}</strong>
-        <label>Bookmark title<input v-model="bookmarkTitle" maxlength="200" :disabled="bookmarkSaving || disabled" @keydown.enter.prevent="addPageBookmark"/></label>
-        <button class="btn primary small" :disabled="bookmarkSaving || disabled || !bookmarkTitle.trim()" @click="addPageBookmark">{{bookmarkSaving ? 'Saving…' : 'Add bookmark'}}</button>
-        <p v-if="bookmarkError" class="error-msg" role="alert">{{bookmarkError}}</p>
+        <strong>Bookmark {{ document.title }}, page {{ current }}</strong>
+        <label
+          >Bookmark title<input
+            v-model="bookmarkTitle"
+            maxlength="200"
+            :disabled="bookmarkSaving || disabled"
+            @keydown.enter.prevent="addPageBookmark"
+        /></label>
+        <button
+          class="btn primary small"
+          :disabled="bookmarkSaving || disabled || !bookmarkTitle.trim()"
+          @click="addPageBookmark"
+          >{{ bookmarkSaving ? 'Saving…' : 'Add bookmark' }}</button
+        >
+        <p v-if="bookmarkError" class="error-msg" role="alert">{{ bookmarkError }}</p>
       </div>
-      <p v-if="bookmarkNotice" class="page-bookmark-notice" role="status">{{bookmarkNotice}}</p>
-      <Transition name="soft"><div v-if="detailsDirty" class="preview-draft-warning" role="status">Save document details to use PDF tools.<button v-if="!detailsOpen" class="text-tool" @click="emit('toggleDetails')">Open details</button></div></Transition>
+      <p v-if="bookmarkNotice" class="page-bookmark-notice" role="status">{{ bookmarkNotice }}</p>
+      <Transition name="soft"
+        ><div v-if="detailsDirty" class="preview-draft-warning" role="status"
+          >Save document details to use PDF tools.<button
+            v-if="!detailsOpen"
+            class="text-tool"
+            @click="emit('toggleDetails')"
+            >Open details</button
+          ></div
+        ></Transition
+      >
 
-      <PdfReaderControls :compact="preparation" editing-tools :page="current" :count="total" v-model:zoom="zoomChoice" :scale="pageZoom" v-model:mode="readerMode" :busy="loading || editing" :can-back="!!readingHistory.length" @update:page="navigateToPage($event)" @back="goBack"><template #actions><button v-if="preparation" class="icon-btn small" aria-label="Rotate view clockwise" title="Rotate view clockwise; working PDF unchanged" @click="viewRotation=(viewRotation+90)%360"><RotateCw :size="16"/></button><button class="icon-btn small" aria-label="Search" title="Search document" :aria-expanded="findOpen" @click="showFind"><Search :size="16"/></button><button v-if="preparation" class="icon-btn small" aria-label="Print working copy" :disabled="disabled || editing || loading" @click="printWorkingCopy"><Printer :size="16"/></button><button class="icon-btn small reader-info-trigger" aria-label="Document information" title="Document information" :aria-expanded="readPanel==='information'" @click="openReadPanel('information',$event)"><Info :size="16"/></button></template></PdfReaderControls>
-      <section v-if="needsOcrPrompt" class="preparation-ocr-banner" role="status" aria-label="Scanned pages detected"><div><strong>Scanned pages detected</strong><span>Text search and selection may be unavailable. OCR can contain recognition errors.</span></div><button class="btn primary small" :disabled="disabled" @click="emit('ocr',ocrLanguage,current-1)">Run OCR</button><button class="btn secondary small" @click="dismissedOcrPrompt=`${document.id}:${document.revision}`">Continue without OCR</button></section>
-      <section v-else-if="activeOcrJob" class="preparation-ocr-banner processing" role="status" aria-label="OCR processing"><div><strong>OCR — {{document.original_name}}</strong><span>{{activeOcrJob.message}} · {{activeOcrJob.progress}}%</span><progress :value="activeOcrJob.progress" max="100">{{activeOcrJob.progress}}%</progress><span>{{ocrElapsed ? `Elapsed ${ocrElapsed} · ` : ''}}Running locally · You can browse other documents.</span></div><button class="btn secondary small" :disabled="activeOcrJob.status==='queued' && activeOcrJob.message==='Cancelling'" @click="emit('cancelOcr')">Cancel OCR</button></section>
-      <section v-else-if="needsOcrReview" class="preparation-ocr-banner review" role="status" aria-label="OCR review recommended"><div><strong>{{ocrReview?.accepted_at ? 'OCR page review accepted' : 'OCR completed · review recommended'}}</strong><span>{{ocrReview?.available ? (ocrReview.regions.length ? `${ocrReview.regions.length} low-confidence ${ocrReview.regions.length===1?'word needs':'words need'} attention on this page. Compare recognized text with the scan.` : 'No low-confidence words detected on this page. Compare recognized text with the scan.') : 'Compare recognized text against the scanned page before relying on it. Recognition accuracy has not been verified.'}}</span></div><button class="btn primary small" :disabled="!ocrReview || ocrReviewBusy || !!ocrReview.accepted_at" @click="acceptOcrReview">{{ocrReview?.accepted_at ? 'Review accepted' : 'Accept review'}}</button></section>
-      <aside v-if="needsOcrReview && !focusedReading" class="ocr-confidence-inspector" aria-label="OCR confidence inspector"><strong><ScanText :size="16"/> {{ocrReview?.confidence===null || !ocrReview?.available ? 'Recognition confidence unavailable' : `Recognition confidence · ${Math.round(ocrReview.confidence)}%`}}</strong><p v-if="ocrReview?.regions.length">Recognized: “{{ocrReview.regions[0].text}}”<br/>Compare with the scan before use.</p><p v-else>{{ocrReview?.message || 'Checking OCR confidence…'}}</p><button class="btn secondary small" :disabled="!ocrReview?.can_rerun || !!ocrReview?.accepted_at || disabled" @click="emit('ocrRerun',current-1,ocrReview!.language)">Rerun this page</button><p v-if="ocrReviewError" role="alert" class="error-msg">{{ocrReviewError}}</p></aside>
-      <div v-if="focusedReading" class="review-context-banner focus-context">Focused reading · Escape restores your panels</div>
-      <div v-else-if="findingContext" class="review-context-banner">Opened from Preflight · {{findingContext}}</div>
-      <div v-else-if="bundleImpactVisible" class="review-context-banner stale-context" role="status">This change affects the current generated bundle. Rebuild will be required for the bundle to include it.</div>
-      <div class="viewer-edit-workspace" :class="{'has-tool-inspector':(inspectorVisible && !focusedReading) || bundleImpactVisible,'expanded-pages':expanded,'has-read-panel':!!readPanel && !focusedReading, 'has-document-information':readPanel==='information' && !focusedReading}">
-      <div v-show="!focusedReading && !preparation" class="reader-panel-tabs" aria-label="Reader panels">
-        <button class="icon-btn small" :class="{active:thumbnailsVisible}" :aria-label="thumbnailsVisible?'Hide thumbnails':'Show thumbnails'" title="Pages" @click="toggleThumbnails"><PanelLeft :size="16"/></button>
-        <button class="icon-btn small" :class="{active:findOpen}" aria-label="Search panel" title="Search" @click="showFind"><Search :size="16"/></button>
-        <button class="icon-btn small" :class="{active:outlineOpen}" aria-label="Document bookmarks" title="PDF outline and document bookmarks" @click="openReadPanel('outline',$event)"><BookMarked :size="16"/></button>
-        <button class="icon-btn small" :class="{active:commentsOpen}" :aria-label="`Comments (${documentComments.length})`" title="Comments" @click="openReadPanel('comments',$event)"><MessageSquare :size="16"/></button>
-        <button v-if="pageBookmarks.length" class="icon-btn small" :aria-label="`Page ${current} bookmarks${pageBookmarks.some(item=>!item.resolved)?' need review':''}`" @click="openReadPanel('page-bookmarks',$event)"><BookOpen :size="16"/></button>
-      </div>
-      <PdfThumbnailRail v-if="(preparation && focusedReading && total > 0 && readPanel!=='search') || (!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading)" :pdf="readerPdf" :count="total" :page="current" :title="document.title" :search="preparation && focusedReading" @search="showFind"
-        :disabled="disabled || editing || loading" :dragging-page="draggingPage" :drop-target-page="dropTargetPage" @select="navigateToPage($event)" @reorder="reorderThumbnailPage"
-        @dragstart="startPageDrag" @dragover="overPage" @drop="dropPage" @dragend="draggingPage=null;dropTargetPage=null"/>
-      <aside v-if="readPanel && (!focusedReading || (preparation && readPanel==='search'))" ref="panelElement" id="pdf-read-panel" class="reader-side-panel" :class="{'document-information-panel':readPanel==='information'}" role="region" :aria-label="findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Source PDF outline' : commentsOpen ? 'Private review comments' : `Bookmarks on page ${current}`">
-        <div class="reader-side-panel-heading"><strong>{{findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Document bookmarks' : commentsOpen ? `Comments (${documentComments.length})` : `Page ${current} bookmarks`}}</strong><button v-if="!findOpen" class="icon-btn small" :aria-label="readPanel==='information' ? 'Close document information' : outlineOpen ? 'Close PDF outline' : commentsOpen ? 'Close comments' : 'Close page bookmarks'" @click="closeReadPanel"><X :size="16"/></button></div>
-      <div v-if="findOpen" class="pdf-findbar" role="search" aria-label="Find in working PDF">
-        <Search :size="16" aria-hidden="true"/>
-        <input ref="findInput" v-model="findQuery" :disabled="!readerPdf" type="search" placeholder="Find text in this PDF" aria-label="Find text in this PDF" @keydown.enter.prevent="stepFind($event.shiftKey ? -1 : 1)"/>
-        <span role="status" v-if="findBusy">Searching…</span><span v-else-if="findError" class="error-msg" role="alert">{{findError}}</span><span role="status" v-else-if="findQuery.trim().length">{{findMatches.length}}{{findTruncated ? '+' : ''}} match{{findMatches.length===1?'':'es'}}<template v-if="findMatches.length"> · {{findIndex+1}}/{{findMatches.length}}</template></span>
-        <button class="icon-btn small" aria-label="Previous search result" :disabled="!findMatches.length" @click="stepFind(-1)"><ChevronLeft :size="16"/></button>
-        <button class="icon-btn small" aria-label="Next search result" :disabled="!findMatches.length" @click="stepFind(1)"><ChevronRight :size="16"/></button>
-        <button class="icon-btn small" aria-label="Close PDF search" @click="closeReadPanel"><X :size="16"/></button>
-      </div>
-      <div v-if="findOpen && findMatches.length" class="pdf-find-results" aria-label="PDF search occurrences">
-        <button v-for="(match,index) in findMatches" :key="match.index" :class="{active:index===findIndex}" :title="match.snippet" :aria-current="index===findIndex?'true':undefined" @keydown="resultKey($event,index)" @click="chooseFind(index)">Page {{match.page}} · {{match.snippet}}</button>
-      </div>
-      <p v-if="findOpen && !findQuery.trim()" class="reader-side-panel-intro">Search text in this working PDF. Image-only pages need OCR before their text can be searched.</p>
-      <p v-if="findOpen && !readerPdf" class="reader-side-panel-intro" role="status">{{loading ? 'Opening PDF…' : 'Search unavailable until the PDF loads.'}}</p>
-        <dl v-if="readPanel==='information'" class="reader-document-information">
-          <dt>Document</dt><dd>{{document.title}}</dd>
-          <dt>Imported original</dt><dd>{{document.original_name}}<small>Preserved separately; reading and editing use the working copy.</small></dd>
-          <dt>Working copy</dt><dd>Revision {{document.revision}} · {{total || document.page_count}} source pages</dd>
-          <dt>Document date</dt><dd>{{document.document_date || 'Not recorded'}}<small>{{document.date_status}} · source: {{document.date_source}}</small></dd>
-          <dt>OCR processing</dt><dd>{{document.ocr_status}}<small>OCR text is not legally verified. Search checks text available in this PDF.</small></dd>
-          <dt>Source SHA-256</dt><dd class="source-hash">{{document.source_sha256 || 'Unavailable'}}</dd>
-        </dl>
-        <div v-if="readPanel==='information'" class="pdf-editor-information-actions">
-          <button class="btn secondary small" :disabled="editing || loading || disabled" @click="emit('artifact','original')"><BookOpen :size="15"/> View imported original</button>
-          <button class="btn secondary small" @click="openReadPanel('comments',$event)"><MessageSquare :size="15"/> Open comments</button>
+      <PdfReaderControls
+        :compact="preparation"
+        editing-tools
+        :page="current"
+        :count="total"
+        v-model:zoom="zoomChoice"
+        :scale="pageZoom"
+        v-model:mode="readerMode"
+        :busy="loading || editing"
+        :can-back="!!readingHistory.length"
+        @update:page="navigateToPage($event)"
+        @back="goBack"
+        ><template #actions
+          ><button
+            v-if="preparation"
+            class="icon-btn small"
+            aria-label="Rotate view clockwise"
+            title="Rotate view clockwise; working PDF unchanged"
+            @click="viewRotation = (viewRotation + 90) % 360"
+            ><RotateCw :size="16" /></button
+          ><button
+            class="icon-btn small"
+            aria-label="Search"
+            title="Search document"
+            :aria-expanded="findOpen"
+            @click="showFind"
+            ><Search :size="16" /></button
+          ><button
+            v-if="preparation"
+            class="icon-btn small"
+            aria-label="Print working copy"
+            :disabled="disabled || editing || loading"
+            @click="printWorkingCopy"
+            ><Printer :size="16" /></button
+          ><button
+            class="icon-btn small reader-info-trigger"
+            aria-label="Document information"
+            title="Document information"
+            :aria-expanded="readPanel === 'information'"
+            @click="openReadPanel('information', $event)"
+            ><Info :size="16" /></button></template
+      ></PdfReaderControls>
+      <section
+        v-if="needsOcrPrompt"
+        class="preparation-ocr-banner"
+        role="status"
+        aria-label="Scanned pages detected"
+        ><div
+          ><strong>Scanned pages detected</strong
+          ><span
+            >Text search and selection may be unavailable. OCR can contain recognition errors.</span
+          ></div
+        ><button
+          class="btn primary small"
+          :disabled="disabled"
+          @click="emit('ocr', ocrLanguage, current - 1)"
+          >Run OCR</button
+        ><button
+          class="btn secondary small"
+          @click="dismissedOcrPrompt = `${document.id}:${document.revision}`"
+          >Continue without OCR</button
+        ></section
+      >
+      <section
+        v-else-if="activeOcrJob"
+        class="preparation-ocr-banner processing"
+        role="status"
+        aria-label="OCR processing"
+        ><div
+          ><strong>OCR — {{ document.original_name }}</strong
+          ><span>{{ activeOcrJob.message }} · {{ activeOcrJob.progress }}%</span
+          ><progress :value="activeOcrJob.progress" max="100">{{ activeOcrJob.progress }}%</progress
+          ><span
+            >{{ ocrElapsed ? `Elapsed ${ocrElapsed} · ` : '' }}Running locally · You can browse
+            other documents.</span
+          ></div
+        ><button
+          class="btn secondary small"
+          :disabled="activeOcrJob.status === 'queued' && activeOcrJob.message === 'Cancelling'"
+          @click="emit('cancelOcr')"
+          >Cancel OCR</button
+        ></section
+      >
+      <section
+        v-else-if="needsOcrReview"
+        class="preparation-ocr-banner review"
+        role="status"
+        aria-label="OCR review recommended"
+        ><div
+          ><strong>{{
+            ocrReview?.accepted_at
+              ? 'OCR page review accepted'
+              : 'OCR completed · review recommended'
+          }}</strong
+          ><span>{{
+            ocrReview?.available
+              ? ocrReview.regions.length
+                ? `${ocrReview.regions.length} low-confidence ${ocrReview.regions.length === 1 ? 'word needs' : 'words need'} attention on this page. Compare recognized text with the scan.`
+                : 'No low-confidence words detected on this page. Compare recognized text with the scan.'
+              : 'Compare recognized text against the scanned page before relying on it. Recognition accuracy has not been verified.'
+          }}</span></div
+        ><button
+          class="btn primary small"
+          :disabled="!ocrReview || ocrReviewBusy || !!ocrReview.accepted_at"
+          @click="acceptOcrReview"
+          >{{ ocrReview?.accepted_at ? 'Review accepted' : 'Accept review' }}</button
+        ></section
+      >
+      <aside
+        v-if="needsOcrReview && !focusedReading"
+        class="ocr-confidence-inspector"
+        aria-label="OCR confidence inspector"
+        ><strong
+          ><ScanText :size="16" />
+          {{
+            ocrReview?.confidence === null || !ocrReview?.available
+              ? 'Recognition confidence unavailable'
+              : `Recognition confidence · ${Math.round(ocrReview.confidence)}%`
+          }}</strong
+        ><p v-if="ocrReview?.regions.length"
+          >Recognized: “{{ ocrReview.regions[0].text }}”<br />Compare with the scan before use.</p
+        ><p v-else>{{ ocrReview?.message || 'Checking OCR confidence…' }}</p
+        ><button
+          class="btn secondary small"
+          :disabled="!ocrReview?.can_rerun || !!ocrReview?.accepted_at || disabled"
+          @click="emit('ocrRerun', current - 1, ocrReview!.language)"
+          >Rerun this page</button
+        ><p v-if="ocrReviewError" role="alert" class="error-msg">{{ ocrReviewError }}</p></aside
+      >
+      <div v-if="focusedReading" class="review-context-banner focus-context"
+        >Focused reading · Escape restores your panels</div
+      >
+      <div v-else-if="findingContext" class="review-context-banner"
+        >Opened from Preflight · {{ findingContext }}</div
+      >
+      <div v-else-if="bundleImpactVisible" class="review-context-banner stale-context" role="status"
+        >This change affects the current generated bundle. Rebuild will be required for the bundle
+        to include it.</div
+      >
+      <div
+        class="viewer-edit-workspace"
+        :class="{
+          'has-tool-inspector': (inspectorVisible && !focusedReading) || bundleImpactVisible,
+          'expanded-pages': expanded,
+          'has-read-panel': !!readPanel && !focusedReading,
+          'has-document-information': readPanel === 'information' && !focusedReading,
+        }"
+      >
+        <div
+          v-show="!focusedReading && !preparation"
+          class="reader-panel-tabs"
+          aria-label="Reader panels"
+        >
+          <button
+            class="icon-btn small"
+            :class="{ active: thumbnailsVisible }"
+            :aria-label="thumbnailsVisible ? 'Hide thumbnails' : 'Show thumbnails'"
+            title="Pages"
+            @click="toggleThumbnails"
+            ><PanelLeft :size="16"
+          /></button>
+          <button
+            class="icon-btn small"
+            :class="{ active: findOpen }"
+            aria-label="Search panel"
+            title="Search"
+            @click="showFind"
+            ><Search :size="16"
+          /></button>
+          <button
+            class="icon-btn small"
+            :class="{ active: outlineOpen }"
+            aria-label="Document bookmarks"
+            title="PDF outline and document bookmarks"
+            @click="openReadPanel('outline', $event)"
+            ><BookMarked :size="16"
+          /></button>
+          <button
+            class="icon-btn small"
+            :class="{ active: commentsOpen }"
+            :aria-label="`Comments (${documentComments.length})`"
+            title="Comments"
+            @click="openReadPanel('comments', $event)"
+            ><MessageSquare :size="16"
+          /></button>
+          <button
+            v-if="pageBookmarks.length"
+            class="icon-btn small"
+            :aria-label="`Page ${current} bookmarks${pageBookmarks.some((item) => !item.resolved) ? ' need review' : ''}`"
+            @click="openReadPanel('page-bookmarks', $event)"
+            ><BookOpen :size="16"
+          /></button>
         </div>
-        <p v-if="outlineOpen" class="reader-side-panel-intro">Navigation embedded in the source PDF. It does not change the bundle index.</p>
-        <p v-if="commentsOpen" class="reader-side-panel-intro">Private review notes, omitted from Save copy and bundles.</p>
-        <div v-if="commentsOpen && viewedComment" class="reader-bookmark-row" role="note" aria-label="Selected comment"><strong>Comment on source page {{viewedComment.page_index+1}}</strong><span>{{viewedComment.body}}</span><small>{{annotationTime(viewedComment)}}</small></div>
-        <p v-if="pageBookmarksOpen" class="reader-side-panel-intro">Manual bookmarks for this source page. Check their bundle destinations under Index & bookmarks.</p>
-        <label v-if="commentsOpen && documentComments.length" class="reader-comment-search"><Search :size="15" aria-hidden="true"/><input v-model="commentQuery" type="search" aria-label="Search private comments" placeholder="Search comments or page"/></label>
-        <div v-if="commentsOpen && commentQuery.trim()" class="reader-filter-count">{{filteredComments.length}} of {{documentComments.length}} comments</div>
-        <div class="reader-side-panel-list">
-          <template v-if="outlineOpen"><p v-if="outlineError" role="status">{{outlineError}}</p><p v-if="outlineLoading || loading" role="status">Loading PDF outline…</p><p v-else-if="!readerPdf" role="status">Outline unavailable until the PDF loads.</p><p v-else-if="!outlineError && !sourceOutline.length">No outline in this source PDF.</p><button v-for="(item,index) in sourceOutline" :key="index" class="text-tool" :disabled="!item.page && !item.url" :style="{paddingLeft:`${10+item.level*12}px`}" @click="item.page?navigateToPage(item.page):item.url&&emit('openExternalLink',item.url)">{{item.title}}<small v-if="item.page"> · p{{item.page}}</small></button>
-            <h4 class="reader-section-label">Manual document bookmarks</h4>
-            <p v-if="bookmarksLoading" role="status">Loading manual bookmarks…</p><p v-else-if="bookmarksError" role="alert">{{bookmarksError}}</p><p v-else-if="!documentBookmarks.length">No manual bookmarks for this document.</p>
-            <button v-for="item in documentBookmarks" :key="item.id" class="text-tool" :disabled="!item.resolved || item.target_revision!==document.revision || item.page_index>=total" @click="navigateToPage(item.page_index+1)">{{item.title}} · Source {{item.page_index+1}}<small v-if="!item.resolved || item.target_revision!==document.revision"> · Needs review</small></button>
-          </template>
-          <template v-if="commentsOpen"><p v-if="!documentComments.length">No private comments in this document.</p><p v-else-if="!filteredComments.length">No matching comments.</p><button v-for="item in filteredComments" :key="item.id" class="text-tool reader-comment-entry" :class="{selected:item.id===viewedCommentId || item.page_index===current-1}" :title="item.body" @click="openReviewComment(item)"><span class="reader-comment-entry-head"><MessageSquare :size="14"/> Source {{item.page_index+1}} <small>{{item.resolved?'Current':'Needs review'}}</small></span><span>{{item.body}}</span><small>{{annotationTime(item)}}</small></button></template>
-          <template v-if="pageBookmarksOpen"><div v-for="item in pageBookmarks" :key="item.id" class="reader-bookmark-row"><strong>{{item.title}}</strong><span v-if="!item.resolved">Needs review after a source revision or page change</span><span v-else>Destination currently linked</span></div></template>
-        </div>
-        <button v-if="pageBookmarksOpen || outlineOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
-      </aside>
-      <aside v-if="bundleImpactVisible" class="viewer-tool-inspector bundle-impact-panel" aria-label="Bundle impact">
-        <div class="viewer-tool-inspector-heading"><strong>Bundle impact</strong></div>
-        <div class="pdf-editor-inspector-content">
-          <span class="pdf-editor-status warning">Previous bundle · Stale</span>
-          <h3>Working copy saved</h3><p>{{document.title}} · Revision {{document.revision}}<br/>{{document.page_count}} source pages</p>
-          <h3>Changes since build {{staleBuild!.id.slice(0,8)}}</h3>
-          <p v-if="staleBuild!.revision">Source at build · Revision {{staleBuild!.revision}}</p>
-          <p>Current preparation differs from this generated bundle. Rebuild to include the changes.</p>
-          <p>Imported originals and the previous output remain preserved.</p>
-          <div class="finding-recheck"><strong>Page mapping pending</strong><p>Review the current page map before the next build. Previous output keeps its frozen page numbers.</p></div>
-          <button class="btn primary" @click="emit('rebuild')">Rebuild bundle</button>
-          <button class="btn secondary" @click="emit('reviewPageMap')">Review page map</button>
-          <button class="text-tool" @click="emit('reviewPrevious')">View previous output</button>
-        </div>
-      </aside>
-      <aside v-if="inspectorVisible && !focusedReading" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen, 'edit-mode-inspector':activeCategory==='edit' || historyOpen || engineBlocked}" :aria-label="engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : 'PDF editing controls'">
-        <div class="viewer-tool-inspector-heading"><strong>{{engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : activeCategory==='ocr' ? 'OCR review' : objectSelectionOpen ? 'Document contents' : selectedTextAnnotation ? 'Text' : annotationPanelOpen && editingAnnotationId ? annotationKindLabel(annotationDraft.kind) : toolTitle}}</strong><button class="icon-btn small" :aria-label="engineBlocked || historyOpen ? 'Collapse inspector' : selectedTextAnnotation ? 'Close text properties' : 'Close PDF tool'" :title="engineBlocked || historyOpen ? 'Collapse inspector' : 'Close tool'" @click="engineBlocked ? engineInspectorOpen=false : historyOpen ? historyOpen=false : activeCategory==='ocr' || objectSelectionOpen ? selectCategory('read') : selectedTextAnnotation ? clearOverlaySelection() : toggleTool(activeTool)"><X :size="16"/></button></div>
-      <div v-if="activeCategory==='ocr' && !engineBlocked" class="pdf-editor-inspector-content" role="region" aria-label="OCR processing and review">
-        <span class="pdf-editor-status warning">{{activeOcrJob ? 'Processing locally' : needsOcrReview ? 'Review recommended' : 'Recognition options'}}</span>
-        <h3>{{activeOcrJob ? `Page ${activeOcrJob.progress}% complete` : needsOcrReview ? `Source page ${current} recognition` : 'Make scanned pages searchable'}}</h3>
-        <template v-if="activeOcrJob"><p>{{activeOcrJob.message}}</p><progress :value="activeOcrJob.progress" max="100">{{activeOcrJob.progress}}%</progress><p>{{ocrElapsed ? `Elapsed ${ocrElapsed} · ` : ''}}Other documents remain available.</p><button class="btn secondary small" @click="emit('cancelOcr')">Cancel OCR</button></template>
-        <template v-else-if="needsOcrReview"><p>{{ocrReview?.regions.length ? `${ocrReview.regions.length} low-confidence regions on this page.` : 'Compare the recognized text with the visible scan.'}}</p><div v-for="(region,index) in ocrReview?.regions || []" :key="index" class="pdf-editor-review-row"><strong>Region {{index+1}}</strong><span>{{region.text}}</span><small v-if="region.confidence !== null">Engine score {{Math.round(region.confidence)}} / 100</small></div><p v-if="ocrReviewError" class="error-msg" role="alert">{{ocrReviewError}}</p><button class="btn primary small" :disabled="!ocrReview || ocrReviewBusy || !!ocrReview.accepted_at" @click="acceptOcrReview">{{ocrReview?.accepted_at ? 'Review accepted' : 'Accept page review'}}</button><button class="btn secondary small" :disabled="!ocrReview?.can_rerun || !!ocrReview?.accepted_at || disabled" @click="emit('ocrRerun',current-1,ocrReview!.language)">Rerun this page</button></template>
-        <p v-else>Select a language above, then run OCR on the working copy. The visible scan stays in place.</p>
-        <p class="pdf-editor-notice">OCR text is a recognition aid. Check names, dates and numbers against the scan before use.</p>
-      </div>
-      <div v-if="activeCategory==='edit' && selectedOverlayItem && !selectedTextAnnotation" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="closeSelectedProperties"><X :size="14"/></button></div>
-      <div v-if="objectSelectionOpen && !engineBlocked" class="pdf-editor-inspector-content pdf-editor-object-picker" role="region" aria-label="Select a PDF object">
-        <h3>Select an object</h3><p>Click an added text object, image or link on the page to see its properties.</p>
-        <button class="pdf-editor-object-choice" :disabled="disabled || loading" @click="toggleTool('edit-text')"><Type :size="18"/><span><strong>Text</strong><small>Edit an available text block</small></span></button>
-        <button class="pdf-editor-object-choice" :disabled="disabled || loading" @click="openAnnotationTool('image')"><Images :size="18"/><span><strong>Image</strong><small>Add an image, or select one to resize</small></span></button>
-        <button class="pdf-editor-object-choice" :disabled="disabled || loading" @click="toggleTool('links')"><Link2 :size="18"/><span><strong>Link</strong><small>Page destination or URL</small></span></button>
-        <p class="pdf-editor-notice"><strong>Working copy only</strong><br/>The imported original remains preserved.</p>
-      </div>
-      <div v-else-if="engineBlocked" class="pdf-editor-inspector-content" role="region" aria-label="Engine recovery">
-        <span class="pdf-editor-status danger">{{engineState==='changed'?'Review required':'Engine offline'}}</span>
-        <h3>{{engineState==='changed'?'Saved inputs changed':'Connection interrupted'}}</h3><p>{{engineState==='changed'?'Review the latest saved state before editing. Retained drafts stay in this window.':'The local processing engine is not responding.'}}</p>
-        <button v-if="engineState==='changed'" class="btn primary small" @click="emit('reviewEngine')">Review latest state</button>
-        <button v-else class="btn primary small" :disabled="engineState==='checking'" @click="emit('retryReader')">{{engineState==='checking' ? 'Checking…' : 'Retry connection'}}</button>
-        <button class="btn secondary small" :aria-expanded="diagnosticsOpen" @click="diagnosticsOpen=!diagnosticsOpen">View diagnostics</button>
-        <dl v-if="diagnosticsOpen" class="pdf-editor-diagnostics"><dt>Engine state</dt><dd>{{engineState}}</dd><dt>Document</dt><dd>{{document?.title}}</dd><dt>Working revision</dt><dd>{{document?.revision}}</dd><dt>Cached page</dt><dd>{{pageReady ? current : 'Unavailable'}}</dd><dt>Last page error</dt><dd>{{viewerError || 'None recorded in this window'}}</dd></dl>
-        <button class="btn secondary small" @click="emit('browseDocuments')">Back to documents</button>
-        <h4>Still available</h4><ul><li>Read document pages already loaded</li><li>Search available text</li><li>Review local annotations</li></ul>
-        <p class="pdf-editor-notice">Waiting for the engine<br/>OCR, page transformations and bundle processing are unavailable.</p>
-      </div>
-      <div v-else-if="historyOpen" class="pdf-editor-inspector-content pdf-editor-history" role="region" aria-label="Working history">
-        <h3>Working session</h3><p>Most recent action first · matter history</p>
-        <div v-if="canRedo" class="pdf-editor-undo-outcome" role="status"><strong>Undo applied</strong><span>{{redoLabel || 'Last action'}} · Redo available</span><small>The previous working state is restored. Imported originals remain unchanged.</small></div>
-        <ol v-if="recentActions?.length"><li v-for="(action,index) in recentActions" :key="index" :class="{undone:!action.applied}"><strong>{{action.label}}</strong><span>{{action.applied ? index===0 && canUndo ? 'Most recent · Undo available' : 'Saved action' : 'Undone · Redo available'}}</span></li></ol>
-        <p v-else>No actions in this matter yet.</p>
-        <div class="pdf-editor-history-actions"><button class="btn secondary small" :disabled="!canUndo || disabled || editing" @click="emit('undo')">Undo</button><button class="btn secondary small" :disabled="!canRedo || disabled || editing" @click="emit('redo')">Redo</button></div>
-        <p class="pdf-editor-notice">Session history<br/>A new edit clears the redo branch. Earlier exports remain unchanged.</p>
-      </div>
-      <div v-else-if="editTextMode && !loading && !textRuns.length && !runsError" class="pdf-editor-inspector-content" role="region" aria-label="Text editing unavailable">
-        <span class="pdf-editor-status warning">Edit unavailable</span>
-        <h3>This page has no directly editable text</h3><p>Page content may be embedded as an image. No change was made to this page.</p>
-        <button class="btn primary small" :disabled="disabled" @click="emit('ocr',ocrLanguage,current-1)">Run OCR</button>
-        <button class="btn secondary small" :disabled="disabled" @click="toggleTool('add-text')">Add replacement text</button>
-        <button class="btn secondary small" @click="toggleTool('edit-text')">Cancel</button>
-        <p class="pdf-editor-notice">Overlay is not redaction<br/>Added text does not remove the image or underlying content. Use Redact to remove sensitive content.</p>
-      </div>
-      <div v-else-if="selectedTextAnnotation" class="pdf-editor-text-object" role="region" aria-label="Placed text properties">
-        <label>Font family<select v-model="textObjectDraft.font_family" :disabled="textObjectBusy || disabled"><option value="helv">Helvetica · built-in PDF font</option><option value="tiro">Times Roman · built-in PDF font</option><option value="cour">Courier · built-in PDF font</option></select></label>
-        <div class="pdf-editor-text-fields"><label>Size<input v-model.number="textObjectDraft.font_size" type="number" min="6" max="36" :disabled="textObjectBusy || disabled"/> pt</label><label>Weight<select v-model="textObjectDraft.bold" :disabled="textObjectBusy || disabled"><option :value="false">Regular</option><option :value="true">Bold</option></select></label></div>
-        <label>Text colour<input value="Document ink" readonly/></label>
-        <fieldset><legend>Alignment</legend><div class="pdf-editor-align-actions"><button v-for="alignment in (['left','center','right','justify'] as const)" :key="alignment" class="icon-btn small" :aria-label="`Align ${alignment}`" :aria-pressed="textObjectDraft.alignment===alignment" :disabled="textObjectBusy || disabled" @click="textObjectDraft.alignment=alignment"><component :is="alignment==='left'?AlignLeft:alignment==='center'?AlignCenter:alignment==='right'?AlignRight:AlignJustify" :size="16"/></button></div></fieldset>
-        <strong class="pdf-editor-object-label">OBJECT</strong>
-        <div class="pdf-editor-text-fields"><label>X / Y <span><input v-model.number="textObjectDraft.x" type="number" min="0" :disabled="textObjectBusy || disabled" aria-label="X position in points"/><input v-model.number="textObjectDraft.y" type="number" min="0" :disabled="textObjectBusy || disabled" aria-label="Y position in points"/></span>pt</label><label>Width / Height <span><input v-model.number="textObjectDraft.width" type="number" min="1" :disabled="textObjectBusy || disabled" aria-label="Width in points"/><input v-model.number="textObjectDraft.height" type="number" min="1" :disabled="textObjectBusy || disabled" aria-label="Height in points"/></span>pt</label></div>
-        <details class="pdf-editor-edit-object-text"><summary>Edit text content</summary><label>Text<textarea v-model="textObjectDraft.body" rows="3" maxlength="1000" :disabled="textObjectBusy || disabled"/></label></details>
-        <p v-if="textObjectError" class="error-msg" role="alert">{{textObjectError}}</p>
-        <button class="btn primary small" :disabled="textObjectBusy || disabled || textObjectDraft.font_size<6 || textObjectDraft.font_size>36" @click="saveTextObject">{{textObjectBusy?'Saving…':'Save text properties'}}</button>
-        <button class="btn secondary small" :disabled="textObjectBusy || disabled" @click="deleteSelectedOverlay">Remove text object</button>
-        <p>These settings affect the next Save copy or bundle. The imported original stays unchanged.</p>
-      </div>
-      <div v-if="textMode && !selectedTextAnnotation" class="edit-context-panel" role="region" aria-label="New text properties">
-        <strong>{{placement ? 'Text placement' : 'Ready to place'}}</strong>
-        <p>Click the page, then type. The original text beneath an added object is retained.</p>
-        <label>Font family<select v-model="overlayFont" aria-label="Font family"><option value="helv">Helvetica · built-in PDF font</option><option value="tiro">Times Roman · built-in PDF font</option><option value="cour">Courier · built-in PDF font</option></select></label>
-        <label>Size<input v-model.number="overlaySize" type="number" min="6" max="36" :disabled="editing || disabled" aria-label="Text size in points"/> pt</label>
-        <label>Weight<select v-model="overlayBold"><option :value="false">Regular</option><option :value="true">Bold</option></select></label>
-        <label>Alignment<select v-model="overlayAlignment"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option><option value="justify">Justify</option></select></label>
-        <p class="edit-context-limit">Printable ASCII · 6–36 pt. Review line breaks in the saved PDF.</p>
-        <button class="btn secondary small" :disabled="editing" @click="toggleTool('add-text')">Cancel placement</button>
-      </div>
-      <Transition name="soft"><div v-if="editTextMode && (textRuns.length || runsError || loading)" class="text-overlay-panel" aria-label="Edit existing text">
-        <strong>{{selectedRun ? 'Selected text' : 'Select text'}}</strong>
-        <p v-if="selectedRun" class="edit-selected-excerpt">{{selectedRun.text}}</p>
-        <p>Click text on the page to change its words. Drag highlighted text anywhere in a clear area of this page to move it. Review the position before applying.</p>
-        <p>Scanned text needs OCR and review before editing. Redact creates a movable mark; only a generated Save copy or bundle removes covered content.</p>
-        <p v-if="replacementEngine==='pdfium-trial'">The whole detected paragraph is selected. This mode changes all of its lines; if the page is unsupported, the working PDF is left unchanged.</p>
-        <div v-if="pendingMove" class="page-tool-actions"><span>Previewing a move on page {{current}}. The destination must be clear.</span><div><button class="btn secondary small" :disabled="editing" @click="cancelMove">Cancel</button><button class="btn primary small" :disabled="editing || disabled" @click="confirmMove">Apply move</button></div></div>
-        <p v-if="runsError && !selectedRun" class="error-msg" role="alert">{{runsError}}</p>
-        <p class="edit-status-slot" role="status">{{editNotice}}</p>
-        <p v-if="!textRuns.length && !editNotice">No selectable horizontal text found on this page. Scanned text needs OCR and review.</p>
-      </div></Transition>
-      <Transition name="soft"><div v-if="redactionOpen" class="text-overlay-panel" aria-label="Permanent redaction">
-        <strong>Permanent redaction · page {{current}}</strong>
-        <ol class="pdf-tool-steps"><li :class="{done:!!redactionRegion}">Drag over the content to remove.</li><li :class="{done:!!redactionRegion}">Adjust the black mark, then click Add redaction mark.</li><li>Move or resize the saved mark. Save copy or rebuild the bundle to remove content in the exported PDF.</li></ol>
-        <p v-if="redactionRegion" class="notice amber" role="status">This is an editable mark. The underlying working PDF still contains the content until a PDF output is generated.</p>
-        <p>Save copy and new bundle exports remove text and image pixels under saved redaction marks. The editor’s working revision, imported originals, prior revisions, existing exports and matter history can still contain the content.</p>
-        <div class="page-tool-actions"><span>{{redactionRegion ? `Marked ${Math.round(redactionRegion.width*100)}% × ${Math.round(redactionRegion.height*100)}% of page` : 'No area marked yet'}}</span><div><button v-if="redactionRegion" class="btn secondary small" :disabled="redactionBusy" @click="redactionRegion=null;redactionError=''">Clear mark</button><button class="btn primary small" :disabled="!redactionRegion || redactionRegion.width < .01 || redactionRegion.height < .01 || redactionBusy || disabled" @click="applyRedaction">{{redactionBusy ? 'Saving…' : 'Add redaction mark'}}</button></div></div>
-        <div v-if="pendingRedactions.length" class="pdf-editor-review-list" aria-label="Pending redaction marks"><strong>{{pendingRedactions.length}} pending {{pendingRedactions.length===1?'mark':'marks'}}</strong><button v-for="(mark,index) in pendingRedactions" :key="mark.id" class="pdf-editor-review-row" :aria-current="mark.page_index===current-1 ? 'page' : undefined" @click="navigateToPage(mark.page_index+1)"><strong>Mark {{index+1}} · Source {{mark.page_index+1}}</strong><span>Review marked region</span></button><p>These marks remove content only in a new Save copy or bundle. The current working PDF still contains it.</p></div>
-        <div v-if="appliedRedactions.some(item => item.page_index === current-1)" class="redaction-restore">
-          <strong>Applied areas on this page</strong>
-          <p>The amber outline selects a restorable area; the black fill is in the updated PDF. The outline includes text touched beyond the original mark. Newer edits inside it will be replaced; edits outside remain. Original vector objects and links are not reconstructed.</p>
-          <p v-if="selectedRedaction?.structure_changed">Page order, size or rotation changed after this mark. Selective restoration is unavailable for this area.</p>
-          <button v-if="selectedRedaction && !selectedRedaction.structure_changed" class="btn secondary small" :disabled="redactionBusy || disabled" @click="removeSelectedRedaction">{{redactionBusy ? 'Restoring…' : 'Remove selected redaction'}}</button>
-        </div>
-        <p v-if="canUndo" class="redaction-undo"><button class="btn secondary small" :disabled="redactionBusy || editing || disabled" :title="undoDescription" @click="emit('undo')"><Undo2 :size="14"/> Undo last matter change</button><span>If redaction was the last change, Undo restores the prior working copy. Earlier exports still need review.</span></p>
-        <p v-if="redactionError" class="error-msg" role="alert">{{redactionError}}</p><p v-if="redactionNotice" class="review-tool-notice" role="status">{{redactionNotice}}</p>
-      </div></Transition>
-      <Transition name="soft"><div v-if="annotationPanelOpen" class="page-annotation-panel" aria-label="Private page marks and image overlays">
-        <p v-if="editingAnnotationId && pageAnnotations.find(item=>item.id===editingAnnotationId)" class="annotation-record-time">Saved {{annotationTime(pageAnnotations.find(item=>item.id===editingAnnotationId)!)}} · Author not recorded</p>
-        <div v-if="annotationDraft.kind==='image' && editingAnnotationId && annotationRegion" class="pdf-editor-image-properties" role="region" aria-label="Image properties">
-          <img v-if="annotationImageUrls[editingAnnotationId]" :src="annotationImageUrls[editingAnnotationId]" alt="Selected image preview"/>
-          <strong>OBJECT</strong>
-          <div class="pdf-editor-image-fields"><label v-for="field in (['x','y','width','height'] as const)" :key="field">{{field==='x'?'X position':field==='y'?'Y position':field==='width'?'Width':'Height'}}<span><input type="number" :aria-label="`Image ${field} in points`" :value="Math.round(annotationRegion[field]*(field==='x'||field==='width'?pageSizePt.width:pageSizePt.height))" :min="field==='width'||field==='height'?1:0" :disabled="annotationBusy || disabled" @change="setImageGeometry(field,$event)"/> pt</span></label></div>
-          <p>Drag the image or its handles on the page. Update mark saves the position and size.</p>
-        </div>
-        <div class="review-tool-heading"><strong>{{annotationKindLabel(annotationDraft.kind)}}</strong><span>{{editingAnnotationId ? 'Review this mark’s properties. Drag it on the page to move or resize it.' : annotationDraft.kind==='image' ? 'Choose a PNG or JPEG, then drag its size and position on the page.' : 'Drag a region on the page. Each saved mark remains independently selectable, movable and removable.'}}</span></div>
-        <p class="annotation-scope-note">{{annotationOutputScope==='private'?'This private review mark is omitted from Save copy and filing bundles.':'This editable mark is included in Save copy and new bundle exports.'}}</p>
-        <div class="annotation-form-grid">
-          <label v-if="annotationDraft.kind==='image' && !editingAnnotationId">PNG or JPEG<input ref="annotationFileInput" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" :disabled="annotationBusy || disabled" @change="chooseAnnotationImage"/></label>
-          <label v-if="!['image','highlight','comment','redaction'].includes(annotationDraft.kind)">Output<select v-model="annotationOutputScope" :disabled="annotationBusy || disabled"><option value="pdf">Include in saved PDF</option><option value="private">Private review only</option></select></label>
-          <label v-if="annotationDraft.kind!=='image'">Colour<select v-model="annotationDraft.color" :disabled="annotationBusy || disabled"><option value="yellow">Yellow</option><option value="green">Green</option><option value="blue">Blue</option><option value="pink">Pink</option></select></label>
-          <label v-if="annotationDraft.kind==='comment' || annotationDraft.kind==='highlight'" class="annotation-note">{{annotationDraft.kind==='comment'?'Comment text':'Optional highlight note'}}<textarea v-model="annotationDraft.body" maxlength="4000" rows="2" :disabled="annotationBusy || disabled"/></label>
-          <label v-if="annotationDraft.kind==='date'" class="annotation-note">Date shown<input v-model="annotationDraft.body" type="date" :disabled="annotationBusy || disabled"/></label>
-          <label v-if="annotationDraft.kind==='text'" class="annotation-note">Text<textarea v-model="annotationDraft.body" maxlength="1000" rows="3" :disabled="annotationBusy || disabled"/></label>
-        </div>
-        <div class="page-tool-actions"><span>{{annotationRegion ? `${Math.round(annotationRegion.width*100)}% × ${Math.round(annotationRegion.height*100)}% region selected` : 'Drag a region on the page'}}</span><div><button v-if="editingAnnotationId" class="btn secondary small" :disabled="annotationBusy" @click="resetAnnotationDraft()">Cancel edit</button><button class="btn secondary small" :disabled="annotationBusy || disabled || !annotationRegion || (annotationDraft.kind==='comment' && !annotationDraft.body.trim()) || (annotationDraft.kind==='image' && !editingAnnotationId && !annotationImage)" @click="savePageAnnotation">{{annotationBusy?'Saving…':editingAnnotationId?'Update mark':'Add mark'}}</button></div></div>
-        <p v-if="annotationError" class="error-msg" role="alert">{{annotationError}}</p><p v-if="annotationNotice" class="review-tool-notice" role="status">{{annotationNotice}}</p>
-        <div v-if="currentPageAnnotations.length" class="page-annotation-list"><div v-for="item in currentPageAnnotations" :key="item.id" :class="['page-annotation-row',{unresolved:!item.resolved}]"><component :is="item.kind==='image'?Images:item.kind==='highlight'?Highlighter:item.kind==='comment'?MessageSquare:item.kind==='draw'?Pencil:item.kind==='box'?Square:item.kind==='ellipse'?Circle:item.kind==='line'?Minus:item.kind==='arrow'?ArrowUpRight:item.kind==='check'?Check:item.kind==='date'?CalendarDays:item.kind==='text'?Type:item.kind==='redaction'?Eraser:X" :size="15"/><span><strong>{{annotationKindLabel(item.kind)}}</strong><small>{{item.resolved ? (item.body && item.kind!=='draw'?item.body:item.output_scope==='pdf'?'Included in Save copy and new bundles':'Private review mark') : 'Needs review after a revision change'}}</small></span><button class="icon-btn small" :aria-label="`Edit ${item.kind}`" :disabled="annotationBusy || !item.resolved" @click="editPageAnnotation(item)"><Pencil :size="14"/></button><button class="icon-btn small danger" :aria-label="`Remove ${item.kind}`" :disabled="annotationBusy" @click="removePageAnnotation(item)"><Trash2 :size="14"/></button></div></div>
-      </div></Transition>
-      <Transition name="soft"><div v-if="linkPanelOpen" class="review-link-panel" role="region" aria-label="Reviewed PDF links">
-        <div class="review-tool-heading"><strong>Reviewed link</strong><span>{{editingLinkId ? 'Update the selected link and its destination.' : 'Drag a rectangle on this page, then choose its destination. Imported PDF actions remain excluded.'}}</span></div>
-        <div class="review-link-grid">
-          <label>Readable label<input v-model="linkDraft.title" maxlength="200" :disabled="linksBusy || disabled" placeholder="Open supporting passage"/></label>
-          <label>Destination<select v-model="linkDraft.kind" :disabled="linksBusy || disabled"><option value="internal">Matter document page</option><option value="external">Web or email address</option></select></label>
-          <template v-if="linkDraft.kind==='internal'">
-            <label>Target document<select v-model="linkDraft.target_document_id" :disabled="linksBusy || disabled"><option value="">Choose document</option><option v-for="item in documents || []" :key="item.id" :value="item.id">{{item.title}}</option></select></label>
-            <label>Target page<input v-model.number="linkDraft.target_page" type="number" min="1" :max="(documents || []).find(item=>item.id===linkDraft.target_document_id)?.page_count || 1" :disabled="linksBusy || disabled"/></label>
-          </template>
-          <label v-else class="review-link-uri">HTTPS, HTTP or mailto address<input v-model="linkDraft.uri" maxlength="2000" :disabled="linksBusy || disabled" placeholder="https://example.org/source"/></label>
-        </div>
-        <div class="page-tool-actions"><span>{{linkRegion ? `${Math.round(linkRegion.width*100)}% × ${Math.round(linkRegion.height*100)}% region selected` : 'Drag a link region on the page'}}</span><button class="btn secondary small" :disabled="linksBusy || disabled || !linkRegion || (editingLinkId && !linkDirty) || !linkDraft.title.trim() || (linkDraft.kind==='internal' ? !linkDraft.target_document_id : !linkDraft.uri.trim())" @click="saveReviewedLink">{{linksBusy?'Saving…':editingLinkId?'Update link':'Save reviewed link'}}</button></div>
-        <p v-if="linkError" class="error-msg" role="alert">{{linkError}}</p><p v-if="linkNotice" class="review-tool-notice" role="status">{{linkNotice}}</p>
-        <div v-if="currentPageLinks.length" class="reviewed-link-list"><div v-for="item in currentPageLinks" :key="item.id" :class="['reviewed-link-row',{unresolved:!item.resolved}]"><button class="reviewed-link-open" :disabled="!item.resolved" @click="followReviewedLink(item)"><ExternalLink v-if="item.kind==='external'" :size="14"/><Link2 v-else :size="14"/><span><strong>{{item.title}}</strong><small>{{item.resolved ? (item.kind==='external' ? item.uri : 'Matter page target') : 'Needs review after a revision change'}}</small></span></button><button class="icon-btn small danger" aria-label="Remove reviewed link" :disabled="linksBusy" @click="removeReviewedLink(item.id)"><Trash2 :size="14"/></button></div></div>
-      </div></Transition>
-      <Transition name="soft"><div v-if="marksPanelOpen" class="output-marks-panel" aria-label="Output watermark and timestamp settings">
-        <div class="review-tool-heading"><strong>Output watermark and timestamp</strong><span>Previewed on the actual working page; inserted only into newly built source-document pages. Originals, working copies and completed exports stay unchanged.</span></div>
-        <div class="output-marks-grid">
-          <label class="checkbox-line"><input v-model="markSettings.watermark_enabled" type="checkbox"/><span><strong>Watermark</strong><small>Visible technical mark, not court approval.</small></span></label>
-          <label>Watermark text<input v-model="markSettings.watermark_text" maxlength="120" :disabled="!markSettings.watermark_enabled"/></label>
-          <label>Watermark position<select v-model="markSettings.watermark_position" :disabled="!markSettings.watermark_enabled"><option v-for="item in markPositions" :key="item[0]" :value="item[0]">{{item[1]}}</option></select></label>
-          <label>Watermark size<input v-model.number="markSettings.watermark_font_size" type="number" min="8" max="72" :disabled="!markSettings.watermark_enabled"/></label>
-          <label>Opacity<input v-model.number="markSettings.watermark_opacity" type="number" min=".05" max=".8" step=".05" :disabled="!markSettings.watermark_enabled"/></label>
-          <label class="checkbox-line"><input v-model="markSettings.timestamp_enabled" type="checkbox"/><span><strong>Build timestamp</strong><small>Uses the chosen timezone.</small></span></label>
-          <label>Timezone<input v-model="markSettings.timestamp_timezone" maxlength="64" :disabled="!markSettings.timestamp_enabled" placeholder="Asia/Kolkata"/></label>
-          <label>Format<select v-model="markSettings.timestamp_format" :disabled="!markSettings.timestamp_enabled"><option value="date">Date</option><option value="datetime">Date, time and zone</option></select></label>
-          <label>Timestamp position<select v-model="markSettings.timestamp_position" :disabled="!markSettings.timestamp_enabled"><option v-for="item in markPositions" :key="item[0]" :value="item[0]">{{item[1]}}</option></select></label>
-          <label>Timestamp prefix<input v-model="markSettings.timestamp_prefix" maxlength="40" :disabled="!markSettings.timestamp_enabled"/></label>
-        </div>
-        <div v-if="markPreview.some(item=>item.overlaps_content)" class="notice amber"><span>One or more preview boxes intersect detectable page content. Choose another position or accept only after visual review; signatures and seals cannot be reliably detected.</span></div>
-        <div class="page-tool-actions"><span>Preview time is current; the export records one fixed build time.</span><button class="btn secondary small" :disabled="marksBusy || disabled || !marksDirty" @click="saveMarks">{{marksBusy?'Saving…':'Save output marks'}}</button></div>
-        <p v-if="marksError" class="error-msg" role="alert">{{marksError}}</p><p v-if="marksNotice" class="review-tool-notice" role="status">{{marksNotice}}</p>
-      </div></Transition>
-      </aside>
-      <div class="viewer-page-column">
-      <div v-if="engineBlocked" class="pdf-editor-engine-banner" role="alert"><strong>Document processing engine unavailable</strong><span>Cached pages may still be readable. Editing and processing are paused until the local engine reconnects.</span><button v-if="!engineInspectorOpen" class="text-tool" @click="engineInspectorOpen=true">Connection details</button></div>
-      <div v-else-if="activeTool!=='select'" class="pdf-tool-hint" role="status"><strong>{{toolTitle}}</strong><span>{{toolFeedback || toolHint}}</span><button class="icon-btn small" aria-label="Cancel PDF tool" title="Cancel tool (Esc)" @click="toggleTool(activeTool)"><X :size="14"/></button></div>
+        <PdfThumbnailRail
+          v-if="
+            (preparation && focusedReading && total > 0 && readPanel !== 'search') ||
+            (!preparation &&
+              total > 0 &&
+              showThumbnails &&
+              (!readPanel || readPanel === 'information') &&
+              !focusedReading)
+          "
+          :pdf="readerPdf"
+          :count="total"
+          :page="current"
+          :title="document.title"
+          :search="preparation && focusedReading"
+          @search="showFind"
+          :disabled="disabled || editing || loading"
+          :dragging-page="draggingPage"
+          :drop-target-page="dropTargetPage"
+          @select="navigateToPage($event)"
+          @reorder="reorderThumbnailPage"
+          @dragstart="startPageDrag"
+          @dragover="overPage"
+          @drop="dropPage"
+          @dragend="
+            draggingPage = null;
+            dropTargetPage = null;
+          "
+        />
+        <aside
+          v-if="readPanel && (!focusedReading || (preparation && readPanel === 'search'))"
+          ref="panelElement"
+          id="pdf-read-panel"
+          class="reader-side-panel"
+          :class="{ 'document-information-panel': readPanel === 'information' }"
+          role="region"
+          :aria-label="
+            findOpen
+              ? 'Search document'
+              : readPanel === 'information'
+                ? 'Document information'
+                : outlineOpen
+                  ? 'Source PDF outline'
+                  : commentsOpen
+                    ? 'Private review comments'
+                    : `Bookmarks on page ${current}`
+          "
+        >
+          <div class="reader-side-panel-heading"
+            ><strong>{{
+              findOpen
+                ? 'Search document'
+                : readPanel === 'information'
+                  ? 'Document information'
+                  : outlineOpen
+                    ? 'Document bookmarks'
+                    : commentsOpen
+                      ? `Comments (${documentComments.length})`
+                      : `Page ${current} bookmarks`
+            }}</strong
+            ><button
+              v-if="!findOpen"
+              class="icon-btn small"
+              :aria-label="
+                readPanel === 'information'
+                  ? 'Close document information'
+                  : outlineOpen
+                    ? 'Close PDF outline'
+                    : commentsOpen
+                      ? 'Close comments'
+                      : 'Close page bookmarks'
+              "
+              @click="closeReadPanel"
+              ><X :size="16" /></button
+          ></div>
+          <div v-if="findOpen" class="pdf-findbar" role="search" aria-label="Find in working PDF">
+            <Search :size="16" aria-hidden="true" />
+            <input
+              ref="findInput"
+              v-model="findQuery"
+              :disabled="!readerPdf"
+              type="search"
+              placeholder="Find text in this PDF"
+              aria-label="Find text in this PDF"
+              @keydown.enter.prevent="stepFind($event.shiftKey ? -1 : 1)"
+            />
+            <span role="status" v-if="findBusy">Searching…</span
+            ><span v-else-if="findError" class="error-msg" role="alert">{{ findError }}</span
+            ><span role="status" v-else-if="findQuery.trim().length"
+              >{{ findMatches.length }}{{ findTruncated ? '+' : '' }} match{{
+                findMatches.length === 1 ? '' : 'es'
+              }}<template v-if="findMatches.length">
+                · {{ findIndex + 1 }}/{{ findMatches.length }}</template
+              ></span
+            >
+            <button
+              class="icon-btn small"
+              aria-label="Previous search result"
+              :disabled="!findMatches.length"
+              @click="stepFind(-1)"
+              ><ChevronLeft :size="16"
+            /></button>
+            <button
+              class="icon-btn small"
+              aria-label="Next search result"
+              :disabled="!findMatches.length"
+              @click="stepFind(1)"
+              ><ChevronRight :size="16"
+            /></button>
+            <button class="icon-btn small" aria-label="Close PDF search" @click="closeReadPanel"
+              ><X :size="16"
+            /></button>
+          </div>
+          <div
+            v-if="findOpen && findMatches.length"
+            class="pdf-find-results"
+            aria-label="PDF search occurrences"
+          >
+            <button
+              v-for="(match, index) in findMatches"
+              :key="match.index"
+              :class="{ active: index === findIndex }"
+              :title="match.snippet"
+              :aria-current="index === findIndex ? 'true' : undefined"
+              @keydown="resultKey($event, index)"
+              @click="chooseFind(index)"
+              >Page {{ match.page }} · {{ match.snippet }}</button
+            >
+          </div>
+          <p v-if="findOpen && !findQuery.trim()" class="reader-side-panel-intro"
+            >Search text in this working PDF. Image-only pages need OCR before their text can be
+            searched.</p
+          >
+          <p v-if="findOpen && !readerPdf" class="reader-side-panel-intro" role="status">{{
+            loading ? 'Opening PDF…' : 'Search unavailable until the PDF loads.'
+          }}</p>
+          <dl v-if="readPanel === 'information'" class="reader-document-information">
+            <dt>Document</dt><dd>{{ document.title }}</dd> <dt>Imported original</dt
+            ><dd
+              >{{ document.original_name
+              }}<small>Preserved separately; reading and editing use the working copy.</small></dd
+            >
+            <dt>Working copy</dt
+            ><dd
+              >Revision {{ document.revision }} · {{ total || document.page_count }} source
+              pages</dd
+            >
+            <dt>Document date</dt
+            ><dd
+              >{{ document.document_date || 'Not recorded'
+              }}<small>{{ document.date_status }} · source: {{ document.date_source }}</small></dd
+            >
+            <dt>OCR processing</dt
+            ><dd
+              >{{ document.ocr_status
+              }}<small
+                >OCR text is not legally verified. Search checks text available in this PDF.</small
+              ></dd
+            >
+            <dt>Source SHA-256</dt
+            ><dd class="source-hash">{{ document.source_sha256 || 'Unavailable' }}</dd>
+          </dl>
+          <div v-if="readPanel === 'information'" class="pdf-editor-information-actions">
+            <button
+              class="btn secondary small"
+              :disabled="editing || loading || disabled"
+              @click="emit('artifact', 'original')"
+              ><BookOpen :size="15" /> View imported original</button
+            >
+            <button class="btn secondary small" @click="openReadPanel('comments', $event)"
+              ><MessageSquare :size="15" /> Open comments</button
+            >
+          </div>
+          <p v-if="outlineOpen" class="reader-side-panel-intro"
+            >Navigation embedded in the source PDF. It does not change the bundle index.</p
+          >
+          <p v-if="commentsOpen" class="reader-side-panel-intro"
+            >Private review notes, omitted from Save copy and bundles.</p
+          >
+          <div
+            v-if="commentsOpen && viewedComment"
+            class="reader-bookmark-row"
+            role="note"
+            aria-label="Selected comment"
+            ><strong>Comment on source page {{ viewedComment.page_index + 1 }}</strong
+            ><span>{{ viewedComment.body }}</span
+            ><small>{{ annotationTime(viewedComment) }}</small></div
+          >
+          <p v-if="pageBookmarksOpen" class="reader-side-panel-intro"
+            >Manual bookmarks for this source page. Check their bundle destinations under Index &
+            bookmarks.</p
+          >
+          <label v-if="commentsOpen && documentComments.length" class="reader-comment-search"
+            ><Search :size="15" aria-hidden="true" /><input
+              v-model="commentQuery"
+              type="search"
+              aria-label="Search private comments"
+              placeholder="Search comments or page"
+          /></label>
+          <div v-if="commentsOpen && commentQuery.trim()" class="reader-filter-count"
+            >{{ filteredComments.length }} of {{ documentComments.length }} comments</div
+          >
+          <div class="reader-side-panel-list">
+            <template v-if="outlineOpen"
+              ><p v-if="outlineError" role="status">{{ outlineError }}</p
+              ><p v-if="outlineLoading || loading" role="status">Loading PDF outline…</p
+              ><p v-else-if="!readerPdf" role="status">Outline unavailable until the PDF loads.</p
+              ><p v-else-if="!outlineError && !sourceOutline.length"
+                >No outline in this source PDF.</p
+              ><button
+                v-for="(item, index) in sourceOutline"
+                :key="index"
+                class="text-tool"
+                :disabled="!item.page && !item.url"
+                :style="{ paddingLeft: `${10 + item.level * 12}px` }"
+                @click="
+                  item.page
+                    ? navigateToPage(item.page)
+                    : item.url && emit('openExternalLink', item.url)
+                "
+                >{{ item.title }}<small v-if="item.page"> · p{{ item.page }}</small></button
+              >
+              <h4 class="reader-section-label">Manual document bookmarks</h4>
+              <p v-if="bookmarksLoading" role="status">Loading manual bookmarks…</p
+              ><p v-else-if="bookmarksError" role="alert">{{ bookmarksError }}</p
+              ><p v-else-if="!documentBookmarks.length">No manual bookmarks for this document.</p>
+              <button
+                v-for="item in documentBookmarks"
+                :key="item.id"
+                class="text-tool"
+                :disabled="
+                  !item.resolved ||
+                  item.target_revision !== document.revision ||
+                  item.page_index >= total
+                "
+                @click="navigateToPage(item.page_index + 1)"
+                >{{ item.title }} · Source {{ item.page_index + 1
+                }}<small v-if="!item.resolved || item.target_revision !== document.revision">
+                  · Needs review</small
+                ></button
+              >
+            </template>
+            <template v-if="commentsOpen"
+              ><p v-if="!documentComments.length">No private comments in this document.</p
+              ><p v-else-if="!filteredComments.length">No matching comments.</p
+              ><button
+                v-for="item in filteredComments"
+                :key="item.id"
+                class="text-tool reader-comment-entry"
+                :class="{
+                  selected: item.id === viewedCommentId || item.page_index === current - 1,
+                }"
+                :title="item.body"
+                @click="openReviewComment(item)"
+                ><span class="reader-comment-entry-head"
+                  ><MessageSquare :size="14" /> Source {{ item.page_index + 1 }}
+                  <small>{{ item.resolved ? 'Current' : 'Needs review' }}</small></span
+                ><span>{{ item.body }}</span
+                ><small>{{ annotationTime(item) }}</small></button
+              ></template
+            >
+            <template v-if="pageBookmarksOpen"
+              ><div v-for="item in pageBookmarks" :key="item.id" class="reader-bookmark-row"
+                ><strong>{{ item.title }}</strong
+                ><span v-if="!item.resolved"
+                  >Needs review after a source revision or page change</span
+                ><span v-else>Destination currently linked</span></div
+              ></template
+            >
+          </div>
+          <button
+            v-if="pageBookmarksOpen || outlineOpen"
+            class="text-tool reader-panel-footer"
+            @click="emit('openBookmarks')"
+            >Open Index & bookmarks</button
+          >
+        </aside>
+        <aside
+          v-if="bundleImpactVisible"
+          class="viewer-tool-inspector bundle-impact-panel"
+          aria-label="Bundle impact"
+        >
+          <div class="viewer-tool-inspector-heading"><strong>Bundle impact</strong></div>
+          <div class="pdf-editor-inspector-content">
+            <span class="pdf-editor-status warning">Previous bundle · Stale</span>
+            <h3>Working copy saved</h3
+            ><p
+              >{{ document.title }} · Revision {{ document.revision }}<br />{{
+                document.page_count
+              }}
+              source pages</p
+            >
+            <h3>Changes since build {{ staleBuild!.id.slice(0, 8) }}</h3>
+            <p v-if="staleBuild!.revision">Source at build · Revision {{ staleBuild!.revision }}</p>
+            <p
+              >Current preparation differs from this generated bundle. Rebuild to include the
+              changes.</p
+            >
+            <p>Imported originals and the previous output remain preserved.</p>
+            <div class="finding-recheck"
+              ><strong>Page mapping pending</strong
+              ><p
+                >Review the current page map before the next build. Previous output keeps its frozen
+                page numbers.</p
+              ></div
+            >
+            <button class="btn primary" @click="emit('rebuild')">Rebuild bundle</button>
+            <button class="btn secondary" @click="emit('reviewPageMap')">Review page map</button>
+            <button class="text-tool" @click="emit('reviewPrevious')">View previous output</button>
+          </div>
+        </aside>
+        <aside
+          v-if="inspectorVisible && !focusedReading"
+          class="viewer-tool-inspector"
+          :class="{
+            'marks-inspector': marksPanelOpen,
+            'edit-mode-inspector': activeCategory === 'edit' || historyOpen || engineBlocked,
+          }"
+          :aria-label="
+            engineBlocked
+              ? 'Engine connection'
+              : historyOpen
+                ? 'Recent actions'
+                : 'PDF editing controls'
+          "
+        >
+          <div class="viewer-tool-inspector-heading"
+            ><strong>{{
+              engineBlocked
+                ? 'Engine connection'
+                : historyOpen
+                  ? 'Recent actions'
+                  : activeCategory === 'ocr'
+                    ? 'OCR review'
+                    : objectSelectionOpen
+                      ? 'Document contents'
+                      : selectedTextAnnotation
+                        ? 'Text'
+                        : annotationPanelOpen && editingAnnotationId
+                          ? annotationKindLabel(annotationDraft.kind)
+                          : toolTitle
+            }}</strong
+            ><button
+              class="icon-btn small"
+              :aria-label="
+                engineBlocked || historyOpen
+                  ? 'Collapse inspector'
+                  : selectedTextAnnotation
+                    ? 'Close text properties'
+                    : 'Close PDF tool'
+              "
+              :title="engineBlocked || historyOpen ? 'Collapse inspector' : 'Close tool'"
+              @click="
+                engineBlocked
+                  ? (engineInspectorOpen = false)
+                  : historyOpen
+                    ? (historyOpen = false)
+                    : activeCategory === 'ocr' || objectSelectionOpen
+                      ? selectCategory('read')
+                      : selectedTextAnnotation
+                        ? clearOverlaySelection()
+                        : toggleTool(activeTool)
+              "
+              ><X :size="16" /></button
+          ></div>
+          <div
+            v-if="activeCategory === 'ocr' && !engineBlocked"
+            class="pdf-editor-inspector-content"
+            role="region"
+            aria-label="OCR processing and review"
+          >
+            <span class="pdf-editor-status warning">{{
+              activeOcrJob
+                ? 'Processing locally'
+                : needsOcrReview
+                  ? 'Review recommended'
+                  : 'Recognition options'
+            }}</span>
+            <h3>{{
+              activeOcrJob
+                ? `Page ${activeOcrJob.progress}% complete`
+                : needsOcrReview
+                  ? `Source page ${current} recognition`
+                  : 'Make scanned pages searchable'
+            }}</h3>
+            <template v-if="activeOcrJob"
+              ><p>{{ activeOcrJob.message }}</p
+              ><progress :value="activeOcrJob.progress" max="100"
+                >{{ activeOcrJob.progress }}%</progress
+              ><p
+                >{{ ocrElapsed ? `Elapsed ${ocrElapsed} · ` : '' }}Other documents remain
+                available.</p
+              ><button class="btn secondary small" @click="emit('cancelOcr')"
+                >Cancel OCR</button
+              ></template
+            >
+            <template v-else-if="needsOcrReview"
+              ><p>{{
+                ocrReview?.regions.length
+                  ? `${ocrReview.regions.length} low-confidence regions on this page.`
+                  : 'Compare the recognized text with the visible scan.'
+              }}</p
+              ><div
+                v-for="(region, index) in ocrReview?.regions || []"
+                :key="index"
+                class="pdf-editor-review-row"
+                ><strong>Region {{ index + 1 }}</strong
+                ><span>{{ region.text }}</span
+                ><small v-if="region.confidence !== null"
+                  >Engine score {{ Math.round(region.confidence) }} / 100</small
+                ></div
+              ><p v-if="ocrReviewError" class="error-msg" role="alert">{{ ocrReviewError }}</p
+              ><button
+                class="btn primary small"
+                :disabled="!ocrReview || ocrReviewBusy || !!ocrReview.accepted_at"
+                @click="acceptOcrReview"
+                >{{ ocrReview?.accepted_at ? 'Review accepted' : 'Accept page review' }}</button
+              ><button
+                class="btn secondary small"
+                :disabled="!ocrReview?.can_rerun || !!ocrReview?.accepted_at || disabled"
+                @click="emit('ocrRerun', current - 1, ocrReview!.language)"
+                >Rerun this page</button
+              ></template
+            >
+            <p v-else
+              >Select a language above, then run OCR on the working copy. The visible scan stays in
+              place.</p
+            >
+            <p class="pdf-editor-notice"
+              >OCR text is a recognition aid. Check names, dates and numbers against the scan before
+              use.</p
+            >
+          </div>
+          <div
+            v-if="activeCategory === 'edit' && selectedOverlayItem && !selectedTextAnnotation"
+            class="pdf-selected-overlay-actions"
+            role="status"
+            ><span
+              >{{ selectedOverlayLabel }} selected · drag to move · drag corner to resize · Delete
+              to remove</span
+            ><button
+              class="btn secondary small"
+              :disabled="annotationBusy || linksBusy || disabled"
+              @click="deleteSelectedOverlay"
+              >Remove selected</button
+            ><button
+              class="icon-btn small"
+              aria-label="Clear selection"
+              @click="closeSelectedProperties"
+              ><X :size="14" /></button
+          ></div>
+          <div
+            v-if="objectSelectionOpen && !engineBlocked"
+            class="pdf-editor-inspector-content pdf-editor-object-picker"
+            role="region"
+            aria-label="Select a PDF object"
+          >
+            <h3>Select an object</h3
+            ><p>Click an added text object, image or link on the page to see its properties.</p>
+            <button
+              class="pdf-editor-object-choice"
+              :disabled="disabled || loading"
+              @click="toggleTool('edit-text')"
+              ><Type :size="18" /><span
+                ><strong>Text</strong><small>Edit an available text block</small></span
+              ></button
+            >
+            <button
+              class="pdf-editor-object-choice"
+              :disabled="disabled || loading"
+              @click="openAnnotationTool('image')"
+              ><Images :size="18" /><span
+                ><strong>Image</strong><small>Add an image, or select one to resize</small></span
+              ></button
+            >
+            <button
+              class="pdf-editor-object-choice"
+              :disabled="disabled || loading"
+              @click="toggleTool('links')"
+              ><Link2 :size="18" /><span
+                ><strong>Link</strong><small>Page destination or URL</small></span
+              ></button
+            >
+            <p class="pdf-editor-notice"
+              ><strong>Working copy only</strong><br />The imported original remains preserved.</p
+            >
+          </div>
+          <div
+            v-else-if="engineBlocked"
+            class="pdf-editor-inspector-content"
+            role="region"
+            aria-label="Engine recovery"
+          >
+            <span class="pdf-editor-status danger">{{
+              engineState === 'changed' ? 'Review required' : 'Engine offline'
+            }}</span>
+            <h3>{{
+              engineState === 'changed' ? 'Saved inputs changed' : 'Connection interrupted'
+            }}</h3><p>{{
+              engineState === 'changed'
+                ? 'Review the latest saved state before editing. Retained drafts stay in this window.'
+                : 'The local processing engine is not responding.'
+            }}</p>
+            <button
+              v-if="engineState === 'changed'"
+              class="btn primary small"
+              @click="emit('reviewEngine')"
+              >Review latest state</button
+            >
+            <button
+              v-else
+              class="btn primary small"
+              :disabled="engineState === 'checking'"
+              @click="emit('retryReader')"
+              >{{ engineState === 'checking' ? 'Checking…' : 'Retry connection' }}</button
+            >
+            <button
+              class="btn secondary small"
+              :aria-expanded="diagnosticsOpen"
+              @click="diagnosticsOpen = !diagnosticsOpen"
+              >View diagnostics</button
+            >
+            <dl v-if="diagnosticsOpen" class="pdf-editor-diagnostics"
+              ><dt>Engine state</dt><dd>{{ engineState }}</dd
+              ><dt>Document</dt><dd>{{ document?.title }}</dd
+              ><dt>Working revision</dt><dd>{{ document?.revision }}</dd
+              ><dt>Cached page</dt><dd>{{ pageReady ? current : 'Unavailable' }}</dd
+              ><dt>Last page error</dt
+              ><dd>{{ viewerError || 'None recorded in this window' }}</dd></dl
+            >
+            <button class="btn secondary small" @click="emit('browseDocuments')"
+              >Back to documents</button
+            >
+            <h4>Still available</h4
+            ><ul
+              ><li>Read document pages already loaded</li
+              ><li>Search available text</li
+              ><li>Review local annotations</li></ul
+            >
+            <p class="pdf-editor-notice"
+              >Waiting for the engine<br />OCR, page transformations and bundle processing are
+              unavailable.</p
+            >
+          </div>
+          <div
+            v-else-if="historyOpen"
+            class="pdf-editor-inspector-content pdf-editor-history"
+            role="region"
+            aria-label="Working history"
+          >
+            <h3>Working session</h3><p>Most recent action first · matter history</p>
+            <div v-if="canRedo" class="pdf-editor-undo-outcome" role="status"
+              ><strong>Undo applied</strong
+              ><span>{{ redoLabel || 'Last action' }} · Redo available</span
+              ><small
+                >The previous working state is restored. Imported originals remain unchanged.</small
+              ></div
+            >
+            <ol v-if="recentActions?.length"
+              ><li
+                v-for="(action, index) in recentActions"
+                :key="index"
+                :class="{ undone: !action.applied }"
+                ><strong>{{ action.label }}</strong
+                ><span>{{
+                  action.applied
+                    ? index === 0 && canUndo
+                      ? 'Most recent · Undo available'
+                      : 'Saved action'
+                    : 'Undone · Redo available'
+                }}</span></li
+              ></ol
+            >
+            <p v-else>No actions in this matter yet.</p>
+            <div class="pdf-editor-history-actions"
+              ><button
+                class="btn secondary small"
+                :disabled="!canUndo || disabled || editing"
+                @click="emit('undo')"
+                >Undo</button
+              ><button
+                class="btn secondary small"
+                :disabled="!canRedo || disabled || editing"
+                @click="emit('redo')"
+                >Redo</button
+              ></div
+            >
+            <p class="pdf-editor-notice"
+              >Session history<br />A new edit clears the redo branch. Earlier exports remain
+              unchanged.</p
+            >
+          </div>
+          <div
+            v-else-if="editTextMode && !loading && !textRuns.length && !runsError"
+            class="pdf-editor-inspector-content"
+            role="region"
+            aria-label="Text editing unavailable"
+          >
+            <span class="pdf-editor-status warning">Edit unavailable</span>
+            <h3>This page has no directly editable text</h3
+            ><p>Page content may be embedded as an image. No change was made to this page.</p>
+            <button
+              class="btn primary small"
+              :disabled="disabled"
+              @click="emit('ocr', ocrLanguage, current - 1)"
+              >Run OCR</button
+            >
+            <button class="btn secondary small" :disabled="disabled" @click="toggleTool('add-text')"
+              >Add replacement text</button
+            >
+            <button class="btn secondary small" @click="toggleTool('edit-text')">Cancel</button>
+            <p class="pdf-editor-notice"
+              >Overlay is not redaction<br />Added text does not remove the image or underlying
+              content. Use Redact to remove sensitive content.</p
+            >
+          </div>
+          <div
+            v-else-if="selectedTextAnnotation"
+            class="pdf-editor-text-object"
+            role="region"
+            aria-label="Placed text properties"
+          >
+            <label
+              >Font family<select
+                v-model="textObjectDraft.font_family"
+                :disabled="textObjectBusy || disabled"
+                ><option value="helv">Helvetica · built-in PDF font</option
+                ><option value="tiro">Times Roman · built-in PDF font</option
+                ><option value="cour">Courier · built-in PDF font</option></select
+              ></label
+            >
+            <div class="pdf-editor-text-fields"
+              ><label
+                >Size<input
+                  v-model.number="textObjectDraft.font_size"
+                  type="number"
+                  min="6"
+                  max="36"
+                  :disabled="textObjectBusy || disabled"
+                />
+                pt</label
+              ><label
+                >Weight<select v-model="textObjectDraft.bold" :disabled="textObjectBusy || disabled"
+                  ><option :value="false">Regular</option
+                  ><option :value="true">Bold</option></select
+                ></label
+              ></div
+            >
+            <label>Text colour<input value="Document ink" readonly /></label>
+            <fieldset
+              ><legend>Alignment</legend
+              ><div class="pdf-editor-align-actions"
+                ><button
+                  v-for="alignment in ['left', 'center', 'right', 'justify'] as const"
+                  :key="alignment"
+                  class="icon-btn small"
+                  :aria-label="`Align ${alignment}`"
+                  :aria-pressed="textObjectDraft.alignment === alignment"
+                  :disabled="textObjectBusy || disabled"
+                  @click="textObjectDraft.alignment = alignment"
+                  ><component
+                    :is="
+                      alignment === 'left'
+                        ? AlignLeft
+                        : alignment === 'center'
+                          ? AlignCenter
+                          : alignment === 'right'
+                            ? AlignRight
+                            : AlignJustify
+                    "
+                    :size="16" /></button></div
+            ></fieldset>
+            <strong class="pdf-editor-object-label">OBJECT</strong>
+            <div class="pdf-editor-text-fields"
+              ><label
+                >X / Y
+                <span
+                  ><input
+                    v-model.number="textObjectDraft.x"
+                    type="number"
+                    min="0"
+                    :disabled="textObjectBusy || disabled"
+                    aria-label="X position in points" /><input
+                    v-model.number="textObjectDraft.y"
+                    type="number"
+                    min="0"
+                    :disabled="textObjectBusy || disabled"
+                    aria-label="Y position in points" /></span
+                >pt</label
+              ><label
+                >Width / Height
+                <span
+                  ><input
+                    v-model.number="textObjectDraft.width"
+                    type="number"
+                    min="1"
+                    :disabled="textObjectBusy || disabled"
+                    aria-label="Width in points" /><input
+                    v-model.number="textObjectDraft.height"
+                    type="number"
+                    min="1"
+                    :disabled="textObjectBusy || disabled"
+                    aria-label="Height in points" /></span
+                >pt</label
+              ></div
+            >
+            <details class="pdf-editor-edit-object-text"
+              ><summary>Edit text content</summary
+              ><label
+                >Text<textarea
+                  v-model="textObjectDraft.body"
+                  rows="3"
+                  maxlength="1000"
+                  :disabled="textObjectBusy || disabled"
+                /></label
+            ></details>
+            <p v-if="textObjectError" class="error-msg" role="alert">{{ textObjectError }}</p>
+            <button
+              class="btn primary small"
+              :disabled="
+                textObjectBusy ||
+                disabled ||
+                textObjectDraft.font_size < 6 ||
+                textObjectDraft.font_size > 36
+              "
+              @click="saveTextObject"
+              >{{ textObjectBusy ? 'Saving…' : 'Save text properties' }}</button
+            >
+            <button
+              class="btn secondary small"
+              :disabled="textObjectBusy || disabled"
+              @click="deleteSelectedOverlay"
+              >Remove text object</button
+            >
+            <p
+              >These settings affect the next Save copy or bundle. The imported original stays
+              unchanged.</p
+            >
+          </div>
+          <div
+            v-if="textMode && !selectedTextAnnotation"
+            class="edit-context-panel"
+            role="region"
+            aria-label="New text properties"
+          >
+            <strong>{{ placement ? 'Text placement' : 'Ready to place' }}</strong>
+            <p>Click the page, then type. The original text beneath an added object is retained.</p>
+            <label
+              >Font family<select v-model="overlayFont" aria-label="Font family"
+                ><option value="helv">Helvetica · built-in PDF font</option
+                ><option value="tiro">Times Roman · built-in PDF font</option
+                ><option value="cour">Courier · built-in PDF font</option></select
+              ></label
+            >
+            <label
+              >Size<input
+                v-model.number="overlaySize"
+                type="number"
+                min="6"
+                max="36"
+                :disabled="editing || disabled"
+                aria-label="Text size in points"
+              />
+              pt</label
+            >
+            <label
+              >Weight<select v-model="overlayBold"
+                ><option :value="false">Regular</option
+                ><option :value="true">Bold</option></select
+              ></label
+            >
+            <label
+              >Alignment<select v-model="overlayAlignment"
+                ><option value="left">Left</option
+                ><option value="center">Center</option
+                ><option value="right">Right</option
+                ><option value="justify">Justify</option></select
+              ></label
+            >
+            <p class="edit-context-limit"
+              >Printable ASCII · 6–36 pt. Review line breaks in the saved PDF.</p
+            >
+            <button class="btn secondary small" :disabled="editing" @click="toggleTool('add-text')"
+              >Cancel placement</button
+            >
+          </div>
+          <Transition name="soft"
+            ><div
+              v-if="editTextMode && (textRuns.length || runsError || loading)"
+              class="text-overlay-panel"
+              aria-label="Edit existing text"
+            >
+              <strong>{{ selectedRun ? 'Selected text' : 'Select text' }}</strong>
+              <p v-if="selectedRun" class="edit-selected-excerpt">{{ selectedRun.text }}</p>
+              <p
+                >Click text on the page to change its words. Drag highlighted text anywhere in a
+                clear area of this page to move it. Review the position before applying.</p
+              >
+              <p
+                >Scanned text needs OCR and review before editing. Redact creates a movable mark;
+                only a generated Save copy or bundle removes covered content.</p
+              >
+              <p v-if="replacementEngine === 'pdfium-trial'"
+                >The whole detected paragraph is selected. This mode changes all of its lines; if
+                the page is unsupported, the working PDF is left unchanged.</p
+              >
+              <div v-if="pendingMove" class="page-tool-actions"
+                ><span>Previewing a move on page {{ current }}. The destination must be clear.</span
+                ><div
+                  ><button class="btn secondary small" :disabled="editing" @click="cancelMove"
+                    >Cancel</button
+                  ><button
+                    class="btn primary small"
+                    :disabled="editing || disabled"
+                    @click="confirmMove"
+                    >Apply move</button
+                  ></div
+                ></div
+              >
+              <p v-if="runsError && !selectedRun" class="error-msg" role="alert">{{ runsError }}</p>
+              <p class="edit-status-slot" role="status">{{ editNotice }}</p>
+              <p v-if="!textRuns.length && !editNotice"
+                >No selectable horizontal text found on this page. Scanned text needs OCR and
+                review.</p
+              >
+            </div></Transition
+          >
+          <Transition name="soft"
+            ><div v-if="redactionOpen" class="text-overlay-panel" aria-label="Permanent redaction">
+              <strong>Permanent redaction · page {{ current }}</strong>
+              <ol class="pdf-tool-steps"
+                ><li :class="{ done: !!redactionRegion }">Drag over the content to remove.</li
+                ><li :class="{ done: !!redactionRegion }"
+                  >Adjust the black mark, then click Add redaction mark.</li
+                ><li
+                  >Move or resize the saved mark. Save copy or rebuild the bundle to remove content
+                  in the exported PDF.</li
+                ></ol
+              >
+              <p v-if="redactionRegion" class="notice amber" role="status"
+                >This is an editable mark. The underlying working PDF still contains the content
+                until a PDF output is generated.</p
+              >
+              <p
+                >Save copy and new bundle exports remove text and image pixels under saved redaction
+                marks. The editor’s working revision, imported originals, prior revisions, existing
+                exports and matter history can still contain the content.</p
+              >
+              <div class="page-tool-actions"
+                ><span>{{
+                  redactionRegion
+                    ? `Marked ${Math.round(redactionRegion.width * 100)}% × ${Math.round(redactionRegion.height * 100)}% of page`
+                    : 'No area marked yet'
+                }}</span
+                ><div
+                  ><button
+                    v-if="redactionRegion"
+                    class="btn secondary small"
+                    :disabled="redactionBusy"
+                    @click="
+                      redactionRegion = null;
+                      redactionError = '';
+                    "
+                    >Clear mark</button
+                  ><button
+                    class="btn primary small"
+                    :disabled="
+                      !redactionRegion ||
+                      redactionRegion.width < 0.01 ||
+                      redactionRegion.height < 0.01 ||
+                      redactionBusy ||
+                      disabled
+                    "
+                    @click="applyRedaction"
+                    >{{ redactionBusy ? 'Saving…' : 'Add redaction mark' }}</button
+                  ></div
+                ></div
+              >
+              <div
+                v-if="pendingRedactions.length"
+                class="pdf-editor-review-list"
+                aria-label="Pending redaction marks"
+                ><strong
+                  >{{ pendingRedactions.length }} pending
+                  {{ pendingRedactions.length === 1 ? 'mark' : 'marks' }}</strong
+                ><button
+                  v-for="(mark, index) in pendingRedactions"
+                  :key="mark.id"
+                  class="pdf-editor-review-row"
+                  :aria-current="mark.page_index === current - 1 ? 'page' : undefined"
+                  @click="navigateToPage(mark.page_index + 1)"
+                  ><strong>Mark {{ index + 1 }} · Source {{ mark.page_index + 1 }}</strong
+                  ><span>Review marked region</span></button
+                ><p
+                  >These marks remove content only in a new Save copy or bundle. The current working
+                  PDF still contains it.</p
+                ></div
+              >
+              <div
+                v-if="appliedRedactions.some((item) => item.page_index === current - 1)"
+                class="redaction-restore"
+              >
+                <strong>Applied areas on this page</strong>
+                <p
+                  >The amber outline selects a restorable area; the black fill is in the updated
+                  PDF. The outline includes text touched beyond the original mark. Newer edits
+                  inside it will be replaced; edits outside remain. Original vector objects and
+                  links are not reconstructed.</p
+                >
+                <p v-if="selectedRedaction?.structure_changed"
+                  >Page order, size or rotation changed after this mark. Selective restoration is
+                  unavailable for this area.</p
+                >
+                <button
+                  v-if="selectedRedaction && !selectedRedaction.structure_changed"
+                  class="btn secondary small"
+                  :disabled="redactionBusy || disabled"
+                  @click="removeSelectedRedaction"
+                  >{{ redactionBusy ? 'Restoring…' : 'Remove selected redaction' }}</button
+                >
+              </div>
+              <p v-if="canUndo" class="redaction-undo"
+                ><button
+                  class="btn secondary small"
+                  :disabled="redactionBusy || editing || disabled"
+                  :title="undoDescription"
+                  @click="emit('undo')"
+                  ><Undo2 :size="14" /> Undo last matter change</button
+                ><span
+                  >If redaction was the last change, Undo restores the prior working copy. Earlier
+                  exports still need review.</span
+                ></p
+              >
+              <p v-if="redactionError" class="error-msg" role="alert">{{ redactionError }}</p><p
+                v-if="redactionNotice"
+                class="review-tool-notice"
+                role="status"
+                >{{ redactionNotice }}</p
+              >
+            </div></Transition
+          >
+          <Transition name="soft"
+            ><div
+              v-if="annotationPanelOpen"
+              class="page-annotation-panel"
+              aria-label="Private page marks and image overlays"
+            >
+              <p
+                v-if="
+                  editingAnnotationId &&
+                  pageAnnotations.find((item) => item.id === editingAnnotationId)
+                "
+                class="annotation-record-time"
+                >Saved
+                {{
+                  annotationTime(pageAnnotations.find((item) => item.id === editingAnnotationId)!)
+                }}
+                · Author not recorded</p
+              >
+              <div
+                v-if="annotationDraft.kind === 'image' && editingAnnotationId && annotationRegion"
+                class="pdf-editor-image-properties"
+                role="region"
+                aria-label="Image properties"
+              >
+                <img
+                  v-if="annotationImageUrls[editingAnnotationId]"
+                  :src="annotationImageUrls[editingAnnotationId]"
+                  alt="Selected image preview"
+                />
+                <strong>OBJECT</strong>
+                <div class="pdf-editor-image-fields"
+                  ><label v-for="field in ['x', 'y', 'width', 'height'] as const" :key="field"
+                    >{{
+                      field === 'x'
+                        ? 'X position'
+                        : field === 'y'
+                          ? 'Y position'
+                          : field === 'width'
+                            ? 'Width'
+                            : 'Height'
+                    }}<span
+                      ><input
+                        type="number"
+                        :aria-label="`Image ${field} in points`"
+                        :value="
+                          Math.round(
+                            annotationRegion[field] *
+                              (field === 'x' || field === 'width'
+                                ? pageSizePt.width
+                                : pageSizePt.height),
+                          )
+                        "
+                        :min="field === 'width' || field === 'height' ? 1 : 0"
+                        :disabled="annotationBusy || disabled"
+                        @change="setImageGeometry(field, $event)"
+                      />
+                      pt</span
+                    ></label
+                  ></div
+                >
+                <p
+                  >Drag the image or its handles on the page. Update mark saves the position and
+                  size.</p
+                >
+              </div>
+              <div class="review-tool-heading"
+                ><strong>{{ annotationKindLabel(annotationDraft.kind) }}</strong
+                ><span>{{
+                  editingAnnotationId
+                    ? 'Review this mark’s properties. Drag it on the page to move or resize it.'
+                    : annotationDraft.kind === 'image'
+                      ? 'Choose a PNG or JPEG, then drag its size and position on the page.'
+                      : 'Drag a region on the page. Each saved mark remains independently selectable, movable and removable.'
+                }}</span></div
+              >
+              <p class="annotation-scope-note">{{
+                annotationOutputScope === 'private'
+                  ? 'This private review mark is omitted from Save copy and filing bundles.'
+                  : 'This editable mark is included in Save copy and new bundle exports.'
+              }}</p>
+              <div class="annotation-form-grid">
+                <label v-if="annotationDraft.kind === 'image' && !editingAnnotationId"
+                  >PNG or JPEG<input
+                    ref="annotationFileInput"
+                    type="file"
+                    accept="image/png,image/jpeg,.png,.jpg,.jpeg"
+                    :disabled="annotationBusy || disabled"
+                    @change="chooseAnnotationImage"
+                /></label>
+                <label
+                  v-if="
+                    !['image', 'highlight', 'comment', 'redaction'].includes(annotationDraft.kind)
+                  "
+                  >Output<select
+                    v-model="annotationOutputScope"
+                    :disabled="annotationBusy || disabled"
+                    ><option value="pdf">Include in saved PDF</option
+                    ><option value="private">Private review only</option></select
+                  ></label
+                >
+                <label v-if="annotationDraft.kind !== 'image'"
+                  >Colour<select
+                    v-model="annotationDraft.color"
+                    :disabled="annotationBusy || disabled"
+                    ><option value="yellow">Yellow</option
+                    ><option value="green">Green</option
+                    ><option value="blue">Blue</option
+                    ><option value="pink">Pink</option></select
+                  ></label
+                >
+                <label
+                  v-if="annotationDraft.kind === 'comment' || annotationDraft.kind === 'highlight'"
+                  class="annotation-note"
+                  >{{
+                    annotationDraft.kind === 'comment' ? 'Comment text' : 'Optional highlight note'
+                  }}<textarea
+                    v-model="annotationDraft.body"
+                    maxlength="4000"
+                    rows="2"
+                    :disabled="annotationBusy || disabled"
+                  />
+                </label>
+                <label v-if="annotationDraft.kind === 'date'" class="annotation-note"
+                  >Date shown<input
+                    v-model="annotationDraft.body"
+                    type="date"
+                    :disabled="annotationBusy || disabled"
+                /></label>
+                <label v-if="annotationDraft.kind === 'text'" class="annotation-note"
+                  >Text<textarea
+                    v-model="annotationDraft.body"
+                    maxlength="1000"
+                    rows="3"
+                    :disabled="annotationBusy || disabled"
+                  />
+                </label>
+              </div>
+              <div class="page-tool-actions"
+                ><span>{{
+                  annotationRegion
+                    ? `${Math.round(annotationRegion.width * 100)}% × ${Math.round(annotationRegion.height * 100)}% region selected`
+                    : 'Drag a region on the page'
+                }}</span
+                ><div
+                  ><button
+                    v-if="editingAnnotationId"
+                    class="btn secondary small"
+                    :disabled="annotationBusy"
+                    @click="resetAnnotationDraft()"
+                    >Cancel edit</button
+                  ><button
+                    class="btn secondary small"
+                    :disabled="
+                      annotationBusy ||
+                      disabled ||
+                      !annotationRegion ||
+                      (annotationDraft.kind === 'comment' && !annotationDraft.body.trim()) ||
+                      (annotationDraft.kind === 'image' && !editingAnnotationId && !annotationImage)
+                    "
+                    @click="savePageAnnotation"
+                    >{{
+                      annotationBusy ? 'Saving…' : editingAnnotationId ? 'Update mark' : 'Add mark'
+                    }}</button
+                  ></div
+                ></div
+              >
+              <p v-if="annotationError" class="error-msg" role="alert">{{ annotationError }}</p><p
+                v-if="annotationNotice"
+                class="review-tool-notice"
+                role="status"
+                >{{ annotationNotice }}</p
+              >
+              <div v-if="currentPageAnnotations.length" class="page-annotation-list"
+                ><div
+                  v-for="item in currentPageAnnotations"
+                  :key="item.id"
+                  :class="['page-annotation-row', { unresolved: !item.resolved }]"
+                  ><component
+                    :is="
+                      item.kind === 'image'
+                        ? Images
+                        : item.kind === 'highlight'
+                          ? Highlighter
+                          : item.kind === 'comment'
+                            ? MessageSquare
+                            : item.kind === 'draw'
+                              ? Pencil
+                              : item.kind === 'box'
+                                ? Square
+                                : item.kind === 'ellipse'
+                                  ? Circle
+                                  : item.kind === 'line'
+                                    ? Minus
+                                    : item.kind === 'arrow'
+                                      ? ArrowUpRight
+                                      : item.kind === 'check'
+                                        ? Check
+                                        : item.kind === 'date'
+                                          ? CalendarDays
+                                          : item.kind === 'text'
+                                            ? Type
+                                            : item.kind === 'redaction'
+                                              ? Eraser
+                                              : X
+                    "
+                    :size="15" /><span
+                    ><strong>{{ annotationKindLabel(item.kind) }}</strong
+                    ><small>{{
+                      item.resolved
+                        ? item.body && item.kind !== 'draw'
+                          ? item.body
+                          : item.output_scope === 'pdf'
+                            ? 'Included in Save copy and new bundles'
+                            : 'Private review mark'
+                        : 'Needs review after a revision change'
+                    }}</small></span
+                  ><button
+                    class="icon-btn small"
+                    :aria-label="`Edit ${item.kind}`"
+                    :disabled="annotationBusy || !item.resolved"
+                    @click="editPageAnnotation(item)"
+                    ><Pencil :size="14" /></button
+                  ><button
+                    class="icon-btn small danger"
+                    :aria-label="`Remove ${item.kind}`"
+                    :disabled="annotationBusy"
+                    @click="removePageAnnotation(item)"
+                    ><Trash2 :size="14" /></button></div
+              ></div> </div
+          ></Transition>
+          <Transition name="soft"
+            ><div
+              v-if="linkPanelOpen"
+              class="review-link-panel"
+              role="region"
+              aria-label="Reviewed PDF links"
+            >
+              <div class="review-tool-heading"
+                ><strong>Reviewed link</strong
+                ><span>{{
+                  editingLinkId
+                    ? 'Update the selected link and its destination.'
+                    : 'Drag a rectangle on this page, then choose its destination. Imported PDF actions remain excluded.'
+                }}</span></div
+              >
+              <div class="review-link-grid">
+                <label
+                  >Readable label<input
+                    v-model="linkDraft.title"
+                    maxlength="200"
+                    :disabled="linksBusy || disabled"
+                    placeholder="Open supporting passage"
+                /></label>
+                <label
+                  >Destination<select v-model="linkDraft.kind" :disabled="linksBusy || disabled"
+                    ><option value="internal">Matter document page</option
+                    ><option value="external">Web or email address</option></select
+                  ></label
+                >
+                <template v-if="linkDraft.kind === 'internal'">
+                  <label
+                    >Target document<select
+                      v-model="linkDraft.target_document_id"
+                      :disabled="linksBusy || disabled"
+                      ><option value="">Choose document</option
+                      ><option v-for="item in documents || []" :key="item.id" :value="item.id">{{
+                        item.title
+                      }}</option></select
+                    ></label
+                  >
+                  <label
+                    >Target page<input
+                      v-model.number="linkDraft.target_page"
+                      type="number"
+                      min="1"
+                      :max="
+                        (documents || []).find((item) => item.id === linkDraft.target_document_id)
+                          ?.page_count || 1
+                      "
+                      :disabled="linksBusy || disabled"
+                  /></label>
+                </template>
+                <label v-else class="review-link-uri"
+                  >HTTPS, HTTP or mailto address<input
+                    v-model="linkDraft.uri"
+                    maxlength="2000"
+                    :disabled="linksBusy || disabled"
+                    placeholder="https://example.org/source"
+                /></label>
+              </div>
+              <div class="page-tool-actions"
+                ><span>{{
+                  linkRegion
+                    ? `${Math.round(linkRegion.width * 100)}% × ${Math.round(linkRegion.height * 100)}% region selected`
+                    : 'Drag a link region on the page'
+                }}</span
+                ><button
+                  class="btn secondary small"
+                  :disabled="
+                    linksBusy ||
+                    disabled ||
+                    !linkRegion ||
+                    (editingLinkId && !linkDirty) ||
+                    !linkDraft.title.trim() ||
+                    (linkDraft.kind === 'internal'
+                      ? !linkDraft.target_document_id
+                      : !linkDraft.uri.trim())
+                  "
+                  @click="saveReviewedLink"
+                  >{{
+                    linksBusy ? 'Saving…' : editingLinkId ? 'Update link' : 'Save reviewed link'
+                  }}</button
+                ></div
+              >
+              <p v-if="linkError" class="error-msg" role="alert">{{ linkError }}</p><p
+                v-if="linkNotice"
+                class="review-tool-notice"
+                role="status"
+                >{{ linkNotice }}</p
+              >
+              <div v-if="currentPageLinks.length" class="reviewed-link-list"
+                ><div
+                  v-for="item in currentPageLinks"
+                  :key="item.id"
+                  :class="['reviewed-link-row', { unresolved: !item.resolved }]"
+                  ><button
+                    class="reviewed-link-open"
+                    :disabled="!item.resolved"
+                    @click="followReviewedLink(item)"
+                    ><ExternalLink v-if="item.kind === 'external'" :size="14" /><Link2
+                      v-else
+                      :size="14"
+                    /><span
+                      ><strong>{{ item.title }}</strong
+                      ><small>{{
+                        item.resolved
+                          ? item.kind === 'external'
+                            ? item.uri
+                            : 'Matter page target'
+                          : 'Needs review after a revision change'
+                      }}</small></span
+                    ></button
+                  ><button
+                    class="icon-btn small danger"
+                    aria-label="Remove reviewed link"
+                    :disabled="linksBusy"
+                    @click="removeReviewedLink(item.id)"
+                    ><Trash2 :size="14" /></button></div
+              ></div> </div
+          ></Transition>
+          <Transition name="soft"
+            ><div
+              v-if="marksPanelOpen"
+              class="output-marks-panel"
+              aria-label="Output watermark and timestamp settings"
+            >
+              <div class="review-tool-heading"
+                ><strong>Output watermark and timestamp</strong
+                ><span
+                  >Previewed on the actual working page; inserted only into newly built
+                  source-document pages. Originals, working copies and completed exports stay
+                  unchanged.</span
+                ></div
+              >
+              <div class="output-marks-grid">
+                <label class="checkbox-line"
+                  ><input v-model="markSettings.watermark_enabled" type="checkbox" /><span
+                    ><strong>Watermark</strong
+                    ><small>Visible technical mark, not court approval.</small></span
+                  ></label
+                >
+                <label
+                  >Watermark text<input
+                    v-model="markSettings.watermark_text"
+                    maxlength="120"
+                    :disabled="!markSettings.watermark_enabled"
+                /></label>
+                <label
+                  >Watermark position<select
+                    v-model="markSettings.watermark_position"
+                    :disabled="!markSettings.watermark_enabled"
+                    ><option v-for="item in markPositions" :key="item[0]" :value="item[0]">{{
+                      item[1]
+                    }}</option></select
+                  ></label
+                >
+                <label
+                  >Watermark size<input
+                    v-model.number="markSettings.watermark_font_size"
+                    type="number"
+                    min="8"
+                    max="72"
+                    :disabled="!markSettings.watermark_enabled"
+                /></label>
+                <label
+                  >Opacity<input
+                    v-model.number="markSettings.watermark_opacity"
+                    type="number"
+                    min=".05"
+                    max=".8"
+                    step=".05"
+                    :disabled="!markSettings.watermark_enabled"
+                /></label>
+                <label class="checkbox-line"
+                  ><input v-model="markSettings.timestamp_enabled" type="checkbox" /><span
+                    ><strong>Build timestamp</strong><small>Uses the chosen timezone.</small></span
+                  ></label
+                >
+                <label
+                  >Timezone<input
+                    v-model="markSettings.timestamp_timezone"
+                    maxlength="64"
+                    :disabled="!markSettings.timestamp_enabled"
+                    placeholder="Asia/Kolkata"
+                /></label>
+                <label
+                  >Format<select
+                    v-model="markSettings.timestamp_format"
+                    :disabled="!markSettings.timestamp_enabled"
+                    ><option value="date">Date</option
+                    ><option value="datetime">Date, time and zone</option></select
+                  ></label
+                >
+                <label
+                  >Timestamp position<select
+                    v-model="markSettings.timestamp_position"
+                    :disabled="!markSettings.timestamp_enabled"
+                    ><option v-for="item in markPositions" :key="item[0]" :value="item[0]">{{
+                      item[1]
+                    }}</option></select
+                  ></label
+                >
+                <label
+                  >Timestamp prefix<input
+                    v-model="markSettings.timestamp_prefix"
+                    maxlength="40"
+                    :disabled="!markSettings.timestamp_enabled"
+                /></label>
+              </div>
+              <div v-if="markPreview.some((item) => item.overlaps_content)" class="notice amber"
+                ><span
+                  >One or more preview boxes intersect detectable page content. Choose another
+                  position or accept only after visual review; signatures and seals cannot be
+                  reliably detected.</span
+                ></div
+              >
+              <div class="page-tool-actions"
+                ><span>Preview time is current; the export records one fixed build time.</span
+                ><button
+                  class="btn secondary small"
+                  :disabled="marksBusy || disabled || !marksDirty"
+                  @click="saveMarks"
+                  >{{ marksBusy ? 'Saving…' : 'Save output marks' }}</button
+                ></div
+              >
+              <p v-if="marksError" class="error-msg" role="alert">{{ marksError }}</p><p
+                v-if="marksNotice"
+                class="review-tool-notice"
+                role="status"
+                >{{ marksNotice }}</p
+              >
+            </div></Transition
+          >
+        </aside>
+        <div class="viewer-page-column">
+          <div v-if="engineBlocked" class="pdf-editor-engine-banner" role="alert"
+            ><strong>Document processing engine unavailable</strong
+            ><span
+              >Cached pages may still be readable. Editing and processing are paused until the local
+              engine reconnects.</span
+            ><button
+              v-if="!engineInspectorOpen"
+              class="text-tool"
+              @click="engineInspectorOpen = true"
+              >Connection details</button
+            ></div
+          >
+          <div v-else-if="activeTool !== 'select'" class="pdf-tool-hint" role="status"
+            ><strong>{{ toolTitle }}</strong
+            ><span>{{ toolFeedback || toolHint }}</span
+            ><button
+              class="icon-btn small"
+              aria-label="Cancel PDF tool"
+              title="Cancel tool (Esc)"
+              @click="toggleTool(activeTool)"
+              ><X :size="14" /></button
+          ></div>
 
-      <div v-if="(loading || editing) && !(replacingText && editSnapshot)" class="preview-status" role="status"><LoaderCircle :size="18" class="spin"/> {{editing?'Updating PDF…':'Loading PDF…'}}</div>
-      <div v-if="readingPositionError && !engineBlocked" class="preview-status error-msg" role="status">{{readingPositionError}}</div>
-      <div v-if="viewerError" class="preview-status error-msg" role="alert">Page {{current}} unavailable. {{engineBlocked ? 'Its data may not be loaded. Reconnect, then retry this PDF.' : viewerError}} <button class="btn secondary small" :disabled="engineBlocked" @click="emit('retryReader')">Retry PDF</button></div>
-      <PdfReaderViewport :horizontal-gutter="32" ref="readerViewport" :pdf="readerPdf" v-model:page="current" :zoom="zoomChoice" :rotation="viewRotation" :mode="activeTool==='select'?readerMode:'single'" :interactive="activeTool==='select' && (!disabled || engineBlocked)" :matches="findOpen?findMatches:[]" :active-match-index="findOpen?findIndex:-1"
-        :surface-class="{'selecting-text':activeTool==='select' && (!disabled || engineBlocked),'placing-text':textMode && !disabled,'drawing-link':linkPanelOpen && !disabled,'drawing-annotation':annotationPanelOpen && !disabled,'drawing-redaction':redactionOpen && !disabled,'is-busy':(loading || editing) && !replacingText,'is-edit-refreshing':replacingText,'is-stale':!pageReady,'is-rotating':rotatingPage}"
-        @position="rememberPosition" @ready="pageRendered" @error="viewerError=$event" @internal-link="navigateToPage($event)" @external-link="emit('openExternalLink',$event)"
-        @surface-click="clickPageSurface" @surface-pointerdown="beginLinkRegion($event);beginAnnotationRegion($event);beginRedactionRegion($event)" @surface-pointermove="updateLinkRegion($event);updateAnnotationRegion($event);updateRedactionRegion($event)" @surface-pointerup="finishLinkRegion($event);finishAnnotationRegion($event);finishRedactionRegion($event)" @surface-pointercancel="finishLinkRegion($event);finishAnnotationRegion($event);finishRedactionRegion($event)">
-          <span v-if="textMode && placement && placement.page===current && overlayText" class="pdf-add-text-preview" :style="{left:`${placement.x*100}%`,top:`${placement.y*100}%`,fontSize:`${overlaySize*pageZoom}px`}">{{overlayText}}</span>
-          <div v-if="textMode && placement && placement.page===current" class="pdf-inline-add-card" :style="inlineAddStyle" @click.stop @pointerdown.stop>
-            <label>Add text on page {{current}}<textarea ref="inlineAddInput" v-model="overlayText" maxlength="1000" rows="3" :disabled="editing || disabled" placeholder="Type text here" @keydown.esc.stop.prevent="placement=null" @keydown.meta.enter.prevent="placeText" @keydown.ctrl.enter.prevent="placeText"></textarea></label>
-            <label>Size <input v-model.number="overlaySize" type="number" min="6" max="36" :disabled="editing || disabled"/> pt</label>
-            <small class="pdf-add-text-guidance">Printable ASCII · 6–36 pt · Ctrl/⌘+Enter to apply</small>
-            <div class="pdf-inline-add-actions"><button class="btn secondary small" :disabled="editing" @click="placement=null">Cancel</button><button class="btn primary small" :disabled="!!overlayValidation || editing || disabled" :title="overlayValidation || undefined" @click="placeText">Apply text</button></div>
-          </div>
-          <span v-if="placement && placement.page===current && !overlayText" class="pdf-placement-marker" :style="{left:`${placement.x*100}%`,top:`${placement.y*100}%`}" aria-hidden="true"></span>
-          <img v-if="editSnapshot" class="pdf-edit-snapshot" :class="{'is-fading':editSnapshotFading}" :src="editSnapshot" alt="" aria-hidden="true" />
-          <button v-for="item in currentPageLinks" :key="item.id" type="button" :class="['pdf-reviewed-link',{unresolved:!item.resolved,selected:overlaySelected('link',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...overlayStyle('link',item.id)}" :title="item.resolved ? item.title+' · drag to move, Delete to remove, double-click to follow' : item.title+' — needs review'" :aria-label="`Select link ${item.title}; drag to move or press Delete to remove`" :aria-pressed="overlaySelected('link',item.id)" @pointerdown.stop="beginOverlayDrag($event,'link',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('link',item)" @dblclick.stop="followReviewedLink(item)"><span>{{item.title}}</span></button>
-          <span v-if="linkPanelOpen && linkRegion" class="pdf-link-region" :style="{left:`${linkRegion.x*100}%`,top:`${linkRegion.y*100}%`,width:`${linkRegion.width*100}%`,height:`${linkRegion.height*100}%`}" aria-hidden="true"></span>
-          <template v-for="item in currentPageAnnotations" :key="item.id">
-            <img v-if="item.kind==='image' && item.resolved && annotationImageUrls[item.id]" :class="['pdf-image-overlay',{selected:overlaySelected('annotation',item.id)}]" :src="annotationImageUrls[item.id]" :alt="item.body || 'User-added image overlay'" role="button" tabindex="0" :aria-label="item.body || 'Select image overlay; drag to move or press Delete to remove'" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...overlayStyle('annotation',item.id)}" @pointerdown.stop="beginOverlayDrag($event,'annotation',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('annotation',item)" @keydown.enter.stop.prevent="clickOverlay('annotation',item)" @keydown.space.stop.prevent="clickOverlay('annotation',item)"/>
-            <button v-else-if="item.kind==='highlight'" type="button" :class="['pdf-review-highlight',item.color,{unresolved:!item.resolved,selected:overlaySelected('annotation',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...overlayStyle('annotation',item.id)}" :title="item.body || 'Private highlight'" :aria-label="'Select highlight; drag to move or press Delete to remove'" :aria-pressed="overlaySelected('annotation',item.id)" @pointerdown.stop="beginOverlayDrag($event,'annotation',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('annotation',item)"></button>
-            <button v-else-if="item.kind==='comment'" type="button" :class="['pdf-review-comment',item.color,{unresolved:!item.resolved,selected:overlaySelected('annotation',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...overlayStyle('annotation',item.id)}" :title="preparation ? undefined : item.body" :aria-label="preparation ? 'Show comment' : 'Select comment; drag to move or press Delete to remove'" :aria-expanded="preparation ? viewedCommentId===item.id : undefined" :aria-controls="preparation && viewedCommentId===item.id ? 'pdf-comment-popover' : undefined" :aria-pressed="overlaySelected('annotation',item.id)" @pointerdown.stop="beginOverlayDrag($event,'annotation',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('annotation',item)"><MessageSquare :size="Math.max(12,Math.min(22,item.rect_width*pageZoom*300))"/></button>
-            <button v-else-if="item.kind!=='image'" type="button" :class="['pdf-review-shape',item.kind,item.color,{unresolved:!item.resolved,selected:overlaySelected('annotation',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`,...(item.kind==='text'?textOverlayStyle(item):{}),...overlayStyle('annotation',item.id)}" :aria-label="`Select ${annotationKindLabel(item.kind)}; drag to move or press Delete to remove`" :aria-pressed="overlaySelected('annotation',item.id)" @pointerdown.stop="beginOverlayDrag($event,'annotation',item)" @pointermove.stop="updateOverlayDrag" @pointerup.stop="finishOverlayDrag" @pointercancel.stop="finishOverlayDrag" @click.stop="clickOverlay('annotation',item)">
-              <svg v-if="['draw','box','ellipse','line','arrow'].includes(item.kind)" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline v-if="item.kind==='draw'" :points="drawPolyline(item.body)"/><rect v-else-if="item.kind==='box'" x="3" y="3" width="94" height="94" rx="1"/><ellipse v-else-if="item.kind==='ellipse'" cx="50" cy="50" rx="47" ry="47"/><line v-else x1="4" y1="96" x2="96" y2="4"/><polyline v-if="item.kind==='arrow'" points="68,4 96,4 96,32"/></svg>
-              <span v-else :style="item.kind==='text'?textOverlayStyle(item):undefined">{{item.kind==='check'?'✓':item.kind==='cross'?'✕':item.body}}</span>
-            </button>
-            <button v-else-if="item.kind==='image'" type="button" :class="['pdf-stale-image-overlay',{selected:overlaySelected('annotation',item.id)}]" :style="{left:`${item.rect_x*100}%`,top:`${item.rect_y*100}%`,width:`${item.rect_width*100}%`,height:`${item.rect_height*100}%`}" title="Image overlay needs review after a revision change" @pointerdown.stop @click.stop="clickOverlay('annotation',item)">Image needs review</button>
-          </template>
-          <div v-if="preparation && viewedComment && viewedComment.page_index===current-1" id="pdf-comment-popover" class="pdf-comment-popover" :style="viewedCommentStyle" role="dialog" aria-label="Comment" @click.stop @pointerdown.stop>
-            <div class="pdf-comment-popover-heading"><span><MessageSquare :size="15" aria-hidden="true"/> Comment · Source {{current}}</span><button type="button" class="icon-btn small" aria-label="Close comment" @click="closeViewedComment"><X :size="15"/></button></div>
-            <p class="pdf-comment-popover-body">{{viewedComment.body}}</p>
-            <span class="pdf-comment-popover-meta">{{annotationTime(viewedComment)}} · Private review note</span>
-          </div>
-          <button v-if="!preparation && selectedOverlayItem?.resolved" type="button" class="pdf-overlay-size-handle" :style="{left:`${(selectedOverlayItem.rect_x+(overlayResizeSize?.width ?? selectedOverlayItem.rect_width)+overlayOffset.x)*100}%`,top:`${(selectedOverlayItem.rect_y+(overlayResizeSize?.height ?? selectedOverlayItem.rect_height)+overlayOffset.y)*100}%`}" :aria-label="`Resize selected ${selectedOverlayLabel}`" @pointerdown.stop="beginOverlayResize" @pointermove.stop="updateOverlayResize" @pointerup.stop="finishOverlayResize" @pointercancel.stop="finishOverlayResize" @click.stop></button>
-          <span v-if="annotationPanelOpen && annotationRegion && annotationDraft.kind!=='draw'" class="pdf-annotation-region" :style="{left:`${annotationRegion.x*100}%`,top:`${annotationRegion.y*100}%`,width:`${annotationRegion.width*100}%`,height:`${annotationRegion.height*100}%`}" aria-hidden="true"></span>
-          <svg v-if="annotationPanelOpen && annotationDraft.kind==='draw' && annotationDrawing && annotationDrawPoints.length" :class="['pdf-draw-live',annotationDraft.color]" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"><polyline :points="annotationDrawPoints.map(point=>`${point.x*1000},${point.y*1000}`).join(' ')"/></svg>
-          <span v-if="annotationPanelOpen && annotationDraft.kind==='draw' && annotationRegion && !annotationDrawing" :class="['pdf-review-shape','draft','draw',annotationDraft.color]" :style="{left:`${annotationRegion.x*100}%`,top:`${annotationRegion.y*100}%`,width:`${annotationRegion.width*100}%`,height:`${annotationRegion.height*100}%`}" aria-hidden="true"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline :points="drawPolyline(annotationDraft.body)"/></svg></span>
-          <span v-if="annotationPanelOpen && annotationRegion && ['box','ellipse','line','arrow','check','cross','date'].includes(annotationDraft.kind)" :class="['pdf-review-shape','draft',annotationDraft.kind,annotationDraft.color]" :style="{left:`${annotationRegion.x*100}%`,top:`${annotationRegion.y*100}%`,width:`${annotationRegion.width*100}%`,height:`${annotationRegion.height*100}%`}" aria-hidden="true"><svg v-if="['box','ellipse','line','arrow'].includes(annotationDraft.kind)" viewBox="0 0 100 100" preserveAspectRatio="none"><rect v-if="annotationDraft.kind==='box'" x="3" y="3" width="94" height="94" rx="1"/><ellipse v-else-if="annotationDraft.kind==='ellipse'" cx="50" cy="50" rx="47" ry="47"/><line v-else x1="4" y1="96" x2="96" y2="4"/><polyline v-if="annotationDraft.kind==='arrow'" points="68,4 96,4 96,32"/></svg><span v-else>{{annotationDraft.kind==='check'?'✓':annotationDraft.kind==='cross'?'✕':annotationDraft.body}}</span></span>
-          <img v-if="annotationPanelOpen && annotationRegion && annotationDraft.kind==='image' && annotationPreviewUrl" class="pdf-image-overlay pdf-image-draft" :src="annotationPreviewUrl" alt="Image placement preview" :style="{left:`${annotationRegion.x*100}%`,top:`${annotationRegion.y*100}%`,width:`${annotationRegion.width*100}%`,height:`${annotationRegion.height*100}%`}"/>
-          <span v-if="redactionOpen && redactionRegion" class="pdf-redaction-region" :style="{left:`${redactionRegion.x*100}%`,top:`${redactionRegion.y*100}%`,width:`${redactionRegion.width*100}%`,height:`${redactionRegion.height*100}%`}" aria-label="Marked redaction area; drag to move, or drag a corner to resize" @pointerdown.stop="beginRedactionMove" @pointermove.stop="updateRedactionMove" @pointerup.stop="finishRedactionMove" @pointercancel.stop="finishRedactionMove">
-            <button v-for="corner in redactionCorners" :key="corner" type="button" :class="['pdf-redaction-handle',corner]" :aria-label="`Resize redaction area from ${corner} corner`" :disabled="redactionBusy || disabled" @pointerdown.stop="beginRedactionResize($event,corner)" @pointermove.stop="updateRedactionResize" @pointerup.stop="finishRedactionResize" @pointercancel.stop="finishRedactionResize"></button>
-          </span>
-          <button v-for="item in (redactionOpen ? appliedRedactions.filter(entry => entry.page_index === current-1) : [])" :key="item.id" type="button" class="pdf-applied-redaction" :class="{selected:selectedRedactionId===item.id}" :style="{left:`${item.restore_x*100}%`,top:`${item.restore_y*100}%`,width:`${item.restore_width*100}%`,height:`${item.restore_height*100}%`}" :aria-label="`Select applied redaction on page ${current}`" :aria-pressed="selectedRedactionId===item.id" @pointerdown.stop @click.stop="selectedRedactionId=item.id"></button>
-          <span v-for="item in markPreview" :key="item.kind" :class="['pdf-output-mark-preview',item.kind,{overlap:item.overlaps_content}]" :style="{left:`${item.relative_rect[0]*100}%`,top:`${item.relative_rect[1]*100}%`,width:`${item.relative_rect[2]*100}%`,height:`${item.relative_rect[3]*100}%`,fontSize:`${item.font_size*pageZoom}px`,opacity:item.opacity,textAlign:item.position.endsWith('left')?'left':item.position.endsWith('right')?'right':'center'}"><span>{{item.text}}</span></span>
-          <template v-if="editTextMode">
-            <button v-for="run in textRuns" :key="run.index" class="pdf-text-run" :class="{selected:selectedRun?.index===run.index, 'move-target':movingRun?.index===run.index}"
-              :style="{left:`${(run.relative_bbox[0]+(movingRun?.index===run.index ? horizontalOffset : 0))*100}%`,top:`${(run.relative_bbox[1]+(movingRun?.index===run.index ? verticalOffset : 0))*100}%`,width:`${(run.relative_bbox[2]-run.relative_bbox[0])*100}%`,height:`${(run.relative_bbox[3]-run.relative_bbox[1])*100}%`}"
-              :aria-label="`Edit text: ${run.text}`" :disabled="disabled || editing" @click.stop="clickRun(run)" @pointerdown="beginMove($event, run)" @pointermove="updateMove" @pointerup="finishMove" @pointercancel="finishMove"><span v-if="movingRun?.index===run.index" class="pdf-move-label">{{run.text}}</span></button>
-          </template>
-          <div v-if="editTextMode && selectedRun" class="pdf-inline-editor" :style="inlineEditorStyle" @click.stop>
-            <div class="pdf-edit-scope"><span>{{replacementEngine==='pdfium-trial'?'Whole paragraph':'Selected text'}}</span><button v-if="paragraphTrialAvailable" type="button" class="text-tool" :disabled="editing" @click="replacementEngine=replacementEngine==='pdfium-trial'?'pymupdf':'pdfium-trial'">{{replacementEngine==='pdfium-trial'?'Edit selected text only':'Edit whole paragraph'}}</button></div>
-            <label :for="`replacement-${selectedRun.index}`">Replacement</label>
-            <textarea :id="`replacement-${selectedRun.index}`" ref="inlineReplacementInput" v-model="replacement" maxlength="2000" rows="2" :disabled="editing || disabled || (replacementEngine==='pdfium-trial' && !selectedParagraph)" aria-describedby="inline-edit-hint" @keydown.esc.stop.prevent="cancelReplacement" @keydown.meta.enter.prevent="applyReplacement" @keydown.ctrl.enter.prevent="applyReplacement"></textarea>
-            <span id="inline-edit-hint" class="pdf-inline-hint">{{replacementEngine==='pdfium-trial' ? (selectedParagraph ? 'Editing the whole detected paragraph' : 'Loading whole paragraph…') : replacement.includes('\n') ? 'Lines need clear space below; use Edit whole paragraph to include nearby lines' : 'Apply change'}} · Esc to cancel</span>
-            <p v-if="runsError" class="error-msg" role="alert">{{runsError}}</p>
-            <div class="pdf-inline-actions">
-              <button class="btn secondary small" :disabled="editing" @click="cancelReplacement">Cancel</button>
-              <button class="btn secondary small" :disabled="!replacement.trim() || editing || disabled || (replacementEngine==='pdfium-trial' && !selectedParagraph)" @click="applyReplacement">Apply replacement</button>
+          <div
+            v-if="(loading || editing) && !(replacingText && editSnapshot)"
+            class="preview-status"
+            role="status"
+            ><LoaderCircle :size="18" class="spin" />
+            {{ editing ? 'Updating PDF…' : 'Loading PDF…' }}</div
+          >
+          <div
+            v-if="readingPositionError && !engineBlocked"
+            class="preview-status error-msg"
+            role="status"
+            >{{ readingPositionError }}</div
+          >
+          <div v-if="viewerError" class="preview-status error-msg" role="alert"
+            >Page {{ current }} unavailable.
+            {{
+              engineBlocked
+                ? 'Its data may not be loaded. Reconnect, then retry this PDF.'
+                : viewerError
+            }}
+            <button
+              class="btn secondary small"
+              :disabled="engineBlocked"
+              @click="emit('retryReader')"
+              >Retry PDF</button
+            ></div
+          >
+          <PdfReaderViewport
+            :horizontal-gutter="32"
+            ref="readerViewport"
+            :pdf="readerPdf"
+            v-model:page="current"
+            :zoom="zoomChoice"
+            :rotation="viewRotation"
+            :mode="activeTool === 'select' ? readerMode : 'single'"
+            :interactive="activeTool === 'select' && (!disabled || engineBlocked)"
+            :matches="findOpen ? findMatches : []"
+            :active-match-index="findOpen ? findIndex : -1"
+            :surface-class="{
+              'selecting-text': activeTool === 'select' && (!disabled || engineBlocked),
+              'placing-text': textMode && !disabled,
+              'drawing-link': linkPanelOpen && !disabled,
+              'drawing-annotation': annotationPanelOpen && !disabled,
+              'drawing-redaction': redactionOpen && !disabled,
+              'is-busy': (loading || editing) && !replacingText,
+              'is-edit-refreshing': replacingText,
+              'is-stale': !pageReady,
+              'is-rotating': rotatingPage,
+            }"
+            @position="rememberPosition"
+            @ready="pageRendered"
+            @error="viewerError = $event"
+            @internal-link="navigateToPage($event)"
+            @external-link="emit('openExternalLink', $event)"
+            @surface-click="clickPageSurface"
+            @surface-pointerdown="
+              beginLinkRegion($event);
+              beginAnnotationRegion($event);
+              beginRedactionRegion($event);
+            "
+            @surface-pointermove="
+              updateLinkRegion($event);
+              updateAnnotationRegion($event);
+              updateRedactionRegion($event);
+            "
+            @surface-pointerup="
+              finishLinkRegion($event);
+              finishAnnotationRegion($event);
+              finishRedactionRegion($event);
+            "
+            @surface-pointercancel="
+              finishLinkRegion($event);
+              finishAnnotationRegion($event);
+              finishRedactionRegion($event);
+            "
+          >
+            <span
+              v-if="textMode && placement && placement.page === current && overlayText"
+              class="pdf-add-text-preview"
+              :style="{
+                left: `${placement.x * 100}%`,
+                top: `${placement.y * 100}%`,
+                fontSize: `${overlaySize * pageZoom}px`,
+              }"
+              >{{ overlayText }}</span
+            >
+            <div
+              v-if="textMode && placement && placement.page === current"
+              class="pdf-inline-add-card"
+              :style="inlineAddStyle"
+              @click.stop
+              @pointerdown.stop
+            >
+              <label
+                >Add text on page {{ current
+                }}<textarea
+                  ref="inlineAddInput"
+                  v-model="overlayText"
+                  maxlength="1000"
+                  rows="3"
+                  :disabled="editing || disabled"
+                  placeholder="Type text here"
+                  @keydown.esc.stop.prevent="placement = null"
+                  @keydown.meta.enter.prevent="placeText"
+                  @keydown.ctrl.enter.prevent="placeText"
+                ></textarea>
+              </label>
+              <label
+                >Size
+                <input
+                  v-model.number="overlaySize"
+                  type="number"
+                  min="6"
+                  max="36"
+                  :disabled="editing || disabled"
+                />
+                pt</label
+              >
+              <small class="pdf-add-text-guidance"
+                >Printable ASCII · 6–36 pt · Ctrl/⌘+Enter to apply</small
+              >
+              <div class="pdf-inline-add-actions"
+                ><button class="btn secondary small" :disabled="editing" @click="placement = null"
+                  >Cancel</button
+                ><button
+                  class="btn primary small"
+                  :disabled="!!overlayValidation || editing || disabled"
+                  :title="overlayValidation || undefined"
+                  @click="placeText"
+                  >Apply text</button
+                ></div
+              >
             </div>
-          </div>
-      </PdfReaderViewport>
-
+            <span
+              v-if="placement && placement.page === current && !overlayText"
+              class="pdf-placement-marker"
+              :style="{ left: `${placement.x * 100}%`, top: `${placement.y * 100}%` }"
+              aria-hidden="true"
+            ></span>
+            <img
+              v-if="editSnapshot"
+              class="pdf-edit-snapshot"
+              :class="{ 'is-fading': editSnapshotFading }"
+              :src="editSnapshot"
+              alt=""
+              aria-hidden="true"
+            />
+            <button
+              v-for="item in currentPageLinks"
+              :key="item.id"
+              type="button"
+              :class="[
+                'pdf-reviewed-link',
+                { unresolved: !item.resolved, selected: overlaySelected('link', item.id) },
+              ]"
+              :style="{
+                left: `${item.rect_x * 100}%`,
+                top: `${item.rect_y * 100}%`,
+                width: `${item.rect_width * 100}%`,
+                height: `${item.rect_height * 100}%`,
+                ...overlayStyle('link', item.id),
+              }"
+              :title="
+                item.resolved
+                  ? item.title + ' · drag to move, Delete to remove, double-click to follow'
+                  : item.title + ' — needs review'
+              "
+              :aria-label="`Select link ${item.title}; drag to move or press Delete to remove`"
+              :aria-pressed="overlaySelected('link', item.id)"
+              @pointerdown.stop="beginOverlayDrag($event, 'link', item)"
+              @pointermove.stop="updateOverlayDrag"
+              @pointerup.stop="finishOverlayDrag"
+              @pointercancel.stop="finishOverlayDrag"
+              @click.stop="clickOverlay('link', item)"
+              @dblclick.stop="followReviewedLink(item)"
+              ><span>{{ item.title }}</span></button
+            >
+            <span
+              v-if="linkPanelOpen && linkRegion"
+              class="pdf-link-region"
+              :style="{
+                left: `${linkRegion.x * 100}%`,
+                top: `${linkRegion.y * 100}%`,
+                width: `${linkRegion.width * 100}%`,
+                height: `${linkRegion.height * 100}%`,
+              }"
+              aria-hidden="true"
+            ></span>
+            <template v-for="item in currentPageAnnotations" :key="item.id">
+              <img
+                v-if="item.kind === 'image' && item.resolved && annotationImageUrls[item.id]"
+                :class="['pdf-image-overlay', { selected: overlaySelected('annotation', item.id) }]"
+                :src="annotationImageUrls[item.id]"
+                :alt="item.body || 'User-added image overlay'"
+                role="button"
+                tabindex="0"
+                :aria-label="
+                  item.body || 'Select image overlay; drag to move or press Delete to remove'
+                "
+                :style="{
+                  left: `${item.rect_x * 100}%`,
+                  top: `${item.rect_y * 100}%`,
+                  width: `${item.rect_width * 100}%`,
+                  height: `${item.rect_height * 100}%`,
+                  ...overlayStyle('annotation', item.id),
+                }"
+                @pointerdown.stop="beginOverlayDrag($event, 'annotation', item)"
+                @pointermove.stop="updateOverlayDrag"
+                @pointerup.stop="finishOverlayDrag"
+                @pointercancel.stop="finishOverlayDrag"
+                @click.stop="clickOverlay('annotation', item)"
+                @keydown.enter.stop.prevent="clickOverlay('annotation', item)"
+                @keydown.space.stop.prevent="clickOverlay('annotation', item)"
+              />
+              <button
+                v-else-if="item.kind === 'highlight'"
+                type="button"
+                :class="[
+                  'pdf-review-highlight',
+                  item.color,
+                  { unresolved: !item.resolved, selected: overlaySelected('annotation', item.id) },
+                ]"
+                :style="{
+                  left: `${item.rect_x * 100}%`,
+                  top: `${item.rect_y * 100}%`,
+                  width: `${item.rect_width * 100}%`,
+                  height: `${item.rect_height * 100}%`,
+                  ...overlayStyle('annotation', item.id),
+                }"
+                :title="item.body || 'Private highlight'"
+                :aria-label="'Select highlight; drag to move or press Delete to remove'"
+                :aria-pressed="overlaySelected('annotation', item.id)"
+                @pointerdown.stop="beginOverlayDrag($event, 'annotation', item)"
+                @pointermove.stop="updateOverlayDrag"
+                @pointerup.stop="finishOverlayDrag"
+                @pointercancel.stop="finishOverlayDrag"
+                @click.stop="clickOverlay('annotation', item)"
+              ></button>
+              <button
+                v-else-if="item.kind === 'comment'"
+                type="button"
+                :class="[
+                  'pdf-review-comment',
+                  item.color,
+                  { unresolved: !item.resolved, selected: overlaySelected('annotation', item.id) },
+                ]"
+                :style="{
+                  left: `${item.rect_x * 100}%`,
+                  top: `${item.rect_y * 100}%`,
+                  width: `${item.rect_width * 100}%`,
+                  height: `${item.rect_height * 100}%`,
+                  ...overlayStyle('annotation', item.id),
+                }"
+                :title="preparation ? undefined : item.body"
+                :aria-label="
+                  preparation
+                    ? 'Show comment'
+                    : 'Select comment; drag to move or press Delete to remove'
+                "
+                :aria-expanded="preparation ? viewedCommentId === item.id : undefined"
+                :aria-controls="
+                  preparation && viewedCommentId === item.id ? 'pdf-comment-popover' : undefined
+                "
+                :aria-pressed="overlaySelected('annotation', item.id)"
+                @pointerdown.stop="beginOverlayDrag($event, 'annotation', item)"
+                @pointermove.stop="updateOverlayDrag"
+                @pointerup.stop="finishOverlayDrag"
+                @pointercancel.stop="finishOverlayDrag"
+                @click.stop="clickOverlay('annotation', item)"
+                ><MessageSquare
+                  :size="Math.max(12, Math.min(22, item.rect_width * pageZoom * 300))"
+              /></button>
+              <button
+                v-else-if="item.kind !== 'image'"
+                type="button"
+                :class="[
+                  'pdf-review-shape',
+                  item.kind,
+                  item.color,
+                  { unresolved: !item.resolved, selected: overlaySelected('annotation', item.id) },
+                ]"
+                :style="{
+                  left: `${item.rect_x * 100}%`,
+                  top: `${item.rect_y * 100}%`,
+                  width: `${item.rect_width * 100}%`,
+                  height: `${item.rect_height * 100}%`,
+                  ...(item.kind === 'text' ? textOverlayStyle(item) : {}),
+                  ...overlayStyle('annotation', item.id),
+                }"
+                :aria-label="`Select ${annotationKindLabel(item.kind)}; drag to move or press Delete to remove`"
+                :aria-pressed="overlaySelected('annotation', item.id)"
+                @pointerdown.stop="beginOverlayDrag($event, 'annotation', item)"
+                @pointermove.stop="updateOverlayDrag"
+                @pointerup.stop="finishOverlayDrag"
+                @pointercancel.stop="finishOverlayDrag"
+                @click.stop="clickOverlay('annotation', item)"
+              >
+                <svg
+                  v-if="['draw', 'box', 'ellipse', 'line', 'arrow'].includes(item.kind)"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <polyline v-if="item.kind === 'draw'" :points="drawPolyline(item.body)" />
+                  <rect v-else-if="item.kind === 'box'" x="3" y="3" width="94" height="94" rx="1" />
+                  <ellipse v-else-if="item.kind === 'ellipse'" cx="50" cy="50" rx="47" ry="47" />
+                  <line v-else x1="4" y1="96" x2="96" y2="4" />
+                  <polyline v-if="item.kind === 'arrow'" points="68,4 96,4 96,32" />
+                </svg>
+                <span v-else :style="item.kind === 'text' ? textOverlayStyle(item) : undefined">{{
+                  item.kind === 'check' ? '✓' : item.kind === 'cross' ? '✕' : item.body
+                }}</span>
+              </button>
+              <button
+                v-else-if="item.kind === 'image'"
+                type="button"
+                :class="[
+                  'pdf-stale-image-overlay',
+                  { selected: overlaySelected('annotation', item.id) },
+                ]"
+                :style="{
+                  left: `${item.rect_x * 100}%`,
+                  top: `${item.rect_y * 100}%`,
+                  width: `${item.rect_width * 100}%`,
+                  height: `${item.rect_height * 100}%`,
+                }"
+                title="Image overlay needs review after a revision change"
+                @pointerdown.stop
+                @click.stop="clickOverlay('annotation', item)"
+                >Image needs review</button
+              >
+            </template>
+            <div
+              v-if="preparation && viewedComment && viewedComment.page_index === current - 1"
+              id="pdf-comment-popover"
+              class="pdf-comment-popover"
+              :style="viewedCommentStyle"
+              role="dialog"
+              aria-label="Comment"
+              @click.stop
+              @pointerdown.stop
+            >
+              <div class="pdf-comment-popover-heading"
+                ><span
+                  ><MessageSquare :size="15" aria-hidden="true" /> Comment · Source
+                  {{ current }}</span
+                ><button
+                  type="button"
+                  class="icon-btn small"
+                  aria-label="Close comment"
+                  @click="closeViewedComment"
+                  ><X :size="15" /></button
+              ></div>
+              <p class="pdf-comment-popover-body">{{ viewedComment.body }}</p>
+              <span class="pdf-comment-popover-meta"
+                >{{ annotationTime(viewedComment) }} · Private review note</span
+              >
+            </div>
+            <button
+              v-if="!preparation && selectedOverlayItem?.resolved"
+              type="button"
+              class="pdf-overlay-size-handle"
+              :style="{
+                left: `${(selectedOverlayItem.rect_x + (overlayResizeSize?.width ?? selectedOverlayItem.rect_width) + overlayOffset.x) * 100}%`,
+                top: `${(selectedOverlayItem.rect_y + (overlayResizeSize?.height ?? selectedOverlayItem.rect_height) + overlayOffset.y) * 100}%`,
+              }"
+              :aria-label="`Resize selected ${selectedOverlayLabel}`"
+              @pointerdown.stop="beginOverlayResize"
+              @pointermove.stop="updateOverlayResize"
+              @pointerup.stop="finishOverlayResize"
+              @pointercancel.stop="finishOverlayResize"
+              @click.stop
+            ></button>
+            <span
+              v-if="annotationPanelOpen && annotationRegion && annotationDraft.kind !== 'draw'"
+              class="pdf-annotation-region"
+              :style="{
+                left: `${annotationRegion.x * 100}%`,
+                top: `${annotationRegion.y * 100}%`,
+                width: `${annotationRegion.width * 100}%`,
+                height: `${annotationRegion.height * 100}%`,
+              }"
+              aria-hidden="true"
+            ></span>
+            <svg
+              v-if="
+                annotationPanelOpen &&
+                annotationDraft.kind === 'draw' &&
+                annotationDrawing &&
+                annotationDrawPoints.length
+              "
+              :class="['pdf-draw-live', annotationDraft.color]"
+              viewBox="0 0 1000 1000"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <polyline
+                :points="
+                  annotationDrawPoints
+                    .map((point) => `${point.x * 1000},${point.y * 1000}`)
+                    .join(' ')
+                "
+              />
+            </svg>
+            <span
+              v-if="
+                annotationPanelOpen &&
+                annotationDraft.kind === 'draw' &&
+                annotationRegion &&
+                !annotationDrawing
+              "
+              :class="['pdf-review-shape', 'draft', 'draw', annotationDraft.color]"
+              :style="{
+                left: `${annotationRegion.x * 100}%`,
+                top: `${annotationRegion.y * 100}%`,
+                width: `${annotationRegion.width * 100}%`,
+                height: `${annotationRegion.height * 100}%`,
+              }"
+              aria-hidden="true"
+              ><svg viewBox="0 0 100 100" preserveAspectRatio="none">
+                <polyline :points="drawPolyline(annotationDraft.body)" /></svg
+            ></span>
+            <span
+              v-if="
+                annotationPanelOpen &&
+                annotationRegion &&
+                ['box', 'ellipse', 'line', 'arrow', 'check', 'cross', 'date'].includes(
+                  annotationDraft.kind,
+                )
+              "
+              :class="['pdf-review-shape', 'draft', annotationDraft.kind, annotationDraft.color]"
+              :style="{
+                left: `${annotationRegion.x * 100}%`,
+                top: `${annotationRegion.y * 100}%`,
+                width: `${annotationRegion.width * 100}%`,
+                height: `${annotationRegion.height * 100}%`,
+              }"
+              aria-hidden="true"
+              ><svg
+                v-if="['box', 'ellipse', 'line', 'arrow'].includes(annotationDraft.kind)"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                <rect
+                  v-if="annotationDraft.kind === 'box'"
+                  x="3"
+                  y="3"
+                  width="94"
+                  height="94"
+                  rx="1"
+                />
+                <ellipse
+                  v-else-if="annotationDraft.kind === 'ellipse'"
+                  cx="50"
+                  cy="50"
+                  rx="47"
+                  ry="47"
+                />
+                <line v-else x1="4" y1="96" x2="96" y2="4" />
+                <polyline v-if="annotationDraft.kind === 'arrow'" points="68,4 96,4 96,32" /></svg
+              ><span v-else>{{
+                annotationDraft.kind === 'check'
+                  ? '✓'
+                  : annotationDraft.kind === 'cross'
+                    ? '✕'
+                    : annotationDraft.body
+              }}</span></span
+            >
+            <img
+              v-if="
+                annotationPanelOpen &&
+                annotationRegion &&
+                annotationDraft.kind === 'image' &&
+                annotationPreviewUrl
+              "
+              class="pdf-image-overlay pdf-image-draft"
+              :src="annotationPreviewUrl"
+              alt="Image placement preview"
+              :style="{
+                left: `${annotationRegion.x * 100}%`,
+                top: `${annotationRegion.y * 100}%`,
+                width: `${annotationRegion.width * 100}%`,
+                height: `${annotationRegion.height * 100}%`,
+              }"
+            />
+            <span
+              v-if="redactionOpen && redactionRegion"
+              class="pdf-redaction-region"
+              :style="{
+                left: `${redactionRegion.x * 100}%`,
+                top: `${redactionRegion.y * 100}%`,
+                width: `${redactionRegion.width * 100}%`,
+                height: `${redactionRegion.height * 100}%`,
+              }"
+              aria-label="Marked redaction area; drag to move, or drag a corner to resize"
+              @pointerdown.stop="beginRedactionMove"
+              @pointermove.stop="updateRedactionMove"
+              @pointerup.stop="finishRedactionMove"
+              @pointercancel.stop="finishRedactionMove"
+            >
+              <button
+                v-for="corner in redactionCorners"
+                :key="corner"
+                type="button"
+                :class="['pdf-redaction-handle', corner]"
+                :aria-label="`Resize redaction area from ${corner} corner`"
+                :disabled="redactionBusy || disabled"
+                @pointerdown.stop="beginRedactionResize($event, corner)"
+                @pointermove.stop="updateRedactionResize"
+                @pointerup.stop="finishRedactionResize"
+                @pointercancel.stop="finishRedactionResize"
+              ></button>
+            </span>
+            <button
+              v-for="item in redactionOpen
+                ? appliedRedactions.filter((entry) => entry.page_index === current - 1)
+                : []"
+              :key="item.id"
+              type="button"
+              class="pdf-applied-redaction"
+              :class="{ selected: selectedRedactionId === item.id }"
+              :style="{
+                left: `${item.restore_x * 100}%`,
+                top: `${item.restore_y * 100}%`,
+                width: `${item.restore_width * 100}%`,
+                height: `${item.restore_height * 100}%`,
+              }"
+              :aria-label="`Select applied redaction on page ${current}`"
+              :aria-pressed="selectedRedactionId === item.id"
+              @pointerdown.stop
+              @click.stop="selectedRedactionId = item.id"
+            ></button>
+            <span
+              v-for="item in markPreview"
+              :key="item.kind"
+              :class="['pdf-output-mark-preview', item.kind, { overlap: item.overlaps_content }]"
+              :style="{
+                left: `${item.relative_rect[0] * 100}%`,
+                top: `${item.relative_rect[1] * 100}%`,
+                width: `${item.relative_rect[2] * 100}%`,
+                height: `${item.relative_rect[3] * 100}%`,
+                fontSize: `${item.font_size * pageZoom}px`,
+                opacity: item.opacity,
+                textAlign: item.position.endsWith('left')
+                  ? 'left'
+                  : item.position.endsWith('right')
+                    ? 'right'
+                    : 'center',
+              }"
+              ><span>{{ item.text }}</span></span
+            >
+            <template v-if="editTextMode">
+              <button
+                v-for="run in textRuns"
+                :key="run.index"
+                class="pdf-text-run"
+                :class="{
+                  selected: selectedRun?.index === run.index,
+                  'move-target': movingRun?.index === run.index,
+                }"
+                :style="{
+                  left: `${(run.relative_bbox[0] + (movingRun?.index === run.index ? horizontalOffset : 0)) * 100}%`,
+                  top: `${(run.relative_bbox[1] + (movingRun?.index === run.index ? verticalOffset : 0)) * 100}%`,
+                  width: `${(run.relative_bbox[2] - run.relative_bbox[0]) * 100}%`,
+                  height: `${(run.relative_bbox[3] - run.relative_bbox[1]) * 100}%`,
+                }"
+                :aria-label="`Edit text: ${run.text}`"
+                :disabled="disabled || editing"
+                @click.stop="clickRun(run)"
+                @pointerdown="beginMove($event, run)"
+                @pointermove="updateMove"
+                @pointerup="finishMove"
+                @pointercancel="finishMove"
+                ><span v-if="movingRun?.index === run.index" class="pdf-move-label">{{
+                  run.text
+                }}</span></button
+              >
+            </template>
+            <div
+              v-if="editTextMode && selectedRun"
+              class="pdf-inline-editor"
+              :style="inlineEditorStyle"
+              @click.stop
+            >
+              <div class="pdf-edit-scope"
+                ><span>{{
+                  replacementEngine === 'pdfium-trial' ? 'Whole paragraph' : 'Selected text'
+                }}</span
+                ><button
+                  v-if="paragraphTrialAvailable"
+                  type="button"
+                  class="text-tool"
+                  :disabled="editing"
+                  @click="
+                    replacementEngine =
+                      replacementEngine === 'pdfium-trial' ? 'pymupdf' : 'pdfium-trial'
+                  "
+                  >{{
+                    replacementEngine === 'pdfium-trial'
+                      ? 'Edit selected text only'
+                      : 'Edit whole paragraph'
+                  }}</button
+                ></div
+              >
+              <label :for="`replacement-${selectedRun.index}`">Replacement</label>
+              <textarea
+                :id="`replacement-${selectedRun.index}`"
+                ref="inlineReplacementInput"
+                v-model="replacement"
+                maxlength="2000"
+                rows="2"
+                :disabled="
+                  editing ||
+                  disabled ||
+                  (replacementEngine === 'pdfium-trial' && !selectedParagraph)
+                "
+                aria-describedby="inline-edit-hint"
+                @keydown.esc.stop.prevent="cancelReplacement"
+                @keydown.meta.enter.prevent="applyReplacement"
+                @keydown.ctrl.enter.prevent="applyReplacement"
+              ></textarea>
+              <span id="inline-edit-hint" class="pdf-inline-hint"
+                >{{
+                  replacementEngine === 'pdfium-trial'
+                    ? selectedParagraph
+                      ? 'Editing the whole detected paragraph'
+                      : 'Loading whole paragraph…'
+                    : replacement.includes('\n')
+                      ? 'Lines need clear space below; use Edit whole paragraph to include nearby lines'
+                      : 'Apply change'
+                }}
+                · Esc to cancel</span
+              >
+              <p v-if="runsError" class="error-msg" role="alert">{{ runsError }}</p>
+              <div class="pdf-inline-actions">
+                <button class="btn secondary small" :disabled="editing" @click="cancelReplacement"
+                  >Cancel</button
+                >
+                <button
+                  class="btn secondary small"
+                  :disabled="
+                    !replacement.trim() ||
+                    editing ||
+                    disabled ||
+                    (replacementEngine === 'pdfium-trial' && !selectedParagraph)
+                  "
+                  @click="applyReplacement"
+                  >Apply replacement</button
+                >
+              </div>
+            </div>
+          </PdfReaderViewport>
+        </div>
       </div>
-      </div>
-      <PageOrganizer v-if="organizerOpen" :document="document" :disabled="!!disabled || editing" @close="organizerOpen=false" @modified="emit('modified')" @error="emit('error',$event)" @page-tools="(task,pages,side)=>emit('pageTools',task,pages,side)" @review-page-map="emit('reviewPageMap')"/>
-
+      <PageOrganizer
+        v-if="organizerOpen"
+        :document="document"
+        :disabled="!!disabled || editing"
+        @close="organizerOpen = false"
+        @modified="emit('modified')"
+        @error="emit('error', $event)"
+        @page-tools="(task, pages, side) => emit('pageTools', task, pages, side)"
+        @review-page-map="emit('reviewPageMap')"
+      />
     </template>
-    <div v-else class="viewer-empty"><FileSearch :size="44"/><strong>Document preview</strong><span>Select a file to review its pages</span><div v-if="expanded" class="empty-reader-history"><button class="btn secondary small" aria-label="Undo last matter change" :title="undoDescription" :disabled="!canUndo || disabled" @click="emit('undo')"><Undo2 :size="16"/> Undo</button><button class="btn secondary small" aria-label="Redo last matter change" :title="redoDescription" :disabled="!canRedo || disabled" @click="emit('redo')"><Redo2 :size="16"/> Redo</button></div></div>
+    <div v-else class="viewer-empty"
+      ><FileSearch :size="44" /><strong>Document preview</strong
+      ><span>Select a file to review its pages</span
+      ><div v-if="expanded" class="empty-reader-history"
+        ><button
+          class="btn secondary small"
+          aria-label="Undo last matter change"
+          :title="undoDescription"
+          :disabled="!canUndo || disabled"
+          @click="emit('undo')"
+          ><Undo2 :size="16" /> Undo</button
+        ><button
+          class="btn secondary small"
+          aria-label="Redo last matter change"
+          :title="redoDescription"
+          :disabled="!canRedo || disabled"
+          @click="emit('redo')"
+          ><Redo2 :size="16" /> Redo</button
+        ></div
+      ></div
+    >
   </div>
 </template>
