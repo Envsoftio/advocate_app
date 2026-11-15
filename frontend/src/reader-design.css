@@ -1872,8 +1872,8 @@ body:has(.design-shell) {
   margin-top: auto;
 }
 
-/* FLOW / 03: contextual recovery and history use the same dock as editing. */
-.flow03-inspector-content {
+/* Shared PDF editor inspector components across reading, OCR, and redaction. */
+.pdf-editor-inspector-content {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1882,27 +1882,27 @@ body:has(.design-shell) {
   font-size: 13px;
   color: var(--cb-text);
 }
-.flow03-inspector-content h3 {
+.pdf-editor-inspector-content h3 {
   font-size: 15px;
   line-height: 1.35;
   margin: 6px 0 0;
 }
-.flow03-inspector-content h4 {
+.pdf-editor-inspector-content h4 {
   font-size: 12px;
   color: var(--cb-muted);
   margin: 18px 0 0;
 }
-.flow03-inspector-content p {
+.pdf-editor-inspector-content p {
   line-height: 1.45;
   margin: 0;
 }
-.flow03-inspector-content ul {
+.pdf-editor-inspector-content ul {
   margin: 0;
   padding-left: 23px;
   display: grid;
   gap: 12px;
 }
-.flow03-diagnostics {
+.pdf-editor-diagnostics {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
@@ -1912,19 +1912,19 @@ body:has(.design-shell) {
   border-radius: 8px;
   overflow-wrap: anywhere;
 }
-.flow03-diagnostics dt {
+.pdf-editor-diagnostics dt {
   color: var(--cb-muted);
 }
-.flow03-diagnostics dd {
+.pdf-editor-diagnostics dd {
   margin: 0;
   font-weight: 600;
 }
-.flow03-inspector-content .btn {
+.pdf-editor-inspector-content .btn {
   width: 100%;
   justify-content: center;
   min-height: 34px;
 }
-.flow03-status {
+.pdf-editor-status {
   display: inline-flex;
   align-items: center;
   align-self: flex-start;
@@ -1934,15 +1934,15 @@ body:has(.design-shell) {
   font-size: 12px;
   font-weight: 600;
 }
-.flow03-status.danger {
+.pdf-editor-status.danger {
   color: var(--cb-status-danger-text);
   background: var(--cb-dangerBg);
 }
-.flow03-status.warning {
+.pdf-editor-status.warning {
   color: var(--cb-status-warning-text);
   background: var(--cb-warningBg);
 }
-.flow03-notice {
+.pdf-editor-notice {
   margin-top: auto !important;
   padding: 12px;
   border-radius: 8px;
@@ -1950,14 +1950,14 @@ body:has(.design-shell) {
   color: var(--cb-text-onPale);
   line-height: 1.45;
 }
-.flow03-history ol {
+.pdf-editor-history ol {
   list-style: none;
   padding: 0;
   margin: 12px 0;
   display: grid;
   gap: 0;
 }
-.flow03-history li {
+.pdf-editor-history li {
   padding: 13px 10px 13px 27px;
   min-height: 68px;
   border-bottom: 1px solid var(--cb-border);
@@ -1966,7 +1966,7 @@ body:has(.design-shell) {
   flex-direction: column;
   gap: 5px;
 }
-.flow03-history li::before {
+.pdf-editor-history li::before {
   content: "";
   position: absolute;
   left: 8px;
@@ -1976,17 +1976,17 @@ body:has(.design-shell) {
   border-radius: 50%;
   background: var(--cb-link);
 }
-.flow03-history li span {
+.pdf-editor-history li span {
   font-size: 12px;
   color: var(--cb-muted);
 }
-.flow03-history-actions {
+.pdf-editor-history-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   margin-top: auto;
 }
-.flow03-text-object {
+.pdf-editor-text-object {
   display: flex;
   flex-direction: column;
   gap: 17px;
@@ -1995,13 +1995,13 @@ body:has(.design-shell) {
   font-size: 12px;
   overflow: auto;
 }
-.flow03-text-object label {
+.pdf-editor-text-object label {
   display: flex;
   flex-direction: column;
   gap: 7px;
   font-weight: 600;
 }
-.flow03-text-object :is(input, select, textarea) {
+.pdf-editor-text-object :is(input, select, textarea) {
   width: 100%;
   min-width: 0;
   min-height: 34px;
@@ -2013,75 +2013,75 @@ body:has(.design-shell) {
   font: inherit;
   font-weight: 500;
 }
-.flow03-text-object textarea {
+.pdf-editor-text-object textarea {
   resize: vertical;
   line-height: 1.4;
 }
-.flow03-text-object input[readonly] {
+.pdf-editor-text-object input[readonly] {
   background: var(--cb-surface2);
 }
-.flow03-text-fields {
+.pdf-editor-text-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
-.flow03-text-fields label > span {
+.pdf-editor-text-fields label > span {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
 }
-.flow03-text-object fieldset {
+.pdf-editor-text-object fieldset {
   border: 0;
   padding: 0;
   margin: 0;
 }
-.flow03-text-object legend {
+.pdf-editor-text-object legend {
   font-weight: 600;
   margin-bottom: 8px;
 }
-.flow03-align-actions {
+.pdf-editor-align-actions {
   display: flex;
   gap: 10px;
 }
-.flow03-align-actions > button {
+.pdf-editor-align-actions > button {
   border: 1px solid var(--cb-control-border);
   border-radius: 7px;
   min-width: 32px;
 }
-.flow03-align-actions > button[aria-pressed="true"] {
+.pdf-editor-align-actions > button[aria-pressed="true"] {
   background: var(--cb-selected);
   border-color: var(--cb-link);
   color: var(--cb-link);
 }
-.flow03-object-label {
+.pdf-editor-object-label {
   margin-top: 12px;
   border-top: 1px solid var(--cb-border);
   padding-top: 18px;
   letter-spacing: 0.08em;
   color: var(--cb-muted);
 }
-.flow03-edit-object-text {
+.pdf-editor-edit-object-text {
   font-size: 12px;
   color: var(--cb-link);
 }
-.flow03-edit-object-text summary {
+.pdf-editor-edit-object-text summary {
   cursor: pointer;
   padding: 6px 0;
 }
-.flow03-edit-object-text label {
+.pdf-editor-edit-object-text label {
   margin-top: 8px;
   color: var(--cb-text);
 }
-.flow03-text-object > .btn {
+.pdf-editor-text-object > .btn {
   margin-top: auto;
   min-height: 34px;
 }
-.flow03-text-object > p:last-child {
+.pdf-editor-text-object > p:last-child {
   color: var(--cb-muted);
   line-height: 1.4;
   margin: 0;
 }
-.flow03-engine-banner {
+.pdf-editor-engine-banner {
   position: relative;
   z-index: 2;
   display: flex;
@@ -2096,8 +2096,88 @@ body:has(.design-shell) {
   font-size: 13px;
   box-shadow: 0 3px 12px #13243b16;
 }
-.flow03-engine-banner span {
+.pdf-editor-engine-banner span {
   color: var(--cb-text-onCanvas);
+}
+.pdf-editor-inspector-content progress {
+  width: 100%;
+  accent-color: var(--cb-link);
+}
+.pdf-editor-review-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--cb-border);
+}
+.pdf-editor-review-list > p {
+  margin: 4px 0 0;
+  line-height: 1.5;
+  color: var(--cb-muted);
+}
+.pdf-editor-review-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--cb-border);
+  border-radius: 8px;
+  background: var(--cb-surface);
+  color: var(--cb-text);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.pdf-editor-review-row[aria-current="page"] {
+  border-color: var(--cb-link);
+  background: var(--cb-selected);
+}
+.pdf-editor-review-row span,
+.pdf-editor-review-row small {
+  color: var(--cb-muted);
+}
+/* One right-hand inspector layout for editor tools and review states. */
+.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector {
+  grid-template-columns: 48px minmax(0, 1fr) 292px;
+}
+.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector:has(> .virtual-thumbnail-rail),
+.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector:has(> .reader-side-panel) {
+  grid-template-columns: 232px minmax(0, 1fr) 292px;
+}
+.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .viewer-tool-inspector {
+  grid-column: 3;
+  grid-row: 1 / -1;
+  width: 292px;
+  min-height: 0;
+  max-height: none;
+  border: 0;
+  border-left: 1px solid var(--cb-border);
+  border-radius: 0;
+  box-shadow: none;
+}
+.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .viewer-page-column {
+  grid-column: 2;
+  grid-row: 1 / -1;
+}
+.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .reader-panel-tabs,
+.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .virtual-thumbnail-rail,
+.design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .reader-side-panel {
+  grid-column: 1;
+}
+@media (max-width: 900px) {
+  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector:has(> .virtual-thumbnail-rail),
+  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector:has(> .reader-side-panel) {
+    grid-template-columns: 160px minmax(0, 1fr) 240px;
+  }
+  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .viewer-tool-inspector {
+    width: 240px;
+  }
+  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .virtual-thumbnail-rail,
+  .design-shell .read-workspace:not(.preparation-preview) .viewer-edit-workspace.has-tool-inspector > .reader-side-panel {
+    width: 160px;
+  }
 }
 .design-shell
   .read-workspace
@@ -2105,28 +2185,28 @@ body:has(.design-shell) {
   > .text-tool:has(.lucide-undo-2) {
   margin-left: auto;
 }
-.design-shell .tab-discard-dialog.flow03-save-dialog {
+.design-shell .tab-discard-dialog.pdf-editor-save-dialog {
   width: 620px;
   max-width: calc(100vw - 32px);
   min-height: 310px;
   padding: 24px;
   border-radius: 12px;
 }
-.design-shell .tab-discard-dialog.flow03-save-dialog h2 {
+.design-shell .tab-discard-dialog.pdf-editor-save-dialog h2 {
   font-size: 19px;
   line-height: 1.3;
   margin: 0 0 30px;
 }
-.design-shell .tab-discard-dialog.flow03-save-dialog #tab-discard-message {
+.design-shell .tab-discard-dialog.pdf-editor-save-dialog #tab-discard-message {
   font-size: 13px;
   line-height: 1.55;
   max-width: 550px;
 }
-.design-shell .tab-discard-dialog.flow03-save-dialog .tab-discard-actions {
+.design-shell .tab-discard-dialog.pdf-editor-save-dialog .tab-discard-actions {
   margin-top: 34px;
 }
 .design-shell
-  .tab-discard-dialog.flow03-save-dialog
+  .tab-discard-dialog.pdf-editor-save-dialog
   .tab-discard-actions
   > .btn {
   min-width: 86px;
@@ -2256,7 +2336,7 @@ body:has(.design-shell) {
 }
 
 /* FLOW / 03 ED02, ED05, ED01I and ED27B contextual states. */
-.flow03-object-choice {
+.pdf-editor-object-choice {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2267,31 +2347,31 @@ body:has(.design-shell) {
   color: var(--cb-text);
   text-align: left;
 }
-.flow03-object-choice > svg {
+.pdf-editor-object-choice > svg {
   color: var(--cb-muted);
   flex: none;
 }
-.flow03-object-choice span {
+.pdf-editor-object-choice span {
   display: grid;
   gap: 5px;
 }
-.flow03-object-choice small {
+.pdf-editor-object-choice small {
   font-size: 12px;
   color: var(--cb-muted);
 }
-.flow03-object-choice:hover {
+.pdf-editor-object-choice:hover {
   color: var(--cb-link);
 }
-.flow03-information-actions {
+.pdf-editor-information-actions {
   display: grid;
   gap: 12px;
   padding: 0 20px 20px;
 }
-.flow03-information-actions .btn {
+.pdf-editor-information-actions .btn {
   justify-content: flex-start;
   min-height: 34px;
 }
-.flow03-undo-outcome {
+.pdf-editor-undo-outcome {
   display: grid;
   gap: 7px;
   padding: 12px;
@@ -2301,24 +2381,24 @@ body:has(.design-shell) {
   font-size: 12px;
   line-height: 1.4;
 }
-.flow03-undo-outcome small {
+.pdf-editor-undo-outcome small {
   color: var(--cb-muted);
   font-size: 12px;
 }
-.flow03-history li.undone {
+.pdf-editor-history li.undone {
   background: var(--cb-surface2);
 }
-.flow03-history li.undone::before {
+.pdf-editor-history li.undone::before {
   background: transparent;
   border: 2px solid var(--cb-muted);
 }
-.flow03-image-properties {
+.pdf-editor-image-properties {
   display: grid;
   gap: 16px;
   margin-bottom: 20px;
   font-size: 12px;
 }
-.flow03-image-properties > img {
+.pdf-editor-image-properties > img {
   width: 100%;
   height: 108px;
   object-fit: contain;
@@ -2326,31 +2406,31 @@ body:has(.design-shell) {
   border: 1px solid var(--cb-border);
   border-radius: 6px;
 }
-.flow03-image-properties > strong {
+.pdf-editor-image-properties > strong {
   font-size: 11px;
   letter-spacing: 0.08em;
   color: var(--cb-muted);
 }
-.flow03-image-fields {
+.pdf-editor-image-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
-.flow03-image-fields label {
+.pdf-editor-image-fields label {
   display: grid;
   gap: 7px;
 }
-.flow03-image-fields label > span {
+.pdf-editor-image-fields label > span {
   display: flex;
   align-items: center;
   gap: 5px;
 }
-.flow03-image-fields input {
+.pdf-editor-image-fields input {
   width: 100%;
   min-width: 0;
   min-height: 34px;
 }
-.flow03-image-properties p {
+.pdf-editor-image-properties p {
   margin: 0;
   line-height: 1.5;
   color: var(--cb-muted);
@@ -2359,5 +2439,4 @@ body:has(.design-shell) {
 .design-shell .edit-mode-inspector>.viewer-tool-inspector-heading {min-height:56px;padding:16px 20px;font-size:14px}
 .design-shell .edit-mode-inspector>.pdf-selected-overlay-actions {display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:12px 16px;border:0;border-bottom:1px solid var(--cb-border);font-size:11px}
 .design-shell .edit-mode-inspector>.pdf-selected-overlay-actions>span {flex:1 0 100%;line-height:1.45}
-.flow03-image-fields input {padding:7px 10px;border:1px solid var(--cb-control-border);border-radius:7px;background:var(--cb-surface);color:var(--cb-text);font:inherit}
 .design-shell .document-information-panel .reader-document-information {padding:20px;flex:1;min-height:0}

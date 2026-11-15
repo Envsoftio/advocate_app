@@ -1222,3 +1222,12 @@ Literal 100% fidelity is **not established**: only ED31 has a supplied raster, a
 - Final `npm run tauri:build -- --bundles app` passed, producing an unsigned Apple Silicon **73.07 MiB** MatterDraft Studio app with the existing matching sidecar. No backend source changed. Native WebView interaction, OS save/export dialogs, Windows and Intel Mac were not exercised in this pass.
 
 Full illustrated feature parity is **not established**: image-content crop, image rotation/replacement/layer ordering and source-paragraph typography controls remain outside the existing UI/API capabilities. This pass does not represent those controls as implemented. See the review for screen-specific limits.
+
+## ED. FLOW / 04–05 PDF editor layout and review states — 15 November 2026
+
+[Certain] The editor now uses one right-hand inspector layout across annotation, OCR and redaction states. The page thumbnail rail remains visible during OCR, page operations and redaction. OCR processing and recognized-region review are available in the full editor inspector. Saved redaction marks are listed by source page, with an explicit statement that the current working PDF still contains their content until a new Save copy or bundle applies them. Legacy `flow03-` CSS names were replaced with reusable PDF editor component names; no PDF processing endpoint, page map, storage schema or source file handling changed.
+
+- Configured backend: `cd backend && .venv312/bin/python -m pytest -q` — **337 passed**, six dependency warnings.
+- Frontend: `cd frontend && npm run build && npm run test` — production/type build passed and **48/48** unit tests passed.
+- Isolated Chrome regression cases for OCR language, redaction output, annotations, page tools and search passed **5/5**. The new redaction review case passed **1/1**, checked the 292 px right inspector against the canvas, and captured 1440 × 900 and 1024 × 768 synthetic screenshots; both were visually inspected.
+- Design limits remain: the supplied ED21/ED35 states depict applying all staged marks destructively to the working revision, while the current primary Redact action stages marks for Save copy and new bundles. The UI retains the accurate current semantics. The design also includes underlining/strikeout and other controls without equivalent editor operations. Those screens are not claimed complete. Native WebView and OS Save/export were not rerun for this frontend change.

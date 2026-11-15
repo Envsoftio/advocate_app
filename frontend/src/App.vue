@@ -3108,7 +3108,7 @@ watch(sidebarCollapsed, (collapsed) => {
       >
         <section
           class="vault-card tab-discard-dialog"
-          :class="{'batch-review-guard':documentTableOpen && tableDirty,'flow03-save-dialog':editorDiscardDialog}"
+          :class="{'batch-review-guard':documentTableOpen && tableDirty,'pdf-editor-save-dialog':editorDiscardDialog}"
           @keydown.tab="trapNavigationFocus"
           role="alertdialog"
           aria-modal="true"

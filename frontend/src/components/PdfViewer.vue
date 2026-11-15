@@ -204,7 +204,7 @@ const activeOcrJob = computed(() => props.ocrJob?.kind === 'ocr' && props.ocrJob
 const needsOcrPrompt = computed(() => props.preparation && !!props.document &&
   props.document.ocr_status === 'needs_ocr' &&
   !activeOcrJob.value && dismissedOcrPrompt.value !== `${props.document.id}:${props.document.revision}`)
-const needsOcrReview = computed(() => props.preparation && props.document?.ocr_status === 'processed' && !activeOcrJob.value)
+const needsOcrReview = computed(() => props.document?.ocr_status === 'processed' && !activeOcrJob.value)
 const current = ref(1)
 type OcrReview = {document_id:string,revision:number,page_index:number,available:boolean,confidence:number|null,
   regions:Array<{text:string,confidence:number,rect:number[]}>,message:string,accepted_at:string|null,
@@ -633,6 +633,9 @@ watch(pageAnnotations, entries => {
 const currentPageAnnotations = computed(() => pageAnnotations.value.filter(item =>
   item.document_id === props.document?.id && item.page_index === current.value - 1))
 const documentComments = computed(()=>pageAnnotations.value.filter(item=>item.document_id===props.document?.id && item.kind==='comment'))
+const pendingRedactions = computed(() => pageAnnotations.value.filter(item =>
+  item.document_id === props.document?.id && item.kind === 'redaction' && item.resolved)
+  .sort((a,b) => a.page_index-b.page_index || a.rect_y-b.rect_y))
 const viewedComment = computed(() => documentComments.value.find(item=>item.id===viewedCommentId.value) || null)
 const viewedCommentStyle = computed(() => {
   const item=viewedComment.value
@@ -667,6 +670,7 @@ const linkDirty = computed(() => {
 })
 const objectSelectionOpen = computed(() => !props.preparation && activeCategory.value==='edit' && activeTool.value==='select' && !selectedTextAnnotation.value && !historyOpen.value && !readPanel.value)
 const inspectorVisible = computed(() => objectSelectionOpen.value || marksPanelOpen.value ||
+  (!props.preparation && activeCategory.value === 'ocr') ||
   (!props.preparation && !!selectedTextAnnotation.value) ||
   (!props.preparation && engineBlocked.value && engineInspectorOpen.value) || historyOpen.value ||
   textMode.value || editTextMode.value ||
@@ -2066,7 +2070,7 @@ async function applyReplacement() {
         <button class="icon-btn small" :class="{active:commentsOpen}" :aria-label="`Comments (${documentComments.length})`" title="Comments" @click="openReadPanel('comments',$event)"><MessageSquare :size="16"/></button>
         <button v-if="pageBookmarks.length" class="icon-btn small" :aria-label="`Page ${current} bookmarks${pageBookmarks.some(item=>!item.resolved)?' need review':''}`" @click="openReadPanel('page-bookmarks',$event)"><BookOpen :size="16"/></button>
       </div>
-      <PdfThumbnailRail v-if="(preparation && focusedReading && total > 0 && readPanel!=='search') || (!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading && (expanded || activeTool==='select' || activeCategory==='review' || activeCategory==='edit'))" :pdf="readerPdf" :count="total" :page="current" :title="document.title" :search="preparation && focusedReading" @search="showFind"
+      <PdfThumbnailRail v-if="(preparation && focusedReading && total > 0 && readPanel!=='search') || (!preparation && total > 0 && showThumbnails && (!readPanel || readPanel==='information') && !focusedReading)" :pdf="readerPdf" :count="total" :page="current" :title="document.title" :search="preparation && focusedReading" @search="showFind"
         :disabled="disabled || editing || loading" :dragging-page="draggingPage" :drop-target-page="dropTargetPage" @select="navigateToPage($event)" @reorder="reorderThumbnailPage"
         @dragstart="startPageDrag" @dragover="overPage" @drop="dropPage" @dragend="draggingPage=null;dropTargetPage=null"/>
       <aside v-if="readPanel && (!focusedReading || (preparation && readPanel==='search'))" ref="panelElement" id="pdf-read-panel" class="reader-side-panel" :class="{'document-information-panel':readPanel==='information'}" role="region" :aria-label="findOpen ? 'Search document' : readPanel==='information' ? 'Document information' : outlineOpen ? 'Source PDF outline' : commentsOpen ? 'Private review comments' : `Bookmarks on page ${current}`">
@@ -2092,7 +2096,7 @@ async function applyReplacement() {
           <dt>OCR processing</dt><dd>{{document.ocr_status}}<small>OCR text is not legally verified. Search checks text available in this PDF.</small></dd>
           <dt>Source SHA-256</dt><dd class="source-hash">{{document.source_sha256 || 'Unavailable'}}</dd>
         </dl>
-        <div v-if="readPanel==='information'" class="flow03-information-actions">
+        <div v-if="readPanel==='information'" class="pdf-editor-information-actions">
           <button class="btn secondary small" :disabled="editing || loading || disabled" @click="emit('artifact','original')"><BookOpen :size="15"/> View imported original</button>
           <button class="btn secondary small" @click="openReadPanel('comments',$event)"><MessageSquare :size="15"/> Open comments</button>
         </div>
@@ -2114,50 +2118,58 @@ async function applyReplacement() {
         <button v-if="pageBookmarksOpen || outlineOpen" class="text-tool reader-panel-footer" @click="emit('openBookmarks')">Open Index & bookmarks</button>
       </aside>
       <aside v-if="inspectorVisible" class="viewer-tool-inspector" :class="{'marks-inspector':marksPanelOpen, 'edit-mode-inspector':activeCategory==='edit' || historyOpen || engineBlocked}" :aria-label="engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : 'PDF editing controls'">
-        <div class="viewer-tool-inspector-heading"><strong>{{engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : objectSelectionOpen ? 'Document contents' : selectedTextAnnotation ? 'Text' : annotationPanelOpen && editingAnnotationId ? annotationKindLabel(annotationDraft.kind) : toolTitle}}</strong><button class="icon-btn small" :aria-label="engineBlocked || historyOpen ? 'Collapse inspector' : selectedTextAnnotation ? 'Close text properties' : 'Close PDF tool'" :title="engineBlocked || historyOpen ? 'Collapse inspector' : 'Close tool'" @click="engineBlocked ? engineInspectorOpen=false : historyOpen ? historyOpen=false : objectSelectionOpen ? selectCategory('read') : selectedTextAnnotation ? clearOverlaySelection() : toggleTool(activeTool)"><X :size="16"/></button></div>
-      <div v-if="activeCategory==='edit' && selectedOverlayItem && !selectedTextAnnotation" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="closeSelectedProperties"><X :size="14"/></button></div>
-      <div v-if="objectSelectionOpen && !engineBlocked" class="flow03-inspector-content flow03-object-picker" role="region" aria-label="Select a PDF object">
-        <h3>Select an object</h3><p>Click an added text object, image or link on the page to see its properties.</p>
-        <button class="flow03-object-choice" :disabled="disabled || loading" @click="toggleTool('edit-text')"><Type :size="18"/><span><strong>Text</strong><small>Edit an available text block</small></span></button>
-        <button class="flow03-object-choice" :disabled="disabled || loading" @click="openAnnotationTool('image')"><Images :size="18"/><span><strong>Image</strong><small>Add an image, or select one to resize</small></span></button>
-        <button class="flow03-object-choice" :disabled="disabled || loading" @click="toggleTool('links')"><Link2 :size="18"/><span><strong>Link</strong><small>Page destination or URL</small></span></button>
-        <p class="flow03-notice"><strong>Working copy only</strong><br/>The imported original remains preserved.</p>
+        <div class="viewer-tool-inspector-heading"><strong>{{engineBlocked ? 'Engine connection' : historyOpen ? 'Recent actions' : activeCategory==='ocr' ? 'OCR review' : objectSelectionOpen ? 'Document contents' : selectedTextAnnotation ? 'Text' : annotationPanelOpen && editingAnnotationId ? annotationKindLabel(annotationDraft.kind) : toolTitle}}</strong><button class="icon-btn small" :aria-label="engineBlocked || historyOpen ? 'Collapse inspector' : selectedTextAnnotation ? 'Close text properties' : 'Close PDF tool'" :title="engineBlocked || historyOpen ? 'Collapse inspector' : 'Close tool'" @click="engineBlocked ? engineInspectorOpen=false : historyOpen ? historyOpen=false : activeCategory==='ocr' || objectSelectionOpen ? selectCategory('read') : selectedTextAnnotation ? clearOverlaySelection() : toggleTool(activeTool)"><X :size="16"/></button></div>
+      <div v-if="activeCategory==='ocr' && !engineBlocked" class="pdf-editor-inspector-content" role="region" aria-label="OCR processing and review">
+        <span class="pdf-editor-status warning">{{activeOcrJob ? 'Processing locally' : needsOcrReview ? 'Review recommended' : 'Recognition options'}}</span>
+        <h3>{{activeOcrJob ? `Page ${activeOcrJob.progress}% complete` : needsOcrReview ? `Source page ${current} recognition` : 'Make scanned pages searchable'}}</h3>
+        <template v-if="activeOcrJob"><p>{{activeOcrJob.message}}</p><progress :value="activeOcrJob.progress" max="100">{{activeOcrJob.progress}}%</progress><p>{{ocrElapsed ? `Elapsed ${ocrElapsed} · ` : ''}}Other documents remain available.</p><button class="btn secondary small" @click="emit('cancelOcr')">Cancel OCR</button></template>
+        <template v-else-if="needsOcrReview"><p>{{ocrReview?.regions.length ? `${ocrReview.regions.length} low-confidence regions on this page.` : 'Compare the recognized text with the visible scan.'}}</p><div v-for="(region,index) in ocrReview?.regions || []" :key="index" class="pdf-editor-review-row"><strong>Region {{index+1}}</strong><span>{{region.text}}</span><small v-if="region.confidence !== null">Engine score {{Math.round(region.confidence)}} / 100</small></div><p v-if="ocrReviewError" class="error-msg" role="alert">{{ocrReviewError}}</p><button class="btn primary small" :disabled="!ocrReview || ocrReviewBusy || !!ocrReview.accepted_at" @click="acceptOcrReview">{{ocrReview?.accepted_at ? 'Review accepted' : 'Accept page review'}}</button><button class="btn secondary small" :disabled="!ocrReview?.can_rerun || !!ocrReview?.accepted_at || disabled" @click="emit('ocrRerun',current-1,ocrReview!.language)">Rerun this page</button></template>
+        <p v-else>Select a language above, then run OCR on the working copy. The visible scan stays in place.</p>
+        <p class="pdf-editor-notice">OCR text is a recognition aid. Check names, dates and numbers against the scan before use.</p>
       </div>
-      <div v-else-if="engineBlocked" class="flow03-inspector-content" role="region" aria-label="Engine recovery">
-        <span class="flow03-status danger">{{engineState==='changed'?'Review required':'Engine offline'}}</span>
+      <div v-if="activeCategory==='edit' && selectedOverlayItem && !selectedTextAnnotation" class="pdf-selected-overlay-actions" role="status"><span>{{selectedOverlayLabel}} selected · drag to move · drag corner to resize · Delete to remove</span><button class="btn secondary small" :disabled="annotationBusy || linksBusy || disabled" @click="deleteSelectedOverlay">Remove selected</button><button class="icon-btn small" aria-label="Clear selection" @click="closeSelectedProperties"><X :size="14"/></button></div>
+      <div v-if="objectSelectionOpen && !engineBlocked" class="pdf-editor-inspector-content pdf-editor-object-picker" role="region" aria-label="Select a PDF object">
+        <h3>Select an object</h3><p>Click an added text object, image or link on the page to see its properties.</p>
+        <button class="pdf-editor-object-choice" :disabled="disabled || loading" @click="toggleTool('edit-text')"><Type :size="18"/><span><strong>Text</strong><small>Edit an available text block</small></span></button>
+        <button class="pdf-editor-object-choice" :disabled="disabled || loading" @click="openAnnotationTool('image')"><Images :size="18"/><span><strong>Image</strong><small>Add an image, or select one to resize</small></span></button>
+        <button class="pdf-editor-object-choice" :disabled="disabled || loading" @click="toggleTool('links')"><Link2 :size="18"/><span><strong>Link</strong><small>Page destination or URL</small></span></button>
+        <p class="pdf-editor-notice"><strong>Working copy only</strong><br/>The imported original remains preserved.</p>
+      </div>
+      <div v-else-if="engineBlocked" class="pdf-editor-inspector-content" role="region" aria-label="Engine recovery">
+        <span class="pdf-editor-status danger">{{engineState==='changed'?'Review required':'Engine offline'}}</span>
         <h3>{{engineState==='changed'?'Saved inputs changed':'Connection interrupted'}}</h3><p>{{engineState==='changed'?'Review the latest saved state before editing. Retained drafts stay in this window.':'The local processing engine is not responding.'}}</p>
         <button v-if="engineState==='changed'" class="btn primary small" @click="emit('reviewEngine')">Review latest state</button>
         <button v-else class="btn primary small" :disabled="engineState==='checking'" @click="emit('retryReader')">{{engineState==='checking' ? 'Checking…' : 'Retry connection'}}</button>
         <button class="btn secondary small" :aria-expanded="diagnosticsOpen" @click="diagnosticsOpen=!diagnosticsOpen">View diagnostics</button>
-        <dl v-if="diagnosticsOpen" class="flow03-diagnostics"><dt>Engine state</dt><dd>{{engineState}}</dd><dt>Document</dt><dd>{{document?.title}}</dd><dt>Working revision</dt><dd>{{document?.revision}}</dd><dt>Cached page</dt><dd>{{pageReady ? current : 'Unavailable'}}</dd><dt>Last page error</dt><dd>{{viewerError || 'None recorded in this window'}}</dd></dl>
+        <dl v-if="diagnosticsOpen" class="pdf-editor-diagnostics"><dt>Engine state</dt><dd>{{engineState}}</dd><dt>Document</dt><dd>{{document?.title}}</dd><dt>Working revision</dt><dd>{{document?.revision}}</dd><dt>Cached page</dt><dd>{{pageReady ? current : 'Unavailable'}}</dd><dt>Last page error</dt><dd>{{viewerError || 'None recorded in this window'}}</dd></dl>
         <button class="btn secondary small" @click="emit('browseDocuments')">Back to documents</button>
         <h4>Still available</h4><ul><li>Read document pages already loaded</li><li>Search available text</li><li>Review local annotations</li></ul>
-        <p class="flow03-notice">Waiting for the engine<br/>OCR, page transformations and bundle processing are unavailable.</p>
+        <p class="pdf-editor-notice">Waiting for the engine<br/>OCR, page transformations and bundle processing are unavailable.</p>
       </div>
-      <div v-else-if="historyOpen" class="flow03-inspector-content flow03-history" role="region" aria-label="Working history">
+      <div v-else-if="historyOpen" class="pdf-editor-inspector-content pdf-editor-history" role="region" aria-label="Working history">
         <h3>Working session</h3><p>Most recent action first · matter history</p>
-        <div v-if="canRedo" class="flow03-undo-outcome" role="status"><strong>Undo applied</strong><span>{{redoLabel || 'Last action'}} · Redo available</span><small>The previous working state is restored. Imported originals remain unchanged.</small></div>
+        <div v-if="canRedo" class="pdf-editor-undo-outcome" role="status"><strong>Undo applied</strong><span>{{redoLabel || 'Last action'}} · Redo available</span><small>The previous working state is restored. Imported originals remain unchanged.</small></div>
         <ol v-if="recentActions?.length"><li v-for="(action,index) in recentActions" :key="index" :class="{undone:!action.applied}"><strong>{{action.label}}</strong><span>{{action.applied ? index===0 && canUndo ? 'Most recent · Undo available' : 'Saved action' : 'Undone · Redo available'}}</span></li></ol>
         <p v-else>No actions in this matter yet.</p>
-        <div class="flow03-history-actions"><button class="btn secondary small" :disabled="!canUndo || disabled || editing" @click="emit('undo')">Undo</button><button class="btn secondary small" :disabled="!canRedo || disabled || editing" @click="emit('redo')">Redo</button></div>
-        <p class="flow03-notice">Session history<br/>A new edit clears the redo branch. Earlier exports remain unchanged.</p>
+        <div class="pdf-editor-history-actions"><button class="btn secondary small" :disabled="!canUndo || disabled || editing" @click="emit('undo')">Undo</button><button class="btn secondary small" :disabled="!canRedo || disabled || editing" @click="emit('redo')">Redo</button></div>
+        <p class="pdf-editor-notice">Session history<br/>A new edit clears the redo branch. Earlier exports remain unchanged.</p>
       </div>
-      <div v-else-if="editTextMode && !loading && !textRuns.length && !runsError" class="flow03-inspector-content" role="region" aria-label="Text editing unavailable">
-        <span class="flow03-status warning">Edit unavailable</span>
+      <div v-else-if="editTextMode && !loading && !textRuns.length && !runsError" class="pdf-editor-inspector-content" role="region" aria-label="Text editing unavailable">
+        <span class="pdf-editor-status warning">Edit unavailable</span>
         <h3>This page has no directly editable text</h3><p>Page content may be embedded as an image. No change was made to this page.</p>
         <button class="btn primary small" :disabled="disabled" @click="emit('ocr',ocrLanguage,current-1)">Run OCR</button>
         <button class="btn secondary small" :disabled="disabled" @click="toggleTool('add-text')">Add replacement text</button>
         <button class="btn secondary small" @click="toggleTool('edit-text')">Cancel</button>
-        <p class="flow03-notice">Overlay is not redaction<br/>Added text does not remove the image or underlying content. Use Redact to remove sensitive content.</p>
+        <p class="pdf-editor-notice">Overlay is not redaction<br/>Added text does not remove the image or underlying content. Use Redact to remove sensitive content.</p>
       </div>
-      <div v-else-if="selectedTextAnnotation" class="flow03-text-object" role="region" aria-label="Placed text properties">
+      <div v-else-if="selectedTextAnnotation" class="pdf-editor-text-object" role="region" aria-label="Placed text properties">
         <label>Font family<select v-model="textObjectDraft.font_family" :disabled="textObjectBusy || disabled"><option value="helv">Helvetica · built-in PDF font</option><option value="tiro">Times Roman · built-in PDF font</option><option value="cour">Courier · built-in PDF font</option></select></label>
-        <div class="flow03-text-fields"><label>Size<input v-model.number="textObjectDraft.font_size" type="number" min="6" max="36" :disabled="textObjectBusy || disabled"/> pt</label><label>Weight<select v-model="textObjectDraft.bold" :disabled="textObjectBusy || disabled"><option :value="false">Regular</option><option :value="true">Bold</option></select></label></div>
+        <div class="pdf-editor-text-fields"><label>Size<input v-model.number="textObjectDraft.font_size" type="number" min="6" max="36" :disabled="textObjectBusy || disabled"/> pt</label><label>Weight<select v-model="textObjectDraft.bold" :disabled="textObjectBusy || disabled"><option :value="false">Regular</option><option :value="true">Bold</option></select></label></div>
         <label>Text colour<input value="Document ink" readonly/></label>
-        <fieldset><legend>Alignment</legend><div class="flow03-align-actions"><button v-for="alignment in (['left','center','right','justify'] as const)" :key="alignment" class="icon-btn small" :aria-label="`Align ${alignment}`" :aria-pressed="textObjectDraft.alignment===alignment" :disabled="textObjectBusy || disabled" @click="textObjectDraft.alignment=alignment"><component :is="alignment==='left'?AlignLeft:alignment==='center'?AlignCenter:alignment==='right'?AlignRight:AlignJustify" :size="16"/></button></div></fieldset>
-        <strong class="flow03-object-label">OBJECT</strong>
-        <div class="flow03-text-fields"><label>X / Y <span><input v-model.number="textObjectDraft.x" type="number" min="0" :disabled="textObjectBusy || disabled" aria-label="X position in points"/><input v-model.number="textObjectDraft.y" type="number" min="0" :disabled="textObjectBusy || disabled" aria-label="Y position in points"/></span>pt</label><label>Width / Height <span><input v-model.number="textObjectDraft.width" type="number" min="1" :disabled="textObjectBusy || disabled" aria-label="Width in points"/><input v-model.number="textObjectDraft.height" type="number" min="1" :disabled="textObjectBusy || disabled" aria-label="Height in points"/></span>pt</label></div>
-        <details class="flow03-edit-object-text"><summary>Edit text content</summary><label>Text<textarea v-model="textObjectDraft.body" rows="3" maxlength="1000" :disabled="textObjectBusy || disabled"/></label></details>
+        <fieldset><legend>Alignment</legend><div class="pdf-editor-align-actions"><button v-for="alignment in (['left','center','right','justify'] as const)" :key="alignment" class="icon-btn small" :aria-label="`Align ${alignment}`" :aria-pressed="textObjectDraft.alignment===alignment" :disabled="textObjectBusy || disabled" @click="textObjectDraft.alignment=alignment"><component :is="alignment==='left'?AlignLeft:alignment==='center'?AlignCenter:alignment==='right'?AlignRight:AlignJustify" :size="16"/></button></div></fieldset>
+        <strong class="pdf-editor-object-label">OBJECT</strong>
+        <div class="pdf-editor-text-fields"><label>X / Y <span><input v-model.number="textObjectDraft.x" type="number" min="0" :disabled="textObjectBusy || disabled" aria-label="X position in points"/><input v-model.number="textObjectDraft.y" type="number" min="0" :disabled="textObjectBusy || disabled" aria-label="Y position in points"/></span>pt</label><label>Width / Height <span><input v-model.number="textObjectDraft.width" type="number" min="1" :disabled="textObjectBusy || disabled" aria-label="Width in points"/><input v-model.number="textObjectDraft.height" type="number" min="1" :disabled="textObjectBusy || disabled" aria-label="Height in points"/></span>pt</label></div>
+        <details class="pdf-editor-edit-object-text"><summary>Edit text content</summary><label>Text<textarea v-model="textObjectDraft.body" rows="3" maxlength="1000" :disabled="textObjectBusy || disabled"/></label></details>
         <p v-if="textObjectError" class="error-msg" role="alert">{{textObjectError}}</p>
         <button class="btn primary small" :disabled="textObjectBusy || disabled || textObjectDraft.font_size<6 || textObjectDraft.font_size>36" @click="saveTextObject">{{textObjectBusy?'Saving…':'Save text properties'}}</button>
         <button class="btn secondary small" :disabled="textObjectBusy || disabled" @click="deleteSelectedOverlay">Remove text object</button>
@@ -2190,6 +2202,7 @@ async function applyReplacement() {
         <p v-if="redactionRegion" class="notice amber" role="status">This is an editable mark. The underlying working PDF still contains the content until a PDF output is generated.</p>
         <p>Save copy and new bundle exports remove text and image pixels under saved redaction marks. The editor’s working revision, imported originals, prior revisions, existing exports and matter history can still contain the content.</p>
         <div class="page-tool-actions"><span>{{redactionRegion ? `Marked ${Math.round(redactionRegion.width*100)}% × ${Math.round(redactionRegion.height*100)}% of page` : 'No area marked yet'}}</span><div><button v-if="redactionRegion" class="btn secondary small" :disabled="redactionBusy" @click="redactionRegion=null;redactionError=''">Clear mark</button><button class="btn primary small" :disabled="!redactionRegion || redactionRegion.width < .01 || redactionRegion.height < .01 || redactionBusy || disabled" @click="applyRedaction">{{redactionBusy ? 'Saving…' : 'Add redaction mark'}}</button></div></div>
+        <div v-if="pendingRedactions.length" class="pdf-editor-review-list" aria-label="Pending redaction marks"><strong>{{pendingRedactions.length}} pending {{pendingRedactions.length===1?'mark':'marks'}}</strong><button v-for="(mark,index) in pendingRedactions" :key="mark.id" class="pdf-editor-review-row" :aria-current="mark.page_index===current-1 ? 'page' : undefined" @click="navigateToPage(mark.page_index+1)"><strong>Mark {{index+1}} · Source {{mark.page_index+1}}</strong><span>Review marked region</span></button><p>These marks remove content only in a new Save copy or bundle. The current working PDF still contains it.</p></div>
         <div v-if="appliedRedactions.some(item => item.page_index === current-1)" class="redaction-restore">
           <strong>Applied areas on this page</strong>
           <p>The amber outline selects a restorable area; the black fill is in the updated PDF. The outline includes text touched beyond the original mark. Newer edits inside it will be replaced; edits outside remain. Original vector objects and links are not reconstructed.</p>
@@ -2201,10 +2214,10 @@ async function applyReplacement() {
       </div></Transition>
       <Transition name="soft"><div v-if="annotationPanelOpen" class="page-annotation-panel" aria-label="Private page marks and image overlays">
         <p v-if="editingAnnotationId && pageAnnotations.find(item=>item.id===editingAnnotationId)" class="annotation-record-time">Saved {{annotationTime(pageAnnotations.find(item=>item.id===editingAnnotationId)!)}} · Author not recorded</p>
-        <div v-if="annotationDraft.kind==='image' && editingAnnotationId && annotationRegion" class="flow03-image-properties" role="region" aria-label="Image properties">
+        <div v-if="annotationDraft.kind==='image' && editingAnnotationId && annotationRegion" class="pdf-editor-image-properties" role="region" aria-label="Image properties">
           <img v-if="annotationImageUrls[editingAnnotationId]" :src="annotationImageUrls[editingAnnotationId]" alt="Selected image preview"/>
           <strong>OBJECT</strong>
-          <div class="flow03-image-fields"><label v-for="field in (['x','y','width','height'] as const)" :key="field">{{field==='x'?'X position':field==='y'?'Y position':field==='width'?'Width':'Height'}}<span><input type="number" :aria-label="`Image ${field} in points`" :value="Math.round(annotationRegion[field]*(field==='x'||field==='width'?pageSizePt.width:pageSizePt.height))" :min="field==='width'||field==='height'?1:0" :disabled="annotationBusy || disabled" @change="setImageGeometry(field,$event)"/> pt</span></label></div>
+          <div class="pdf-editor-image-fields"><label v-for="field in (['x','y','width','height'] as const)" :key="field">{{field==='x'?'X position':field==='y'?'Y position':field==='width'?'Width':'Height'}}<span><input type="number" :aria-label="`Image ${field} in points`" :value="Math.round(annotationRegion[field]*(field==='x'||field==='width'?pageSizePt.width:pageSizePt.height))" :min="field==='width'||field==='height'?1:0" :disabled="annotationBusy || disabled" @change="setImageGeometry(field,$event)"/> pt</span></label></div>
           <p>Drag the image or its handles on the page. Update mark saves the position and size.</p>
         </div>
         <div class="review-tool-heading"><strong>{{annotationKindLabel(annotationDraft.kind)}}</strong><span>{{editingAnnotationId ? 'Review this mark’s properties. Drag it on the page to move or resize it.' : annotationDraft.kind==='image' ? 'Choose a PNG or JPEG, then drag its size and position on the page.' : 'Drag a region on the page. Each saved mark remains independently selectable, movable and removable.'}}</span></div>
@@ -2256,7 +2269,7 @@ async function applyReplacement() {
       </div></Transition>
       </aside>
       <div class="viewer-page-column">
-      <div v-if="engineBlocked" class="flow03-engine-banner" role="alert"><strong>Document processing engine unavailable</strong><span>Cached pages may still be readable. Editing and processing are paused until the local engine reconnects.</span><button v-if="!engineInspectorOpen" class="text-tool" @click="engineInspectorOpen=true">Connection details</button></div>
+      <div v-if="engineBlocked" class="pdf-editor-engine-banner" role="alert"><strong>Document processing engine unavailable</strong><span>Cached pages may still be readable. Editing and processing are paused until the local engine reconnects.</span><button v-if="!engineInspectorOpen" class="text-tool" @click="engineInspectorOpen=true">Connection details</button></div>
       <div v-else-if="activeTool!=='select'" class="pdf-tool-hint" role="status"><strong>{{toolTitle}}</strong><span>{{toolFeedback || toolHint}}</span><button class="icon-btn small" aria-label="Cancel PDF tool" title="Cancel tool (Esc)" @click="toggleTool(activeTool)"><X :size="14"/></button></div>
 
       <div v-if="(loading || editing) && !(replacingText && editSnapshot)" class="preview-status" role="status"><LoaderCircle :size="18" class="spin"/> {{editing?'Updating PDF…':'Loading PDF…'}}</div>
