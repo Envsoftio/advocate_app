@@ -49,6 +49,11 @@ async function enter(page: any) {
   await page.evaluate(() => document.fonts.ready);
 }
 async function capture(page: any, info: any, name: string) {
+  const dismiss = page.locator('.toast').getByRole('button');
+  if (await dismiss.isVisible()) {
+    await dismiss.click();
+    await expect(page.locator('.toast')).toBeHidden();
+  }
   await page.screenshot({ path: info.outputPath(name + '.png'), animations: 'disabled' });
   if (name.includes('15A-') || name.includes('15A-settings')) return;
   for (const size of [
@@ -106,8 +111,8 @@ test('B01B real failure/retry, persisted output, generated review and matching e
   const workspace = page.locator('.build-workspace');
   await expect(workspace).toContainText('1 included documents · 1 reference-only');
   for (const [selector, x, y, width, height] of [
-    ['.build-settings-card', 208, 272, 882, 518],
-    ['.build-summary', 1106, 272, 310, 518],
+    ['.build-settings-card', 264, 276, 826, 518],
+    ['.build-summary', 1106, 276, 310, 518],
   ] as const) {
     const box = (await page.locator(selector).boundingBox())!;
     expect(Math.round(box.x)).toBe(x);
@@ -138,6 +143,10 @@ test('B01B real failure/retry, persisted output, generated review and matching e
   await workspace.getByRole('button', { name: 'Build bundle', exact: true }).click();
   await expect(workspace).toContainText('Build failed');
   await capture(page, info, '16A-failure');
+  await page.reload();
+  await enterLatestMatter(page);
+  await enter(page);
+  await expect(workspace).toContainText('Build failed');
   await workspace.getByRole('button', { name: 'Build settings', exact: true }).click();
   await workspace.getByRole('button', { name: 'Plan volumes', exact: true }).click();
   await tool.getByLabel('Maximum pages per volume').fill('300');
@@ -158,7 +167,23 @@ test('B01B real failure/retry, persisted output, generated review and matching e
   await workspace.getByRole('button', { name: 'Build bundle', exact: true }).click();
   await expect(workspace).toContainText('Building bundle');
   await capture(page, info, '15B-progress');
+  await expect(workspace).not.toContainText('A failed build');
+  await expect(workspace.getByRole('list', { name: 'Build stages' })).toBeVisible();
+  let cancelRequests = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith('/cancel')) cancelRequests++;
+  });
   await workspace.getByRole('button', { name: 'Cancel build', exact: true }).click();
+  const cancel = page.getByRole('alertdialog', { name: 'Cancel this build?' });
+  await expect(cancel).toBeVisible();
+  await expect(cancel.getByRole('button', { name: 'Keep building' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(cancel).toBeHidden();
+  expect(cancelRequests).toBe(0);
+  await expect(workspace.getByRole('button', { name: 'Cancel build', exact: true })).toBeFocused();
+  await workspace.getByRole('button', { name: 'Cancel build', exact: true }).click();
+  await cancel.getByRole('button', { name: 'Cancel build', exact: true }).click();
+  await expect.poll(() => cancelRequests).toBe(1);
   await expect(workspace).toContainText('Cancellation requested');
   await expect(workspace).not.toContainText('Build cancelled');
   release();
@@ -169,6 +194,9 @@ test('B01B real failure/retry, persisted output, generated review and matching e
   ).json();
   const build = builds[0];
   await expect(workspace).toContainText(build.id);
+  await expect(workspace.getByRole('row').filter({ hasText: 'combined.pdf' })).toContainText(
+    String(build.pages),
+  );
   await capture(page, info, '17A-complete');
   await workspace.getByRole('button', { name: 'Review bundle', exact: true }).click();
   const review = page.getByRole('dialog', { name: 'Review generated PDF' });

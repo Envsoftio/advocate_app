@@ -855,3 +855,27 @@
     flex-wrap: wrap;
   }
 }
+
+/* Keep review exits reachable even when the finding or note needs scrolling. */
+.finding-review-header {
+  position: sticky;
+  top: -20px;
+  z-index: 1;
+  margin: -20px -18px 16px;
+  padding: 16px 18px 12px;
+  background: var(--cb-surface);
+  border-bottom: 1px solid var(--cb-border);
+}
+.finding-review-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.finding-review-title h2 {
+  margin: 0;
+}
+.finding-review-header > button {
+  width: 100%;
+  margin-top: 8px;
+}

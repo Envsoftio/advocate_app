@@ -69,9 +69,9 @@ test('B03C reference geometry and real appearance matrix with compact keyboard r
     card = w.locator('.build-settings-card'),
     summary = w.locator('.build-summary');
   for (const [size, theme, expectedX, expectedWidth, summaryWidth, height] of [
-    [1440, 'light', 208, 882, 310, 518],
+    [1440, 'light', 264, 826, 310, 518],
     [1024, 'light', 88, 652, 244, 386],
-    [1440, 'dark', 208, 882, 310, 518],
+    [1440, 'dark', 264, 826, 310, 518],
   ] as const) {
     await page.setViewportSize({ width: size, height: size === 1440 ? 900 : 768 });
     await appearance(page, theme, 100);
@@ -83,7 +83,7 @@ test('B03C reference geometry and real appearance matrix with compact keyboard r
     const b = (await card.boundingBox())!,
       s = (await summary.boundingBox())!;
     expect(Math.round(b.x)).toBe(expectedX);
-    expect(Math.round(b.y)).toBe(272);
+    expect(Math.round(b.y)).toBe(276);
     expect(Math.round(b.width)).toBe(expectedWidth);
     expect(Math.round(s.width)).toBe(summaryWidth);
     expect(Math.round(b.height)).toBe(height);

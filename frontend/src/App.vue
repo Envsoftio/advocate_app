@@ -942,6 +942,13 @@ async function openFinding(check: PreflightCheck, outputBuildId?: string) {
     issue(err);
   }
 }
+async function closePreflightFinding() {
+  preflightContext.value = null;
+  await nextTick();
+  document
+    .querySelector<HTMLElement>('.read-workspace [role="tab"][aria-selected="true"]')
+    ?.focus();
+}
 async function returnToPreflight() {
   const context = preflightContext.value;
   if (!context) return;
@@ -3927,6 +3934,7 @@ watch(sidebarCollapsed, (collapsed) => {
           selectedDoc?.revision !== preflightContext.finding.target_revision
         "
         @return="returnToPreflight"
+        @close="closePreflightFinding"
         @tools="pageToolsOpen = true"
       />
 

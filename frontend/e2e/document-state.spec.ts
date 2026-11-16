@@ -12,7 +12,7 @@ import { test, expect, type Page, type APIRequestContext } from '@playwright/tes
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-const base = 'http://127.0.0.1:8768',
+const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`,
   headers = { Authorization: 'Bearer e2e-isolated-token' };
 const backendRoot = resolve(import.meta.dirname, '../../backend');
 const python =
@@ -238,6 +238,38 @@ test('02B Preflight opens exact source and revision, returns to finding and refu
   await current.getByRole('button', { name: 'Review source 1' }).click();
   await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '1');
   await expect(page.locator('.finding-review-panel')).toContainText('Revision 2');
+  const context = page.locator('.finding-review-panel');
+  for (const [width, height, theme] of [
+    [1440, 900, 'light'],
+    [1024, 768, 'dark'],
+    [640, 800, 'light'],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await page.evaluate((theme) => {
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.dataset.effectiveTheme = theme;
+    }, theme);
+    await context.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    for (const name of ['Return to Preflight', 'Close Preflight finding']) {
+      const button = context.getByRole('button', { name, exact: true });
+      await expect(button).toBeVisible();
+      await button.click({ trial: true });
+    }
+    await page.screenshot({
+      path: test.info().outputPath(`finding-${width}-${theme}.png`),
+      animations: 'disabled',
+    });
+  }
+  await context.getByRole('button', { name: 'Close Preflight finding' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(context).toHaveCount(0);
+  await expect(page.locator('.design-shell')).toHaveAttribute('data-finding', 'false');
+  await expectValue(page.getByRole('spinbutton', { name: 'Go to page' }), '1');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: /Preflight checks/ }).click();
+  await expect(page.locator('.preflight-workspace')).toBeVisible();
 });
 
 test('02B pending and failed maps do not reuse prior rows; late check responses cannot replace newer results', async ({

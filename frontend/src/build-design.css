@@ -1630,3 +1630,163 @@
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
+
+/* FLOW / 09: 15B progress and the separate 16A recovery composition. */
+.build-job-card progress {
+  height: 5px;
+}
+.build-stage-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.build-stage-list li {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 112px;
+  gap: 14px;
+  align-items: center;
+  min-height: 48px;
+}
+.build-stage-list [data-state='Complete'] svg {
+  color: var(--cb-success);
+}
+.build-stage-list [data-state='In progress'] {
+  color: var(--cb-info);
+}
+.build-stage-list small {
+  color: inherit;
+}
+.build-job-id {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.build-progress-note {
+  margin: 28px 0 0;
+  color: var(--cb-muted);
+}
+.build-recovery-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 20px;
+  margin-top: 30px;
+}
+.build-recovery-card,
+.build-recovery-context {
+  min-height: 470px;
+  padding: 24px 22px;
+}
+.build-recovery-status {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 32px;
+}
+.build-failure-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  background: var(--cb-dangerBg);
+  color: var(--cb-status-danger-text);
+}
+.build-recovery-card h2 {
+  font-size: 20px;
+  line-height: 30px;
+}
+.build-recovery-help {
+  color: var(--cb-muted);
+  margin: 24px 0;
+}
+.build-recovery-details {
+  border-top: 1px solid var(--cb-border);
+  margin-top: 32px;
+  padding-top: 18px;
+}
+.build-recovery-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.build-recovery-context > svg {
+  margin-top: 16px;
+  color: var(--cb-muted);
+}
+.build-recovery-context h3 {
+  border-top: 1px solid var(--cb-border);
+  padding-top: 20px;
+  margin-top: 24px;
+}
+.build-recovery-context ol {
+  padding-left: 20px;
+  color: var(--cb-muted);
+  line-height: 30px;
+}
+.build-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgb(0 0 0 / 35%);
+}
+.build-confirm-dialog {
+  position: fixed;
+  z-index: 2001;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, calc(100vw - 32px));
+  color: var(--cb-text);
+  font:
+    13px/22px Inter,
+    sans-serif;
+  padding: 24px;
+}
+.build-confirm-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+.build-confirm-dialog .build-actions {
+  justify-content: flex-end;
+}
+@media (max-width: 1199px) {
+  .build-recovery-grid {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+}
+@media (max-width: 900px) {
+  .build-recovery-grid {
+    grid-template-columns: 1fr;
+  }
+  .build-recovery-card,
+  .build-recovery-context {
+    min-height: 0;
+  }
+  .build-stage-list li {
+    grid-template-columns: 16px minmax(0, 1fr) 80px;
+    gap: 10px;
+  }
+}
+
+.generated-files th:first-child {
+  width: 62%;
+}
+.generated-files th:nth-child(2) {
+  width: 14%;
+}
+.generated-files th:nth-child(3) {
+  width: 24%;
+}
+.generated-files td:nth-child(n + 2) {
+  font-variant-numeric: tabular-nums;
+}
+.build-workspace > .supplement-entry {
+  margin-top: 16px;
+}
+@media (max-width: 1199px) {
+  .build-recovery-grid {
+    grid-template-columns: 1fr;
+  }
+  .build-recovery-card,
+  .build-recovery-context {
+    min-height: 0;
+  }
+}

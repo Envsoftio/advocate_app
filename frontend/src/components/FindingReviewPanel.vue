@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount } from 'vue';
+import { X } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { friendlyError } from '../lib/format';
 import type { Check } from '../lib/types';
 const props = defineProps<{ matterId: string; finding: Check; changed: boolean }>();
-const emit = defineEmits<{ return: []; tools: [] }>();
+const emit = defineEmits<{ return: []; tools: []; close: [] }>();
 const note = ref(''),
   pending = ref(false),
   error = ref(''),
@@ -46,8 +47,23 @@ async function save() {
 onBeforeUnmount(() => sequence++);
 </script>
 <template>
-  <aside class="finding-review-panel" aria-label="Preflight finding"
-    ><h2>Preflight finding</h2><span class="build-state">Review required</span
+  <aside class="finding-review-panel" aria-label="Preflight finding">
+    <header class="finding-review-header">
+      <div class="finding-review-title">
+        <h2>Preflight finding</h2>
+        <button
+          class="icon-btn"
+          aria-label="Close Preflight finding"
+          title="Close Preflight finding"
+          :disabled="pending"
+          @click="emit('close')"
+          ><X :size="16"
+        /></button>
+      </div>
+      <button class="membership-button quiet" :disabled="pending" @click="emit('return')"
+        >Return to Preflight</button
+      > </header
+    ><span class="build-state">Review required</span
     ><h3>{{ finding.code.toLowerCase().split('_').join(' ') }}</h3
     ><p
       >{{
@@ -74,8 +90,6 @@ onBeforeUnmount(() => sequence++);
       :disabled="pending || changed"
       @click="emit('tools')"
       >Open Page tools</button
-    ><button class="membership-button quiet" :disabled="pending" @click="emit('return')"
-      >Return to Preflight</button
     ><p v-if="error" role="alert" class="qa-error">{{ error }}</p
     ><div class="finding-recheck"
       ><strong>Checks must run again</strong

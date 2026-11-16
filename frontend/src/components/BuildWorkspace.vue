@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppSelect from './ui/AppSelect.vue';
+import AppConfirmDialog from './ui/AppConfirmDialog.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
   Check,
@@ -10,6 +11,9 @@ import {
   AlertCircle,
   X,
   ArrowRight,
+  Circle,
+  CircleX,
+  LoaderCircle,
 } from 'lucide-vue-next';
 import { api } from '../lib/api';
 import { bytesLabel, prettyDate, friendlyError } from '../lib/format';
@@ -132,6 +136,35 @@ const hasSizeException = computed(() =>
   Array.isArray((job.value?.result as Record<string, unknown> | null)?.size_exceptions),
 );
 const running = computed(() => job.value && ['running', 'queued'].includes(job.value.status));
+const cancelOpen = ref(false);
+watch(
+  () => [job.value?.id, job.value?.status],
+  () => {
+    cancelOpen.value = false;
+  },
+);
+function confirmCancel() {
+  if (running.value && !props.cancelPending && !props.blocked) emit('cancel');
+}
+// Boundaries are actual progress events emitted by engine.build_bundle, not timers.
+// Covers, numbering and navigation are assembled per volume, not separate job stages.
+const buildStages = computed(() =>
+  [
+    { label: 'Check source documents', start: 5, end: 10 },
+    { label: 'Assemble volumes, index and navigation', start: 10, end: 70 },
+    { label: 'Create combined PDF and index CSV', start: 70, end: 85 },
+    { label: 'Process outputs and package ZIP', start: 85, end: 97 },
+    { label: 'Check saved output files', start: 97, end: 100 },
+  ].map((stage) => ({
+    ...stage,
+    state:
+      (job.value?.progress ?? 0) >= stage.end
+        ? 'Complete'
+        : (job.value?.progress ?? 0) >= stage.start
+          ? 'In progress'
+          : 'Waiting',
+  })),
+);
 const view = computed(() => (props.storage ? 'storage' : running.value ? 'job' : screen.value));
 const title = computed(
   () =>
@@ -486,27 +519,6 @@ onBeforeUnmount(() => {
           Create backup
         </button>
       </header>
-      <div
-        v-if="artifact && ['settings', 'result', 'stale'].includes(view)"
-        class="supplement-entry"
-        :class="{ 'has-plans': savedSupplements.length > 0 }"
-      >
-        <button
-          v-if="view !== 'stale'"
-          class="text-tool"
-          :disabled="blocked || busy"
-          @click="openSupplement()"
-          >Create supplement from build {{ artifact.id.slice(0, 8) }}</button
-        >
-        <button
-          v-for="p in savedSupplements"
-          :key="p.id"
-          class="text-tool"
-          :disabled="blocked || busy"
-          @click="openSupplement(p.id)"
-          >Resume {{ p.title }}</button
-        >
-      </div>
       <template v-if="view === 'settings'">
         <div class="build-strip build-preflight" :class="statusKind" role="status">
           <CircleCheck v-if="statusKind === 'success'" :size="16" /><AlertCircle
@@ -686,73 +698,40 @@ onBeforeUnmount(() => {
         </div>
       </template>
       <template v-else-if="view === 'job'">
-        <section class="build-card build-job-card">
-          <span class="build-state" :class="{ danger: job?.status === 'failed' }">{{
+        <section
+          v-if="running"
+          class="build-card build-job-card"
+          aria-label="Build progress details"
+        >
+          <span class="build-state" role="status">{{
             cancelPending
               ? 'Cancellation requested'
-              : running
-                ? 'In progress'
-                : job?.status === 'interrupted'
-                  ? 'Interrupted by engine restart'
-                  : job?.status === 'cancelled'
-                    ? 'Build cancelled'
-                    : 'Build failed'
+              : job?.status === 'queued'
+                ? 'Queued'
+                : 'In progress'
           }}</span>
           <div class="build-progress-title">
-            <h2>
-              {{
-                running
-                  ? job?.message
-                  : job?.status === 'cancelled'
-                    ? 'No new bundle was finalized'
-                    : job?.status === 'interrupted'
-                      ? 'The local engine stopped before completion'
-                      : 'The bundle could not be generated'
-              }}
-            </h2>
-            <strong v-if="running">{{ job?.progress }}%</strong>
+            <h2>{{ job?.message }}</h2><strong>{{ job?.progress }}%</strong>
           </div>
-          <progress v-if="running" :value="job?.progress" max="100" aria-label="Build progress" />
+          <progress :value="job?.progress" max="100" aria-label="Build progress" />
           <div class="build-job-grid">
-            <div>
-              <p v-if="running">
-                {{
-                  cancelPending
-                    ? 'Waiting for the backend to confirm cancellation. A completed publication cannot be undone.'
-                    : 'Processing the submitted membership, working revisions and saved settings.'
-                }}
-              </p>
-              <p v-else class="build-error-detail">
-                {{ job?.error || 'Inspect the current inputs and start a new build when ready.' }}
-              </p>
-              <details v-if="!running">
-                <summary>Technical details</summary>
-                <p>Job {{ job?.id }} · {{ job?.status }}</p>
-                <p> No earlier generated file or imported original is replaced by this attempt. </p>
-              </details>
-              <p>A failed build has no new output to validate.</p>
-              <div class="build-actions" v-if="!running">
-                <button class="membership-button secondary" @click="emit('documents')">
-                  Inspect working documents</button
-                ><button class="membership-button secondary" @click="emit('checks')">
-                  Run checks</button
-                ><button
-                  class="membership-button quiet"
-                  :disabled="busy || blocked"
-                  @click="
-                    job?.status === 'interrupted' && !job.retry_job_id
-                      ? emit('retry', job)
-                      : emit('build')
-                  "
-                >
-                  Retry build
-                </button>
-              </div>
-            </div>
+            <ol class="build-stage-list" aria-label="Build stages">
+              <li v-for="stage in buildStages" :key="stage.label" :data-state="stage.state">
+                <CircleCheck v-if="stage.state === 'Complete'" :size="16" aria-hidden="true" />
+                <LoaderCircle
+                  v-else-if="stage.state === 'In progress'"
+                  :size="16"
+                  aria-hidden="true"
+                />
+                <Circle v-else :size="16" aria-hidden="true" />
+                <span>{{ stage.label }}</span><small>{{ stage.state }}</small>
+              </li>
+            </ol>
             <aside class="build-card">
-              <h3>Saved input contract</h3>
-              <p> Membership and working revisions are checked when the job starts. </p>
-              <p>Settings are saved before submission.</p>
+              <h3>Submitted build</h3>
+              <p class="build-job-id">{{ job?.id }}</p>
+              <p>Selected working revisions and saved settings are checked before assembly.</p>
+              <p v-if="job?.created_at">Submitted {{ prettyDate(job.created_at) }}</p>
               <button
                 v-if="artifact"
                 class="text-tool"
@@ -762,17 +741,102 @@ onBeforeUnmount(() => {
               </button>
             </aside>
           </div>
+          <p class="build-progress-note" role="status">{{
+            cancelPending
+              ? 'Waiting for the backend to confirm cancellation. A completed publication cannot be undone.'
+              : 'The checks report will describe the files actually written.'
+          }}</p>
         </section>
+        <div v-else class="build-recovery-grid">
+          <section class="build-card build-recovery-card" aria-label="Build recovery">
+            <div class="build-recovery-status">
+              <span class="build-failure-icon"><CircleX :size="20" aria-hidden="true" /></span>
+              <span class="build-state" :class="{ danger: job?.status === 'failed' }">{{
+                job?.status === 'interrupted'
+                  ? 'Build interrupted'
+                  : job?.status === 'cancelled'
+                    ? 'Build cancelled'
+                    : 'Build failed'
+              }}</span>
+            </div>
+            <h2>{{
+              job?.status === 'cancelled'
+                ? 'The build was cancelled'
+                : job?.status === 'interrupted'
+                  ? 'The local engine stopped before completion'
+                  : 'The bundle could not be generated'
+            }}</h2>
+            <p class="build-error-detail" role="alert">{{
+              job?.error ||
+              job?.message ||
+              'Inspect the current inputs before starting a new build.'
+            }}</p>
+            <p class="build-recovery-help"
+              >Inspect the working documents and saved settings, confirm the page map and bookmarks,
+              then run checks again. Retry creates a new attempt using current inputs.</p
+            >
+            <div class="build-actions">
+              <button class="membership-button primary" @click="emit('documents')"
+                >Inspect working documents</button
+              >
+              <button class="membership-button secondary" @click="emit('checks')"
+                >Run checks</button
+              >
+              <button
+                class="membership-button quiet"
+                :disabled="busy || blocked || dirty || !included.length"
+                @click="
+                  job?.status === 'interrupted' && !job.retry_job_id
+                    ? emit('retry', job)
+                    : emit('build')
+                "
+                >Retry build</button
+              >
+            </div>
+            <details class="build-recovery-details">
+              <summary>Technical details</summary>
+              <p class="build-job-id"
+                >Job {{ job?.id }} · {{ job?.status }} · {{ job?.progress }}%</p
+              >
+              <p>Imported originals and earlier generated files remain preserved.</p>
+            </details>
+          </section>
+          <aside class="build-card build-recovery-context">
+            <h2>Build context</h2>
+            <FileText :size="20" aria-hidden="true" />
+            <p
+              >The engine's error is shown in full. A specific affected source page is not reported
+              for every failure.</p
+            >
+            <span class="build-state">Working copies</span>
+            <p v-if="artifact"
+              ><button class="text-tool" @click="emit('review', artifact.id, 'combined.pdf')"
+                >Open earlier build {{ artifact.id.slice(0, 8) }}</button
+              ></p
+            >
+            <h3>Recovery path</h3>
+            <ol
+              ><li>Inspect inputs and build settings</li
+              ><li>Confirm page map and bookmarks</li
+              ><li>Run checks and rebuild</li></ol
+            >
+          </aside>
+        </div>
         <footer class="build-footer">
           <button class="membership-button secondary" @click="emit('documents')">
             Continue working</button
-          ><button
+          ><AppConfirmDialog
             v-if="running"
-            class="membership-button secondary"
-            :disabled="cancelPending || blocked"
-            @click="emit('cancel')"
+            v-model:open="cancelOpen"
+            title="Cancel this build?"
+            description="Request cancellation of this attempt. Your preparation and previous builds remain saved. If publication has already finished, the completed build stays available."
+            confirm-label="Cancel build"
+            cancel-label="Keep building"
+            @confirm="confirmCancel"
           >
-            {{ cancelPending ? 'Cancelling…' : 'Cancel build' }}</button
+            <button class="membership-button secondary" :disabled="cancelPending || blocked">{{
+              cancelPending ? 'Cancelling…' : 'Cancel build'
+            }}</button> </AppConfirmDialog
           ><button v-else class="membership-button secondary" @click="screen = 'settings'">
             Build settings
           </button>
@@ -921,8 +985,8 @@ onBeforeUnmount(() => {
                 <thead>
                   <tr>
                     <th>File</th>
+                    <th>Pages</th>
                     <th>Measured size</th>
-                    <th>State</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -937,10 +1001,13 @@ onBeforeUnmount(() => {
                         <FileText :size="16" />{{ file.name }}</button
                       ><span v-else>{{ file.name }}</span>
                     </td>
+                    <td>{{
+                      qa?.run?.measured_files[file.name]?.pages ??
+                      (file.name === 'combined.pdf' ? artifact.pages : '—')
+                    }}</td>
                     <td :title="`${file.bytes.toLocaleString()} actual bytes`">{{
                       bytesLabel(file.bytes)
                     }}</td>
-                    <td>Generated</td>
                   </tr>
                 </tbody>
               </table>
@@ -993,6 +1060,27 @@ onBeforeUnmount(() => {
           </div>
         </details>
       </template>
+      <div
+        v-if="artifact && ['settings', 'result', 'stale'].includes(view)"
+        class="supplement-entry"
+        :class="{ 'has-plans': savedSupplements.length > 0 }"
+      >
+        <button
+          v-if="view !== 'stale'"
+          class="text-tool"
+          :disabled="blocked || busy"
+          @click="openSupplement()"
+          >Create supplement from build {{ artifact.id.slice(0, 8) }}</button
+        >
+        <button
+          v-for="p in savedSupplements"
+          :key="p.id"
+          class="text-tool"
+          :disabled="blocked || busy"
+          @click="openSupplement(p.id)"
+          >Resume {{ p.title }}</button
+        >
+      </div>
       <OutputChecksDialog
         v-if="checksOpen && artifact"
         :key="artifact.id"

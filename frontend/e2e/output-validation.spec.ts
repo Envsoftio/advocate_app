@@ -71,7 +71,9 @@ async function matrix(page: any, info: any, name: string) {
           const box = (await modal.boundingBox())!;
           expect(box.width).toBeLessThanOrEqual(size.width);
           expect(box.height).toBeLessThanOrEqual(size.height);
-          await modal.getByRole('button', { name: 'Done', exact: true }).scrollIntoViewIfNeeded();
+          await modal
+            .getByRole('button', { name: 'Done', exact: true })
+            .evaluate((element) => element.scrollIntoView({ block: 'center' }));
           await expect(modal.getByRole('button', { name: 'Done', exact: true })).toBeInViewport();
           await modal.evaluate((e: HTMLElement) => (e.scrollTop = 0));
         }
@@ -79,7 +81,7 @@ async function matrix(page: any, info: any, name: string) {
         if (await finding.count()) {
           await finding
             .getByRole('button', { name: 'Keep page & return' })
-            .scrollIntoViewIfNeeded();
+            .evaluate((element) => element.scrollIntoView({ block: 'center' }));
           await expect(finding.getByRole('button', { name: 'Keep page & return' })).toBeInViewport({
             ratio: 1,
           });
