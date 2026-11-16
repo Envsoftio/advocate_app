@@ -61,6 +61,13 @@
           "source_label": "Delhi High Court Online e-Filing FAQ, Q18-Q19",
           "source_url": "https://www.delhihighcourt.nic.in/web/sites/default/files/efiling/efilingfaq.pdf",
           "effective_from": null
+        },
+        {
+          "title": "2026 online upload implementation notice",
+          "detail": "The IT Cell notice dated 6 February 2026 implements the 300 MB online e-file limit from 11:00 a.m. on 7 February 2026. The High Court notification separately provides a Designated Centre route for larger e-files. District-court limits are a different scope.",
+          "source_label": "Delhi High Court IT Cell · 6 February 2026",
+          "source_url": "https://www.delhihighcourt.nic.in/files/2026-02/announcements/16it.pdf",
+          "effective_from": "2026-02-07"
         }
       ],
       "templates": [
@@ -84,10 +91,17 @@
         }
       ],
       "source_conflicts": [
+        "17 November 2026: the Rule 3.4 amendment and IT Cell implementation notice were rechecked. Other inherited references retain their earlier review date; no advocate approval has been obtained.",
         "The older FAQ states a 50 MB online limit. The later 2026 amendment substitutes Rule 3.4 and sets the High Court maximum e-file size at 300 MB.",
         "The common-objections page contains older paper-format references, including foolscap. Do not use those references to override the later A4 Practice Directions without advocate and registry confirmation.",
         "Common objections help prevent defects but are not a complete required-document checklist for every case type or filing stage."
       ]
+    },
+    "version": "research-2026-11-17.1",
+    "approval": {
+      "status": "not_reviewed",
+      "reviewer": null,
+      "reviewed_at": null
     }
   },
   {
@@ -102,5 +116,135 @@
     "disallow_pdf_encryption": false,
     "description": "Configurable PDF preparation without built-in court requirements or a filing-compliance claim. Confirm the destination court, case type and stage separately.",
     "sources": []
+  },
+  {
+    "id": "supreme-court-source-draft",
+    "name": "Supreme Court of India (source-linked draft)",
+    "status": "SOURCE_LINKED_DRAFT",
+    "effective_from": null,
+    "last_checked": "2026-11-17",
+    "max_file_mb": null,
+    "require_searchable_text": false,
+    "require_bookmarks": false,
+    "disallow_pdf_encryption": false,
+    "description": "Source-linked preparation reference only. No advocate approval or case-specific completeness determination. No automatic portal-size cap is applied.",
+    "sources": [
+      {
+        "title": "SC-eFM 3.0 FAQ",
+        "url": "https://efiling3.sci.gov.in/resources/FAQ"
+      },
+      {
+        "title": "Supreme Court Rules",
+        "url": "https://www.sci.gov.in/supreme-court-rules/"
+      },
+      {
+        "title": "Official e-filing services",
+        "url": "https://www.sci.gov.in/e-filing/"
+      }
+    ],
+    "filing_guidance": {
+      "title": "Supreme Court of India filing reference",
+      "scope": "Supreme Court e-filing portal reference. Petition type, stage, applicable rules and amendments need separate review; this is not a filing-completeness checklist.",
+      "status": "SOURCE_LINKED_DRAFT_REQUIRES_ADVOCATE_REVIEW",
+      "reviewed_through": "2026-11-17",
+      "requirements": [
+        {
+          "title": "Petition upload format and size",
+          "detail": "The SC-eFM 3.0 FAQ, question 12, describes PDF uploads with a 50 MB maximum and splitting larger files. Confirm the portal used; this is not a cap on the entire ZIP package. No automatic limit is applied by this draft profile.",
+          "source_label": "SC-eFM 3.0 FAQ · question 12",
+          "source_url": "https://efiling3.sci.gov.in/resources/FAQ",
+          "effective_from": null
+        },
+        {
+          "title": "Petition forms and procedural requirements",
+          "detail": "Question 14 directs users to the Supreme Court Rules, 2013 for petition templates. The applicable proceeding and later amendments must be identified before a required-document checklist can be evaluated.",
+          "source_label": "Supreme Court Rules and amendments",
+          "source_url": "https://www.sci.gov.in/supreme-court-rules/",
+          "effective_from": null
+        },
+        {
+          "title": "Choose the actual filing service",
+          "detail": "The official e-filing page links both SC-eFM 2.0 and SC-eFM 3.0. Confirm the route before relying on portal guidance.",
+          "source_label": "Supreme Court e-filing services",
+          "source_url": "https://www.sci.gov.in/e-filing/",
+          "effective_from": null
+        }
+      ],
+      "templates": [],
+      "source_conflicts": [
+        "No advocate has approved this profile. Source research is not legal sign-off.",
+        "The 50 MB FAQ statement is upload guidance; MatterDraft’s general all-artifact size cap has different semantics and is deliberately not set automatically.",
+        "The January 2025 scrutiny-checklist PDF could not be retrieved during this pass; its detailed requirements are not encoded."
+      ]
+    },
+    "version": "research-2026-11-17.1",
+    "approval": {
+      "status": "not_reviewed",
+      "reviewer": null,
+      "reviewed_at": null
+    }
+  },
+  {
+    "id": "punjab-haryana-source-draft",
+    "name": "Punjab and Haryana High Court (source-linked draft)",
+    "status": "SOURCE_LINKED_DRAFT",
+    "effective_from": null,
+    "last_checked": "2026-11-17",
+    "max_file_mb": null,
+    "require_searchable_text": false,
+    "require_bookmarks": false,
+    "disallow_pdf_encryption": false,
+    "description": "Source-linked preparation reference only. No advocate approval or case-specific completeness determination. No automatic portal-size cap is applied.",
+    "sources": [
+      {
+        "title": "Official notification and guidelines index",
+        "url": "https://www.highcourtchd.gov.in/?mod=noti_giudelines"
+      },
+      {
+        "title": "Official e-filing resources",
+        "url": "https://www.highcourtchd.gov.in/?mod=e_filing"
+      }
+    ],
+    "filing_guidance": {
+      "title": "Punjab and Haryana High Court filing reference",
+      "scope": "High Court of Punjab and Haryana, Chandigarh: reference to official filing resources. Civil, criminal and writ proceedings have distinct objection checklists; no single required-document list is inferred.",
+      "status": "SOURCE_LINKED_DRAFT_REQUIRES_ADVOCATE_REVIEW",
+      "reviewed_through": "2026-11-17",
+      "requirements": [
+        {
+          "title": "Check current software and notices",
+          "detail": "The official notice index lists a new e-filing software notice effective 25 September 2026, alongside earlier 2026 and 2025 guidance. The notice body could not be retrieved here; confirm its instructions before relying on an older workflow.",
+          "source_label": "Official notification and guidelines index",
+          "source_url": "https://www.highcourtchd.gov.in/?mod=noti_giudelines",
+          "effective_from": null
+        },
+        {
+          "title": "Use the checklist for the proceeding",
+          "detail": "The official website provides separate Civil, Criminal and Writ objection-checklist links. Their current detailed contents were not retrieved in this pass. Select the applicable proceeding and review the original checklist.",
+          "source_label": "Official website · objection checklists",
+          "source_url": "https://www.highcourtchd.gov.in/?mod=noti_giudelines",
+          "effective_from": null
+        },
+        {
+          "title": "Filing portal and assistance",
+          "detail": "Use the court’s own e-filing page to reach its portal, manuals and assistance resources. This application prepares documents locally and does not submit them to the court.",
+          "source_label": "Official e-filing resources",
+          "source_url": "https://www.highcourtchd.gov.in/?mod=e_filing",
+          "effective_from": null
+        }
+      ],
+      "templates": [],
+      "source_conflicts": [
+        "No advocate has approved this profile. Current case-specific and conditional requirements remain unverified.",
+        "The January 2025 guideline has time-limited and category-specific provisions. It must not be treated as a current universal filing mandate.",
+        "No verified current upload-size cap was obtained. The draft leaves the technical cap unset rather than borrowing another court’s limit."
+      ]
+    },
+    "version": "research-2026-11-17.1",
+    "approval": {
+      "status": "not_reviewed",
+      "reviewer": null,
+      "reviewed_at": null
+    }
   }
 ]

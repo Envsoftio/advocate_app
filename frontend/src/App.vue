@@ -1078,7 +1078,8 @@ async function closeVolumePlanning(close: () => void) {
   const mode = volumeReturnMode.value;
   volumeReturnMode.value = '';
   close();
-  if (mode) await openStructure(mode === 'bookmarks' ? 'Bookmarks' : mode);
+  if (mode === 'preflight') await showView('validation');
+  else if (mode) await openStructure(mode === 'bookmarks' ? 'Bookmarks' : mode);
 }
 async function navigateVolumePlanning(name: string) {
   volumeReturnMode.value = '';
@@ -1118,9 +1119,27 @@ const selectedProfile = computed(
     profileList.value.find((p) => p.id === currentMatter.value?.court_profile) ||
     profileList.value[0],
 );
-const delhiGuidance = computed(
-  () => profileList.value.find((p) => p.id === 'delhi-hc-illustrative')?.filing_guidance,
+const referenceProfileId = ref('delhi-hc-illustrative');
+const referenceProfiles = computed(() => profileList.value.filter((p) => p.filing_guidance));
+const referenceProfile = computed(() =>
+  referenceProfiles.value.find((p) => p.id === referenceProfileId.value),
 );
+watch(
+  () => [currentMatter.value?.court_profile, profileList.value],
+  () => {
+    const id = currentMatter.value?.court_profile;
+    if (referenceProfiles.value.some((p) => p.id === id) && !filingGuide.value?.hasPendingDraft())
+      referenceProfileId.value = id!;
+  },
+);
+async function changeReferenceProfile(id: string) {
+  if (filingGuide.value?.hasPendingDraft() && !(await filingGuide.value.flushPendingSave())) {
+    notify('Save the party-data draft before switching reference courts.', 'error');
+    return;
+  }
+  referenceProfileId.value = id;
+}
+
 const isJobActive = computed(
   () =>
     !!activeJob.value &&
@@ -1918,6 +1937,9 @@ async function openOfficialReference(url: string) {
     'delhihighcourt.nic.in',
     'www.delhihighcourt.nic.in',
     'dhcefiling.nic.in',
+    'www.sci.gov.in',
+    'efiling3.sci.gov.in',
+    'www.highcourtchd.gov.in',
   ]);
   if (parsed.protocol !== 'https:' || !allowedHosts.has(parsed.hostname)) {
     notify('Blocked an unexpected external reference URL.', 'error');
@@ -2741,6 +2763,41 @@ async function rerunOcrPage(pageIndex: number, language: 'eng' | 'hin' | 'eng+hi
     issue(error);
   }
 }
+async function startPreflightScreen() {
+  if (
+    !currentMatterId.value ||
+    engineBlocked.value ||
+    busy.value ||
+    isJobActive.value ||
+    documentDirty.value ||
+    settingsDirty.value ||
+    formattingDirty.value
+  )
+    return;
+  const id = currentMatterId.value;
+  const snapshot = checks.value[0]?.effective_input_digest;
+  if (!snapshot) return;
+  busy.value = true;
+  try {
+    const job = await api<Job>(`/matters/${id}/preflight/screen`, 'POST', {
+      expected_snapshot: snapshot,
+    });
+    if (currentMatterId.value === id) watchJob(job);
+  } catch (error) {
+    issue(error);
+  } finally {
+    busy.value = false;
+  }
+}
+async function resolvePreflightAction(action: string) {
+  if (action === 'court-rules') {
+    if (selectedProfile.value?.filing_guidance) referenceProfileId.value = selectedProfile.value.id;
+    await showView('rules');
+  } else if (action === 'membership') await openMembership();
+  else if (action === 'bookmarks') await openStructure('Bookmarks');
+  else if (action === 'volumes') await openStructurePolicy('Plan volumes', 'preflight');
+  else await showView('build');
+}
 async function validate(): Promise<PreflightCheck[]> {
   const id = currentMatterId.value;
   if (!id || engineBlocked.value) return [];
@@ -2913,15 +2970,17 @@ function watchJob(job: Job) {
         if (next.status === 'failed') notify(next.error || 'Job failed', 'error');
         if (next.status === 'completed')
           notify(
-            next.kind === 'ocr'
-              ? 'OCR processing finished.'
-              : next.kind === 'compress'
-                ? 'PDF compression finished. Review the size and quality.'
-                : next.kind === 'supplement-build'
-                  ? 'Supplemental artifact generated successfully.'
-                  : next.kind === 'variant-build'
-                    ? 'Audience variant artifact generated successfully.'
-                    : 'Filing bundle generated successfully.',
+            next.kind === 'preflight-screen'
+              ? 'Page screening finished. Review candidates in Preflight.'
+              : next.kind === 'ocr'
+                ? 'OCR processing finished.'
+                : next.kind === 'compress'
+                  ? 'PDF compression finished. Review the size and quality.'
+                  : next.kind === 'supplement-build'
+                    ? 'Supplemental artifact generated successfully.'
+                    : next.kind === 'variant-build'
+                      ? 'Audience variant artifact generated successfully.'
+                      : 'Filing bundle generated successfully.',
             'success',
           );
         if (next.status === 'cancelled') notify('Processing cancelled.', 'info');
@@ -2949,6 +3008,11 @@ async function cancelJob() {
   }
 }
 async function retryInterrupted(job: Job) {
+  if (job.kind === 'preflight-screen') {
+    await validate();
+    await startPreflightScreen();
+    return;
+  }
   try {
     let relevant =
       job.kind === 'ocr'
@@ -3929,11 +3993,24 @@ watch(sidebarCollapsed, (collapsed) => {
               </div>
             </div>
           </div>
+          <label class="field court-reference-picker"
+            >Reference court
+            <AppSelect
+              :value="referenceProfileId"
+              @change="changeReferenceProfile(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="profile in referenceProfiles" :key="profile.id" :value="profile.id">{{
+                profile.name
+              }}</option>
+            </AppSelect>
+            <small>Browsing references does not change the matter’s saved technical profile.</small>
+          </label>
           <CourtProfileGuide
-            v-if="delhiGuidance"
+            v-if="referenceProfile?.filing_guidance"
             :key="guideReloadKey"
             ref="filingGuide"
-            :guidance="delhiGuidance"
+            :guidance="referenceProfile.filing_guidance"
+            :show-memo-helper="referenceProfileId === 'delhi-hc-illustrative'"
             :matter-id="currentMatterId"
             :can-undo="history.can_undo"
             :can-redo="history.can_redo"
@@ -4901,6 +4978,7 @@ watch(sidebarCollapsed, (collapsed) => {
               <template #volumes="{ close, recovery }"
                 ><VolumePlanning
                   :return-to-index="!!volumeReturnMode"
+                  :return-to-preflight="volumeReturnMode === 'preflight'"
                   :initial-recovery="recovery"
                   ref="outputPresetsPanel"
                   :matter-id="currentMatterId!"
@@ -5128,6 +5206,8 @@ watch(sidebarCollapsed, (collapsed) => {
 
             <PreflightWorkspace
               v-else-if="activeView === 'validation'"
+              :matter-id="currentMatterId!"
+              :screening-job="activeJob?.kind === 'preflight-screen' ? activeJob : null"
               :checks="checks"
               :loading="checksLoading"
               :error="checksError"
@@ -5136,6 +5216,9 @@ watch(sidebarCollapsed, (collapsed) => {
               v-model:filter="preflightFilter"
               @run="validate"
               @finding="openFinding($event)"
+              @resolve="resolvePreflightAction"
+              @screen="startPreflightScreen"
+              @cancel-screen="cancelJob"
               @build="showView('build')"
             >
               <FilingReview

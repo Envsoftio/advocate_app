@@ -404,6 +404,12 @@ class Store:
                 (doc_id, revision, page_index)).fetchone()
         return dict(row) if row else None
 
+    def reviewed_ocr_pages(self, doc_id: str, revision: int) -> set[int]:
+        with self.connect() as con:
+            return {row['page_index'] for row in con.execute(
+                'SELECT page_index FROM ocr_page_reviews WHERE document_id=? AND revision=?',
+                (doc_id, revision))}
+
     def accept_ocr_page_review(self, doc_id: str, revision: int, page_index: int) -> dict:
         with self.connect() as con:
             current = con.execute('SELECT revision,page_count,ocr_status FROM documents WHERE id=? AND archived_at IS NULL',

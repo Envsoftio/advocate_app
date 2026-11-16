@@ -948,7 +948,7 @@ def pdf_has_unsearchable_images(path: Path) -> bool:
         return any(not page.get_text().strip() and bool(page.get_image_info()) for page in pdf)
 
 
-def inspect_ocr_page(path: Path, page_index: int, language: str = 'eng') -> dict:
+def inspect_ocr_page(path: Path, page_index: int, language: str = 'eng', *, cancelled=None) -> dict:
     """Measure OCR confidence from the visible page image, never infer verification.
 
     The optional Tesseract executable supplies TSV confidence. The PDF remains
@@ -971,10 +971,33 @@ def inspect_ocr_page(path: Path, page_index: int, language: str = 'eng') -> dict
         return {'available': False, 'confidence': None, 'regions': [],
                 'message': 'Tesseract confidence analysis is unavailable on this device.'}
     try:
-        result = subprocess.run([executable, 'stdin', 'stdout', '-l', language,
-                                 '--tessdata-dir', pymupdf.get_tessdata(),
-                                 '-c', 'tessedit_create_tsv=1'],
-                                input=image, capture_output=True, timeout=90, check=True)
+        command = [executable, 'stdin', 'stdout', '-l', language,
+                   '--tessdata-dir', pymupdf.get_tessdata(), '-c', 'tessedit_create_tsv=1']
+        if cancelled is None:
+            result = subprocess.run(command, input=image, capture_output=True, timeout=90, check=True)
+        else:
+            import time
+            with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                deadline = time.monotonic() + 90
+                first = True
+                try:
+                    while True:
+                        if cancelled():
+                            raise ProcessingError('OCR confidence screening cancelled')
+                        if time.monotonic() >= deadline:
+                            raise subprocess.TimeoutExpired(command, 90)
+                        try:
+                            stdout, stderr = process.communicate(input=image if first else None, timeout=0.2)
+                            break
+                        except subprocess.TimeoutExpired:
+                            first = False
+                    if process.returncode:
+                        raise subprocess.CalledProcessError(process.returncode, command, stdout, stderr)
+                    result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate()
     except (OSError, subprocess.SubprocessError) as exc:
         raise ProcessingError('Tesseract confidence analysis failed: ' + str(exc)) from exc
     words = []

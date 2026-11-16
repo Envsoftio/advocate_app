@@ -20,6 +20,7 @@ type FilingGuidance = NonNullable<CourtProfile['filing_guidance']>;
 
 const props = defineProps<{
   guidance: FilingGuidance;
+  showMemoHelper?: boolean;
   matterId: string | null;
   canUndo: boolean;
   canRedo: boolean;
@@ -159,10 +160,12 @@ function downloadReviewCsv() {
   <section class="filing-guide">
     <div class="guide-heading"
       ><div
-        ><div class="guide-eyebrow">DELHI HIGH COURT · REFERENCE ONLY</div
+        ><div class="guide-eyebrow">OFFICIAL SOURCES · DRAFT REFERENCE ONLY</div
         ><h2>{{ guidance.title }}</h2
         ><p>{{ guidance.scope }}</p></div
-      ><div class="review-chip">Reviewed through {{ guidance.reviewed_through }}</div></div
+      ><div class="review-chip"
+        >Source check: {{ guidance.reviewed_through }} · No advocate approval</div
+      ></div
     >
     <div class="requirements-grid">
       <article
@@ -181,7 +184,7 @@ function downloadReviewCsv() {
         ><p v-for="warning in guidance.source_conflicts" :key="warning">{{ warning }}</p></div
       ></div
     >
-    <div class="template-section"
+    <div v-if="guidance.templates?.length" class="template-section"
       ><h3>Official forms and templates</h3
       ><div class="template-list"
         ><button
@@ -195,7 +198,7 @@ function downloadReviewCsv() {
             ><p>{{ template.purpose }}</p></div
           ><ArrowRight :size="16" /></button></div
     ></div>
-    <div class="memo-helper">
+    <div v-if="showMemoHelper !== false" class="memo-helper">
       <div class="memo-heading"
         ><div
           ><h3>Memo of Parties data helper</h3

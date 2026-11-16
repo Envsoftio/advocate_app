@@ -224,6 +224,7 @@ export interface PageSearchResult {
   truncated: boolean;
 }
 export interface Check {
+  action?: string;
   validation_run_id?: string;
   effective_input_digest?: string | null;
   finding_id?: string;
@@ -301,7 +302,7 @@ export interface ExportManifest {
 export interface Job {
   id: string;
   matter_id: string;
-  kind: 'build' | 'supplement-build' | 'variant-build' | 'ocr' | 'compress';
+  kind: 'build' | 'supplement-build' | 'variant-build' | 'ocr' | 'compress' | 'preflight-screen';
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   target_id?: string | null;
   retry_job_id?: string | null;

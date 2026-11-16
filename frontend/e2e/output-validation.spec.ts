@@ -119,8 +119,8 @@ test('B01C new design, exact findings, persisted review, measured output and rel
   await expect(page.locator('.section-enter-active')).toHaveCount(0);
   await page.evaluate(() => document.fonts.ready);
   const summary = (await page.locator('.preflight-summary').boundingBox())!;
-  expect(Math.round(summary.x)).toBe(208);
-  expect(Math.round(summary.width)).toBe(1208);
+  expect(Math.round(summary.x)).toBe(264);
+  expect(Math.round(summary.width)).toBe(1152);
   await matrix(page, info, '14C-preflight');
   await selectOption(preflight.getByLabel('Show', { exact: true }), 'warning');
   await preflight.getByRole('button', { name: 'Review source 2' }).click();

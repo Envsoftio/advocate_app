@@ -15,6 +15,7 @@ const props = defineProps<{
   job: Job | null;
   initialRecovery?: boolean;
   returnToIndex?: boolean;
+  returnToPreflight?: boolean;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -693,7 +694,13 @@ defineExpose({ saveDraft, discard });
         class="membership-button secondary"
         :disabled="busy"
         @click="leave(() => emit('close'))"
-        >{{ returnToIndex ? 'Back to index' : 'Back to build' }}</button
+        >{{
+          returnToPreflight
+            ? 'Back to Preflight'
+            : returnToIndex
+              ? 'Back to index'
+              : 'Back to build'
+        }}</button
       ><button class="membership-button secondary" :disabled="busy || !settings" @click="preview"
         >Preview changes</button
       ><button

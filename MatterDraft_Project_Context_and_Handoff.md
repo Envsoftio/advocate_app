@@ -36,6 +36,8 @@ The client described the following desired product:
 6. **Automations:** Index page-number updates, bookmarks generated from index entries, category-driven rule/defect checking.
 7. **Architecture:** Offline first, clean UI/backend boundary, secure IPC, progress/cancellation, modularity and maintainability.
 
+**Signing scope update · 17 November 2026:** The product owner confirmed deferring dedicated signing pending advocate clarification. No signature-image substitute is selected. Existing signature-risk safeguards and original preservation remain; the original e-signature capability above is deferred, not fulfilled. See DEC-04 in [the implementation backlog](docs/IMPLEMENTATION_TASKS.md).
+
 **24 October 2026 desktop-foundation scope clarification:** The product owner selected modern DOCX/XLSX/PPTX exports for this increment, rather than legacy `.doc/.xls/.ppt` or every pairwise Office conversion. Share-link generation is deferred; no online destination or revocation service is authorized. The original broader PDF/Office conversion discussion below remains historical context and requires a separate scope decision before implementation. Editable Office review drafts must identify their PDF/CSV source build and describe extraction/layout losses; they are not filing PDFs.
 8. **Testing/distribution:** pytest for Python, Vitest for TypeScript, Playwright E2E requested initially, native builds for Windows/macOS (Linux mentioned in build scope).
 

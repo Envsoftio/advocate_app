@@ -94,7 +94,7 @@ def preflight(store: Store, matter_id: str, profile: dict, *,
     if not docs:
         issues.append(dict(severity='error', code='NO_DOCUMENTS', message='Include at least one document in Bundle membership before building.', document_id=None))
     if profile['status'] != 'APPROVED':
-        issues.append(dict(severity='info', code='PROFILE_NOT_APPROVED', message='This is a demo/illustrative profile, not a verified court-compliance determination.', document_id=None))
+        issues.append(dict(severity='info', code='PROFILE_NOT_APPROVED', message=f'{profile["name"]} has no recorded advocate approval. Technical checks do not establish case-specific legal completeness. Review the official references for the applicable proceeding.', document_id=None))
     if matter and not supported_index_script(matter['name']):
         issues.append(dict(severity='error', code='UNSUPPORTED_INDEX_SCRIPT',
                            message='The matter name contains a script outside the current Latin/Devanagari visual pilot. Generated index output is blocked until this script is verified.',
@@ -124,6 +124,9 @@ def preflight(store: Store, matter_id: str, profile: dict, *,
             issues.append(dict(severity='error', code='UNSUPPORTED_INDEX_SCRIPT',
                                message=f'{doc["title"]} contains a script outside the current Latin/Devanagari visual pilot. Generated index output is blocked until this script is verified.',
                                **common))
+        if not doc.get('document_date'):
+            issues.append(dict(severity='warning', code='DOCUMENT_DATE_MISSING',
+                message=f'{doc["title"]} has no document date. Review the source; add a known date or acknowledge that it is unavailable.', **common))
         mode = annexure_mode(doc, output_settings)
         if mode != 'none':
             if doc['label_status'] != 'confirmed' or not doc['label'].strip():
@@ -165,6 +168,13 @@ def preflight(store: Store, matter_id: str, profile: dict, *,
             if key in seen_labels:
                 issues.append(dict(severity='warning', code='DUPLICATE_LABEL', message=f'Duplicate annexure/document label: {doc["label"]}', **common))
             seen_labels.add(key)
+        if doc.get('ocr_status') == 'processed':
+            reviewed_pages = store.reviewed_ocr_pages(doc['id'], doc['revision'])
+            start = doc.get('_source_start', 0)
+            for page_index in range(start, start + doc['page_count']):
+                if page_index not in reviewed_pages:
+                    issues.append(dict(severity='warning', code='OCR_REVIEW_PENDING', page_index=page_index,
+                        message=f'{doc["title"]}, source page {page_index + 1} has OCR text awaiting review. Open the page to inspect measured confidence and compare recognized text with the scan.', **common))
         working = store.working_path(doc)
         if not working.is_file():
             issues.append(dict(severity='error', code='MISSING_WORKING_COPY', message=f'Working file missing: {doc["title"]}', **common))
@@ -173,9 +183,17 @@ def preflight(store: Store, matter_id: str, profile: dict, *,
             with open_pdf(working) as pdf:
                 if pdf.needs_pass:
                     issues.append(dict(severity='error', code='ENCRYPTED_INPUT', message=f'Encrypted input: {doc["title"]}', **common))
+                if pdf.page_count != doc.get('_source_total', doc['page_count']):
+                    issues.append(dict(severity='error', code='PAGE_COUNT_MISMATCH',
+                        message=f'{doc["title"]}: working PDF page count differs from the recorded source count. Restore or reimport the document.', **common))
                 annotation_count = 0
                 link_count = 0
                 for index, page in enumerate(pdf):
+                    try:
+                        page.get_pixmap(matrix=pymupdf.Matrix(0.25, 0.25), alpha=False)
+                    except Exception as exc:
+                        issues.append(dict(severity='error', code='PAGE_RENDER_FAILED', page_index=index,
+                            message=f'{doc["title"]}, source page {index + 1} could not be rendered: {exc}', **common))
                     annotation_count += sum(1 for _ in (page.annots() or ()))
                     link_count += len(page.get_links())
                     if not page.get_text('text').strip() and profile['require_searchable_text']:
@@ -237,16 +255,40 @@ def preflight(store: Store, matter_id: str, profile: dict, *,
                 message=f'Link “{link["title"]}” targets excluded material. Retarget or remove this link, or include its destination.',
                 document_id=link['source_document_id'], target_revision=link['source_revision'],
                 page_index=link['source_page_index'], artifact='working'))
+    for bookmark in store.list_manual_bookmarks(matter_id):
+        if bookmark['document_id'] in included_ids and not bookmark['resolved']:
+            issues.append(dict(severity='warning', code='UNRESOLVED_BOOKMARK',
+                message='A manual bookmark has an unavailable destination and will be omitted. Resolve or remove it in Index & bookmarks.',
+                document_id=bookmark['document_id'], record_id=bookmark['id'], action='bookmarks'))
+    for link in store.list_reviewed_links(matter_id):
+        if link['source_document_id'] in included_ids and not link['resolved']:
+            issues.append(dict(severity='warning', code='UNRESOLVED_LINK',
+                message='A reviewed link has an unavailable endpoint and will be omitted. Review its source document.',
+                document_id=link['source_document_id'], record_id=link['id']))
+    if docs and not any(i['severity'] == 'error' for i in issues):
+        try:
+            bundle_preview(store, matter_id, matter['max_pages_per_volume'],
+                           bool(matter['keep_groups_intact']), output_settings,
+                           documents_override=docs)
+        except (ProcessingError, ValueError, OSError) as exc:
+            issues.append(dict(severity='error', code='PAGE_MAP_UNAVAILABLE',
+                message=f'The current volume/page plan cannot be generated: {exc}',
+                document_id=None, action='volumes'))
     if not any(i['severity'] == 'error' for i in issues):
         issues.append(dict(severity='info', code='TECHNICAL_PREFLIGHT', message='Basic technical preflight completed. Legal completeness, authenticity, signatures, limitation and registry acceptance are not verified.', document_id=None))
     try:
         snapshot = store.build_input_digest(matter_id)
     except (OSError, ValueError):
         snapshot = None
+    if documents_override is None:
+        from .page_analysis import findings as screening_findings
+        issues.extend(screening_findings(store, matter_id))
     for issue in issues:
         issue['input_snapshot'] = snapshot
         identity = {key: issue.get(key) for key in
                     ('code', 'document_id', 'target_revision', 'page_index', 'message')}
+        if issue.get('record_id'):
+            identity['record_id'] = issue['record_id']
         issue['finding_id'] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
     return issues
 

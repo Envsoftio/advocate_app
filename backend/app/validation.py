@@ -90,6 +90,38 @@ def record_preflight(store, matter_id, findings):
     return findings
 
 
+PREFLIGHT_REVIEW_ITEMS = ('latest_order', 'sequence', 'titles', 'pagination')
+
+
+def preflight_review_state(store, matter_id):
+    snapshot = store.build_input_digest(matter_id, effective=True)
+    path = _folder(store, matter_id, 'preflight') / ('review-' + snapshot + '.json')
+    return json.loads(read_bytes(path)) if path.exists() else {
+        'input_digest': snapshot, 'version': 0,
+        'items': {key: False for key in PREFLIGHT_REVIEW_ITEMS},
+        'warnings': [], 'updated_at': None}
+
+
+def save_preflight_review(store, matter_id, payload):
+    current = preflight_review_state(store, matter_id)
+    if payload.get('input_digest') != current['input_digest'] or payload.get('version') != current['version']:
+        raise ValueError('Saved inputs or review changed; run checks again before reviewing')
+    items, warnings = payload.get('items'), payload.get('warnings')
+    if not isinstance(items, dict) or set(items) != set(PREFLIGHT_REVIEW_ITEMS) or any(type(v) is not bool for v in items.values()):
+        raise ValueError('Supply all four human-review items as booleans')
+    runs = history(store, matter_id, 'preflight')
+    run = next((r for r in runs if r['id'] == payload.get('run_id')), None)
+    if not run or run['contract']['input_digest'] != current['input_digest']:
+        raise ValueError('Run checks on the current saved inputs before reviewing')
+    allowed = {f['finding_id'] for f in run['findings'] if f['severity'] == 'warning'}
+    if not isinstance(warnings, list) or any(not isinstance(v, str) or v not in allowed for v in warnings):
+        raise ValueError('Only warnings from this check run can be acknowledged; errors must be fixed')
+    result = {**current, 'items': items, 'warnings': sorted(set(warnings)),
+              'version': current['version'] + 1, 'updated_at': utcnow()}
+    _write(_folder(store, matter_id, 'preflight') / ('review-' + current['input_digest'] + '.json'), result)
+    return result
+
+
 def validate_output(store, matter_id, build_id, selected_files=None):
     manifest = manifest_for(store, matter_id, build_id)
     by_name = {f['name']: f for f in manifest['files']}

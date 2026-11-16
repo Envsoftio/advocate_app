@@ -1959,6 +1959,21 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                         store.discard_uncommitted_working(doc_id, rel, candidate)
         return jobs.submit(doc['matter_id'], 'compress', task, target_id=doc_id)
 
+    @app.post('/matters/{matter_id}/preflight/screen', status_code=202)
+    def screen_preflight_pages(matter_id: str, payload: dict, _: None = Depends(auth)):
+        from .page_analysis import scan
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            snapshot = store.build_input_digest(matter_id, effective=True)
+            if payload.get('expected_snapshot') != snapshot:
+                raise HTTPException(409, 'Saved inputs changed; run checks again before screening')
+            if not store.get_bundle_documents(matter_id):
+                raise HTTPException(422, 'Include documents before screening pages')
+            if any(j['status'] in ('queued', 'running') for j in store.list_jobs(matter_id)):
+                raise HTTPException(409, 'Wait for the active operation before screening pages')
+            return jobs.submit(matter_id, 'preflight-screen',
+                lambda job_id, progress, cancelled: scan(store, matter_id, snapshot, progress, cancelled))
+
     @app.get('/matters/{matter_id}/validate')
     def validate_matter(matter_id: str, _: None = Depends(auth)):
         with store.matter_lock(matter_id):
@@ -2361,6 +2376,21 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 note = {**payload, 'updated_at': output_validation.utcnow()}
                 output_validation._write(path, note)
                 return {**record, 'review': note}
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+
+    @app.get('/matters/{matter_id}/preflight/review')
+    def preflight_review_state(matter_id: str, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            return output_validation.preflight_review_state(store, matter_id)
+
+    @app.put('/matters/{matter_id}/preflight/review')
+    def save_preflight_review(matter_id: str, payload: dict, _: None = Depends(auth)):
+        with store.matter_lock(matter_id):
+            matter_or_404(matter_id)
+            try:
+                return output_validation.save_preflight_review(store, matter_id, payload)
             except ValueError as exc:
                 raise HTTPException(409, str(exc)) from exc
 
