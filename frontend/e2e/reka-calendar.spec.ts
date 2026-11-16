@@ -76,6 +76,25 @@ test('Reka calendars keep ISO dates, explicit confirmation, blank values and key
       await page.getByRole('button', { name: 'Document details', exact: true }).click();
     }
     await expect(input).toBeVisible();
+    for (const name of ['Document type', 'Part']) {
+      const select = page
+        .locator('#document-details-panel')
+        .getByRole('combobox', { name, exact: true });
+      const color = await select.evaluate((el) => getComputedStyle(el).color);
+      await expect(select.locator('.app-select-label')).toHaveCSS('color', color);
+      await select.click();
+      const option = page.getByRole('option', { selected: true });
+      await expect(option.locator('.app-select-item-label')).toHaveCSS(
+        'color',
+        await option.evaluate((el) => getComputedStyle(el).color),
+      );
+      if (name === 'Document type')
+        await page.screenshot({
+          path: info.outputPath(`details-dropdown-${width}-${theme}-${scale}.png`),
+          animations: 'disabled',
+        });
+      await page.keyboard.press('Escape');
+    }
     const iconColor = await trigger.locator('svg').evaluate((el) => ({
       stroke: getComputedStyle(el).stroke,
       expected: getComputedStyle(el).getPropertyValue('--cb-muted').trim(),

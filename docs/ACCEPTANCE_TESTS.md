@@ -1350,3 +1350,12 @@ Selection commits after the menu releases focus, so save/discard guards retain a
 The initial broad Chrome run stopped at its eight-failure limit after 75 passes. Dropdown-related batch dismissal, nested reading-mode dismissal and reader-details focus return were corrected and retested. The final broad Chrome run recorded **116 passes** before its five-failure limit. A continuation recorded **33 passes, one skipped opt-in vault test and one reload failure**; this included the remaining dropdown/calendar checks and the isolated PDF surface/viewport checks. Final reload follow-up passed both the JSON layout matrix and reader persistence/shortcut-focus journey. The test helper now waits for the asynchronous matter list, and shortcut focus is asserted on the persistent View trigger. Source code was unchanged during these final runs.
 
 Two full-suite position assertions remain unresolved and are not recorded as passes: the source/OCR layout test expects a page top of 108 px but observes 172 px with the OCR status band; the matter-home test expects its heading at 144 px but observes 126.453125 px. The latter reproduced identically against the staged pre-dropdown source in an isolated temporary checkout. Tests were not weakened to make those coordinates pass. The broad suite is **not wholly green**. Detailed run artifacts are in `/private/tmp/matterdraft-select-final`, `/private/tmp/matterdraft-select-remainder` and `/private/tmp/matterdraft-select-reload-final`.
+
+
+## EM. Dropdown selected-text color — 16 November 2026
+
+The legacy `.field span { color: #b76b50 }` rule colored Reka dropdown labels rust-red in document details. The shared trigger label and menu item label now explicitly inherit their parent control/menu color with component-scoped specificity. The selection indicator retains its existing accent token. No selection handlers, values, dimensions or workflow guards changed.
+
+- Existing calendar appearance checks now verify computed text colors on both Document type and Part triggers and selected options at 1440×900 light/100% and 1024×768 dark/125%. Chrome **2/2** and WebKit **2/2** calendar/dropdown checks passed.
+- Frontend build and **49 unit tests** passed; formatting passed. Apple Silicon app rebuild passed (**73.13 MiB**).
+- Rendered evidence: `/private/tmp/matterdraft-select-color-visual`; copies in ignored `docs/ui-evidence/reka-select/`. This color fix does not resolve or change EL's separately recorded layout assertions.

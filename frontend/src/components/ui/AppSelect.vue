@@ -144,7 +144,7 @@ function restoreFocus(event: Event) {
             :data-select-value="String(choice.value ?? '')"
             class="app-select-item"
           >
-            <SelectItemText>{{ choice.label }}</SelectItemText>
+            <SelectItemText class="app-select-item-label">{{ choice.label }}</SelectItemText>
             <SelectItemIndicator class="app-select-check"><Check :size="14" /></SelectItemIndicator>
           </SelectItem>
         </SelectViewport>

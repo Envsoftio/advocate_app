@@ -14,7 +14,8 @@
   font: inherit;
   cursor: pointer;
 }
-.app-select-label {
+.app-select-trigger .app-select-label {
+  color: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -70,6 +71,9 @@
 .app-select-item[data-highlighted] {
   background: var(--cb-selected);
   color: var(--cb-text);
+}
+.app-select-content .app-select-item-label {
+  color: inherit;
 }
 .app-select-item[data-state='checked'] {
   font-weight: 600;
