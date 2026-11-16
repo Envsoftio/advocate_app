@@ -474,6 +474,8 @@ Cloud collaboration, author permissions, secure download links and DMS connector
 
 ### 6.3 Background job model
 
+New primary, supplemental and audience-variant build jobs persist an integrity-checked input snapshot before queuing. Saved-input retry reuses submitted revisions/settings/plans after failure, cancellation or interruption; current-input rebuild is a separate action. Jobs expose frozen counts and persisted milestone timestamps (schema 28). Snapshots inherit vault encryption, survive restart and are cleaned when no retained job references them. Missing/corrupt snapshots and profile drift fail closed; legacy jobs retain their prior retry contract. See [FLOW09 implementation](docs/DESIGN_FLOW09_BUILD.md).
+
 Build and OCR operations are queued through one Python thread executor. Progress is polled via `/jobs/{id}` and persisted in SQLite. On restart, queued/running jobs are marked interrupted, unpublished build staging is removed, and the UI offers a new-job retry. Jobs do not resume midway. Terminal job records are retained for 90 days. Cancellation checks occur between volumes and OCR pages; responsiveness during large single-volume work remains unverified under DAT-03.
 
 Document revisions and a process-wide PDF processing lock now serialize API PDF operations and builds/OCR/compression across matters. This prevents concurrent native-library use; it is not crash isolation. Moving native PDF work to supervised worker processes remains a release-hardening consideration. Do not add concurrent native calls without validating the library execution model.

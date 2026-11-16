@@ -2072,24 +2072,18 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             require_signature_acknowledgement(store.get_bundle_documents(matter_id),
                                               acknowledge_signature_risk,
                                               'building transformed bundle PDFs')
-            submission_error = None
-            try:
-                submitted_digest = store.build_input_digest(matter_id)
-            except (OSError, ValueError):
-                submitted_digest = None
-                matter = matter_or_404(matter_id)
-                problems = preflight(store, matter_id, profiles[matter['court_profile']])
-                submission_error = 'Preflight failed: ' + '; '.join(
-                    issue['message'] for issue in problems if issue['severity'] == 'error')
-        def task(job_id, progress, cancelled):
+            from . import build_inputs
+            context = build_inputs.capture(store, matter_id)
+        return submit_frozen_build(matter_id, context, job_id, acknowledge_signature_risk)
+
+    def submit_frozen_build(matter_id, context, job_id, acknowledged):
+        from . import build_inputs
+        def task(attempt_id, progress, cancelled):
             with store.matter_lock(matter_id):
-                if submission_error:
-                    raise ProcessingError(submission_error)
-                if submitted_digest is not None and store.build_input_digest(matter_id) != submitted_digest:
-                    raise ProcessingError('Build inputs changed while queued; submit a new build')
-                return build_bundle(store, matter_id, job_id, progress, cancelled,
-                                    signature_acknowledged=acknowledge_signature_risk)
-        return jobs.submit(matter_id, 'build', task, job_id=job_id)
+                return build_inputs.run(store, matter_id, context, attempt_id, progress,
+                                        cancelled, acknowledged)
+        return jobs.submit(matter_id, context['kind'], task, target_id=context.get('plan_id'),
+                           job_id=job_id, input_context=context)
 
     def submit_supplement_build(matter_id: str, plan_id: str,
                                 job_id: str | None = None,
@@ -2108,19 +2102,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             selected_docs = [by_id[doc_id] for doc_id in dict.fromkeys(p['document_id'] for p in resolved)]
             require_signature_acknowledgement(selected_docs, acknowledge_signature_risk,
                                               'building transformed supplemental PDFs')
-            submitted_version = plan['version']
-            submitted_contract = supplements.plan_contract(plan)
-        def task(job_id, progress, cancelled):
-            with store.matter_lock(matter_id):
-                current = supplements.get_plan(store, matter_id, plan_id)
-                ready, reason = supplements.build_ready(store, matter_id, current) if current else (False, 'Supplemental plan is unavailable.')
-                if not ready or current['version'] != submitted_version or supplements.plan_contract(current) != submitted_contract:
-                    raise ProcessingError(reason or 'Supplemental plan changed while queued; review and submit a new build.')
-                return build_bundle(store, matter_id, job_id, progress, cancelled,
-                                    signature_acknowledged=acknowledge_signature_risk,
-                                    supplement_plan=current)
-        return jobs.submit(matter_id, 'supplement-build', task,
-                           target_id=plan_id, job_id=job_id)
+            from . import build_inputs
+            context = build_inputs.capture(store, matter_id, kind='supplement-build', plan=plan)
+        return submit_frozen_build(matter_id, context, job_id, acknowledge_signature_risk)
 
     def submit_variant_build(matter_id: str, plan_id: str,
                              job_id: str | None = None,
@@ -2138,17 +2122,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             selected = variants.ordered_documents(store, matter_id, plan['included_ids'])
             require_signature_acknowledgement(selected, acknowledge_signature_risk,
                                               'building transformed audience-variant PDFs')
-            version, digest = plan['version'], variants.plan_contract(plan)
-        def task(job_id, progress, cancelled):
-            with store.matter_lock(matter_id):
-                latest = variants.get_plan(store, matter_id, plan_id)
-                if not latest or latest['version'] != version or variants.plan_contract(latest) != digest:
-                    raise ProcessingError('Variant changed while queued; review and submit a new build.')
-                return build_bundle(store, matter_id, job_id, progress, cancelled,
-                                    signature_acknowledged=acknowledge_signature_risk,
-                                    variant_plan=latest)
-        return jobs.submit(matter_id, 'variant-build', task,
-                           target_id=plan_id, job_id=job_id)
+            from . import build_inputs
+            context = build_inputs.capture(store, matter_id, kind='variant-build', plan=plan)
+        return submit_frozen_build(matter_id, context, job_id, acknowledge_signature_risk)
 
     @app.post('/matters/{matter_id}/build', status_code=202)
     def start_build(matter_id: str, payload: SignatureRiskAcknowledgement | None = None,
@@ -2198,6 +2174,23 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         elif prior['kind'] not in ('build', 'supplement-build', 'variant-build'):
             raise HTTPException(status_code=409, detail='This job type cannot be retried')
         acknowledged = payload.acknowledge_signature_risk if payload else False
+        if prior.get('input_context'):
+            from . import build_inputs
+            with store.matter_lock(prior['matter_id']):
+                try:
+                    build_inputs.load(store, prior['matter_id'], prior['input_context'])
+                except (OSError, ValueError, ProcessingError) as exc:
+                    raise HTTPException(409, str(exc)) from exc
+                require_signature_acknowledgement(prior['input_context']['documents'], acknowledged,
+                                                  'retrying saved bundle inputs')
+                new_job_id = new_id()
+                if not jobs.claim_retry(job_id, new_job_id):
+                    raise HTTPException(409, 'This stopped attempt has already been retried or is not retryable')
+                try:
+                    return submit_frozen_build(prior['matter_id'], prior['input_context'], new_job_id, acknowledged)
+                except BaseException:
+                    jobs.release_retry(job_id, new_job_id)
+                    raise
         if prior['kind'] == 'ocr':
             require_signature_acknowledgement([doc], acknowledged, 'retrying OCR')
         elif prior['kind'] == 'build':

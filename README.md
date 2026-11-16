@@ -264,3 +264,5 @@ One sidebar supplies Overview, Documents, Index & Bookmarks, Preflight, Build an
 
 
 Preflight's **Screen pages** action performs local, cancellable screening for possible blank pages and measured OCR-confidence issues, with exact-page review actions. It changes neither original nor working PDF bytes; findings expire when inputs change. **Court rules → Reference court** provides official-source draft guidance for the Supreme Court of India, Delhi High Court and Punjab and Haryana High Court. These references are not advocate-approved conditional filing checklists. See [scope and research limits](docs/PREFLIGHT_COURT_RULES_ACCEPTANCE.md) and [verification](docs/ACCEPTANCE_TESTS.md).
+
+Build recovery supports durable saved-input retries for new primary, supplemental and audience-variant jobs, with a separate current-input rebuild action. See [build/recovery contracts and acceptance limits](docs/DESIGN_FLOW09_BUILD.md).

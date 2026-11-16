@@ -1790,3 +1790,16 @@
     min-height: 0;
   }
 }
+
+.build-failure-targets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+.build-failure-targets li + li {
+  margin-top: 20px;
+}
+.build-recovery-details li {
+  overflow-wrap: anywhere;
+}

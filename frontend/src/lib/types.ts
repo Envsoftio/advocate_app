@@ -299,7 +299,32 @@ export interface ExportManifest {
   }>;
   checks: Check[];
 }
+export interface BuildFailure {
+  code: string;
+  message: string;
+  document_id?: string;
+  target_revision?: number;
+  page_index?: number;
+  artifact?: string;
+  volume?: number;
+}
+export interface BuildInputContext {
+  snapshot_id: string;
+  captured_at: string;
+  kind: string;
+  included_documents: number;
+  source_pages: number;
+  generated_pages: number | null;
+  physical_pages: number | null;
+  volumes: number | null;
+  plan_error?: string;
+  documents: Array<
+    Pick<MatterDocument, 'id' | 'title' | 'revision' | 'page_count' | 'signature_status'>
+  >;
+}
 export interface Job {
+  input_context?: BuildInputContext | null;
+  events?: Array<{ progress: number; message: string; at: string }>;
   id: string;
   matter_id: string;
   kind: 'build' | 'supplement-build' | 'variant-build' | 'ocr' | 'compress' | 'preflight-screen';

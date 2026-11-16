@@ -17,11 +17,11 @@ class JobManager:
             store.recover_interrupted_work()
 
     def submit(self, matter_id: str, kind: str, task, target_id: str | None = None,
-               job_id: str | None = None):
+               job_id: str | None = None, input_context: dict | None = None):
         job_id = job_id or new_id()
         job = {'id': job_id, 'matter_id': matter_id, 'kind': kind, 'status': 'queued',
                'target_id': target_id, 'progress': 0, 'message': 'Queued',
-               'error': None, 'result': None, 'retry_job_id': None, 'created_at': utcnow()}
+               'input_context': input_context, 'events': [], 'error': None, 'result': None, 'retry_job_id': None, 'created_at': utcnow()}
         cancelled = threading.Event()
         with self._lock:
             self._jobs[job_id] = (job, cancelled)
@@ -32,6 +32,8 @@ class JobManager:
             with self._lock:
                 job['progress'] = max(0, min(100, value))
                 job['message'] = message
+                if not job['events'] or job['events'][-1]['message'] != message:
+                    job['events'].append(dict(progress=job['progress'], message=message, at=utcnow()))
                 if self._store:
                     self._store.save_job(job)
 
@@ -57,7 +59,9 @@ class JobManager:
             except Exception as exc:
                 with self._lock:
                     job.update(status='cancelled' if cancelled.is_set() else 'failed',
-                               error=str(exc), result=getattr(exc, 'recovery', None), message='Cancelled' if cancelled.is_set() else 'Failed')
+                               error=str(exc), result=getattr(exc, 'recovery', None) or (dict(failures=[dict(
+                                   code='BUILD_FAILED', severity='error', message=str(exc))])
+                                   if kind in ('build', 'supplement-build', 'variant-build') else None), message='Cancelled' if cancelled.is_set() else 'Failed')
                     if self._store:
                         self._store.save_job(job)
 
@@ -84,11 +88,22 @@ class JobManager:
             return None
         with self._lock:
             job = self._store.get_job(job_id)
-            if not job or job['status'] != 'interrupted' or job['retry_job_id']:
+            if not job or (job['status'] != 'interrupted' and not (job.get('input_context') and job['status'] in ('failed', 'cancelled'))) or job['retry_job_id']:
                 return None
             job['retry_job_id'] = retry_job_id
             self._store.save_job(job)
+            if job_id in self._jobs:
+                self._jobs[job_id][0]['retry_job_id'] = retry_job_id
             return job
+
+    def release_retry(self, job_id, retry_job_id):
+        with self._lock:
+            job = self._store.get_job(job_id)
+            if job and job.get('retry_job_id') == retry_job_id:
+                job['retry_job_id'] = None
+                self._store.save_job(job)
+                if job_id in self._jobs:
+                    self._jobs[job_id][0]['retry_job_id'] = None
 
     def shutdown(self):
         with self._lock:

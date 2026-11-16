@@ -133,7 +133,7 @@ def test_membership_undo_backup_and_empty_build(client, auth, matter, make_pdf, 
         build_bundle(store,matter['id'],'empty',lambda *a:None,lambda:False)
 
 
-def test_queued_build_rejects_membership_change(client, auth, matter, make_pdf, monkeypatch):
+def test_queued_build_keeps_submitted_membership(client, auth, matter, make_pdf, monkeypatch):
     upload(client,auth,matter,make_pdf)
     pending=[]
     def capture(matter_id,kind,task,**kwargs):
@@ -142,8 +142,10 @@ def test_queued_build_rejects_membership_change(client, auth, matter, make_pdf, 
     monkeypatch.setattr(client.app.state.jobs,'submit',capture)
     assert client.post(f'/matters/{matter["id"]}/build',headers=auth).status_code==202
     assert apply(client,auth,matter,[]).status_code==200
-    with pytest.raises(ProcessingError,match='inputs changed while queued'):
-        pending[0]('job',lambda *a:None,lambda:False)
+    result = pending[0]('b'*32,lambda *a:None,lambda:False)
+    assert result['pages'] == 3
+    assert len(result['bundle_membership']['documents']) == 1
+    assert client.app.state.store.get_bundle_documents(matter['id']) == []
 
 
 def test_reference_only_signature_does_not_require_build_acknowledgment(client, auth, matter, make_pdf):

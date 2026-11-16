@@ -548,3 +548,8 @@ export async function downloadProtectedPdf(
   setTimeout(() => URL.revokeObjectURL(fileUrl), 30_000);
   return true;
 }
+
+export async function revealSavedExport(matterId: string, exportId: string): Promise<void> {
+  if (!inTauri()) throw new Error('Saved-file reveal is available in the desktop app.');
+  await invoke('reveal_saved_export', { matterId, exportId });
+}

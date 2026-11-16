@@ -2,9 +2,9 @@
 
 17 November 2026. Scope: `FLOW / 09 / Build the package` and `FLOW / 09 / Build recovery` in `CourtBundle_Complete_Workflow (2).pen`: **15A settings, 15B progress, 17A complete, 16A failure**. These are states of the existing Build workspace. The matching files in `CourtBundle_JSON_For_Codex/screens/` supply the component overrides, geometry and semantic tokens; the 15A PNG is the supplied raster reference. The other three frames have JSON design references but no supplied PNG.
 
-## Requirements and implementation audit
+## Initial UI-only requirements and implementation audit
 
-The canonical bundle requirements are in `MatterDraft_Project_Context_and_Handoff.md` §§6.2 and 6.5 and the FIL backlog, rather than the newer customer/admin/licensing PRDs. The build engine is already substantially implemented; a missing-looking screen is not evidence of missing PDF assembly.
+The canonical bundle requirements are in `MatterDraft_Project_Context_and_Handoff.md` §§6.2 and 6.3 and the FIL backlog, rather than the newer customer/admin/licensing PRDs. The build engine is already substantially implemented; a missing-looking screen is not evidence of missing PDF assembly.
 
 | Requirement | Current implementation and this correction |
 | --- | --- |
@@ -15,9 +15,9 @@ The canonical bundle requirements are in `MatterDraft_Project_Context_and_Handof
 | Completion, review and export | 17A retains actual saved files, measured sizes, selected-build review and output-check gates. Adds PDF page counts from the selected build's measured validation data; combined count can fall back to its manifest. Non-PDF/unknown counts remain a dash. Removes the redundant repeated “Generated” column to preserve readable file sizes. |
 | Preservation | Existing original/prior-artifact hashes, durable jobs, late-response guards, output review persistence and export/release policies remain intact. No source PDF is modified by these UI changes. |
 
-## Concrete remaining gaps
+## Initial gaps (superseded by the implementation below)
 
-- **Exact old-snapshot retry is not implemented.** The 16A design's `retrySameSnapshot` metadata exceeds the backend contract. Failed/cancelled retry submits current saved inputs; interrupted retry creates one new job, also using current inputs. The UI now states this explicitly. Resuming midway is also unsupported, as already documented in handoff §6.5.
+- **Exact old-snapshot retry is not implemented.** The 16A design's `retrySameSnapshot` metadata exceeds the backend contract. Failed/cancelled retry submits current saved inputs; interrupted retry creates one new job, also using current inputs. The UI now states this explicitly. Resuming midway is also unsupported, as already documented in handoff §6.3.
 - **Frozen-input counts are not exposed on active Job responses.** The progress sidebar shows the real job identity and submission date instead of displaying live draft counts as frozen inputs or inventing a preparation revision. Detailed per-stage timestamps are also unavailable; the list uses the engine's actual coarse milestones.
 - **Exact affected-page routing is not available for every build error.** Failures expose an error string, with structured recovery for measured size exceptions. The recovery panel therefore opens working documents/preflight instead of guessing a document/page from text. Existing size recovery remains available.
 - **Reveal generated folder is not a supported export operation.** Local storage and the existing native Save/browser download workflow remain available. No fictional output path is shown.
@@ -34,3 +34,16 @@ The screen matrix captures 1440×900 and 1024×768, light/dark, 90/100/110/125% 
 Verification results and platform limits are recorded in `ACCEPTANCE_TESTS.md` under “FLOW / 09 build and recovery”.
 
 Selected captures: [progress](ui-evidence/flow09/15B-progress-1440-light-100.png), [recovery](ui-evidence/flow09/16A-failure-1440-light-100.png), [completion](ui-evidence/flow09/17A-complete-1440-light-100.png), [compact dark completion](ui-evidence/flow09/17A-complete-1024-dark-125.png). Final results: **350 backend / 49 frontend unit tests; 13 targeted browser cases passed across the main and follow-up runs; matching Apple Silicon sidecar and app compiled**. Native runtime/Save dialogs and Windows remain unverified by this pass.
+
+## Bundle functionality follow-up — 17 November 2026
+
+The four technical gaps above are now implemented:
+
+- Primary, supplemental and audience-variant submissions capture durable, integrity-checked source revisions, settings, membership and plans before queuing. **Retry saved inputs** creates one new attempt from that snapshot after failure/cancellation/interruption, including after restart. **Build current inputs** explicitly submits current preparation. Existing legacy jobs retain their previous retry behavior; no halfway resume is claimed.
+- Job responses persist frozen document/page/volume counts and actual milestone timestamps. Invalid plans show unavailable counts rather than fabricated totals. Schema 28 adds nullable job context/events without changing existing API routes.
+- Structured failures carry known source/revision/page targets. Navigation verifies the current revision and refuses a substitute page. Errors without a known target retain general recovery actions. Imported-original integrity is checked again before publication, including live original bytes; prior artifacts remain immutable.
+- Native **Show saved file** reveals only a successfully exported file recorded by the native save service in this application session. It does not expose the encrypted internal output directory. Browser downloads retain browser behavior.
+
+Snapshots use the existing encryption key when the vault is enabled; plaintext-to-vault migration also encrypts snapshot databases. Restart cleanup removes abandoned captures and snapshots no longer referenced by retained jobs. Snapshots consume additional local storage and are not portable-backup job history. Missing/corrupt inputs or changed technical profiles fail closed. Retry preserves submitted inputs, not byte-identical generation timestamps.
+
+Validation: 356 backend tests, 49 frontend unit tests, seven native Rust tests, production frontend build, matching Apple Silicon sidecar and macOS app compilation passed. Browser and visual details are in the latest acceptance entry. Legal qualification, clean-device/Windows/Intel acceptance, and native OS Save/Finder runtime checks remain open; these are not satisfied by compilation. Universal exact-page attribution is not claimed for failures that provide no source-page evidence.

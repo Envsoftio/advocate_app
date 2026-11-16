@@ -147,6 +147,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_backend_connection,
             native_save::save_export,
+            native_save::reveal_saved_export,
             native_save::save_protected_export,
             native_save::save_matter,
             native_save::save_office_export,

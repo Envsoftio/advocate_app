@@ -429,3 +429,81 @@ test('B01B late build response cannot replace another matter workspace', async (
     release();
   }
 });
+
+test('saved-input retry keeps the failed settings and current-input build uses repaired settings', async ({
+  page,
+  request,
+}) => {
+  const { matter } = await fixture(request);
+  await request.patch(`${base}/matters/${matter.id}`, {
+    headers,
+    data: { max_pages_per_volume: 2 },
+  });
+  await page.goto('/');
+  await enterLatestMatter(page);
+  await enter(page);
+  const workspace = page.locator('.build-workspace');
+  await workspace.getByRole('button', { name: 'Build bundle', exact: true }).click();
+  await expect(workspace).toContainText('Build failed');
+  const first = (
+    await (await request.get(`${base}/matters/${matter.id}/jobs`, { headers })).json()
+  )[0];
+  expect(first.input_context.source_pages).toBe(3);
+  await request.patch(`${base}/matters/${matter.id}`, {
+    headers,
+    data: { max_pages_per_volume: 300 },
+  });
+  await page.reload();
+  await enterLatestMatter(page);
+  await enter(page);
+  await workspace.getByRole('button', { name: 'Retry saved inputs', exact: true }).click();
+  await expect(workspace).toContainText('Build failed');
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${base}/matters/${matter.id}/jobs`, { headers })).json()).length,
+    )
+    .toBe(2);
+  const retried = (
+    await (await request.get(`${base}/matters/${matter.id}/jobs`, { headers })).json()
+  )[0];
+  expect(retried.input_context.snapshot_id).toBe(first.input_context.snapshot_id);
+  await expect(workspace).toContainText('2-page volume cap');
+  await workspace.getByRole('button', { name: 'Build current inputs', exact: true }).click();
+  await expect(workspace.getByRole('heading', { name: 'Bundle ready for review' })).toBeVisible();
+  const builds = await (
+    await request.get(`${base}/matters/${matter.id}/exports`, { headers })
+  ).json();
+  expect(builds).toHaveLength(1);
+  expect(builds[0].input_snapshot_id).not.toBe(first.input_context.snapshot_id);
+  expect(builds[0].pages).toBe(4);
+});
+
+test('build recovery opens the exact affected revision and refuses a changed source', async ({
+  page,
+  request,
+}) => {
+  const { matter, docs } = await fixture(request);
+  await request.patch(`${base}/documents/${docs[0].id}`, { headers, data: { title: 'தமிழ்' } });
+  await page.goto('/');
+  await enterLatestMatter(page);
+  await enter(page);
+  const workspace = page.locator('.build-workspace');
+  await workspace.getByRole('button', { name: 'Build bundle', exact: true }).click();
+  await expect(workspace).toContainText('Build failed');
+  await workspace
+    .getByRole('button', { name: 'Inspect affected document · Revision 1', exact: true })
+    .click();
+  await expect(page.locator('.pdf-paper')).toBeVisible();
+  await expect(page.locator('.read-workspace')).toContainText('Revision 1');
+  await request.post(`${base}/documents/${docs[0].id}/pages/rotate`, {
+    headers,
+    data: { page_index: 0, degrees: 90, expected_revision: 1 },
+  });
+  await enter(page);
+  await workspace
+    .getByRole('button', { name: 'Inspect affected document · Revision 1', exact: true })
+    .click();
+  await expect(page.locator('.toast')).toContainText('No substitute page was opened');
+  await expect(workspace).toBeVisible();
+});

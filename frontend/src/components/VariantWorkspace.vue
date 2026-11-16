@@ -734,7 +734,11 @@ defineExpose({
               @click="emit('cancelJob')"
               >Cancel job</button
             ><button
-              v-if="activeBuild.status === 'interrupted'"
+              v-if="
+                ['interrupted', 'failed', 'cancelled'].includes(activeBuild.status) &&
+                !activeBuild.retry_job_id &&
+                (activeBuild.input_context || activeBuild.status === 'interrupted')
+              "
               class="text-tool"
               @click="emit('retry', activeBuild)"
               >Retry</button

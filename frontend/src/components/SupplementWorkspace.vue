@@ -819,10 +819,14 @@ onBeforeUnmount(() => {
             @click="emit('cancel')"
             >Cancel build</button
           ><button
-            v-else-if="supplementJob.status === 'interrupted'"
+            v-else-if="
+              ['interrupted', 'failed', 'cancelled'].includes(supplementJob.status) &&
+              !supplementJob.retry_job_id &&
+              (supplementJob.input_context || supplementJob.status === 'interrupted')
+            "
             class="membership-button secondary"
             @click="emit('retry', supplementJob)"
-            >Retry as a new build</button
+            >Retry saved inputs</button
           ><button v-else class="membership-button secondary" @click="returnPlan()"
             >Return to plan</button
           ></section

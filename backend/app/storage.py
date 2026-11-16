@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 27:
+            if version > 28:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -396,6 +396,14 @@ class Store:
                 if 'text_style_json' not in columns:
                     con.execute("ALTER TABLE page_annotations ADD COLUMN text_style_json TEXT NOT NULL DEFAULT '{}'")
                 con.execute('PRAGMA user_version=27')
+
+            if version < 28:
+                columns = {row['name'] for row in con.execute('PRAGMA table_info(jobs)')}
+                if 'context_json' not in columns:
+                    con.execute('ALTER TABLE jobs ADD COLUMN context_json TEXT')
+                if 'events_json' not in columns:
+                    con.execute('ALTER TABLE jobs ADD COLUMN events_json TEXT')
+                con.execute('PRAGMA user_version=28')
 
     def get_ocr_page_review(self, doc_id: str, revision: int, page_index: int) -> dict | None:
         with self.connect() as con:
@@ -2011,22 +2019,24 @@ class Store:
         with self.connect() as con:
             con.execute('''INSERT INTO jobs
                 (id,matter_id,kind,target_id,status,progress,message,error,result_json,
-                 retry_job_id,created_at,updated_at,started_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 retry_job_id,created_at,updated_at,started_at,context_json,events_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(id) DO UPDATE SET
                 status=excluded.status,progress=excluded.progress,message=excluded.message,
                 error=excluded.error,result_json=excluded.result_json,
                 retry_job_id=excluded.retry_job_id,updated_at=excluded.updated_at,
-                started_at=excluded.started_at''',
+                started_at=excluded.started_at,context_json=excluded.context_json,events_json=excluded.events_json''',
                 (job['id'], job['matter_id'], job['kind'], job.get('target_id'),
                  job['status'], job['progress'], job['message'], job.get('error'),
                  json.dumps(job.get('result')) if job.get('result') is not None else None,
                  job.get('retry_job_id'), job.get('created_at', now), now,
-                 job.get('started_at')))
+                 job.get('started_at'), json.dumps(job.get('input_context')), json.dumps(job.get('events', []))))
 
     @staticmethod
     def _job(row) -> dict:
         item = dict(row)
+        item['input_context'] = json.loads(item.pop('context_json') or 'null')
+        item['events'] = json.loads(item.pop('events_json') or '[]')
         item['result'] = json.loads(item.pop('result_json')) if item['result_json'] else None
         return item
 
@@ -2058,6 +2068,8 @@ class Store:
             con.execute('''DELETE FROM jobs WHERE status IN ('completed','failed','cancelled')
                 AND updated_at < ?''', (cutoff,))
         for matter_id in matter_ids:
+            from .build_inputs import cleanup
+            cleanup(self, matter_id)
             root = self.exports_root(matter_id)
             if root.is_dir():
                 for staging in root.glob('.build-*'):

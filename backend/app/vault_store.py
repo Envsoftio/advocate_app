@@ -159,21 +159,30 @@ class VaultStore:
             candidate.unlink(missing_ok=True)
             encrypt_file(path, candidate, data_key)
             os.replace(candidate, path)
-        if database.exists() and is_plain_sqlite(database):
-            with sqlite3.connect(database) as con:
-                con.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        # Frozen build stores retain the same encryption boundary as the live DB.
+        roots = [self.root, *[p for p in self.root.glob('matters/*/build-inputs/*')
+                             if p.is_dir() and not p.is_symlink()]]
+        for db_root in roots:
+            database = db_root / 'court_bundle.sqlite3'
+            old_db = db_root / '.migration-plain.sqlite3'
+            encrypted_db = db_root / '.migration-encrypted.sqlite3'
+            if not database.exists() and old_db.exists():
+                os.replace(encrypted_db if encrypted_db.exists() else old_db, database)
+            if database.exists() and is_plain_sqlite(database):
+                with sqlite3.connect(database) as con:
+                    con.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                encrypted_db.unlink(missing_ok=True)
+                migrate_plain_database(database, encrypted_db, data_key)
+                os.replace(database, old_db)
+                os.replace(encrypted_db, database)
+            if database.exists():
+                with connect_encrypted(database, data_key) as con:
+                    if con.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                        raise VaultError('Encrypted database migration failed integrity check')
+                    con.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            old_db.unlink(missing_ok=True)
             encrypted_db.unlink(missing_ok=True)
-            migrate_plain_database(database, encrypted_db, data_key)
-            os.replace(database, old_db)
-            os.replace(encrypted_db, database)
-        if database.exists():
-            with connect_encrypted(database, data_key) as con:
-                if con.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
-                    raise VaultError('Encrypted database migration failed integrity check')
-                con.execute('PRAGMA wal_checkpoint(TRUNCATE)')
-        old_db.unlink(missing_ok=True)
-        encrypted_db.unlink(missing_ok=True)
-        (self.root / 'court_bundle.sqlite3-wal').unlink(missing_ok=True)
-        (self.root / 'court_bundle.sqlite3-shm').unlink(missing_ok=True)
+            (db_root / 'court_bundle.sqlite3-wal').unlink(missing_ok=True)
+            (db_root / 'court_bundle.sqlite3-shm').unlink(missing_ok=True)
         metadata['state'] = 'active'
         self._save(metadata)

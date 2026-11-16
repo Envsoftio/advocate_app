@@ -121,8 +121,14 @@ def test_failed_processing_keeps_prior_build_and_intended_settings(client, auth,
         assert client.post(f'/jobs/{response["id"]}/cancel',headers=auth).status_code == 200
     release.set()
     result=wait_for_job(client,auth,response['id'])
-    assert result['status'] == ('cancelled' if mode == 'cancel' else 'failed'), result
-    assert len(store.list_exports(matter['id'])) == 1
+    assert result['status'] == ('cancelled' if mode == 'cancel' else 'completed' if mode == 'stale' else 'failed'), result
+    assert len(store.list_exports(matter['id'])) == (2 if mode == 'stale' else 1)
+    if mode == 'stale':
+        frozen_output = next(item for item in store.list_exports(matter['id']) if item['id'] == result['id'])
+        assert frozen_output['stale']
+        assert not frozen_output['output_marks']['cleanup_metadata']
+        assert settings(client,auth,matter)['output_marks']['cleanup_metadata']
+
     assert all(store.sha256(p)==h for p,h in hashes.items())
     assert settings(client,auth,matter)['output_marks']['processing_quality']=='small'
     monkeypatch.setattr(engine,'process_generated_pdf',actual)

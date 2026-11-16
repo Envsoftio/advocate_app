@@ -19,12 +19,14 @@ export function signatureStatusLabel(status: SignatureStatus): string {
   )[status];
 }
 
-export function signatureRiskDocuments(documents: MatterDocument[]): MatterDocument[] {
+export function signatureRiskDocuments<T extends Pick<MatterDocument, 'signature_status'>>(
+  documents: T[],
+): T[] {
   return documents.filter((document) => risky.has(document.signature_status));
 }
 
 export function confirmSignatureTransformation(
-  documents: MatterDocument[],
+  documents: Array<Pick<MatterDocument, 'title' | 'signature_status'>>,
   action: string,
 ): { proceed: boolean; acknowledged: boolean } {
   const affected = signatureRiskDocuments(documents);

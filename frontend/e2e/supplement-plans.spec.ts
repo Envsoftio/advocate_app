@@ -201,9 +201,9 @@ test('B04A eight stable pages, caller Apply Cancel, saved reopen, real map and a
         if (size.width === 1440 && scale === 100) {
           const a = (await w.locator('.supplement-material').boundingBox())!,
             b = (await w.locator('.supplement-summary').boundingBox())!;
-          expect(Math.round(a.x)).toBe(208);
-          expect(Math.round(a.y)).toBe(236);
-          expect(Math.round(a.width)).toBe(858);
+          expect(Math.round(a.x)).toBe(264);
+          expect(Math.round(a.y)).toBe(240);
+          expect(Math.round(a.width)).toBe(802);
           expect(Math.round(a.height)).toBe(538);
           expect(Math.round(b.width)).toBe(332);
           expect(
@@ -431,18 +431,18 @@ test('B04B BU09 preserved-label policy renders from reconciled data and builds a
     y: Math.round(strip.y),
     width: Math.round(strip.width),
     height: Math.round(strip.height),
-  }).toEqual({ x: 208, y: 214, width: 1208, height: 42 });
+  }).toEqual({ x: 264, y: 218, width: 1152, height: 42 });
   expect({
     x: Math.round(card.x),
     y: Math.round(card.y),
     width: Math.round(card.width),
     height: Math.round(card.height),
-  }).toEqual({ x: 208, y: 278, width: 1208, height: 420 });
+  }).toEqual({ x: 264, y: 282, width: 1152, height: 420 });
   expect({
     x: Math.round(actions.x),
     y: Math.round(actions.y),
     width: Math.round(actions.width),
-  }).toEqual({ x: 208, y: 718, width: 1208 });
+  }).toEqual({ x: 264, y: 722, width: 1152 });
   await page.screenshot({
     path: resolve(b04bEvidence, 'BU09-1440-light-100.png'),
     animations: 'disabled',

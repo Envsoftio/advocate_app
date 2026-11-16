@@ -15,9 +15,9 @@ import {
   CircleX,
   LoaderCircle,
 } from 'lucide-vue-next';
-import { api } from '../lib/api';
+import { api, inTauri, revealSavedExport } from '../lib/api';
 import { bytesLabel, prettyDate, friendlyError } from '../lib/format';
-import type { ExportManifest, Job, MatterDocument, CourtProfile } from '../lib/types';
+import type { ExportManifest, Job, MatterDocument, CourtProfile, BuildFailure } from '../lib/types';
 import OutputChecksDialog from './OutputChecksDialog.vue';
 import { useOutputValidation } from '../lib/outputValidation';
 import { differences, type SavedLayout } from '../lib/bundleSettings';
@@ -47,6 +47,7 @@ const emit = defineEmits<{
   build: [];
   cancel: [];
   retry: [job: Job];
+  sourceFailure: [failure: BuildFailure];
   review: [id: string, name: string];
   export: [artifact: ExportManifest];
   documents: [];
@@ -118,6 +119,22 @@ const selectedId = ref(''),
 const artifact = computed(
   () => props.artifacts.find((a) => a.id === selectedId.value) || props.artifacts[0] || null,
 );
+const revealError = ref('');
+async function revealOutput() {
+  if (!artifact.value) return;
+  revealError.value = '';
+  try {
+    await revealSavedExport(props.matterId, artifact.value.id);
+  } catch (error) {
+    revealError.value = friendlyError(error);
+  }
+}
+watch(
+  () => [props.matterId, artifact.value?.id],
+  () => {
+    revealError.value = '';
+  },
+);
 const checksOpen = ref(false);
 const {
   state: qa,
@@ -136,6 +153,10 @@ const hasSizeException = computed(() =>
   Array.isArray((job.value?.result as Record<string, unknown> | null)?.size_exceptions),
 );
 const running = computed(() => job.value && ['running', 'queued'].includes(job.value.status));
+const failures = computed(() => {
+  const values = (job.value?.result as { failures?: BuildFailure[] } | null)?.failures;
+  return Array.isArray(values) ? values : [];
+});
 const cancelOpen = ref(false);
 watch(
   () => [job.value?.id, job.value?.status],
@@ -728,9 +749,23 @@ onBeforeUnmount(() => {
               </li>
             </ol>
             <aside class="build-card">
-              <h3>Submitted build</h3>
+              <h3>{{ job?.input_context ? 'Frozen input snapshot' : 'Submitted build' }}</h3>
               <p class="build-job-id">{{ job?.id }}</p>
-              <p>Selected working revisions and saved settings are checked before assembly.</p>
+              <template v-if="job?.input_context">
+                <p>{{ job.input_context.included_documents }} included documents</p>
+                <p
+                  >{{ job.input_context.source_pages }} source pages +
+                  {{ job.input_context.generated_pages ?? '—' }} generated</p
+                >
+                <p
+                  >{{ job.input_context.volumes ?? '—' }} volumes ·
+                  {{ job.input_context.physical_pages ?? '—' }} physical pages</p
+                >
+                <small v-if="job.input_context.plan_error"
+                  >Page plan unavailable; see the build error.</small
+                >
+              </template>
+              <p v-else>Legacy job: frozen counts are unavailable.</p>
               <p v-if="job?.created_at">Submitted {{ prettyDate(job.created_at) }}</p>
               <button
                 v-if="artifact"
@@ -773,7 +808,8 @@ onBeforeUnmount(() => {
             }}</p>
             <p class="build-recovery-help"
               >Inspect the working documents and saved settings, confirm the page map and bookmarks,
-              then run checks again. Retry creates a new attempt using current inputs.</p
+              then run checks again. Retry saved inputs reuses the submitted revisions and settings.
+              Build current inputs uses your latest saved preparation.</p
             >
             <div class="build-actions">
               <button class="membership-button primary" @click="emit('documents')"
@@ -783,14 +819,17 @@ onBeforeUnmount(() => {
                 >Run checks</button
               >
               <button
+                v-if="job?.input_context && !job.retry_job_id"
                 class="membership-button quiet"
+                :disabled="busy || blocked"
+                @click="emit('retry', job)"
+                >Retry saved inputs</button
+              >
+              <button
+                class="membership-button secondary"
                 :disabled="busy || blocked || dirty || !included.length"
-                @click="
-                  job?.status === 'interrupted' && !job.retry_job_id
-                    ? emit('retry', job)
-                    : emit('build')
-                "
-                >Retry build</button
+                @click="emit('build')"
+                >Build current inputs</button
               >
             </div>
             <details class="build-recovery-details">
@@ -799,14 +838,37 @@ onBeforeUnmount(() => {
                 >Job {{ job?.id }} · {{ job?.status }} · {{ job?.progress }}%</p
               >
               <p>Imported originals and earlier generated files remain preserved.</p>
+              <p v-if="job?.input_context">Snapshot {{ job.input_context.snapshot_id }}</p>
+              <ul v-if="job?.events?.length"
+                ><li v-for="event in job.events" :key="event.at"
+                  >{{ event.at }} · {{ event.progress }}% · {{ event.message }}</li
+                ></ul
+              >
             </details>
           </section>
           <aside class="build-card build-recovery-context">
             <h2>Build context</h2>
             <FileText :size="20" aria-hidden="true" />
-            <p
-              >The engine's error is shown in full. A specific affected source page is not reported
-              for every failure.</p
+            <ul v-if="failures.length" class="build-failure-targets">
+              <li v-for="(failure, index) in failures" :key="index">
+                <strong>{{ failure.code.replace(/_/g, ' ').toLowerCase() }}</strong>
+                <p>{{ failure.message }}</p>
+                <button
+                  v-if="failure.document_id && failure.target_revision !== undefined"
+                  class="text-tool"
+                  @click="emit('sourceFailure', failure)"
+                  >{{
+                    failure.page_index === undefined
+                      ? 'Inspect affected document'
+                      : `Open source page ${failure.page_index + 1}`
+                  }}
+                  · Revision {{ failure.target_revision }}</button
+                >
+              </li>
+            </ul>
+            <p v-else
+              >This failure concerns the build as a whole. Inspect the error and current
+              settings.</p
             >
             <span class="build-state">Working copies</span>
             <p v-if="artifact"
@@ -1049,10 +1111,16 @@ onBeforeUnmount(() => {
             @click="storage ? emit('build') : (screen = 'settings')"
           >
             {{ storage ? 'Build bundle' : 'Rebuild' }}</button
+          ><button
+            v-if="artifact && inTauri()"
+            class="membership-button secondary"
+            @click="revealOutput"
+            >Show saved file</button
           ><button v-if="artifact?.stale" class="text-tool" @click="screen = 'changes'">
             Review changes</button
           ><span>Later edits leave this build unchanged.</span>
         </footer>
+        <p v-if="revealError" role="alert">{{ revealError }}</p>
         <details v-if="artifact" ref="extraTools" class="build-extra-tools">
           <summary> More output tools · Office drafts, print and protected copies </summary>
           <div role="group" aria-label="Office review exports">

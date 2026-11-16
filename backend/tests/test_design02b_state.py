@@ -83,7 +83,7 @@ def test_queued_ocr_rejects_changed_revision_without_committing(client, auth, ma
     assert client.post(f'/documents/{doc["id"]}/ocr',headers=auth,json={'expected_revision':doc['revision']}).status_code==409
 
 
-def test_queued_build_rejects_changed_settings_and_retained_build_stays_frozen(client, auth, matter, make_pdf, monkeypatch):
+def test_queued_build_uses_frozen_settings_and_retained_build_stays_frozen(client, auth, matter, make_pdf, monkeypatch):
     upload(client,auth,matter,make_pdf)
     path=f'/matters/{matter["id"]}'
     job=wait_for_job(client,auth,client.post(path+'/build',headers=auth).json()['id'])
@@ -97,9 +97,9 @@ def test_queued_build_rejects_changed_settings_and_retained_build_stays_frozen(c
     monkeypatch.setattr(client.app.state.jobs,'submit',capture)
     assert client.post(path+'/build',headers=auth).status_code==202
     assert client.patch(path,headers=auth,json={'max_pages_per_volume':200}).status_code==200
-    with pytest.raises(ProcessingError,match='inputs changed while queued'):
-        pending[0]('job',lambda *args:None,lambda:False)
-    retained=client.get(path+'/exports',headers=auth).json()[0]
+    built = pending[0]('a'*32,lambda *args:None,lambda:False)
+    assert built['build_settings']['max_pages_per_volume'] == 300
+    retained=next(item for item in client.get(path+'/exports',headers=auth).json() if item['id']==manifest['id'])
     assert retained['stale']
     assert retained['page_map_snapshot']==manifest['page_map_snapshot']
     assert retained['build_input_digest']==manifest['build_input_digest']

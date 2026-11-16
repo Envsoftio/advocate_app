@@ -66,7 +66,7 @@ def original_integrity_issues(store: Store, docs: list[dict]) -> list[dict]:
     issues = []
     for doc in docs:
         original = store.original_path(doc)
-        common = dict(severity='error', document_id=doc['id'], artifact='original')
+        common = dict(severity='error', document_id=doc['id'], target_revision=doc['revision'], artifact='original')
         if not original.is_file():
             issues.append(dict(code='MISSING_ORIGINAL',
                                message=f'Original missing for {doc["title"]} (document {doc["id"]}).', **common))
@@ -1410,17 +1410,25 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
                                          align=pymupdf.TEXT_ALIGN_CENTER)
                 separator.insert_text((60, 770),
                                       'DRAFT technical separator - review before filing', fontsize=8)
-            with open_pdf(d['_working_path']) as source:
-                if source.page_count != d.get('_source_total', d['page_count']):
-                    raise ProcessingError(f'Page count changed for {d["title"]} while building. Retry.')
-                # Source annotations/links are omitted by policy; generated index links
-                # are inserted from the deterministic page map after document insertion.
-                for first in range(d.get('_source_start', 0), d.get('_source_start', 0)+d['page_count'], 10):
-                    if cancelled and cancelled():
-                        raise ProcessingError('Operation cancelled')
-                    output.insert_pdf(source, from_page=first,
-                                      to_page=min(first + 9, d.get('_source_start', 0)+d['page_count'] - 1),
-                                      annots=False, links=False)
+            try:
+                with open_pdf(d['_working_path']) as source:
+                    if source.page_count != d.get('_source_total', d['page_count']):
+                        raise ProcessingError(f'Page count changed for {d["title"]} while building. Retry.')
+                    # Source annotations/links are omitted by policy; generated index links
+                    # are inserted from the deterministic page map after document insertion.
+                    for first in range(d.get('_source_start', 0), d.get('_source_start', 0)+d['page_count'], 10):
+                        if cancelled and cancelled():
+                            raise ProcessingError('Operation cancelled')
+                        output.insert_pdf(source, from_page=first,
+                                          to_page=min(first + 9, d.get('_source_start', 0)+d['page_count'] - 1),
+                                          annots=False, links=False)
+            except Exception as exc:
+                if cancelled and cancelled():
+                    raise
+                raise ProcessingError(str(exc), recovery={'failures': [dict(
+                    code='SOURCE_ASSEMBLY_FAILED', severity='error', message=str(exc),
+                    document_id=d['id'], target_revision=d['revision'], artifact='working',
+                    volume=volume_no)]}) from exc
             if row['part'] != current_part:
                 current_part = row['part']
                 toc.append([1, f'Part {current_part}', row['start_page']])
@@ -1523,7 +1531,7 @@ def render_volume(documents: list[dict], matter: dict, path: Path, volume_no: in
 def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancelled,
                  signature_acknowledged: bool = False,
                  supplement_plan: dict | None = None,
-                 variant_plan: dict | None = None) -> dict:
+                 variant_plan: dict | None = None, input_snapshot_id: str | None = None) -> dict:
     matter = store.get_matter(matter_id)
     if not matter:
         raise ProcessingError('Matter not found')
@@ -1642,7 +1650,8 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
     mark_at_iso = mark_at.isoformat(timespec='seconds')
     progress(5, 'Checking source documents')
     if any(x['severity'] == 'error' for x in problems):
-        raise ProcessingError('Preflight failed: ' + '; '.join(x['message'] for x in problems if x['severity']=='error'))
+        raise ProcessingError('Preflight failed: ' + '; '.join(x['message'] for x in problems if x['severity']=='error'),
+            recovery={'failures': [x for x in problems if x['severity'] == 'error']})
     bookmark_inputs = [{key: (item[key] if item['resolved'] or key != 'title' else None)
                         for key in ('id', 'title', 'document_id',
                         'page_index', 'target_revision', 'parent_id', 'position')}
@@ -1953,6 +1962,7 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
                          page_map_entries(bundle_preview(store, matter_id, max_pages, keep_groups,
                                                          output_marks, documents_override=documents)))
         export_manifest = dict(id=export_id, created_at=report['created_at'], matter_id=matter_id,
+                               input_snapshot_id=input_snapshot_id,
                                artifact_kind=artifact_kind,
                                variant_plan_id=variant_plan['id'] if variant_plan else None,
                                variant_plan_version=variant_plan['version'] if variant_plan else None,
@@ -1996,9 +2006,11 @@ def build_bundle(store: Store, matter_id: str, export_id: str, progress, cancell
         if cancelled():
             raise ProcessingError('Operation cancelled')
         source_errors = original_integrity_issues(store, documents)
+        if hasattr(store, 'live'):
+            source_errors.extend(original_integrity_issues(store.live, documents))
         if source_errors:
             raise ProcessingError('Source integrity check failed before export: ' +
-                                  '; '.join(issue['message'] for issue in source_errors))
+                                  '; '.join(issue['message'] for issue in source_errors), recovery={'failures': source_errors})
         if supplement_plan and supplement_plan.get('input_snapshot') != store.build_input_digest(matter_id):
             raise ProcessingError('Supplement inputs changed during assembly; no export was published')
         if variant_plan and not variants.is_current(store, matter_id, variant_plan)[0]:

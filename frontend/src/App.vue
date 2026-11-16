@@ -2878,9 +2878,14 @@ async function startBuild(): Promise<boolean> {
     if (!(await savePolicy()) || currentMatterId.value !== submittedMatterId) return false;
     const signature = confirmSignatureTransformation(includedDocuments.value, 'Bundle generation');
     if (!signature.proceed) return false;
-    const job = await api<Job>(`/matters/${submittedMatterId}/build`, 'POST', {
-      acknowledge_signature_risk: signature.acknowledged,
-    });
+    const job = await api<Job>(
+      `/matters/${submittedMatterId}/build`,
+      'POST',
+      {
+        acknowledge_signature_risk: signature.acknowledged,
+      },
+      120_000,
+    );
     if (currentMatterId.value === submittedMatterId) watchJob(job);
     return true;
   } catch (err) {
@@ -2892,9 +2897,10 @@ async function startBuild(): Promise<boolean> {
 }
 async function startSupplementBuild(planId: string): Promise<boolean> {
   if (!currentMatterId.value || isJobActive.value || buildSubmitting.value) return false;
+  const submittedMatterId = currentMatterId.value;
   buildSubmitting.value = true;
   try {
-    const catalog = await api<any>('/matters/' + currentMatterId.value + '/supplements');
+    const catalog = await api<any>('/matters/' + submittedMatterId + '/supplements');
     const plan = catalog.plans.find((item: any) => item.id === planId);
     if (!plan) throw new Error('The saved supplemental plan is unavailable.');
     const selected = new Set(plan.selected_page_ids);
@@ -2903,17 +2909,19 @@ async function startSupplementBuild(planId: string): Promise<boolean> {
         .filter((document: any) => document.pages.some((page: any) => selected.has(page.id)))
         .map((document: any) => document.id),
     );
+    if (currentMatterId.value !== submittedMatterId) return false;
     const signature = confirmSignatureTransformation(
       docs.value.filter((document) => documentIds.has(document.id)),
       'Supplement generation',
     );
     if (!signature.proceed) return false;
     const job = await api<Job>(
-      '/matters/' + currentMatterId.value + '/supplements/' + planId + '/build',
+      '/matters/' + submittedMatterId + '/supplements/' + planId + '/build',
       'POST',
       { acknowledge_signature_risk: signature.acknowledged },
+      120_000,
     );
-    watchJob(job);
+    if (currentMatterId.value === submittedMatterId) watchJob(job);
     return true;
   } catch (err) {
     issue(err);
@@ -2924,25 +2932,28 @@ async function startSupplementBuild(planId: string): Promise<boolean> {
 }
 async function startVariantBuild(planId: string): Promise<boolean> {
   if (!currentMatterId.value || isJobActive.value || buildSubmitting.value) return false;
+  const submittedMatterId = currentMatterId.value;
   buildSubmitting.value = true;
   try {
     const catalog = await api<{ plans: Array<{ id: string; included_ids: string[] }> }>(
-      `/matters/${currentMatterId.value}/variants`,
+      `/matters/${submittedMatterId}/variants`,
     );
     const plan = catalog.plans.find((item) => item.id === planId);
     if (!plan) throw new Error('The selected audience variant is unavailable.');
     const included = new Set(plan.included_ids);
+    if (currentMatterId.value !== submittedMatterId) return false;
     const signature = confirmSignatureTransformation(
       docs.value.filter((doc) => included.has(doc.id)),
       'Audience variant generation',
     );
     if (!signature.proceed) return false;
     const job = await api<Job>(
-      `/matters/${currentMatterId.value}/variants/${planId}/build`,
+      `/matters/${submittedMatterId}/variants/${planId}/build`,
       'POST',
       { acknowledge_signature_risk: signature.acknowledged },
+      120_000,
     );
-    watchJob(job);
+    if (currentMatterId.value === submittedMatterId) watchJob(job);
     return true;
   } catch (err) {
     issue(err);
@@ -3014,7 +3025,49 @@ async function cancelJob() {
     issue(err);
   }
 }
+async function openBuildFailure(failure: {
+  document_id?: string;
+  target_revision?: number;
+  page_index?: number;
+  artifact?: string;
+}) {
+  if (!currentMatterId.value || !failure.document_id || failure.target_revision === undefined)
+    return;
+  const matterId = currentMatterId.value;
+  const tabId = activeTabId.value;
+  const call = ++findingNavigationSequence;
+  try {
+    const current = await api<MatterDocument[]>(`/matters/${matterId}/documents`);
+    if (
+      currentMatterId.value !== matterId ||
+      activeTabId.value !== tabId ||
+      call !== findingNavigationSequence
+    )
+      return;
+    const doc = current.find((item) => item.id === failure.document_id);
+    if (
+      !doc ||
+      doc.revision !== failure.target_revision ||
+      (failure.page_index !== undefined && failure.page_index >= doc.page_count)
+    )
+      throw new Error(
+        'This build error targets an older or unavailable revision. No substitute page was opened. Inspect current inputs and build again.',
+      );
+    docs.value = current;
+    await openDocumentTab(
+      doc.id,
+      failure.page_index === undefined ? undefined : failure.page_index + 1,
+      doc.revision,
+    );
+    preparationMode.value = false;
+    if (failure.artifact === 'original') await switchArtifact('original');
+  } catch (err) {
+    issue(err);
+  }
+}
 async function retryInterrupted(job: Job) {
+  const submittedMatterId = currentMatterId.value;
+  if (!submittedMatterId || submittedMatterId !== job.matter_id) return;
   if (job.kind === 'preflight-screen') {
     await validate();
     await startPreflightScreen();
@@ -3029,7 +3082,12 @@ async function retryInterrupted(job: Job) {
           : job.kind === 'variant-build'
             ? docs.value
             : includedDocuments.value;
-    if (job.kind === 'variant-build' && job.target_id && currentMatterId.value) {
+    if (
+      !job.input_context &&
+      job.kind === 'variant-build' &&
+      job.target_id &&
+      currentMatterId.value
+    ) {
       const catalog = await api<{ plans: Array<{ id: string; included_ids: string[] }> }>(
         `/matters/${currentMatterId.value}/variants`,
       );
@@ -3039,7 +3097,7 @@ async function retryInterrupted(job: Job) {
       relevant = docs.value.filter((doc) => included.has(doc.id));
     }
     const signature = confirmSignatureTransformation(
-      relevant,
+      job.input_context?.documents ?? relevant,
       job.kind === 'ocr' ? 'Retrying OCR' : 'Retrying bundle generation',
     );
     if (!signature.proceed) return;
@@ -3047,6 +3105,7 @@ async function retryInterrupted(job: Job) {
       acknowledge_signature_risk: signature.acknowledged,
       ...(job.kind === 'ocr' ? { language: retryOcrLanguage.value } : {}),
     });
+    if (currentMatterId.value !== submittedMatterId) return;
     watchJob(retry);
     await loadMatterResources();
     notify(`Restarted ${job.kind} as a new job.`, 'info');
@@ -4755,6 +4814,7 @@ watch(sidebarCollapsed, (collapsed) => {
               @checks="outputChecksArtifact = $event"
               @cancel-job="cancelJob"
               @retry="retryInterrupted"
+              @source-failure="openBuildFailure"
               @dirty-changed="variantDirty = $event"
               @context="variantContext = $event"
             />
@@ -4925,6 +4985,7 @@ watch(sidebarCollapsed, (collapsed) => {
               @supplement-build="startSupplementBuild"
               @cancel="cancelJob"
               @retry="retryInterrupted"
+              @source-failure="openBuildFailure"
               @review="reviewGeneratedPdf"
               @finding="openFinding"
               @export="exportDialogArtifact = $event"

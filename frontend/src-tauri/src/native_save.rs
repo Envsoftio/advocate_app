@@ -760,3 +760,29 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 }
+
+/// Reveal only a successfully saved artifact for this build, never an arbitrary
+/// renderer-supplied path or the encrypted internal data directory.
+#[tauri::command]
+pub(crate) fn reveal_saved_export(
+    app: AppHandle,
+    saves: State<'_, SaveState>,
+    matter_id: String,
+    export_id: String,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    if !valid_id(&matter_id) || !valid_id(&export_id) {
+        return Err("Invalid build selection".into());
+    }
+    let prefix = format!("{matter_id}/{export_id}/");
+    let paths = saves.paths.lock().map_err(|error| error.to_string())?;
+    let path = paths.get(&format!("{prefix}combined.pdf"))
+        .or_else(|| paths.iter().find(|(key, _)| key.starts_with(&prefix)).map(|(_, path)| path))
+        .ok_or("Export a file from this build first. Saved locations are available during this app session.")?
+        .clone();
+    drop(paths);
+    if !path.is_file() {
+        return Err("The saved file was moved or removed. Export it again to choose a location.".into());
+    }
+    app.opener().reveal_item_in_dir(path).map_err(|error| error.to_string())
+}

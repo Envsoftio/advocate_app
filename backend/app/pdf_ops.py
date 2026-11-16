@@ -19,7 +19,10 @@ from .file_io import copy_file, open_pdf, protected, save_pdf, size as file_size
 
 
 class ProcessingError(Exception):
-    pass
+    def __init__(self, message, *, recovery=None):
+        super().__init__(message)
+        if recovery is not None:
+            self.recovery = recovery
 
 
 def ocr_provenance(language: str) -> dict:
