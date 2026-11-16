@@ -70,12 +70,12 @@ test('FLOW07 unresolved destinations, exact bookmark repair, guarded removal and
   await expect(page.locator('.section-enter-active')).toHaveCount(0);
   await page.evaluate(() => document.fonts.ready);
   for (const [selector, x, width] of [
-    ['.structure-order', 208, 282],
-    ['.structure-map', 506, 910],
+    ['.structure-order', 264, 282],
+    ['.structure-map', 562, 854],
   ] as const) {
     const b = (await workspace.locator(selector).boundingBox())!;
     expect(Math.round(b.x)).toBe(x);
-    expect(Math.round(b.y)).toBe(266);
+    expect(Math.round(b.y)).toBe(270);
     expect(Math.round(b.width)).toBe(width);
   }
   await expect(workspace.locator('.structure-heading')).not.toContainText('Recalculating');

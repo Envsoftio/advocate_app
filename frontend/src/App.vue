@@ -3533,7 +3533,10 @@ watch(sidebarCollapsed, (collapsed) => {
           ><FolderOpen /><span>All matters</span></button
         >
         <span v-else class="rail-local"
-          ><small>ON THIS COMPUTER</small><span><ShieldCheck />Local processing</span></span
+          ><small>ON THIS COMPUTER</small
+          ><span class="rail-local-row"
+            ><span class="rail-icon-slot"><ShieldCheck /></span><span>Local processing</span></span
+          ></span
         >
         <button
           :aria-label="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
@@ -3692,8 +3695,12 @@ watch(sidebarCollapsed, (collapsed) => {
       </nav>
 
       <div class="preparation-utility">
-        <button class="preparation-search-trigger" @click="searchWorkspace"
-          ><Search :size="16" /> Search matters and documents <kbd>Ctrl K</kbd></button
+        <button
+          class="preparation-search-trigger"
+          aria-label="Search matters and documents"
+          title="Search matters and documents"
+          @click="searchWorkspace"
+          ><Search :size="16" /><span>Search matters and documents</span><kbd>Ctrl K</kbd></button
         >
         <span class="preparation-save-state"
           ><CircleAlert

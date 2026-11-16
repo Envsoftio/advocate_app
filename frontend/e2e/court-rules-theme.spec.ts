@@ -5,7 +5,14 @@ import { test, expect } from '@playwright/test';
 
 test('court rules identifies applied checks and keeps dark theme reference text legible', async ({
   page,
+  request,
 }) => {
+  const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`;
+  const created = await request.post(`${base}/matters`, {
+    headers: { Authorization: 'Bearer e2e-isolated-token' },
+    data: { name: 'Synthetic court rules review', court_profile: 'general-demo' },
+  });
+  expect(created.ok()).toBe(true);
   await page.goto('/');
   await enterLatestMatter(page);
   await openWorkspaceNavigation(page);

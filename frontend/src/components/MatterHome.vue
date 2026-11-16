@@ -93,7 +93,7 @@ defineExpose({ focusSearch, focusActivity });
     <header class="flow-heading"
       ><div><h1>Matters</h1><p>Your matters, source documents and generated packages.</p></div
       ><button class="btn primary" @click="emit('create')"
-        ><Plus :size="16" />New matter</button
+        ><Plus :size="18" />New matter</button
       ></header
     >
     <div v-if="matters.length || archived.length" class="matter-filters"
@@ -108,15 +108,19 @@ defineExpose({ focusSearch, focusActivity });
       ><AppSelect v-model="status" aria-label="Filter by package status"
         ><option value="all">All statuses</option><option>Not built</option><option>Current</option
         ><option>Stale</option></AppSelect
-      ><span class="matter-count"
-        >{{ visible.length }} {{ visible.length === 1 ? 'matter' : 'matters' }}</span
-      ><AppSelect v-model="sort" aria-label="Sort matters"
-        ><option value="recent">Recently modified</option
-        ><option value="name">Matter name</option></AppSelect
-      ><button class="btn secondary" :aria-pressed="!compact" @click="compact = false"
-        ><List :size="15" />List</button
-      ><button class="btn quiet" :aria-pressed="compact" @click="compact = true"
-        >Compact</button
+      ><div class="matter-filter-actions"
+        ><span class="matter-count"
+          >{{ visible.length }} {{ visible.length === 1 ? 'matter' : 'matters' }}</span
+        ><AppSelect v-model="sort" aria-label="Sort matters"
+          ><option value="recent">Recently modified</option
+          ><option value="name">Matter name</option></AppSelect
+        ><div class="matter-density" role="group" aria-label="Matter list density"
+          ><button class="btn secondary" :aria-pressed="!compact" @click="compact = false"
+            ><List :size="15" />List</button
+          ><button class="btn quiet" :aria-pressed="compact" @click="compact = true"
+            >Compact</button
+          ></div
+        ></div
       ></div
     >
     <p v-if="failed" role="alert"
@@ -134,6 +138,8 @@ defineExpose({ focusSearch, focusActivity });
             ><td
               ><button
                 class="matter-home-card"
+                :title="m.name"
+                :aria-label="`${scope === 'archived' ? 'Restore' : 'Open'} ${m.name}`"
                 @click="scope === 'archived' ? emit('restore', m.id) : emit('open', m.id)"
                 ><Folder :size="18" /><span
                   ><strong>{{ m.name }}</strong
@@ -154,7 +160,7 @@ defineExpose({ focusSearch, focusActivity });
                     ? 'Archived'
                     : summaries[m.id]
                       ? summaries[m.id].review
-                        ? `${summaries[m.id].review} need review`
+                        ? `${summaries[m.id].review} ${summaries[m.id].review === 1 ? 'needs' : 'need'} review`
                         : summaries[m.id].documents
                           ? 'In preparation'
                           : 'Add documents'

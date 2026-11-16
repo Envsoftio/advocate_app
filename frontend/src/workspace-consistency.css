@@ -1,0 +1,195 @@
+/* Shared reading scale for the legacy information pages and Matter Overview.
+   PDF editor, index, build and validation retain their supplied scoped layouts. */
+:root .design-shell :is(.rules-page, .about-page) {
+  padding: 28px 24px 40px;
+  min-width: 0;
+  width: 100%;
+}
+:root .design-shell :is(.rules-page, .about-page) .page-eyebrow {
+  color: var(--cb-link);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+:root .design-shell :is(.rules-page, .about-page) h1 {
+  margin: 8px 0;
+  color: var(--cb-text);
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+:root .design-shell :is(.rules-page, .about-page) .page-description {
+  color: var(--cb-muted);
+  font-size: 14px;
+  line-height: 21px;
+  margin-bottom: 24px;
+  max-width: 70ch;
+}
+:root .rules-page > .notice {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 21px;
+}
+:root .rules-page .rule-card {
+  min-width: 0;
+  padding: 20px;
+}
+:root .rules-page .badge {
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+:root:not([data-effective-theme='dark']) .rules-page .badge.muted {
+  color: #704710;
+}
+:root .rules-page .rule-card h2 {
+  margin: 16px 0 8px;
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+}
+:root .rules-page .rule-card p,
+:root .about-page .feature-strip p,
+:root .about-page .about-card p {
+  color: var(--cb-muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+:root .rules-page .rule-card p {
+  min-height: 0;
+}
+:root .rules-page .rule-facts > div {
+  font-size: 13px;
+  line-height: 20px;
+}
+:root .rules-page .rule-facts span,
+:root .rules-page .rule-sources > span {
+  color: var(--cb-muted);
+}
+:root .rules-page .rule-sources > span {
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.04em;
+}
+:root .rules-page .rule-sources a {
+  color: var(--cb-link);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+:root .about-page .feature-strip > div {
+  min-width: 0;
+}
+:root .about-page .feature-strip h3,
+:root .about-page .about-card h2 {
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+}
+:root .about-page .about-card {
+  max-width: none;
+}
+:root .design-shell .matter-overview.flow-page {
+  padding: 24px;
+}
+:root .matter-overview .flow-heading h1 {
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+:root .matter-overview .flow-heading p {
+  font-size: 14px;
+  line-height: 20px;
+}
+:root .matter-overview .flow-section-heading h2 {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+:root .matter-overview .overview-metrics > span,
+:root .matter-overview .preparation-step p,
+:root .matter-overview .overview-activity small {
+  font-size: 13px;
+  line-height: 20px;
+}
+:root .matter-overview .overview-review p,
+:root .matter-overview .overview-activity strong,
+:root .matter-overview .preparation-step h3 {
+  font-size: 14px;
+  line-height: 20px;
+}
+:root .matter-overview .overview-activity time {
+  font-size: 12px;
+  line-height: 18px;
+}
+:root .matter-overview .btn {
+  font-size: 14px;
+  min-height: 40px;
+  height: auto;
+}
+@media (max-width: 1199px) {
+  :root .app-shell.design-shell[data-build='true']:not([data-editor-screen='true']) {
+    --workspace-rail-width: 64px;
+  }
+  :root .design-shell[data-build='true']:not([data-editor-screen='true']) .matter-rail {
+    padding: 104px 10px 16px;
+    align-items: center;
+    overflow-x: hidden;
+  }
+  :root .design-shell[data-build='true']:not([data-editor-screen='true']) .matter-rail button {
+    width: 44px;
+    padding: 8px;
+    justify-content: center;
+  }
+  :root .design-shell[data-build='true']:not([data-editor-screen='true']) .rail-context {
+    display: none;
+  }
+}
+@media (max-width: 1100px) {
+  :root .bundle-structure .structure-map-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :root .bundle-structure .structure-order {
+    height: auto;
+    min-height: 220px;
+  }
+  :root .rules-page .rules-grid,
+  :root .about-page .feature-strip,
+  :root .matter-overview .overview-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :root .matter-overview .overview-columns {
+    gap: 24px;
+  }
+  :root .matter-overview .overview-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    padding-block: 12px;
+  }
+}
+@media (max-width: 900px) {
+  :root .matter-overview .overview-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding-block: 12px;
+  }
+  :root .matter-overview .overview-metrics > span {
+    gap: 10px;
+  }
+}
+@media (max-width: 700px) {
+  :root .rules-page .rules-grid,
+  :root .about-page .feature-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :root .design-shell :is(.rules-page, .about-page) {
+    padding: 24px;
+  }
+  :root .design-shell .matter-overview.flow-page {
+    padding: 24px;
+  }
+}
