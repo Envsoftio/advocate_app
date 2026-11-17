@@ -77,7 +77,13 @@ test('annotation properties fit the right edge at supported sizes', async ({ pag
       expect(Math.abs(geometry.inspector!.right - geometry.workspace!.right)).toBeLessThan(1);
       expect(Math.abs(geometry.inspector!.top - geometry.workspace!.top)).toBeLessThan(1);
       expect(Math.abs(geometry.inspector!.bottom - geometry.workspace!.bottom)).toBeLessThan(1);
-      expect(Math.abs(geometry.inspector!.left - geometry.page!.right)).toBeLessThan(1);
+      if (width > 1100) {
+        expect(Math.abs(geometry.inspector!.left - geometry.page!.right)).toBeLessThan(1);
+      } else {
+        // Compact properties overlay a stable full-width canvas (ED38B).
+        expect(Math.abs(geometry.workspace!.right - geometry.page!.right)).toBeLessThan(1);
+        expect(geometry.inspector!.left).toBeGreaterThan(geometry.page!.left);
+      }
       expect(geometry.inspectorScroll).toBeLessThanOrEqual(geometry.inspectorClient + 1);
       expect(geometry.documentScroll).toBeLessThanOrEqual(geometry.viewport + 1);
       if (width === 1024 && scale === 125) {

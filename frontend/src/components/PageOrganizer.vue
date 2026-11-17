@@ -543,7 +543,8 @@ onBeforeUnmount(() => {
     >
       <header class="organizer-heading">
         <div
-          ><h2 id="organizer-title">{{ currentDocument.original_name }}</h2
+          ><h2 id="organizer-title"
+            >{{ selected.size }} {{ selected.size === 1 ? 'page' : 'pages' }} selected</h2
           ><p class="organizer-document"
             >Revision {{ currentDocument.revision }} · {{ selected.size }}
             {{ selected.size === 1 ? 'page' : 'pages' }} selected · Imported original preserved</p
@@ -557,6 +558,37 @@ onBeforeUnmount(() => {
           ><X :size="20"
         /></button>
       </header>
+      <aside class="organizer-selection-inspector" aria-label="Page selection">
+        <h3>Page selection</h3>
+        <strong>{{ selected.size }} {{ selected.size === 1 ? 'page' : 'pages' }} selected</strong>
+        <p>{{ selected.size ? `Source ${selectionLabel}` : 'Select pages in the grid' }}</p>
+        <p>{{ pageCount }} source pages in working revision {{ currentDocument.revision }}</p>
+        <h4>Page actions</h4>
+        <button
+          class="btn secondary"
+          :disabled="controlsLocked || !selected.size || orderChanged"
+          @click="openTool('insert', 'before')"
+          >Insert before selection</button
+        >
+        <button
+          class="btn secondary"
+          :disabled="controlsLocked || !selected.size || orderChanged"
+          @click="openTool('insert', 'after')"
+          >Insert after selection</button
+        >
+        <button
+          class="btn secondary"
+          :disabled="controlsLocked || !selected.size || orderChanged"
+          @click="openTool('extract')"
+          >Extract selected pages</button
+        >
+        <p class="organizer-working-notice"
+          >Working copy only. Imported originals remain unchanged. Applied changes can be undone.</p
+        >
+        <button class="btn secondary" :disabled="working" @click="requestClose"
+          >Back to document</button
+        >
+      </aside>
       <p id="organizer-description" class="organizer-description"
         >Drag selected pages to reorder. Shift-click selects a range.</p
       >
@@ -1419,6 +1451,120 @@ onBeforeUnmount(() => {
   }
   .organizer-selection-actions {
     gap: 7px;
+  }
+}
+/* ED38 / ED42 share the editor chrome; the organizer begins below its mode row. */
+.page-organizer {
+  top: 148px;
+  width: calc(100vw / var(--ui-scale, 1) - 64px);
+  height: calc(100dvh / var(--ui-scale, 1) - 176px);
+}
+.organizer-toolbar {
+  order: 0;
+  min-height: 44px;
+  flex-shrink: 0;
+  padding: 5px 16px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.organizer-toolbar > * {
+  flex-shrink: 0;
+}
+.organizer-heading {
+  order: 1;
+  min-height: 68px;
+  padding: 18px 28px 0;
+  background: var(--cb-canvas);
+}
+.organizer-heading h2 {
+  font-size: 18px;
+}
+.organizer-document {
+  margin-top: 4px;
+}
+.organizer-description {
+  min-height: 36px;
+  padding: 4px 28px 12px;
+  background: var(--cb-canvas);
+}
+.organizer-grid {
+  grid-template-columns: repeat(auto-fill, 144px);
+  justify-content: center;
+  align-content: start;
+  gap: 20px;
+  padding: 0 28px 24px;
+}
+.organizer-page {
+  height: 186px;
+}
+.organizer-selection {
+  top: 44px;
+}
+.organizer-selection-inspector {
+  display: none;
+}
+@media (min-width: 1101px) {
+  .page-organizer[open] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 292px;
+    grid-template-rows: 44px 68px 36px minmax(0, 1fr) auto;
+  }
+  .organizer-toolbar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .organizer-heading {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .organizer-description {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .organizer-grid {
+    grid-column: 1;
+    grid-row: 4;
+  }
+  .organizer-footer {
+    grid-column: 1;
+    grid-row: 5;
+  }
+  .organizer-selection-inspector {
+    display: flex;
+    grid-column: 2;
+    grid-row: 2 / 6;
+    flex-direction: column;
+    gap: 16px;
+    padding: 20px;
+    overflow-y: auto;
+    border-left: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .organizer-selection-inspector h3 {
+    margin: 0 0 16px;
+    font-size: 16px;
+  }
+  .organizer-selection-inspector h4 {
+    margin: 16px 0 0;
+    font-size: 12px;
+  }
+  .organizer-selection-inspector p {
+    margin: 0;
+    line-height: 1.5;
+  }
+  .organizer-working-notice {
+    margin-top: auto !important;
+    padding: 14px;
+    background: var(--cb-surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .organizer-load-error {
+    position: absolute;
+    z-index: 9;
+    top: 44px;
+    left: 24px;
+    right: 316px;
   }
 }
 </style>

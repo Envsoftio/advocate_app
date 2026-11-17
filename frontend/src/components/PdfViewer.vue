@@ -1247,6 +1247,56 @@ const bundleImpactVisible = computed(
     !readPanel.value &&
     !inspectorVisible.value,
 );
+// Compact properties are a reversible presentation state, never a draft discard.
+const propertiesCollapsed = ref(false);
+const propertiesToggle = ref<HTMLButtonElement | null>(null);
+const compactEditor = ref(false);
+let editorWidthQuery: MediaQueryList | undefined;
+function updateEditorWidth() {
+  compactEditor.value = editorWidthQuery?.matches ?? false;
+}
+onMounted(() => {
+  editorWidthQuery = window.matchMedia('(max-width: 1100px)');
+  updateEditorWidth();
+  editorWidthQuery.addEventListener('change', updateEditorWidth);
+});
+onBeforeUnmount(() => editorWidthQuery?.removeEventListener('change', updateEditorWidth));
+const propertiesAvailable = computed(() => inspectorVisible.value && !focusedReading.value);
+const propertiesShown = computed(
+  () =>
+    propertiesAvailable.value &&
+    !propertiesCollapsed.value &&
+    !(compactEditor.value && objectSelectionOpen.value),
+);
+function toggleProperties() {
+  // The object chooser is deliberately opened only through this control on compact screens.
+  if (compactEditor.value && objectSelectionOpen.value) {
+    compactChooserOpen.value = !compactChooserOpen.value;
+    propertiesCollapsed.value = false;
+  } else propertiesCollapsed.value = !propertiesCollapsed.value;
+}
+const compactChooserOpen = ref(false);
+const showToolInspector = computed(
+  () =>
+    propertiesShown.value ||
+    (propertiesAvailable.value &&
+      compactEditor.value &&
+      objectSelectionOpen.value &&
+      compactChooserOpen.value &&
+      !propertiesCollapsed.value),
+);
+function collapseProperties() {
+  propertiesCollapsed.value = true;
+  compactChooserOpen.value = false;
+  nextTick(() => propertiesToggle.value?.focus());
+}
+watch(
+  [activeTool, activeCategory, selectedOverlay, selectedRun, historyOpen, () => props.document?.id],
+  () => {
+    propertiesCollapsed.value = false;
+    compactChooserOpen.value = false;
+  },
+);
 const inspectorVisible = computed(
   () =>
     objectSelectionOpen.value ||
@@ -1364,14 +1414,6 @@ const markPositions = [
   ['bottom_center', 'Bottom centre'],
   ['bottom_right', 'Bottom right'],
 ] as const;
-const inlineEditorStyle = computed(() => {
-  const box = selectedRun.value?.relative_bbox;
-  if (!box) return {};
-  return {
-    ...(box[0] > 0.5 ? { right: `${(1 - box[2]) * 100}%` } : { left: `${box[0] * 100}%` }),
-    ...(box[1] > 0.62 ? { bottom: `${(1 - box[3]) * 100}%` } : { top: `${box[1] * 100}%` }),
-  };
-});
 let runsSequence = 0;
 let pdf: PDFDocumentProxy | null = null;
 let epoch = 0;
@@ -1387,7 +1429,9 @@ const pageReady = computed(
     activeDocumentId === props.document?.id,
 );
 function closeDraftWithEscape(event: KeyboardEvent) {
-  if (viewedCommentId.value) {
+  if (compactEditor.value && showToolInspector.value) {
+    collapseProperties();
+  } else if (viewedCommentId.value) {
     viewedCommentId.value = null;
     clearOverlaySelection();
   } else if (focusedReading.value) void toggleFocusedReading();
@@ -4015,6 +4059,16 @@ async function applyReplacement() {
           >
         </div>
       </div>
+      <button
+        v-if="propertiesAvailable"
+        ref="propertiesToggle"
+        class="icon-btn editor-properties-toggle"
+        aria-label="Toggle context inspector"
+        title="Toggle context inspector"
+        :aria-expanded="showToolInspector"
+        @click="toggleProperties"
+        ><PanelRightOpen :size="17"
+      /></button>
       <div
         v-if="
           !preparation &&
@@ -4218,7 +4272,7 @@ async function applyReplacement() {
       <div
         class="viewer-edit-workspace"
         :class="{
-          'has-tool-inspector': (inspectorVisible && !focusedReading) || bundleImpactVisible,
+          'has-tool-inspector': showToolInspector || bundleImpactVisible,
           'expanded-pages': expanded,
           'has-read-panel': !!readPanel && !focusedReading,
           'has-document-information': readPanel === 'information' && !focusedReading,
@@ -4580,8 +4634,10 @@ async function applyReplacement() {
           </div>
         </aside>
         <aside
-          v-if="inspectorVisible && !focusedReading"
+          v-show="showToolInspector"
+          v-if="propertiesAvailable"
           class="viewer-tool-inspector"
+          @keydown.esc.stop.prevent="collapseProperties"
           :class="{
             'marks-inspector': marksPanelOpen,
             'edit-mode-inspector': activeCategory === 'edit' || historyOpen || engineBlocked,
@@ -4613,7 +4669,7 @@ async function applyReplacement() {
             ><button
               class="icon-btn small"
               :aria-label="
-                engineBlocked || historyOpen
+                compactEditor || engineBlocked || historyOpen
                   ? 'Collapse inspector'
                   : selectedTextAnnotation
                     ? 'Close text properties'
@@ -4621,15 +4677,17 @@ async function applyReplacement() {
               "
               :title="engineBlocked || historyOpen ? 'Collapse inspector' : 'Close tool'"
               @click="
-                engineBlocked
-                  ? (engineInspectorOpen = false)
-                  : historyOpen
-                    ? (historyOpen = false)
-                    : activeCategory === 'ocr' || objectSelectionOpen
-                      ? selectCategory('read')
-                      : selectedTextAnnotation
-                        ? clearOverlaySelection()
-                        : toggleTool(activeTool)
+                compactEditor
+                  ? collapseProperties()
+                  : engineBlocked
+                    ? (engineInspectorOpen = false)
+                    : historyOpen
+                      ? (historyOpen = false)
+                      : activeCategory === 'ocr' || objectSelectionOpen
+                        ? selectCategory('read')
+                        : selectedTextAnnotation
+                          ? clearOverlaySelection()
+                          : toggleTool(activeTool)
               "
               ><X :size="16" /></button
           ></div>
@@ -5058,6 +5116,75 @@ async function applyReplacement() {
             >
               <strong>{{ selectedRun ? 'Selected text' : 'Select text' }}</strong>
               <p v-if="selectedRun" class="edit-selected-excerpt">{{ selectedRun.text }}</p>
+              <div v-if="editTextMode && selectedRun" class="pdf-inline-editor" @click.stop>
+                <div class="pdf-edit-scope"
+                  ><span>{{
+                    replacementEngine === 'pdfium-trial' ? 'Whole paragraph' : 'Selected text'
+                  }}</span
+                  ><button
+                    v-if="paragraphTrialAvailable"
+                    type="button"
+                    class="text-tool"
+                    :disabled="editing"
+                    @click="
+                      replacementEngine =
+                        replacementEngine === 'pdfium-trial' ? 'pymupdf' : 'pdfium-trial'
+                    "
+                    >{{
+                      replacementEngine === 'pdfium-trial'
+                        ? 'Edit selected text only'
+                        : 'Edit whole paragraph'
+                    }}</button
+                  ></div
+                >
+                <label :for="`replacement-${selectedRun.index}`">Replacement</label>
+                <textarea
+                  :id="`replacement-${selectedRun.index}`"
+                  ref="inlineReplacementInput"
+                  v-model="replacement"
+                  maxlength="2000"
+                  rows="2"
+                  :disabled="
+                    editing ||
+                    disabled ||
+                    (replacementEngine === 'pdfium-trial' && !selectedParagraph)
+                  "
+                  aria-describedby="inline-edit-hint"
+                  @keydown.esc.stop.prevent="cancelReplacement"
+                  @keydown.meta.enter.prevent="applyReplacement"
+                  @keydown.ctrl.enter.prevent="applyReplacement"
+                ></textarea>
+                <span id="inline-edit-hint" class="pdf-inline-hint"
+                  >{{
+                    replacementEngine === 'pdfium-trial'
+                      ? selectedParagraph
+                        ? 'Editing the whole detected paragraph'
+                        : 'Loading whole paragraph…'
+                      : replacement.includes('\n')
+                        ? 'Lines need clear space below; use Edit whole paragraph to include nearby lines'
+                        : 'Apply change'
+                  }}
+                  · Esc to cancel</span
+                >
+                <p v-if="runsError" class="error-msg" role="alert">{{ runsError }}</p>
+                <div class="pdf-inline-actions">
+                  <button class="btn secondary small" :disabled="editing" @click="cancelReplacement"
+                    >Cancel</button
+                  >
+                  <button
+                    class="btn secondary small"
+                    :disabled="
+                      !replacement.trim() ||
+                      editing ||
+                      disabled ||
+                      (replacementEngine === 'pdfium-trial' && !selectedParagraph)
+                    "
+                    @click="applyReplacement"
+                    >Apply replacement</button
+                  >
+                </div>
+              </div>
+
               <p
                 >Click text on the page to change its words. Drag highlighted text anywhere in a
                 clear area of this page to move it. Review the position before applying.</p
@@ -5680,7 +5807,11 @@ async function applyReplacement() {
               >Connection details</button
             ></div
           >
-          <div v-else-if="activeTool !== 'select'" class="pdf-tool-hint" role="status"
+          <div
+            v-else-if="activeTool !== 'select'"
+            class="pdf-tool-hint"
+            :data-feedback="!!toolFeedback"
+            role="status"
             ><strong>{{ toolTitle }}</strong
             ><span>{{ toolFeedback || toolHint }}</span
             ><button
@@ -6269,79 +6400,6 @@ async function applyReplacement() {
                 }}</span></button
               >
             </template>
-            <div
-              v-if="editTextMode && selectedRun"
-              class="pdf-inline-editor"
-              :style="inlineEditorStyle"
-              @click.stop
-            >
-              <div class="pdf-edit-scope"
-                ><span>{{
-                  replacementEngine === 'pdfium-trial' ? 'Whole paragraph' : 'Selected text'
-                }}</span
-                ><button
-                  v-if="paragraphTrialAvailable"
-                  type="button"
-                  class="text-tool"
-                  :disabled="editing"
-                  @click="
-                    replacementEngine =
-                      replacementEngine === 'pdfium-trial' ? 'pymupdf' : 'pdfium-trial'
-                  "
-                  >{{
-                    replacementEngine === 'pdfium-trial'
-                      ? 'Edit selected text only'
-                      : 'Edit whole paragraph'
-                  }}</button
-                ></div
-              >
-              <label :for="`replacement-${selectedRun.index}`">Replacement</label>
-              <textarea
-                :id="`replacement-${selectedRun.index}`"
-                ref="inlineReplacementInput"
-                v-model="replacement"
-                maxlength="2000"
-                rows="2"
-                :disabled="
-                  editing ||
-                  disabled ||
-                  (replacementEngine === 'pdfium-trial' && !selectedParagraph)
-                "
-                aria-describedby="inline-edit-hint"
-                @keydown.esc.stop.prevent="cancelReplacement"
-                @keydown.meta.enter.prevent="applyReplacement"
-                @keydown.ctrl.enter.prevent="applyReplacement"
-              ></textarea>
-              <span id="inline-edit-hint" class="pdf-inline-hint"
-                >{{
-                  replacementEngine === 'pdfium-trial'
-                    ? selectedParagraph
-                      ? 'Editing the whole detected paragraph'
-                      : 'Loading whole paragraph…'
-                    : replacement.includes('\n')
-                      ? 'Lines need clear space below; use Edit whole paragraph to include nearby lines'
-                      : 'Apply change'
-                }}
-                · Esc to cancel</span
-              >
-              <p v-if="runsError" class="error-msg" role="alert">{{ runsError }}</p>
-              <div class="pdf-inline-actions">
-                <button class="btn secondary small" :disabled="editing" @click="cancelReplacement"
-                  >Cancel</button
-                >
-                <button
-                  class="btn secondary small"
-                  :disabled="
-                    !replacement.trim() ||
-                    editing ||
-                    disabled ||
-                    (replacementEngine === 'pdfium-trial' && !selectedParagraph)
-                  "
-                  @click="applyReplacement"
-                  >Apply replacement</button
-                >
-              </div>
-            </div>
           </PdfReaderViewport>
         </div>
       </div>

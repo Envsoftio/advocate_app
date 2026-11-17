@@ -102,7 +102,7 @@ with pymupdf.open(stream=sys.stdin.buffer.read(),filetype='pdf') as pdf:
         Math.round(box!.height),
       ];
     })
-    .toEqual([64, 116, 1376, 756]);
+    .toEqual([64, 148, 1376, 724]);
   await expect(organizer.getByRole('button', { name: 'Next page grid' })).toBeEnabled();
   await expect(organizer.locator('canvas')).toHaveCount(24);
   await expect(organizer.locator('.thumbnail-ready').first()).toBeVisible();

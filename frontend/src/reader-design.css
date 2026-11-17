@@ -2469,3 +2469,163 @@ body:has(.design-shell) {
     display: none;
   }
 }
+
+/* FLOW 12 / ED37–38B: properties overlay the paper without resizing it.
+   Hiding this drawer never exits a tool or discards its pending values. */
+.design-shell .read-workspace:has(.editor-properties-toggle) {
+  position: relative;
+}
+.design-shell .editor-properties-toggle {
+  position: absolute;
+  top: 114px;
+  right: 12px;
+  z-index: 5;
+  background: var(--cb-surface);
+  color: var(--cb-text);
+}
+.design-shell .page-editbar:has(~ .editor-properties-toggle) {
+  padding-right: 52px;
+}
+@media (max-width: 1100px) {
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector) {
+    position: relative;
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector):has(
+      > .virtual-thumbnail-rail
+    ),
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector):has(
+      > .reader-side-panel
+    ) {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector)
+    > .viewer-tool-inspector {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 8;
+    grid-column: 1 / -1;
+    width: min(300px, 100%);
+    height: 100%;
+    background: var(--cb-surface);
+    box-shadow: -4px 0 12px #00000012;
+  }
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector)
+    > .virtual-thumbnail-rail,
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector:has(> .viewer-tool-inspector)
+    > .reader-side-panel {
+    width: 200px;
+  }
+}
+@media (max-width: 1100px) {
+  .design-shell
+    .read-workspace:has(
+      .editor-tool-group:is(
+        [aria-label='Edit PDF'],
+        [aria-label='PDF history tools'],
+        [aria-label='Review PDF']
+      )
+    ) {
+    position: relative;
+  }
+  .design-shell
+    .read-workspace:has(
+      .editor-tool-group:is(
+        [aria-label='Edit PDF'],
+        [aria-label='PDF history tools'],
+        [aria-label='Review PDF']
+      )
+    )
+    > .reader-navigation {
+    position: absolute;
+    z-index: 9;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: calc(100% - 24px);
+    min-height: 34px;
+    height: 34px;
+    padding: 0 4px;
+    border: 1px solid var(--cb-border);
+    border-radius: 8px;
+    background: var(--cb-surface);
+  }
+  .design-shell
+    .read-workspace:has(
+      .editor-tool-group:is(
+        [aria-label='Edit PDF'],
+        [aria-label='PDF history tools'],
+        [aria-label='Review PDF']
+      )
+    )
+    > .reader-navigation
+    > :nth-child(n + 4):not(.zoom-select):not(.reader-view-menu) {
+    display: none;
+  }
+  .design-shell
+    .read-workspace:has(
+      .editor-tool-group:is(
+        [aria-label='Edit PDF'],
+        [aria-label='PDF history tools'],
+        [aria-label='Review PDF']
+      )
+    )
+    > .reader-navigation
+    .page-counter {
+    border: 0;
+  }
+}
+
+@media (max-width: 1100px) {
+  .design-shell
+    .read-workspace:has(.editor-tool-group[aria-label='Edit PDF'])
+    .pdf-tool-hint:not([data-feedback='true']) {
+    display: none;
+  }
+}
+/* ED38B / ED41 keep the actual replacement controls in the properties panel,
+   so a drawer never obscures the input or its commit/cancel actions. */
+.viewer-tool-inspector .pdf-inline-editor {
+  position: static;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+  background: transparent;
+}
+.viewer-tool-inspector .pdf-inline-editor textarea {
+  width: 100%;
+  min-height: 100px;
+  font: inherit;
+}
+.viewer-tool-inspector .pdf-inline-actions {
+  flex-wrap: wrap;
+}
+@media (max-width: 1100px) {
+  /* Keep floating navigation inside the visible paper area, away from the
+     drawer's Cancel/Apply actions at enlarged interface sizes. */
+  .design-shell
+    .read-workspace:has(.viewer-edit-workspace.has-tool-inspector)
+    > .reader-navigation {
+    left: calc(50% - 50px);
+    max-width: max(160px, calc(100% - 500px));
+    height: auto;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
