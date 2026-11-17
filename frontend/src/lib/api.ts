@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { disconnectEngine, requireEngine } from './engineConnection';
+import { disconnectEngine, requireEngine, lastEngineResponse } from './engineConnection';
 import type { Matter, MatterDocument } from './types';
 
 type BackendConnection = { base_url: string; token: string };
@@ -106,6 +106,7 @@ async function request(
     }
     throw new ApiError(res.status, detail);
   }
+  lastEngineResponse.value = Date.now();
   return res;
 }
 

@@ -366,14 +366,14 @@ test('06B batch save shows the supplied saved state and persists the reviewed va
   await enter(page);
   const geometry = [] as Array<{ selector: string; actual: number[]; expected: number[] }>;
   for (const [selector, x, y, width, height] of [
-    ['.batch-review-toolbar', 88, 220, 1328, 48],
-    ['.batch-part-select .app-select-trigger', 236, 227, 220, 34],
-    ['.batch-kind-select', 470, 227, 154, 34],
-    ['.batch-columns-trigger', 1196, 227, 112, 34],
-    ['.batch-density-trigger', 1314, 227, 92, 34],
-    ['.batch-table thead', 88, 284, 1328, 38],
-    ['.batch-table tbody tr:first-child', 88, 322, 1328, 38],
-    ['.batch-review-heading>.membership-button', 1236, 140, 180, 34],
+    ['.batch-review-toolbar', 88, 224, 1328, 48],
+    ['.batch-part-select .app-select-trigger', 236, 231, 220, 34],
+    ['.batch-kind-select', 470, 231, 154, 34],
+    ['.batch-columns-trigger', 1196, 231, 112, 34],
+    ['.batch-density-trigger', 1314, 231, 92, 34],
+    ['.batch-table thead', 88, 288, 1328, 38],
+    ['.batch-table tbody tr:first-child', 88, 326, 1328, 38],
+    ['.batch-review-heading>.membership-button', 1236, 144, 180, 34],
   ] as const) {
     const box = (await page.locator(selector).boundingBox())!;
     geometry.push({
@@ -437,7 +437,7 @@ test('B02C new batch and suggestion layouts, explicit one-field acceptance and p
   ] as const) {
     const b = (await page.locator(selector).boundingBox())!;
     expect(Math.round(b.x)).toBe(x);
-    expect(Math.round(b.y)).toBe(266);
+    expect(Math.round(b.y)).toBe(270);
     expect(Math.round(b.width)).toBe(width);
     expect(Math.round(b.height)).toBe(586);
   }

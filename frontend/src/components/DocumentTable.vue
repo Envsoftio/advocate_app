@@ -134,9 +134,15 @@ type ColumnKey = (typeof columnDefinitions)[number]['key'];
 const columnWidths = reactive<Record<ColumnKey, number>>(
   Object.fromEntries(columnDefinitions.map((c) => [c.key, c.width])) as Record<ColumnKey, number>,
 );
-const visibleColumns = computed(() =>
-  columnDefinitions.filter((c) => !hiddenColumns.value.includes(c.label)),
-);
+const tableHost = ref<HTMLElement | null>(null);
+const compactLayout = ref(false);
+const moreFields = ref(false);
+const compactOmissions = ['File name', 'Document date', 'Label', 'Group'];
+const columnVisible = (label: string) =>
+  !hiddenColumns.value.includes(label) &&
+  (!compactLayout.value || moreFields.value || !compactOmissions.includes(label));
+const visibleColumns = computed(() => columnDefinitions.filter((c) => columnVisible(c.label)));
+let layoutObserver: ResizeObserver | undefined;
 const tableWidth = computed(() =>
   visibleColumns.value.reduce((total, c) => total + columnWidths[c.key], 0),
 );
@@ -186,9 +192,14 @@ function resetColumnWidths() {
   saveColumns();
 }
 function toggleColumn(label: string) {
-  hiddenColumns.value = hiddenColumns.value.includes(label)
-    ? hiddenColumns.value.filter((x) => x !== label)
-    : [...hiddenColumns.value, label];
+  if (compactLayout.value && !moreFields.value && compactOmissions.includes(label)) {
+    moreFields.value = true;
+    hiddenColumns.value = hiddenColumns.value.filter((x) => x !== label);
+  } else {
+    hiddenColumns.value = hiddenColumns.value.includes(label)
+      ? hiddenColumns.value.filter((x) => x !== label)
+      : [...hiddenColumns.value, label];
+  }
   saveColumns();
 }
 function saveColumns() {
@@ -241,6 +252,10 @@ function onEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') closeAdvanced();
 }
 onMounted(() => {
+  layoutObserver = new ResizeObserver(([entry]) => {
+    compactLayout.value = entry.contentRect.width < 1050;
+  });
+  if (tableHost.value) layoutObserver.observe(tableHost.value);
   try {
     const saved = JSON.parse(localStorage.getItem('matterdraft.batch.columns') || '{}');
     for (const column of columnDefinitions) {
@@ -278,6 +293,7 @@ const hiddenColumns = ref<string[]>([]);
 let loadSequence = 0,
   alive = true;
 onBeforeUnmount(() => {
+  layoutObserver?.disconnect();
   alive = false;
   loadSequence++;
   document.removeEventListener('pointerdown', closeOverlays);
@@ -771,6 +787,8 @@ async function moveDocument(doc: MatterDocument) {
       @close="closeSuggestions"
     />
     <section
+      ref="tableHost"
+      :data-compact="compactLayout"
       v-show="!suggestionsOpen"
       class="document-register batch-review"
       aria-label="Editable document table"
@@ -934,11 +952,14 @@ async function moveDocument(doc: MatterDocument) {
               ><button type="button" class="membership-button secondary batch-columns-trigger"
                 >Columns</button
               ></template
+            >
+            <label v-if="compactLayout"
+              ><input type="checkbox" v-model="moreFields" />Show additional fields</label
             ><strong>Visible columns</strong
             ><label v-for="name in ['File name', 'Group', 'OCR', 'Status']" :key="name"
               ><input
                 type="checkbox"
-                :checked="!hiddenColumns.includes(name)"
+                :checked="columnVisible(name)"
                 @change="toggleColumn(name)"
               />{{ name }}</label
             ><button class="text-tool" @click="resetColumnWidths"
@@ -1306,10 +1327,10 @@ async function moveDocument(doc: MatterDocument) {
                   :aria-label="'Title for ' + doc.original_name"
                   maxlength="250" /></td
               ><td
-                v-if="!hiddenColumns.includes('File name')"
+                v-if="columnVisible('File name')"
                 :title="doc.original_name + ' · ' + sourceTimestamp(doc)"
                 >{{ doc.original_name }}</td
-              ><td
+              ><td v-if="columnVisible('Document date')"
                 ><AppDateInput
                   v-model="drafts[doc.id].document_date"
                   :aria-label="'Date for ' + doc.original_name"
@@ -1331,21 +1352,21 @@ async function moveDocument(doc: MatterDocument) {
                     part
                   }}</option></AppSelect
                 ></td
-              ><td
+              ><td v-if="columnVisible('Label')"
                 ><input
                   v-model="drafts[doc.id].label"
                   :aria-label="'Label for ' + doc.original_name"
                   maxlength="60" /></td
-              ><td v-if="!hiddenColumns.includes('Group')"
+              ><td v-if="columnVisible('Group')"
                 ><input
                   v-model="drafts[doc.id].group_key"
                   :aria-label="'Group for ' + doc.original_name"
                   maxlength="100" /></td
               ><td>{{ doc.page_count }}</td
-              ><td v-if="!hiddenColumns.includes('OCR')" :title="doc.ocr_status">{{
+              ><td v-if="columnVisible('OCR')" :title="doc.ocr_status">{{
                 doc.ocr_status === 'native_text' ? 'Text' : doc.ocr_status.split('_').join(' ')
               }}</td
-              ><td v-if="!hiddenColumns.includes('Status')">{{
+              ><td v-if="columnVisible('Status')">{{
                 rowDirty(doc)
                   ? 'Unsaved'
                   : doc.date_status === 'confirmed'
@@ -1362,7 +1383,13 @@ async function moveDocument(doc: MatterDocument) {
         ><span :class="dirtyRows.length ? 'unsaved' : 'saved'">{{
           dirtyRows.length ? `${dirtyRows.length} unsaved changes` : 'All changes saved'
         }}</span
-        ><small>Tab moves between fields · Escape reverts the current row</small
+        ><button
+          v-if="compactLayout"
+          class="text-tool"
+          :aria-pressed="moreFields"
+          @click="moreFields = !moreFields"
+          >{{ moreFields ? 'Fewer fields' : 'More fields' }}</button
+        ><small v-else>Tab moves between fields · Escape reverts the current row</small
         ><button
           class="membership-button quiet"
           :disabled="!dirtyRows.length || localBusy"

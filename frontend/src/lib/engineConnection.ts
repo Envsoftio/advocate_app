@@ -4,6 +4,8 @@ import { computed, ref } from 'vue';
 export const engineState = ref<'ready' | 'disconnected' | 'checking' | 'changed'>('ready');
 export const engineBlocked = computed(() => engineState.value !== 'ready');
 export const autosaveHeld = ref(false);
+// Session-only diagnostic evidence; never contains credentials or matter data.
+export const lastEngineResponse = ref<number | null>(null);
 export const engineReviewReason = ref(
   'Saved inputs changed. Review the latest state before editing.',
 );

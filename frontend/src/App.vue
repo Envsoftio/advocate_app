@@ -2240,17 +2240,7 @@ async function reviewRecoveredState() {
     ))
   )
     return;
-  membershipPanel.value?.discard();
-  membershipDirty.value = false;
-  membershipOpen.value = false;
-  pdfViewer.value?.discardPendingDraft();
-  outputPresetsPanel.value?.discard();
-  workspaceTabs.value.forEach((tab) => {
-    delete tab.documentDraft;
-    delete tab.settingsDraft;
-    tab.hadUnsavedChanges = false;
-  });
-  formattingDirty.value = false;
+  engineState.value = 'checking';
   try {
     await api('/health', 'GET', undefined, 1500);
     // Stay blocked until all required current resources have been read successfully.
@@ -2260,8 +2250,21 @@ async function reviewRecoveredState() {
       api<MatterDocument[]>(`/matters/${id}/documents`),
       api<PreflightCheck[]>(`/matters/${id}/validate`),
     ]);
+    if (id !== currentMatterId.value)
+      throw new Error('Workspace changed during recovery. Retry for this workspace.');
     if (!matters.some((item) => item.id === id))
       throw new Error('This matter is no longer available. Retained reading context remains open.');
+    membershipPanel.value?.discard();
+    membershipDirty.value = false;
+    membershipOpen.value = false;
+    pdfViewer.value?.discardPendingDraft();
+    outputPresetsPanel.value?.discard();
+    workspaceTabs.value.forEach((tab) => {
+      delete tab.documentDraft;
+      delete tab.settingsDraft;
+      tab.hadUnsavedChanges = false;
+    });
+    formattingDirty.value = false;
     matterList.value = matters;
     docs.value = documents;
     resetDrafts();
@@ -4006,7 +4009,7 @@ watch(sidebarCollapsed, (collapsed) => {
         @review="reviewRecoveredState"
       />
       <EngineNotice
-        v-if="!membershipOpen && !editorScreen"
+        v-if="!membershipOpen && !editorScreen && !(preparationVisible && selectedDoc)"
         @retry="retryEngine"
         @review="reviewRecoveredState"
       />

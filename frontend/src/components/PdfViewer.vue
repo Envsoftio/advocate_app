@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import EngineDiagnostics from './EngineDiagnostics.vue';
+import EngineNotice from './EngineNotice.vue';
 import AppSelect from './ui/AppSelect.vue';
 import { RovingFocusGroup, RovingFocusItem } from 'reka-ui';
 import AppDateInput from './ui/AppDateInput.vue';
@@ -592,7 +594,6 @@ const textMode = computed(() => activeTool.value === 'add-text');
 const editTextMode = computed(() => activeTool.value === 'edit-text');
 const historyOpen = ref(false);
 const engineInspectorOpen = ref(true);
-const diagnosticsOpen = ref(false);
 watch(engineBlocked, (blocked) => {
   if (blocked) engineInspectorOpen.value = true;
 });
@@ -4112,6 +4113,11 @@ async function applyReplacement() {
             @click="openReadPanel('information', $event)"
             ><Info :size="16" /></button></template
       ></PdfReaderControls>
+      <EngineNotice
+        v-if="preparation"
+        @retry="emit('retryReader')"
+        @review="emit('reviewEngine')"
+      />
       <section
         v-if="needsOcrPrompt"
         class="preparation-ocr-banner"
@@ -4778,20 +4784,15 @@ async function applyReplacement() {
               @click="emit('retryReader')"
               >{{ engineState === 'checking' ? 'Checking…' : 'Retry connection' }}</button
             >
-            <button
-              class="btn secondary small"
-              :aria-expanded="diagnosticsOpen"
-              @click="diagnosticsOpen = !diagnosticsOpen"
-              >View diagnostics</button
-            >
-            <dl v-if="diagnosticsOpen" class="pdf-editor-diagnostics"
-              ><dt>Engine state</dt><dd>{{ engineState }}</dd
-              ><dt>Document</dt><dd>{{ document?.title }}</dd
-              ><dt>Working revision</dt><dd>{{ document?.revision }}</dd
-              ><dt>Cached page</dt><dd>{{ pageReady ? current : 'Unavailable' }}</dd
-              ><dt>Last page error</dt
-              ><dd>{{ viewerError || 'None recorded in this window' }}</dd></dl
-            >
+            <EngineDiagnostics @retry="emit('retryReader')" @review="emit('reviewEngine')">
+              <dl class="pdf-editor-diagnostics"
+                ><dt>Document</dt><dd>{{ document?.title }}</dd
+                ><dt>Working revision</dt><dd>{{ document?.revision }}</dd
+                ><dt>Cached page</dt><dd>{{ pageReady ? current : 'Unavailable' }}</dd
+                ><dt>Last page error</dt
+                ><dd>{{ viewerError || 'None recorded in this window' }}</dd></dl
+              >
+            </EngineDiagnostics>
             <button class="btn secondary small" @click="emit('browseDocuments')"
               >Back to documents</button
             >
@@ -5667,7 +5668,7 @@ async function applyReplacement() {
           >
         </aside>
         <div class="viewer-page-column">
-          <div v-if="engineBlocked" class="pdf-editor-engine-banner" role="alert"
+          <div v-if="engineBlocked && !preparation" class="pdf-editor-engine-banner" role="alert"
             ><strong>Document processing engine unavailable</strong
             ><span
               >Cached pages may still be readable. Editing and processing are paused until the local

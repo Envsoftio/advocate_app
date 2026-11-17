@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import EngineDiagnostics from './EngineDiagnostics.vue';
 import { engineState, engineBlocked, engineReason } from '../lib/engineConnection';
 defineProps<{ reviewLabel?: string }>();
 defineEmits<{ retry: []; review: [] }>();
@@ -6,8 +7,9 @@ defineEmits<{ retry: []; review: [] }>();
 <template>
   <div v-if="engineBlocked" class="engine-notice">
     <details>
-      <summary
-        ><span role="status">{{ engineReason }}</span></summary
+      <summary class="engine-notice-title"
+        ><span>Document processing engine unavailable</span
+        ><span class="engine-notice-reason" role="status">{{ engineReason }}</span></summary
       >
       <p
         >Reading and search can use PDF data still available in this window. Other pages, text and
@@ -20,6 +22,7 @@ defineEmits<{ retry: []; review: [] }>();
         explicitly save any retained draft.</p
       >
     </details>
+    <EngineDiagnostics @retry="$emit('retry')" @review="$emit('review')" />
     <button v-if="engineState === 'changed'" class="btn secondary small" @click="$emit('review')">{{
       reviewLabel || 'Review latest state'
     }}</button>

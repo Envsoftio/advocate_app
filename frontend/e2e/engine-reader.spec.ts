@@ -213,6 +213,20 @@ test('02C stale recovery keeps the PDF draft and old revision until explicit rev
   await guard.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('button', { name: 'Review latest state' })).toBeFocused();
   await expectValue(draft, 'Do not replay this edit');
+  // A failed fresh-state read must not consume the retained draft even after Discard.
+  await page.route(`${base}/matters/*/documents`, (route) => route.abort('connectionrefused'));
+  await page.getByRole('button', { name: 'Review latest state' }).click();
+  await guard.getByRole('button', { name: 'Discard' }).click();
+  await expect(page.getByRole('region', { name: 'Engine recovery' })).toContainText(
+    'Connection interrupted',
+  );
+  await expectValue(draft, 'Do not replay this edit');
+  await expect(page.getByRole('button', { name: 'Retry connection', exact: true })).toBeEnabled();
+  await page.unroute(`${base}/matters/*/documents`);
+  await page.getByRole('button', { name: 'Retry connection', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Engine recovery' })).toContainText(
+    'Saved inputs changed',
+  );
   await page.getByRole('button', { name: 'Review latest state' }).click();
   await guard.getByRole('button', { name: 'Discard' }).click();
   await expect(page.locator('.application-status')).toContainText('Working revision 2');
@@ -230,6 +244,11 @@ test('02C uncached original pages report unavailable without changing artifact o
   await expect(review.locator('.pdf-text-layer')).toContainText('Recovery evidence page 1');
   await disconnect(page);
   await expectValue(review.getByRole('combobox', { name: 'Document version' }), 'original');
+  await review.getByRole('button', { name: 'View diagnostics' }).click();
+  const diagnostics = page.getByRole('dialog', { name: 'Processing diagnostics' });
+  await expect(diagnostics).toBeVisible();
+  await diagnostics.getByRole('button', { name: 'Continue browsing' }).click();
+  await expect(review.getByRole('button', { name: 'View diagnostics' })).toBeFocused();
   await review.getByRole('spinbutton', { name: 'Original source page number' }).fill('12');
   await review.getByRole('spinbutton', { name: 'Original source page number' }).press('Enter');
   await expect(review.getByRole('alert')).toContainText('unavailable');

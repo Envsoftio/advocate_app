@@ -49,7 +49,7 @@ test('05C compact details floats over the working reader and Cancel discards the
         Math.round(box!.height),
       ];
     })
-    .toEqual([664, 116, 360, 624]);
+    .toEqual([664, 120, 360, 624]);
   await drawer.getByRole('textbox', { name: 'Display title' }).fill('Unsaved compact title');
   await expect(drawer).toContainText('Unsaved changes');
   await page.screenshot({
