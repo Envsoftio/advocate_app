@@ -33,7 +33,8 @@ from .pdf_ops import (ProcessingError, check_pdf_password, normalize_to_pdf, reo
                       validate_overlay_image, insert_working_image)
 from .schemas import MatterCreate, MatterPatch, BundlePreviewRequest, DocumentPatch, BatchDocumentPatch, DocumentSortPreview, LabelProposalRequest, ApplyLabelProposal, MemoPartiesUpdate, MatterValuesUpdate, FilingReview, ReorderDocuments, ReorderPages, RotatePage, DeletePage, InsertPages, ReplacePages, ReplaceDocument, ManualBookmarksUpdate, ReviewedLinksUpdate, OutputMarks, OutputPresetCreate, CropPages, TextOverlay, ReplaceTextRun, ParagraphSelection, MoveTextRun, PermanentRedaction, RestoreRedaction, SignatureRiskAcknowledgement, OcrRequest, OcrReviewAccept, OcrRerunRequest, PageAnnotationCreate, PageAnnotationUpdate, valid_draw_body, valid_date_mark
 from .storage import Store, new_id, utcnow
-from . import metadata_review, supplements, variants
+from . import metadata_review, supplements, variants, review_storage
+from .schemas import RevisionRestore, ExportArchive, ReviewComparison
 from .schemas import SupplementalPlanRequest, AudienceVariantRequest
 from .engine import supplemental_preview, supplemental_policy_preview
 from .file_io import copy_file, open_pdf, protected, read_bytes, write_bytes, size as file_size
@@ -1321,6 +1322,43 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
                 store.discard_uncommitted_working(doc_id, rel, candidate)
                 raise
 
+    @app.get('/documents/{doc_id}/revisions')
+    def retained_revisions(doc_id: str, _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        with store.matter_lock(doc['matter_id']):
+            return review_storage.revisions(store, doc_or_404(doc_id))
+
+    @app.api_route('/documents/{doc_id}/revisions/{revision}/pdf', methods=['GET', 'HEAD'])
+    def retained_revision_pdf(doc_id: str, revision: int, request: Request,
+                              sha256: str = Query(pattern=r'^[0-9a-f]{64}$'), _: None = Depends(auth)):
+        doc = doc_or_404(doc_id)
+        try:
+            _, path = review_storage.revision_record(store, doc, revision)
+            if store.sha256(path) != sha256:
+                raise ValueError('Retained revision bytes changed; reload revision history')
+            return pdf_stream_response(path, request, f'revision-{revision}.pdf', store._data_key)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post('/documents/{doc_id}/revisions/{revision}/restore')
+    def restore_revision(doc_id: str, revision: int, payload: RevisionRestore, _: None = Depends(auth)):
+        def restore(candidate, doc):
+            record, source = review_storage.revision_record(store, doc, revision)
+            if store.sha256(source) != payload.expected_sha256:
+                raise ValueError('Retained revision bytes changed; reload revision history')
+            if revision == doc['revision']:
+                raise ValueError('This revision is already current')
+            copy_file(source, candidate)
+            with open_pdf(candidate) as pdf:
+                if len(pdf) != record['page_count']:
+                    raise ValueError('Retained revision page count is inconsistent')
+            return {key: record[key] for key in ('page_count', 'ocr_status', 'ocr_provenance_json')}
+        try:
+            return edit_working_copy(doc_id, restore, payload.acknowledge_signature_risk,
+                expected_revision=payload.expected_revision, changes_page_structure=True)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     @app.post('/documents/{doc_id}/pages/reorder')
     def page_reorder(doc_id: str, payload: ReorderPages, _: None = Depends(auth)):
         try:
@@ -2331,6 +2369,26 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             except (ProcessingError, ValueError, OSError) as exc:
                 raise HTTPException(409, str(exc)) from exc
 
+    @app.put('/matters/{matter_id}/exports/{export_id}/archive')
+    def archive_build(matter_id: str, export_id: str, payload: ExportArchive, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        with store.matter_lock(matter_id):
+            try:
+                return store.archive_export(matter_id, export_id, payload.archived)
+            except ValueError as exc:
+                raise HTTPException(404, str(exc)) from exc
+
+    @app.post('/matters/{matter_id}/exports/{export_id}/compare-pages')
+    def compare_pdf_pages(matter_id: str, export_id: str, payload: ReviewComparison, _: None = Depends(auth)):
+        matter_or_404(matter_id)
+        with store.matter_lock(matter_id):
+            try:
+                return review_storage.compare_pages(store, matter_id, export_id,
+                    doc_or_404(payload.document_id), payload.prior_source_page,
+                    payload.current_source_page, payload.expected_revision, payload.ignore_generated_numbering)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(409, str(exc)) from exc
+
     @app.post('/matters/{matter_id}/exports/{export_id}/compare')
     def compare_export(matter_id: str, export_id: str, payload: BundlePreviewRequest,
                        _: None = Depends(auth)):
@@ -2341,9 +2399,14 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             if prior is None:
                 raise HTTPException(status_code=404, detail='Build not found')
             try:
-                return compare_bundle_plan(store, matter_id, prior,
+                result = compare_bundle_plan(store, matter_id, prior,
                                            payload.max_pages_per_volume,
                                            payload.keep_groups_intact)
+                for document in result.get('documents', []):
+                    document['before_source_ranges'] = [dict(first=row.get('source_start', 0)+1,
+                        last=row.get('source_end', row.get('source_start', 0)+row['end_page']-row['start_page']+1))
+                        for row in prior.get('page_map_snapshot', []) if row['id'] == document['document_id']]
+                return result
             except ProcessingError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
 

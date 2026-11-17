@@ -485,5 +485,16 @@ test('B04B BU09 preserved-label policy renders from reconciled data and builds a
   expect(supplement.baseline_build_id).toBe(prior.id);
   await w.getByRole('button', { name: 'Review supplement' }).click();
   await expect(page.locator('.pdf-paper')).toBeVisible();
-  await expect(page.getByText('original source pages · Generated PDF · Read only')).toBeVisible();
+  const review = page.getByRole('dialog', { name: 'Review generated PDF' });
+  await expect(review).toContainText('physical pages in saved build');
+  const row = supplement.page_map_snapshot.find((row: any) => row.source_start > 0);
+  expect(row).toBeTruthy();
+  const pageInput = review.getByRole('spinbutton', { name: 'PDF page number' });
+  await pageInput.fill(String(row.combined_start_page));
+  await pageInput.press('Enter');
+  await review.getByRole('button', { name: `View source: ${row.title}`, exact: true }).click();
+  await expect(review).toBeHidden();
+  await expect(
+    page.locator('.viewer-root').getByRole('spinbutton', { name: 'Go to page' }),
+  ).toHaveValue(String(row.source_start + 1));
 });

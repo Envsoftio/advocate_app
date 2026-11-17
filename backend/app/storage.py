@@ -106,7 +106,7 @@ class Store:
     def _initialize(self):
         with self.connect() as con:
             version = con.execute('PRAGMA user_version').fetchone()[0]
-            if version > 28:
+            if version > 29:
                 raise RuntimeError(f'Unsupported matter database schema version {version}')
             con.execute('PRAGMA journal_mode=WAL')
             con.executescript('''
@@ -404,6 +404,10 @@ class Store:
                 if 'events_json' not in columns:
                     con.execute('ALTER TABLE jobs ADD COLUMN events_json TEXT')
                 con.execute('PRAGMA user_version=28')
+
+            if version < 29:
+                con.execute('CREATE TABLE IF NOT EXISTS export_archive (matter_id TEXT NOT NULL, build_id TEXT NOT NULL, archived_at TEXT NOT NULL, PRIMARY KEY(matter_id,build_id))')
+                con.execute('PRAGMA user_version=29')
 
     def get_ocr_page_review(self, doc_id: str, revision: int, page_index: int) -> dict | None:
         with self.connect() as con:
@@ -1958,6 +1962,8 @@ class Store:
             return []
         matter = self.get_matter(matter_id)
         exports = []
+        with self.connect() as con:
+            archived = {r['build_id']: r['archived_at'] for r in con.execute('SELECT build_id,archived_at FROM export_archive WHERE matter_id=?', (matter_id,))}
         try:
             current_digest = self.build_input_digest(matter_id)
             effective_digest = self.build_input_digest(matter_id, effective=True)
@@ -1988,10 +1994,25 @@ class Store:
                     info['stale'] = (not recorded_digest or not matter or
                                      info.get('matter_updated_at') != matter['updated_at'] or
                                      recorded_digest != current_digest)
+                from .engine import generated_index_destinations
+                info['reader_indexes'] = generated_index_destinations(info.get('page_map_snapshot', []), info['output_marks']) if 'output_marks' in info else {}
+                info['archived_at'] = archived.get(info['id'])
                 exports.append(info)
             except (ValueError, OSError):
                 continue
         return sorted(exports, key=lambda x: x.get('created_at', ''), reverse=True)
+
+    def archive_export(self, matter_id: str, build_id: str, archived: bool):
+        if not any(item['id'] == build_id for item in self.list_exports(matter_id)):
+            raise ValueError('Saved build not found in this matter')
+        with self.connect() as con:
+            if archived:
+                con.execute('INSERT OR IGNORE INTO export_archive VALUES (?,?,?)', (matter_id, build_id, utcnow()))
+            else:
+                con.execute('DELETE FROM export_archive WHERE matter_id=? AND build_id=?', (matter_id, build_id))
+            self._audit(con, 'build_archived' if archived else 'build_restored', matter_id)
+        # Organization only: never touch input timestamps, manifests or output bytes.
+        return next(item for item in self.list_exports(matter_id) if item['id'] == build_id)
 
     def get_export_file(self, matter_id: str, export_id: str, filename: str) -> Path | None:
         from .file_io import read_bytes, size

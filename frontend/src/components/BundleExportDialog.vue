@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AppSelect from './ui/AppSelect.vue';
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useOutputValidation } from '../lib/outputValidation';
 import { computed } from 'vue';
 import { X, Download } from 'lucide-vue-next';
@@ -20,8 +20,23 @@ const {
   state: qa,
   pending: qaPending,
   error: qaError,
+  reload: reloadQa,
 } = useOutputValidation(() => [props.matterId, props.artifact.id]);
 const release = ref(false);
+const isStale = computed(() => qa.value?.stale ?? props.artifact.stale);
+const humanReviewed = computed(
+  () =>
+    !!qa.value &&
+    Object.keys(qa.value.review_labels).length > 0 &&
+    Object.keys(qa.value.review_labels).every((key) => qa.value!.review.items[key]),
+);
+const selectedFile = computed(() =>
+  props.artifact.files.find((file) => file.name === selected.value),
+);
+watch(selected, () => {
+  message.value = '';
+  error.value = '';
+});
 const allowed = computed(
   () => !!qa.value && (release.value ? qa.value.can_release : qa.value.can_download),
 );
@@ -80,9 +95,15 @@ onBeforeUnmount(() => {
         ><X :size="18" /></button
     ></header>
     <div class="build-badges"
-      ><span>Build {{ artifact.id.slice(0, 8) }} · {{ artifact.stale ? 'Stale' : 'Saved' }}</span
+      ><span
+        >Build {{ artifact.id.slice(0, 8) }} ·
+        {{ artifact.archived_at ? 'Archived' : isStale ? 'Stale' : 'Saved' }}</span
       ><span class="warning">{{
-        qa?.can_release ? 'Human review recorded' : 'Human review pending'
+        qaPending
+          ? 'Loading review status…'
+          : humanReviewed
+            ? 'Human review recorded'
+            : 'Human review pending'
       }}</span></div
     >
     <label
@@ -99,9 +120,12 @@ onBeforeUnmount(() => {
         ></AppSelect
       ></label
     >
+    <p v-if="selectedFile" class="export-file-size"
+      >{{ selectedFile.name }} · {{ bytesLabel(selectedFile.bytes) }} measured</p
+    >
     <p class="export-package-info">{{
       selected.endsWith('.zip')
-        ? 'Includes the saved PDFs, CSV index and technical report.'
+        ? 'Includes the saved PDFs, CSV index, technical report, read-me and any generated Office drafts.'
         : 'Exports the selected file from this saved build.'
     }}</p>
     <p
@@ -118,7 +142,7 @@ onBeforeUnmount(() => {
     ><p v-if="qa && !allowed" class="build-strip warning">{{
       (release ? qa.release_reasons : qa.download_reasons).join(' · ')
     }}</p>
-    <p v-if="artifact.stale" class="build-strip warning"
+    <p v-if="isStale" class="build-strip warning"
       >Previous output — current preparation has changed.</p
     >
     <p v-if="error" role="alert" class="build-strip danger">{{ error }}</p><p role="status">{{

@@ -331,9 +331,12 @@ test('02B pending and failed maps do not reuse prior rows; late check responses 
   const run = page.getByRole('button', { name: 'Run checks', exact: true });
   await run.click();
   await expect(page.locator('.preflight-workspace')).toContainText(
-    'Checking the current saved input snapshot',
+    'Checking saved inputs, working pages and the volume plan',
   );
-  await run.click();
+  await expect(page.getByRole('button', { name: 'Checking…', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'All matters', exact: true }).click();
+  await openNamedMatter(page, matter.name);
+  await page.getByRole('button', { name: 'Preflight checks', exact: true }).click();
   await expect(page.locator('.preflight-workspace')).toContainText('Newer completed checks');
   const oldResponse = page.waitForResponse(
     async (response) =>

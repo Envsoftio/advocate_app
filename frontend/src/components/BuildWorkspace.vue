@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import RevisionHistoryDialog from './RevisionHistoryDialog.vue';
 import AppSelect from './ui/AppSelect.vue';
 import AppConfirmDialog from './ui/AppConfirmDialog.vue';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
@@ -39,6 +40,7 @@ const props = defineProps<{
   checksText: string;
   checksState?: 'loading' | 'error' | 'pending' | 'danger' | 'warning' | 'success';
   storage?: boolean;
+  archivedDocuments?: MatterDocument[];
 }>();
 const emit = defineEmits<{
   dirtyChanged: [boolean];
@@ -55,6 +57,11 @@ const emit = defineEmits<{
   membership: [];
   storage: [];
   backup: [];
+  artifactsChanged: [];
+  updatePolicy: [artifact: ExportManifest];
+  storedDocument: [id: string, original: boolean];
+  source: [id: string, page: number, revision: number];
+  restoreDocument: [id: string];
   finding: [finding: any, buildId: string];
   configure: [name: string];
 }>();
@@ -116,8 +123,44 @@ watch(
 );
 const selectedId = ref(''),
   screen = ref<'settings' | 'result' | 'stale' | 'changes' | 'job'>('settings');
+const storageCategory = ref<'generated' | 'originals' | 'working' | 'archive' | 'archived-builds'>(
+  'generated',
+);
+const explicitBuildSelection = ref(false);
+const visibleArtifacts = computed(() =>
+  props.artifacts.filter((a) =>
+    props.storage && storageCategory.value === 'archived-builds'
+      ? !!a.archived_at
+      : !a.archived_at ||
+        (!props.storage && explicitBuildSelection.value && a.id === selectedId.value),
+  ),
+);
 const artifact = computed(
-  () => props.artifacts.find((a) => a.id === selectedId.value) || props.artifacts[0] || null,
+  () =>
+    visibleArtifacts.value.find((a) => a.id === selectedId.value) ||
+    visibleArtifacts.value[0] ||
+    null,
+);
+const historyDocument = ref<MatterDocument | null>(null);
+const archivePending = ref(false),
+  archiveError = ref('');
+async function archiveBuild() {
+  if (!artifact.value || archivePending.value) return;
+  archivePending.value = true;
+  archiveError.value = '';
+  try {
+    await api(`/matters/${props.matterId}/exports/${artifact.value.id}/archive`, 'PUT', {
+      archived: !artifact.value.archived_at,
+    });
+    emit('artifactsChanged');
+  } catch (error) {
+    archiveError.value = friendlyError(error);
+  } finally {
+    archivePending.value = false;
+  }
+}
+const baselinePlans = computed(() =>
+  savedSupplements.value.filter((plan) => plan.baseline_build_id === artifact.value?.id),
 );
 const revealError = ref('');
 async function revealOutput() {
@@ -145,6 +188,12 @@ const {
 } = useOutputValidation(
   () => [props.matterId, artifact.value?.id || ''],
   () => props.refreshKey,
+);
+const humanReviewed = computed(
+  () =>
+    !!qa.value &&
+    Object.keys(qa.value.review_labels).length > 0 &&
+    Object.keys(qa.value.review_labels).every((key) => qa.value!.review.items[key]),
 );
 const included = computed(() => props.documents.filter((d) => d.bundle_included));
 const sourcePages = computed(() => included.value.reduce((n, d) => n + d.page_count, 0));
@@ -186,7 +235,21 @@ const buildStages = computed(() =>
           : 'Waiting',
   })),
 );
-const view = computed(() => (props.storage ? 'storage' : running.value ? 'job' : screen.value));
+
+const storedDocuments = computed(() =>
+  storageCategory.value === 'archive'
+    ? props.archivedDocuments || []
+    : storageCategory.value === 'originals'
+      ? [...props.documents, ...(props.archivedDocuments || [])]
+      : props.documents,
+);
+const view = computed(() =>
+  props.storage && !['changes', 'stale'].includes(screen.value)
+    ? 'storage'
+    : running.value
+      ? 'job'
+      : screen.value,
+);
 const title = computed(
   () =>
     ({
@@ -337,7 +400,8 @@ watch(
         screen.value = 'job';
       else if (j.status === 'completed') {
         selectedId.value = j.id;
-        screen.value = props.artifacts.find((a) => a.id === j.id)?.stale ? 'stale' : 'result';
+        screen.value =
+          !props.storage && props.artifacts.find((a) => a.id === j.id)?.stale ? 'stale' : 'result';
       }
     }
   },
@@ -348,7 +412,8 @@ watch(
   (list) => {
     if (!selectedId.value && list.length) {
       selectedId.value = list[0].id;
-      if (screen.value !== 'job') screen.value = list[0].stale ? 'stale' : 'result';
+      if (screen.value !== 'job')
+        screen.value = !props.storage && list[0].stale ? 'stale' : 'result';
     }
   },
   { immediate: true },
@@ -419,6 +484,11 @@ async function showOutputTools() {
   }
 }
 defineExpose({
+  showChoicesFor: (id: string) => {
+    explicitBuildSelection.value = true;
+    selectedId.value = id;
+    void showChoices();
+  },
   openSupplementMembership: () => {
     if (!supplementOpen.value) return false;
     supplementPanel.value?.openPicker();
@@ -885,6 +955,9 @@ onBeforeUnmount(() => {
           </aside>
         </div>
         <footer class="build-footer">
+          <button v-if="storage" class="membership-button secondary" @click="screen = 'result'"
+            >Back to storage</button
+          >
           <button class="membership-button secondary" @click="emit('documents')">
             Continue working</button
           ><AppConfirmDialog
@@ -936,7 +1009,10 @@ onBeforeUnmount(() => {
             <p>
               Recalculate references for all included documents. The earlier bundle stays unchanged.
             </p>
-            <button class="membership-button primary" @click="screen = 'settings'">
+            <button
+              class="membership-button primary"
+              @click="storage ? emit('build') : (screen = 'settings')"
+            >
               Rebuild
             </button>
           </section>
@@ -963,10 +1039,10 @@ onBeforeUnmount(() => {
               against a saved supplemental plan.</p
             >
             <button
-              :disabled="blocked || busy || !savedSupplements.length"
-              :title="savedSupplements.length ? '' : 'Create and save a supplemental plan first'"
+              :disabled="blocked || busy || !baselinePlans.length"
+              :title="baselinePlans.length ? '' : 'Create and save a supplemental plan first'"
               class="membership-button secondary"
-              @click="openSupplement(savedSupplements[0].id, 'policy')"
+              @click="openSupplement(baselinePlans[0].id, 'policy')"
             >
               Preview inserts
             </button>
@@ -987,24 +1063,28 @@ onBeforeUnmount(() => {
         ><BuildComparison
           :matter-id="matterId"
           :export-id="artifact.id"
+          @source="(id, page, revision) => emit('source', id, page, revision)"
           :max-pages="maxPages"
           :keep-groups="keepGroups"
           :refresh-key="refreshKey"
         />
         <footer class="build-footer">
-          <button class="membership-button secondary" @click="emit('documents')">
-            Open working copy</button
-          ><button
+          <button v-if="storage" class="membership-button secondary" @click="screen = 'result'"
+            >Back to storage</button
+          >
+          <button
             class="membership-button secondary"
             @click="emit('review', artifact.id, 'combined.pdf')"
           >
             Open earlier bundle</button
-          ><button class="membership-button quiet" @click="showChoices">
+          ><button
+            class="membership-button quiet"
+            @click="storage ? emit('updatePolicy', artifact) : showChoices()"
+          >
             Choose update policy</button
           >
         </footer>
-        <p class="build-secondary"> Side-by-side PDF comparison is not available yet. </p></template
-      >
+      </template>
       <template v-else>
         <div v-if="artifact" class="build-strip" :class="{ warning: artifact.stale }">
           {{ artifact.stale ? 'Previous generated output · Stale' : 'Generated output saved' }}
@@ -1015,28 +1095,126 @@ onBeforeUnmount(() => {
               : qa?.can_release
                 ? 'Technical and human review recorded'
                 : qa?.can_download
-                  ? 'Technical checks complete · human review required'
+                  ? humanReviewed
+                    ? 'Technical checks complete · human review recorded'
+                    : 'Technical checks complete · human review required'
                   : 'Output checks need attention'
           }}
         </div>
-        <div v-if="artifact" class="build-result-grid" :class="{ 'storage-grid': storage }">
+        <div
+          v-if="artifact || storage"
+          class="build-result-grid"
+          :class="{ 'storage-grid': storage }"
+        >
           <aside v-if="storage" class="build-card storage-categories">
             <small>MATTER FILES</small>
-            <p>Imported originals</p>
-            <p>Working revisions</p>
-            <strong>Generated bundles · {{ artifacts.length }}</strong>
-            <p> Imported originals remain unchanged. Edits are stored in working revisions. </p>
+            <nav aria-label="Stored file categories">
+              <button
+                :aria-current="storageCategory === 'originals' ? 'page' : undefined"
+                @click="storageCategory = 'originals'"
+                >Imported originals<small
+                  >{{ documents.length + (archivedDocuments?.length || 0) }} files ·
+                  preserved</small
+                ></button
+              >
+              <button
+                :aria-current="storageCategory === 'working' ? 'page' : undefined"
+                @click="storageCategory = 'working'"
+                >Working revisions<small>{{ documents.length }} current documents</small></button
+              >
+              <button
+                :aria-current="storageCategory === 'generated' ? 'page' : undefined"
+                @click="storageCategory = 'generated'"
+                >Generated bundles<small
+                  >{{ artifacts.filter((a) => !a.archived_at).length }} saved builds</small
+                ></button
+              >
+              <button
+                :aria-current="storageCategory === 'archive' ? 'page' : undefined"
+                @click="storageCategory = 'archive'"
+                >Archived documents<small
+                  >{{ archivedDocuments?.length || 0 }} retained documents</small
+                ></button
+              >
+              <button
+                :aria-current="storageCategory === 'archived-builds' ? 'page' : undefined"
+                @click="storageCategory = 'archived-builds'"
+                >Archived builds<small
+                  >{{ artifacts.filter((a) => a.archived_at).length }} preserved builds</small
+                ></button
+              >
+            </nav>
+            <p>Imported originals remain unchanged. Edits are stored in working revisions.</p>
             <slot name="storage-tools" />
           </aside>
-          <section class="build-card generated-files">
+          <section
+            v-if="storage && !['generated', 'archived-builds'].includes(storageCategory)"
+            class="build-card stored-documents"
+          >
+            <h2>{{
+              storageCategory === 'originals'
+                ? 'Imported originals'
+                : storageCategory === 'working'
+                  ? 'Working revisions'
+                  : 'Archived documents'
+            }}</h2>
+            <p>{{
+              storageCategory === 'originals'
+                ? 'Includes reference-only and archived originals. Imported bytes are preserved. Restore an archived document before opening it.'
+                : storageCategory === 'working'
+                  ? 'Open the current working revision. Matter Undo/Redo remains available in Documents.'
+                  : 'Restore returns the retained document to preparation; earlier generated files stay unchanged.'
+            }}</p>
+            <div v-for="doc in storedDocuments" :key="doc.id" class="stored-document-row">
+              <FileText :size="18" /><div
+                ><strong>{{ doc.title }}</strong
+                ><small
+                  >{{ doc.original_name }} · Revision {{ doc.revision }} ·
+                  {{ doc.page_count }} pages</small
+                ><small>{{
+                  doc.archived_at
+                    ? 'Archived'
+                    : doc.bundle_included
+                      ? 'Included in bundle'
+                      : 'Reference-only'
+                }}</small></div
+              >
+              <button
+                v-if="doc.archived_at"
+                class="text-tool"
+                :disabled="busy || blocked"
+                @click="emit('restoreDocument', doc.id)"
+                >Restore</button
+              >
+              <button
+                v-else
+                class="text-tool"
+                @click="emit('storedDocument', doc.id, storageCategory === 'originals')"
+                >{{
+                  storageCategory === 'originals' ? 'View original' : 'Open working copy'
+                }}</button
+              >
+              <button
+                v-if="storageCategory === 'working'"
+                class="text-tool"
+                @click="historyDocument = doc"
+                >Revision history</button
+              >
+            </div>
+            <p v-if="!storedDocuments.length"
+              >No {{ storageCategory === 'archive' ? 'archived documents' : 'documents' }} in this
+              matter.</p
+            >
+          </section>
+          <section v-else-if="artifact" class="build-card generated-files">
             <header>
-              <h2>Generated files</h2>
+              <h2>{{ storage ? 'Generated bundles' : 'Generated files' }}</h2>
               <AppSelect
                 v-model="selectedId"
                 aria-label="Saved build"
                 @change="!storage && selectBuild()"
               >
-                <option v-for="item in artifacts" :key="item.id" :value="item.id">
+                <option v-for="item in visibleArtifacts" :key="item.id" :value="item.id">
                   {{ item.id.slice(0, 8) }} · {{ prettyDate(item.created_at)
                   }}{{ item.stale ? ' · Stale' : '' }}
                 </option>
@@ -1049,6 +1227,8 @@ onBeforeUnmount(() => {
                     <th>File</th>
                     <th>Pages</th>
                     <th>Measured size</th>
+                    <th v-if="storage">Created</th>
+                    <th v-if="storage">State</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1070,12 +1250,23 @@ onBeforeUnmount(() => {
                     <td :title="`${file.bytes.toLocaleString()} actual bytes`">{{
                       bytesLabel(file.bytes)
                     }}</td>
+                    <td v-if="storage">{{ prettyDate(artifact.created_at) }}</td>
+                    <td v-if="storage">{{
+                      artifact.archived_at
+                        ? 'Archived'
+                        : artifact.stale
+                          ? 'Previous output'
+                          : 'Generated'
+                    }}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <p>Build {{ artifact.id }} · Read only</p>
           </section>
+          <p v-else class="build-card"
+            >No saved builds. Include documents and build a bundle to create an output.</p
+          >
           <aside v-if="!storage" class="build-card build-review-checks">
             <h2>Review before sharing</h2>
             <p> Generated files are available. Inspect the pages you will share. </p>
@@ -1098,8 +1289,13 @@ onBeforeUnmount(() => {
           No saved builds. Include documents and build a bundle to create an output.
         </p>
         <footer class="build-footer">
-          <button class="membership-button secondary" @click="emit('storage')">
+          <button v-if="!storage" class="membership-button secondary" @click="emit('storage')">
             Local storage</button
+          ><button
+            v-else-if="artifact && ['generated', 'archived-builds'].includes(storageCategory)"
+            class="membership-button secondary"
+            @click="emit('review', artifact.id, 'combined.pdf')"
+            >Review Combined PDF</button
           ><button
             v-if="artifact"
             class="membership-button primary"
@@ -1116,12 +1312,27 @@ onBeforeUnmount(() => {
             class="membership-button secondary"
             @click="revealOutput"
             >Show saved file</button
-          ><button v-if="artifact?.stale" class="text-tool" @click="screen = 'changes'">
+          ><button v-if="artifact?.stale" class="text-tool" @click="showChanges">
             Review changes</button
+          ><AppConfirmDialog
+            v-if="storage && artifact && ['generated', 'archived-builds'].includes(storageCategory)"
+            :title="artifact.archived_at ? 'Restore saved build?' : 'Archive saved build?'"
+            description="This only changes its Storage category. All files, review records and baseline references remain preserved."
+            :confirm-label="artifact.archived_at ? 'Restore build' : 'Archive build'"
+            cancel-label="Cancel"
+            @confirm="archiveBuild"
+            ><button class="membership-button secondary" :disabled="archivePending || blocked">{{
+              artifact.archived_at ? 'Restore build' : 'Archive build'
+            }}</button></AppConfirmDialog
           ><span>Later edits leave this build unchanged.</span>
         </footer>
+        <p v-if="archiveError" role="alert">{{ archiveError }}</p>
         <p v-if="revealError" role="alert">{{ revealError }}</p>
-        <details v-if="artifact" ref="extraTools" class="build-extra-tools">
+        <details
+          v-if="artifact && $slots['output-tools']"
+          ref="extraTools"
+          class="build-extra-tools"
+        >
           <summary> More output tools · Office drafts, print and protected copies </summary>
           <div role="group" aria-label="Office review exports">
             <slot name="output-tools" :artifact="artifact" />
@@ -1149,6 +1360,12 @@ onBeforeUnmount(() => {
           >Resume {{ p.title }}</button
         >
       </div>
+      <RevisionHistoryDialog
+        v-if="historyDocument"
+        :document="historyDocument"
+        @close="historyDocument = null"
+        @restored="emit('artifactsChanged')"
+      />
       <OutputChecksDialog
         v-if="checksOpen && artifact"
         :key="artifact.id"

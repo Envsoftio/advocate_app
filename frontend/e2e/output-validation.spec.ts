@@ -243,6 +243,18 @@ test('B01C new design, exact findings, persisted review, measured output and rel
       )
     ).ok(),
   ).toBeTruthy();
+  await page.reload();
+  await enterLatestMatter(page);
+  await page
+    .locator('.matter-rail')
+    .getByRole('button', { name: 'Build bundle', exact: true })
+    .click();
+  await workspace.getByRole('button', { name: 'Saved files', exact: true }).click();
+  await expect(workspace).toContainText('human review recorded');
+  await workspace.getByRole('button', { name: 'Export files', exact: true }).click();
+  await expect(exp).toContainText('Human review recorded');
+  await exp.getByLabel('Release reviewed output').check();
+  await expect(exp.getByRole('button', { name: 'Export files', exact: true })).toBeDisabled();
 });
 
 test('B01C output history and late responses stay with the selected build', async ({

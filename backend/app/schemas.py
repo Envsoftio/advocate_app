@@ -826,3 +826,20 @@ class SupplementalPlanRequest(BundlePreviewRequest):
     expected_version: int | None = Field(default=None, ge=1)
     insertion_policy: Literal['separate_supplement', 'preserve_printed_labels'] | None = None
     policy_reviewed: bool = False
+
+
+class RevisionRestore(SignatureRiskAcknowledgement):
+    expected_revision: int = Field(ge=1)
+    expected_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class ExportArchive(BaseModel):
+    archived: bool
+
+
+class ReviewComparison(BaseModel):
+    ignore_generated_numbering: bool = False
+    document_id: str = Field(min_length=1, max_length=100)
+    expected_revision: int = Field(ge=1)
+    prior_source_page: int = Field(ge=1)
+    current_source_page: int = Field(ge=1)

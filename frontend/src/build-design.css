@@ -7,6 +7,8 @@
   overflow: auto;
 }
 .design-shell[data-build='true'] .matter-storage {
+  max-width: none;
+  width: 100%;
   display: block;
   padding: 0;
   margin: 0;
@@ -1802,4 +1804,251 @@
 }
 .build-recovery-details li {
   overflow-wrap: anywhere;
+}
+
+/* FLOW 10 / 20A: category navigation and retained local files. */
+.storage-categories nav {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+.storage-categories nav button {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--cb-text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.storage-categories nav button[aria-current='page'] {
+  background: var(--cb-infoBg);
+  color: var(--cb-info);
+  font-weight: 600;
+}
+.storage-categories nav small,
+.stored-document-row small {
+  display: block;
+  color: var(--cb-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.stored-documents {
+  min-width: 0;
+}
+.stored-documents > p {
+  color: var(--cb-muted);
+  line-height: 1.6;
+}
+.stored-document-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--cb-border);
+}
+.stored-document-row > div {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.stored-document-row > svg {
+  flex-shrink: 0;
+}
+.storage-grid .generated-files table {
+  min-width: 700px;
+}
+.storage-grid .generated-files th:first-child {
+  width: 34%;
+}
+.storage-grid .generated-files th:nth-child(2) {
+  width: 9%;
+}
+.storage-grid .generated-files th:nth-child(3) {
+  width: 16%;
+}
+.storage-grid .generated-files th:nth-child(4) {
+  width: 25%;
+}
+.bundle-export-dialog .export-file-size {
+  margin-bottom: 0;
+  color: var(--cb-text);
+}
+.bundle-export-dialog .export-package-info {
+  margin-top: 12px;
+}
+
+/* The result review sidebar is right-aligned; Storage has a left category rail. */
+.build-result-grid.storage-grid {
+  grid-template-columns: 230px minmax(0, 1fr);
+}
+@container bundle (max-width: 800px) {
+  .build-result-grid.storage-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .storage-categories nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .storage-categories p {
+    margin: 16px 0 0;
+  }
+}
+
+.pdf-comparison-dialog,
+.revision-history-dialog {
+  width: min(1440px, calc(100vw / var(--ui-scale) - 32px));
+  height: calc(100dvh / var(--ui-scale) - 32px);
+  max-width: none;
+  max-height: none;
+  padding: 20px;
+  border: 1px solid var(--cb-border);
+  border-radius: 12px;
+  background: var(--cb-app);
+  color: var(--cb-text);
+}
+.pdf-comparison-dialog[open],
+.revision-history-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pdf-comparison-dialog::backdrop,
+.revision-history-dialog::backdrop {
+  background: var(--cb-overlay-scrim);
+}
+.pdf-comparison-dialog > header,
+.revision-history-dialog > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.pdf-comparison-dialog h2,
+.revision-history-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.pdf-comparison-dialog p,
+.revision-history-dialog p {
+  color: var(--cb-muted);
+  line-height: 1.5;
+}
+.comparison-page-controls {
+  display: flex;
+  gap: 16px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+.comparison-page-controls label {
+  display: grid;
+  gap: 5px;
+}
+.comparison-page-controls input,
+.revision-history-dialog input[type='number'] {
+  width: 140px;
+  padding: 8px;
+  border: 1px solid var(--cb-border);
+  background: var(--cb-surface);
+  color: var(--cb-text);
+  border-radius: 6px;
+}
+.pdf-comparison-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 260px;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+.retained-pdf-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--cb-surface);
+  border: 1px solid var(--cb-border);
+}
+.retained-pdf-pane > header {
+  padding: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.retained-pdf-pane .shared-reader-viewport {
+  flex: 1;
+  min-height: 0;
+}
+.comparison-differences {
+  overflow: auto;
+  padding: 16px;
+  background: var(--cb-surface);
+  border: 1px solid var(--cb-border);
+}
+.comparison-differences pre {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px;
+  background: var(--cb-surface2);
+}
+.revision-history-body {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+}
+.revision-history-body > aside {
+  overflow: auto;
+  padding: 4px;
+}
+.revision-history-body label {
+  display: block;
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+@media (max-width: 1000px) {
+  .pdf-comparison-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    overflow: auto;
+  }
+  .comparison-differences {
+    grid-column: 1 / -1;
+  }
+  .retained-pdf-pane {
+    min-height: 400px;
+  }
+  .revision-history-body {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+}
+@media (max-width: 650px) {
+  .pdf-comparison-grid,
+  .revision-history-body {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .retained-pdf-pane {
+    min-height: 480px;
+    flex-shrink: 0;
+  }
+  .revision-history-body > aside {
+    overflow: visible;
+  }
+}
+
+.comparison-page-controls .comparison-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+}
+.comparison-page-controls .comparison-option input {
+  width: auto;
 }

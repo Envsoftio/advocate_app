@@ -3,6 +3,7 @@ import AppSelect from './ui/AppSelect.vue';
 import { RovingFocusGroup, RovingFocusItem } from 'reka-ui';
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
   Bookmark,
   MessageSquare,
@@ -23,6 +24,7 @@ import { engineBlocked } from '../lib/engineConnection';
 import PdfReaderViewport from './PdfReaderViewport.vue';
 import PdfReaderControls from './PdfReaderControls.vue';
 import PdfThumbnailRail from './PdfThumbnailRail.vue';
+import { generatedSourcePage } from '../lib/generatedSource';
 import type { ExportManifest } from '../lib/types';
 import { api, originalDocumentSource, originalImage, exportPdfDocumentSource } from '../lib/api';
 import {
@@ -95,20 +97,16 @@ const printedLabel = computed(() => {
     (props.filename === 'combined.pdf' ? row.combined_start_page : row.start_page);
   return row.printed_labels?.[offset] ?? String(row.start_page + offset);
 });
+const sourcePage = computed(() =>
+  generatedSourcePage(sourceRow.value, props.filename, pageNumber.value),
+);
 function viewSource() {
   const row = sourceRow.value;
   const revision = props.manifest?.input_revisions?.find(
     (r) => r.document_id === row?.id,
   )?.revision;
-  if (row && revision)
-    emit(
-      'source',
-      row.id,
-      pageNumber.value -
-        (props.filename === 'combined.pdf' ? row.combined_start_page : row.start_page) +
-        1,
-      revision,
-    );
+  if (row && revision && sourcePage.value !== null)
+    emit('source', row.id, sourcePage.value, revision);
 }
 const originalInfo = ref<OriginalInfo | null>(null);
 const originalImageUrl = ref('');
@@ -124,7 +122,7 @@ const infoOpen = ref(false);
 watch(
   () => props.originalId,
   () => {
-    infoOpen.value = true;
+    infoOpen.value = !!props.originalId || !!props.editorReview;
   },
   { immediate: true },
 );
@@ -150,6 +148,7 @@ const pageNumber = ref(1),
   mode = ref<ReaderMode>('single');
 const viewRotation = ref(0);
 const history = ref<ReaderPosition[]>([]);
+const forwardHistory = ref<ReaderPosition[]>([]);
 const outline = ref<
   Array<{ title: string; page: number | null; url: string | null; level: number }>
 >([]);
@@ -185,15 +184,27 @@ function navigate(page: number) {
   if (!pdf.value || page < 1 || page > pdf.value.numPages) return;
   const at = viewport.value?.capture();
   if (at) history.value = [...history.value.slice(-49), at];
+  forwardHistory.value = [];
   pageNumber.value = page;
 }
 async function back() {
   const at = history.value.pop();
   if (at) {
+    const current = viewport.value?.capture();
+    if (current) forwardHistory.value.push(current);
     pageNumber.value = at.page;
     await nextTick();
     await viewport.value?.restore(at);
   }
+}
+async function forward() {
+  const at = forwardHistory.value.pop();
+  if (!at) return;
+  const current = viewport.value?.capture();
+  if (current) history.value.push(current);
+  pageNumber.value = at.page;
+  await nextTick();
+  await viewport.value?.restore(at);
 }
 function chooseMatch(index: number) {
   const match = select(index);
@@ -300,6 +311,7 @@ async function load(retainContext = false) {
   renderError.value = '';
   error.value = '';
   history.value = [];
+  forwardHistory.value = [];
   query.value = '';
   viewRotation.value = 0;
   originalNavTab.value = 'pages';
@@ -503,7 +515,12 @@ onBeforeUnmount(() => {
         ><Focus :size="16" /></button
     ></div>
     <span class="sr-only"
-      >{{ originalInfo?.page_count }} original source pages · {{ artifactLabel }} · Read only</span
+      >{{
+        originalId
+          ? `${originalInfo?.page_count ?? ''} original source pages`
+          : `${manifest?.pages ?? ''} physical pages in saved build`
+      }}
+      · {{ artifactLabel }} · Read only</span
     >
     <div v-if="originalImageUrl && inPreparation" class="original-image-toolbar"
       ><span>Original 1 / 1</span><span>Image source · Read only</span
@@ -537,6 +554,18 @@ onBeforeUnmount(() => {
         @update:page="navigate"
         @back="back"
         ><template #actions
+          ><button
+            v-if="generated"
+            class="icon-btn small"
+            aria-label="Forward to next reading position"
+            :disabled="!forwardHistory.length"
+            @click="forward"
+            ><ArrowRight :size="16" /></button
+          ><button
+            v-if="generated && manifest?.reader_indexes?.[filename]"
+            class="text-tool"
+            @click="navigate(manifest!.reader_indexes![filename])"
+            >Return to index</button
           ><button
             v-if="generated && !editorReview"
             ref="focusButton"
@@ -641,16 +670,7 @@ onBeforeUnmount(() => {
               sourceRow ? `V${sourceRow.volume} · ${printedLabel}` : 'Generated front matter'
             }}</strong></p
           ><p v-if="sourceRow"
-            >Source at build<br /><strong
-              >{{ sourceRow.title }} ·
-              {{
-                pageNumber -
-                (filename === 'combined.pdf'
-                  ? sourceRow.combined_start_page
-                  : sourceRow.start_page) +
-                1
-              }}</strong
-            ></p
+            >Source at build<br /><strong>{{ sourceRow.title }} · {{ sourcePage }}</strong></p
           ><div v-if="stale" class="finding-recheck"
             ><strong>Previous bundle · Stale</strong
             ><p

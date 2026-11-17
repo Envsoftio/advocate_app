@@ -3279,6 +3279,37 @@ async function saveProtectedExport() {
     savingExport.value = false;
   }
 }
+const pendingStorageBuild = ref<{ matterId: string; buildId: string } | null>(null);
+function applyStoredBuildChoice() {
+  const pending = pendingStorageBuild.value;
+  if (
+    !pending ||
+    pending.matterId !== currentMatterId.value ||
+    activeView.value !== 'build' ||
+    !buildWorkspace.value
+  )
+    return;
+  buildWorkspace.value.showChoicesFor(pending.buildId);
+  pendingStorageBuild.value = null;
+}
+watch(buildWorkspace, applyStoredBuildChoice, { flush: 'post' });
+async function openStoredBuildChoices(artifact: ExportManifest) {
+  pendingStorageBuild.value = { matterId: artifact.matter_id, buildId: artifact.id };
+  await showView('build');
+  if (activeView.value !== 'build') {
+    pendingStorageBuild.value = null;
+    return;
+  }
+  await nextTick();
+  applyStoredBuildChoice();
+}
+async function openStoredDocument(id: string, original: boolean) {
+  if (original) {
+    const doc = [...docs.value, ...archivedDocs.value].find((item) => item.id === id);
+    if (!doc || !(await guardArtifactTransition('imported original'))) return;
+    reviewingPdf.value = { exportId: '', filename: doc.original_name, originalId: id };
+  } else await openDocumentTab(id);
+}
 async function openGeneratedSource(id: string, page: number, revision: number) {
   const doc = docs.value.find((item) => item.id === id);
   if (!doc || doc.revision !== revision) {
@@ -3535,7 +3566,7 @@ watch(sidebarCollapsed, (collapsed) => {
     :data-batch="documentTableOpen"
     :data-finding="!!preflightContext && activeView === 'documents'"
     :data-preparation="preparationVisible || documentTableOpen || buildShell"
-    :data-nav-collapsed="sidebarCollapsed"
+    :data-nav-collapsed="sidebarCollapsed || !!(reviewingPdf && !reviewingPdf.originalId)"
     :data-editor-screen="editorScreen"
     :data-flow="activeView === 'matters' || activeView === 'overview' || activeView === 'import'"
     :data-build="expandedBuildShell"
@@ -4987,6 +5018,8 @@ watch(sidebarCollapsed, (collapsed) => {
               @retry="retryInterrupted"
               @source-failure="openBuildFailure"
               @review="reviewGeneratedPdf"
+              @artifacts-changed="loadMatterResources"
+              @source="openGeneratedSource"
               @finding="openFinding"
               @export="exportDialogArtifact = $event"
               @documents="showPreparation"
@@ -5147,6 +5180,12 @@ watch(sidebarCollapsed, (collapsed) => {
               <BuildWorkspace
                 :key="currentMatterId!"
                 storage
+                :archived-documents="archivedDocs"
+                @stored-document="openStoredDocument"
+                @update-policy="openStoredBuildChoices"
+                @restore-document="restoreArchivedDocument"
+                @documents="showView('documents')"
+                @checks="showView('validation')"
                 :matter-id="currentMatterId!"
                 :documents="docs"
                 :artifacts="exportsList"
@@ -5160,6 +5199,8 @@ watch(sidebarCollapsed, (collapsed) => {
                 :dirty="settingsDirty"
                 checks-text=""
                 @review="reviewGeneratedPdf"
+                @artifacts-changed="loadMatterResources"
+                @source="openGeneratedSource"
                 @finding="openFinding"
                 @export="exportDialogArtifact = $event"
                 @build="showView('build')"
@@ -5559,7 +5600,13 @@ watch(sidebarCollapsed, (collapsed) => {
       :original-id="reviewingPdf.originalId"
       :in-preparation="preparationVisible && !!reviewingPdf.originalId"
       :working-page-count="selectedDoc?.page_count"
-      :artifact-options="selectedDoc ? artifactOptions : undefined"
+      :artifact-options="
+        selectedDoc &&
+        activeView === 'documents' &&
+        (reviewingPdf.originalId ? selectedDoc.id === reviewingPdf.originalId : !preparationVisible)
+          ? artifactOptions
+          : undefined
+      "
       :manifest="exportsList.find((item) => item.id === reviewingPdf!.exportId)"
       @source="openGeneratedSource"
       @checks="

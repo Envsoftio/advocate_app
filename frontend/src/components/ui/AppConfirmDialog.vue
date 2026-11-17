@@ -10,14 +10,20 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from 'reka-ui';
-defineProps<{ title: string; description: string; confirmLabel: string; cancelLabel: string }>();
+defineProps<{
+  portalTo?: HTMLElement;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  cancelLabel: string;
+}>();
 const open = defineModel<boolean>('open', { default: false });
 const emit = defineEmits<{ confirm: [] }>();
 </script>
 <template>
   <AlertDialogRoot v-model:open="open">
     <AlertDialogTrigger as-child><slot /></AlertDialogTrigger>
-    <AlertDialogPortal>
+    <AlertDialogPortal :to="portalTo">
       <AlertDialogOverlay class="build-confirm-overlay" />
       <AlertDialogContent class="build-confirm-dialog build-card" @escape-key-down.stop>
         <AlertDialogTitle as="h2">{{ title }}</AlertDialogTitle>

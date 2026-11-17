@@ -271,6 +271,8 @@ export interface CourtProfile {
   };
 }
 export interface ExportManifest {
+  reader_indexes?: Record<string, number>;
+  archived_at?: string | null;
   id: string;
   matter_id: string;
   created_at: string;
@@ -289,6 +291,8 @@ export interface ExportManifest {
   input_revisions?: Array<{ document_id: string; revision: number }>;
   page_map_snapshot?: Array<{
     printed_labels?: string[];
+    source_start?: number;
+    source_end?: number;
     id: string;
     title: string;
     volume: number;

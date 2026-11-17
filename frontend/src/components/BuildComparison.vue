@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import PdfComparisonDialog from './PdfComparisonDialog.vue';
 import { api } from '../lib/api';
 import { friendlyError, prettyDate } from '../lib/format';
 
@@ -30,6 +31,7 @@ type Revision = {
   after_revision: number | null;
   before_sha256: string | null;
   after_sha256: string | null;
+  before_source_ranges?: Array<{ first: number; last: number }>;
   before_source_pages: number;
   after_source_pages: number;
 };
@@ -55,8 +57,10 @@ const props = defineProps<{
   keepGroups: boolean;
   refreshKey: number;
 }>();
+const emit = defineEmits<{ source: [id: string, page: number, revision: number] }>();
 const result = ref<Comparison | null>(null);
 const selected = ref('');
+const compareOpen = ref(false);
 const detail = computed(
   () =>
     result.value?.documents?.find((d) => d.document_id === selected.value) ||
@@ -170,7 +174,24 @@ onBeforeUnmount(() => {
               navigation.</dd
             ></div
           ></dl
+        ><button
+          v-if="detail.after_revision"
+          class="membership-button secondary"
+          @click="emit('source', detail.document_id, 1, detail.after_revision)"
+          >Open working copy</button
+        ><button
+          v-if="detail.after_revision && detail.before_source_pages"
+          class="membership-button secondary"
+          @click="compareOpen = true"
+          >Compare PDF pages</button
         ></section
+      >
+      <p
+        v-for="change in result.changes.filter((c) => c.before?.label !== c.after?.label)"
+        :key="`label-${change.document_id}`"
+        ><strong>{{ change.title }} · Annexure label:</strong>
+        {{ change.before?.label || 'Not assigned' }} → {{ change.after?.label || 'Not assigned' }}.
+        Page ranges are recorded separately below.</p
       >
       <div class="revision-status"
         ><span v-for="status in ['added', 'changed', 'omitted', 'unchanged']" :key="status"
@@ -201,5 +222,16 @@ onBeforeUnmount(() => {
         ></details
       >
     </template>
+    <PdfComparisonDialog
+      v-if="compareOpen && detail?.after_revision"
+      :key="detail.document_id"
+      :matter-id="matterId"
+      :build-id="exportId"
+      :document-id="detail.document_id"
+      :revision="detail.after_revision"
+      :title="detail.title"
+      :initial-prior-page="detail.before_source_ranges?.[0]?.first || 1"
+      @close="compareOpen = false"
+    />
   </section>
 </template>

@@ -316,6 +316,8 @@ def status(store, matter_id, build_id):
     release_reasons = reasons[:]
     if run:
         release_reasons.extend(c['name'] + ': ' + c['outcome'] for c in run['checks'] if c['id'] == 'redaction' and c['blocking'])
+    if manifest.get('archived_at'):
+        release_reasons.append('This build is archived; restore it before reviewed release')
     if manifest['stale']:
         release_reasons.append('Current effective inputs differ; this is a historical build')
     if review['artifact_digest'] != digest(manifest['files']) or not all(review['items'].values()):

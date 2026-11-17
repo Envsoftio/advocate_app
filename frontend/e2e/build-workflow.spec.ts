@@ -203,6 +203,8 @@ test('B01B real failure/retry, persisted output, generated review and matching e
   await expect(review.locator('.pdf-paper').first()).toBeVisible();
   await expect(review).toContainText(build.id.slice(0, 8));
   await expect(review.getByRole('button', { name: 'Output checks', exact: true })).toBeEnabled();
+  await expect(review.locator('.artifact-info-panel')).toHaveCount(0);
+  await expect(review.getByLabel('Document version')).toHaveCount(0);
   await capture(page, info, '18A-review');
   await review.getByRole('button', { name: 'Export files', exact: true }).click();
   const exp = page.getByRole('dialog', { name: 'Export bundle files', exact: true });
@@ -319,7 +321,38 @@ test('B01B real failure/retry, persisted output, generated review and matching e
   await review.getByRole('button', { name: 'Close review', exact: true }).click();
   await page.locator('.matter-rail').getByRole('button', { name: 'Storage', exact: true }).click();
   await expect(workspace).toContainText(build.id);
+  await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click();
   await capture(page, info, '20A-storage');
+  await workspace.getByRole('button', { name: 'Review changes', exact: true }).click();
+  await expect(workspace).toHaveAttribute('data-screen', 'changes');
+  await expect(workspace).toContainText('title changed');
+  await workspace.getByRole('button', { name: 'Back to storage', exact: true }).click();
+  await expect(workspace).toHaveAttribute('data-screen', 'storage');
+  await workspace.getByRole('button', { name: /Imported originals.*files/ }).click();
+  await expect(workspace.locator('.stored-document-row')).toHaveCount(2);
+  await expect(workspace.locator('.stored-documents')).toContainText('Reference-only');
+  await workspace.getByRole('button', { name: 'View original', exact: true }).last().click();
+  const originalReview = page.getByRole('dialog', { name: 'Review imported original' });
+  await expect(originalReview.locator('.pdf-paper').first()).toBeVisible();
+  await expect(originalReview.getByLabel('Document version')).toHaveCount(0);
+  await originalReview.getByRole('button', { name: 'Close review', exact: true }).click();
+  await workspace.getByRole('button', { name: /Working revisions.*current documents/ }).click();
+  await expect(
+    workspace.getByRole('heading', { name: 'Working revisions', exact: true }),
+  ).toBeVisible();
+  await workspace.getByRole('button', { name: /Archived documents.*retained/ }).click();
+  await expect(workspace).toContainText('No archived documents');
+  await workspace.getByRole('button', { name: /Generated bundles.*saved builds/ }).click();
+  await workspace.getByRole('button', { name: 'Review Combined PDF', exact: true }).click();
+  await expect(review).toContainText(build.id.slice(0, 8));
+  await review.getByRole('button', { name: 'Save a copy', exact: true }).click();
+  await exp.getByLabel('Release reviewed output').check();
+  await expect(exp.getByRole('button', { name: 'Export files', exact: true })).toBeDisabled();
+  await exp.getByLabel('Release reviewed output').uncheck();
+  await expect(exp.getByRole('button', { name: 'Export files', exact: true })).toBeEnabled();
+  await exp.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await review.getByRole('button', { name: 'Close review', exact: true }).click();
+
   expect(
     hash(
       await (

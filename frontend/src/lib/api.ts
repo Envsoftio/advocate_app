@@ -553,3 +553,14 @@ export async function revealSavedExport(matterId: string, exportId: string): Pro
   if (!inTauri()) throw new Error('Saved-file reveal is available in the desktop app.');
   await invoke('reveal_saved_export', { matterId, exportId });
 }
+
+export async function retainedPdfSource(documentId: string, revision: number, sha256: string) {
+  const connection = await getConnection();
+  return {
+    url: `${connection.base_url}/documents/${encodeURIComponent(documentId)}/revisions/${revision}/pdf?sha256=${encodeURIComponent(sha256)}`,
+    httpHeaders: { Authorization: `Bearer ${connection.token}` },
+    rangeChunkSize: 256 * 1024,
+    disableStream: true,
+    disableAutoFetch: true,
+  };
+}

@@ -897,6 +897,17 @@ def page_map_entries(preview: dict) -> list[dict]:
             for volume in preview['volumes'] for row in volume['rows']]
 
 
+def generated_index_destinations(rows: list[dict], settings: dict) -> dict[str, int]:
+    """Reader destinations from the frozen map and the same cover rule as rendering."""
+    result = {}
+    for row in rows:
+        filename = f'volume-{row["volume"]:02d}.pdf'
+        result[filename] = cover_pages(settings) + 1
+        if row['volume'] == 1:
+            result['combined.pdf'] = row['combined_start_page'] - row['start_page'] + cover_pages(settings) + 1
+    return result
+
+
 def compare_bundle_plan(store: Store, matter_id: str, prior: dict,
                         max_pages: int, keep_groups: bool) -> dict:
     """Explain only changes supported by a recorded page-map snapshot."""
