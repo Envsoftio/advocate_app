@@ -14,13 +14,19 @@
       {"label":"main", "title":"MatterDraft Studio — Filing Preparation", "width":1440, "height":900, "minWidth":900, "minHeight":640, "backgroundThrottling":"disabled"}
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:*; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:;"
+      "csp": "default-src 'self'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:*; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:;"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "webviewInstallMode": { "type": "offlineInstaller", "silent": true }
+    },
     "externalBin": ["binaries/filing-api"],
+    "resources": {
+      "../../rust-backend/assets/cmap-NOTICES.txt": "licenses/cmap-NOTICES.txt"
+    },
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
   }
 }

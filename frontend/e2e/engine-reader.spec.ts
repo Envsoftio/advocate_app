@@ -11,7 +11,7 @@ import { test, expect, type Page, type APIRequestContext, type Locator } from '@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-const base = 'http://127.0.0.1:8768',
+const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`,
   headers = { Authorization: 'Bearer e2e-isolated-token' };
 const root = resolve(import.meta.dirname, '../../backend');
 const python =

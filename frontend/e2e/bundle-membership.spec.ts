@@ -70,14 +70,15 @@ test('BU05 reference geometry, membership apply/discard/failure/stale and caller
   await expect(panel.locator('input:checked')).toHaveCount(8);
   await expect(panel).toContainText('2 reference-only');
   for (const [selector, x, y, width] of [
-    ['.matter-rail', 0, 116, 184],
-    ['.bundle-membership', 184, 116, 1256],
-    ['.membership-card', 208, 266, 1208],
+    ['.matter-rail', 0, 120, 240],
+    ['.bundle-membership', 240, 128, 1200],
+    ['.membership-card', 264, 278, 1152],
   ] as const) {
     const box = (await page.locator(selector).boundingBox())!;
-    expect(Math.round(box.x)).toBe(x);
-    expect(Math.round(box.y)).toBe(y);
-    expect(Math.round(box.width)).toBe(width);
+    expect(
+      { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width) },
+      selector,
+    ).toEqual({ x, y, width });
   }
   await page.screenshot({ path: info.outputPath('BU05-1440-light.png'), animations: 'disabled' });
   // Reka supplies roving focus; activation stays explicit and cannot clear a filter.

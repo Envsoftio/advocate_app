@@ -1429,7 +1429,9 @@ const pageReady = computed(
     activeDocumentId === props.document?.id,
 );
 function closeDraftWithEscape(event: KeyboardEvent) {
-  if (compactEditor.value && showToolInspector.value) {
+  if (activeTool.value === 'notes' && hasPendingAnnotationDraft()) {
+    toggleTool('notes');
+  } else if (compactEditor.value && showToolInspector.value) {
     collapseProperties();
   } else if (viewedCommentId.value) {
     viewedCommentId.value = null;
@@ -4173,7 +4175,7 @@ async function applyReplacement() {
         @review="emit('reviewEngine')"
       />
       <section
-        v-if="needsOcrPrompt"
+        v-if="needsOcrPrompt && !focusedReading"
         class="preparation-ocr-banner"
         role="status"
         aria-label="Scanned pages detected"
@@ -4194,7 +4196,7 @@ async function applyReplacement() {
         ></section
       >
       <section
-        v-else-if="activeOcrJob"
+        v-else-if="activeOcrJob && !focusedReading"
         class="preparation-ocr-banner processing"
         role="status"
         aria-label="OCR processing"
@@ -4214,7 +4216,7 @@ async function applyReplacement() {
         ></section
       >
       <section
-        v-else-if="needsOcrReview"
+        v-else-if="needsOcrReview && !focusedReading"
         class="preparation-ocr-banner review"
         role="status"
         aria-label="OCR review recommended"
@@ -4273,6 +4275,7 @@ async function applyReplacement() {
         class="viewer-edit-workspace"
         :class="{
           'has-tool-inspector': showToolInspector || bundleImpactVisible,
+          'has-engine-recovery': engineBlocked && engineInspectorOpen && showToolInspector,
           'expanded-pages': expanded,
           'has-read-panel': !!readPanel && !focusedReading,
           'has-document-information': readPanel === 'information' && !focusedReading,

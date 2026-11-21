@@ -49,14 +49,14 @@ test('FLOW 01: one sidebar, real queue, processing, review and persistent collap
   await page.screenshot({ animations: 'disabled', path: `${evidence}/01A-1440-light.png` });
   await page.locator('.matter-home-card').filter({ hasText: 'Sharma' }).click();
   await expect(page.getByRole('region', { name: 'Matter overview' })).toBeVisible();
-  await expect(page.locator('.matter-rail')).toHaveCSS('width', '184px');
+  await expect(page.locator('.matter-rail')).toHaveCSS('width', '240px');
   await expect(
     page.locator(
       '.section-enter-active,.section-leave-active,.page-enter-active,.page-leave-active',
     ),
   ).toHaveCount(0);
   await expect
-    .poll(async () => (await page.locator('.overview-metrics').boundingBox())!.y)
+    .poll(async () => (await page.locator('.new-matter-metrics').boundingBox())!.y)
     .toBe(226);
   await expect(
     page.locator(

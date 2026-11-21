@@ -21,7 +21,9 @@ describe('local API failures', () => {
     expect(source.url).toContain(
       '/matters/synthetic%2Fmatter/exports/synthetic%20export/inspection/volume%20%231.pdf',
     );
-    expect(source.httpHeaders.Authorization).toMatch(/^Bearer .+/);
+    expect(source.httpHeaders).toMatchObject({
+      Authorization: expect.stringMatching(/^Bearer .+/),
+    });
     expect(source).toMatchObject({
       rangeChunkSize: 262144,
       disableStream: true,
@@ -52,7 +54,7 @@ describe('local API failures', () => {
       ),
     );
     const pending = api('/health', 'GET', undefined, 100);
-    const result = expect(pending).rejects.toThrow('Local Python service timed out');
+    const result = expect(pending).rejects.toThrow('Local processing service timed out');
     await vi.advanceTimersByTimeAsync(100);
     await result;
   });

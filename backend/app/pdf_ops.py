@@ -643,6 +643,11 @@ def apply_output_marks(page: pymupdf.Page, settings: dict,
             for item in plan]
 
 
+def _is_ocr_font(name: str) -> bool:
+    name = name.lower()
+    return 'glyphless' in name or 'matterdraftocr' in name
+
+
 def editable_text_runs(path: Path, page_index: int) -> list[dict]:
     """List horizontal text spans with PDF and displayed coordinates."""
     with open_pdf(path) as doc:
@@ -660,10 +665,8 @@ def editable_text_runs(path: Path, page_index: int) -> list[dict]:
                 for span in line.get('spans', []):
                     if not span['text'].strip():
                         continue
-                    # PyMuPDF OCR stores recognized words in an invisible
-                    # GlyphLessFont layer. Replacing that layer would leave the
-                    # scanned pixels unchanged and create a misleading edit.
-                    if 'glyphless' in span['font'].lower():
+                    # Replacing an invisible OCR layer leaves the scan unchanged.
+                    if _is_ocr_font(span['font']):
                         continue
                     box = pymupdf.Rect(span['bbox'])
                     if box.is_empty or not unrotated_rect.contains(box):
@@ -1043,7 +1046,7 @@ def restore_page_for_ocr(path: Path, before_ocr: Path, page_index: int) -> None:
         if current[page_index].first_annot or prior[page_index].first_annot:
             raise ProcessingError('This page has annotations; page OCR rerun needs manual review')
         blocks = prior[page_index].get_text('dict')['blocks']
-        if any('glyphless' in span['font'].lower() for block in blocks if block.get('type') == 0
+        if any(_is_ocr_font(span['font']) for block in blocks if block.get('type') == 0
                for line in block['lines'] for span in line['spans']):
             raise ProcessingError('Pre-OCR source page already contains OCR text')
         current.insert_pdf(prior, from_page=page_index, to_page=page_index,
@@ -1071,7 +1074,7 @@ def ocr_pdf(path: Path, *, language: str='eng', page_index: int | None = None,
             page = source[index]
             blocks = page.get_text('dict')['blocks']
             text_blocks = [block for block in blocks if block.get('type') == 0]
-            has_ocr = any('glyphless' in span['font'].lower()
+            has_ocr = any(_is_ocr_font(span['font'])
                           for block in text_blocks for line in block['lines'] for span in line['spans'])
             needs_ocr = not has_ocr and (not page.get_text().strip() or bool(page.get_images()))
             if needs_ocr:

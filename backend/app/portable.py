@@ -41,18 +41,24 @@ def _validate_ocr_provenance(value: str) -> None:
         for run in runs:
             if (not isinstance(run, dict) or
                     run.get('language') not in ('eng', 'hin', 'eng+hin') or
-                    run.get('provider') != 'PyMuPDF+Tesseract' or
-                    not isinstance(run.get('pymupdf_version'), str) or
-                    not isinstance(run.get('tesseract_cli_version'), (str, type(None))) or
                     not isinstance(run.get('applied_at'), str) or
                     type(run.get('applied_revision')) is not int or
+                    run['applied_revision'] < 1 or
                     type(run.get('pages_ocr_applied')) is not int or
                     run['pages_ocr_applied'] < 1 or
                     (run.get('base_revision') is not None and
                      (type(run['base_revision']) is not int or run['base_revision'] < 1)) or
                     (run.get('rerun') is not None and type(run['rerun']) is not bool)):
                 raise ValueError
-            hashes = run.get('model_sha256')
+            if (run.get('provider') == 'PyMuPDF+Tesseract' and
+                    isinstance(run.get('pymupdf_version'), str) and
+                    isinstance(run.get('tesseract_cli_version'), (str, type(None)))):
+                hashes = run.get('model_sha256')
+            elif (run.get('provider') == 'Tesseract' and
+                    isinstance(run.get('version'), str) and run.get('text_verified') is False):
+                hashes = run.get('traineddata_sha256')
+            else:
+                raise ValueError
             if not isinstance(hashes, dict) or set(hashes) != set(run['language'].split('+')):
                 raise ValueError
             if any(not isinstance(digest, str) or len(digest) != 64 or

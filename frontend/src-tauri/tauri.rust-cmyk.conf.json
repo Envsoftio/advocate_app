@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "pdf-runtime/iccprofiles/default_cmyk.icc": "matterdraft-pdf/iccprofiles/default_cmyk.icc"
+    }
+  }
+}

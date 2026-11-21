@@ -78,7 +78,7 @@ test('FLOW / 02 source, OCR and focus states use real document and job data', as
     .poll(async () =>
       Math.round((await page.getByRole('status', { name: 'OCR processing' }).boundingBox())!.y),
     )
-    .toBe(724);
+    .toBe(728);
   await page.screenshot({ path: info.outputPath('07B-1440-light.png'), animations: 'disabled' });
   await expect
     .poll(

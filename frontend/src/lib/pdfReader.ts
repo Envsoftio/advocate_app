@@ -2,8 +2,9 @@ import { nextTick, onBeforeUnmount, ref, shallowRef } from 'vue';
 import * as pdfjs from 'pdfjs-dist';
 import workerSrc from './pdfWorker?worker&url';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import type { DocumentInitParameters } from 'pdfjs-dist/types/src/display/api';
+import type { PdfSource } from './rustPdf';
 import { api, ApiError, saveReaderPosition } from './api';
+import { pdfAssets } from './pdfAssets';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
 export type ReaderMode = 'single' | 'continuous';
@@ -144,10 +145,13 @@ export function usePdfDocument() {
   const error = ref('');
   let generation = 0;
   let task: ReturnType<typeof pdfjs.getDocument> | null = null;
+  let stopRange: (() => void) | undefined;
   let teardown: Promise<void> = Promise.resolve();
   let ownedWorker: InstanceType<typeof pdfjs.PDFWorker> | null = null;
   function close() {
     generation++;
+    stopRange?.();
+    stopRange = undefined;
     const oldTask = task;
     task = null;
     const oldWorker = ownedWorker;
@@ -178,7 +182,7 @@ export function usePdfDocument() {
     });
     return teardown;
   }
-  async function open(source: () => Promise<DocumentInitParameters>) {
+  async function open(source: () => Promise<PdfSource>) {
     const closing = close();
     const call = generation;
     loading.value = true;
@@ -186,12 +190,22 @@ export function usePdfDocument() {
     try {
       await closing;
       if (call !== generation) return null;
-      const input = await source();
-      if (call !== generation) return null;
+      const { rangeFailure, ...input } = await source();
+      if (call !== generation) {
+        input.range?.abort();
+        return null;
+      }
+      if (input.range) stopRange = () => input.range?.abort();
+      void rangeFailure?.catch((err: Error) => {
+        if (call === generation) {
+          void close();
+          error.value = err.message;
+        }
+      });
       ownedWorker = new pdfjs.PDFWorker();
-      const pending = pdfjs.getDocument({ ...input, worker: ownedWorker });
+      const pending = pdfjs.getDocument({ ...input, ...pdfAssets, worker: ownedWorker });
       task = pending;
-      const loaded = await pending.promise;
+      const loaded = await Promise.race([pending.promise, ...(rangeFailure ? [rangeFailure] : [])]);
       if (call !== generation) {
         void loaded.destroy().catch(() => {});
         return null;

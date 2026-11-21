@@ -93,8 +93,8 @@ MatterDraft/
 
 - Approved first-phase targets: Windows 10/11 x64 and macOS 12+ on Intel and Apple Silicon. Each combination still requires native build and device verification.
 - Python 3.11–3.13 with an environment supporting PyMuPDF; Node.js >=20; npm; Rust toolchain (for Tauri); system toolchains required by Tauri.
-- **Development OCR:** Tesseract English and Hindi traineddata (`eng.traineddata`, `hin.traineddata`); install Tesseract and both models as appropriate for your OS.
-- Internet **only for installing development dependencies**; all application processing is local after dependencies are installed.
+- **Python browser development:** Run OCR with Tesseract and its English and Hindi models (`eng.traineddata`, `hin.traineddata`) in the development environment.
+- **Rust desktop qualification:** The app ships its PDF engine, preview fonts and character maps, OCR libraries, and English and Hindi models. The Windows setup package includes WebView2 for offline installation. The [build recipe](rust-backend/README.md#offline-rust-ocr-qualification-bundles) prepares these files on the build machine. PDF processing and OCR run offline after installation.
 
 ## Quick start: browser-based frontend development
 
@@ -164,11 +164,34 @@ Results appear in `samples/example_output/`. `combined.pdf` and `filing-package.
 
 ## Tauri desktop: development and packaging
 
+### Backend selection
+
+Set the existing `MATTERDRAFT_BACKEND=rust` in `frontend/.env.local` and run
+`npm run tauri:dev` from `frontend`. The desktop app opens its isolated
+protected Rust workspace and uses direct Tauri commands. `./dev-rust.sh`
+selects the same workspace. The Rust development launcher needs no Python
+service or PyInstaller binary.
+
+Tauri embeds the selector when compiling the desktop executable. It reads
+`.env`, `.env.local`, `.env.{mode}`, and `.env.{mode}.local` from the repository
+root and from `frontend`, in that order for each layer. A frontend value wins
+within the same layer. Cargo debug builds use `development` and release builds
+use `production`. Restart the desktop build after editing a file. The process
+environment can override the compiled choice using the same variable.
+
+The standard package defaults to Python. With `MATTERDRAFT_BACKEND=rust` selected
+for the build, `npm run tauri:build` uses the Rust-only configuration and its
+staged offline OCR resources. The packaged app opens the separate
+`rust-qualification-v1` protected workspace. [Stage the native OCR resources](rust-backend/README.md#offline-rust-ocr-qualification-bundles).
+Browser-only development continues to use the existing browser API settings.
+
+### Python development and standard packaging
+
 For native development with Vue, Rust and Python hot reload, run this single
 command from the repository root:
 
 ```bash
-./dev.sh
+MATTERDRAFT_BACKEND=python ./dev.sh
 ```
 
 The script uses `backend/.venv312` when available, installs missing development
@@ -176,7 +199,7 @@ dependencies, starts FastAPI from source with Uvicorn reload, and starts Tauri
 with Vite hot module replacement. Development mode deliberately does not build
 or launch the frozen PyInstaller sidecar. Stop both processes with `Ctrl+C`.
 
-The packaged application still requires the platform-specific sidecar below.
+The standard package includes the platform-specific sidecar below.
 
 Tauri CLI expects `frontend/src-tauri/`. First make a native Python executable for your target host:
 

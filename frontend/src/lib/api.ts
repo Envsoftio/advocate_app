@@ -1,8 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
+import { rustResponse } from './rustTransport';
 import { disconnectEngine, requireEngine, lastEngineResponse } from './engineConnection';
-import type { Matter, MatterDocument } from './types';
+import type { Job, Matter, MatterDocument } from './types';
 
-type BackendConnection = { base_url: string; token: string };
+type BackendConnection = { base_url: string; token: string; rust_protected?: boolean };
 let sessionPromise: Promise<BackendConnection> | undefined;
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -38,7 +39,9 @@ async function getConnection(): Promise<BackendConnection> {
     ]);
   } catch (err) {
     sessionPromise = undefined;
-    throw err;
+    if (err instanceof ApiError) throw err;
+    const detail = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+    throw new ApiError(0, detail || 'Cannot obtain the local engine session.');
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -61,8 +64,9 @@ async function request(
   if (!['GET', 'HEAD'].includes(init?.method || 'GET') && !path.startsWith('/vault/'))
     requireEngine();
   const conn = await getConnection();
+  const rust = conn.base_url === 'rust-ipc:';
   const headers = new Headers(init?.headers);
-  headers.set('Authorization', 'Bearer ' + conn.token);
+  if (!rust) headers.set('Authorization', 'Bearer ' + conn.token);
   if (typeof init?.body === 'string') headers.set('Content-Type', 'application/json');
   let res: Response;
   const controller = new AbortController();
@@ -71,14 +75,29 @@ async function request(
   init?.signal?.addEventListener('abort', abortFromCaller, { once: true });
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    res = await fetch(conn.base_url + path, { ...init, headers, signal: controller.signal });
+    res = rust
+      ? await rustResponse(
+          path,
+          init?.method || 'GET',
+          controller.signal,
+          init?.body,
+          init?.headers,
+          conn.rust_protected,
+        )
+      : await fetch(conn.base_url + path, { ...init, headers, signal: controller.signal });
   } catch (err) {
     if (!init?.signal?.aborted) disconnectEngine();
+    if (controller.signal.aborted && rust)
+      throw new ApiError(
+        0,
+        'Rust request timed out. Reconnect and check saved state before retrying.',
+      );
     if (controller.signal.aborted)
-      throw new ApiError(0, 'Local Python service timed out. Check the engine and retry.');
+      throw new ApiError(0, 'Local processing service timed out. Check the engine and retry.');
+    if (rust) throw new ApiError(0, 'Rust engine request failed. ' + String(err));
     throw new ApiError(
       0,
-      'Local Python service unavailable. Check it is running and retry. ' + String(err),
+      'Local processing service unavailable. Check it is running and retry. ' + String(err),
     );
   } finally {
     clearTimeout(timeout);
@@ -123,6 +142,10 @@ export async function api<T>(
   return response.json() as Promise<T>;
 }
 
+export async function readProcessingJob(id: string, signal: AbortSignal): Promise<Job> {
+  const response = await request(`/jobs/${encodeURIComponent(id)}`, { signal });
+  return response.json() as Promise<Job>;
+}
 export async function saveReaderPosition(key: string, state: import('./pdfReader').ReadingState) {
   // Keep a final metadata-only save alive when the reader/window closes.
   await request('/reader-position', {
@@ -224,6 +247,10 @@ export async function pdfBytes(
   revision: number,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
+  if (await isRustBackend()) {
+    const { rustPdfBytes } = await import('./rustPdf');
+    return rustPdfBytes(docId, revision, signal);
+  }
   const response = await request(`/documents/${docId}/pdf?revision=${revision}`, {
     cache: 'no-store',
     signal,
@@ -285,6 +312,10 @@ export async function documentThumbnailBlob(
 
 export async function pdfDocumentSource(docId: string, revision: number) {
   const connection = await getConnection();
+  if (connection.base_url === 'rust-ipc:') {
+    const { rustPdfSource } = await import('./rustPdf');
+    return rustPdfSource(docId, { kind: 'working', revision });
+  }
   return {
     url: `${connection.base_url}/documents/${encodeURIComponent(docId)}/pdf?revision=${revision}`,
     httpHeaders: { Authorization: `Bearer ${connection.token}` },
@@ -382,6 +413,10 @@ export async function pageAnnotationAsset(annotationId: string): Promise<Blob> {
 
 export async function originalDocumentSource(documentId: string) {
   const connection = await getConnection();
+  if (connection.base_url === 'rust-ipc:') {
+    const { rustPdfSource } = await import('./rustPdf');
+    return rustPdfSource(documentId, { kind: 'original' });
+  }
   return {
     url: `${connection.base_url}/documents/${encodeURIComponent(documentId)}/original`,
     httpHeaders: { Authorization: `Bearer ${connection.token}` },
@@ -402,6 +437,10 @@ export async function exportPdfDocumentSource(
   filename: string,
 ) {
   const connection = await getConnection();
+  if (connection.base_url === 'rust-ipc:') {
+    const { rustExportPdfSource } = await import('./rustPdf');
+    return rustExportPdfSource(matterId, exportId, filename);
+  }
   return {
     url: `${connection.base_url}/matters/${encodeURIComponent(matterId)}/exports/${encodeURIComponent(exportId)}/inspection/${encodeURIComponent(filename)}`,
     httpHeaders: { Authorization: `Bearer ${connection.token}` },
@@ -482,6 +521,40 @@ export async function printableExport(
   return response.blob();
 }
 
+type PrintOptions = {
+  pages: string;
+  orientation: 'source' | 'portrait' | 'landscape';
+  scale: 'fit' | 'actual';
+};
+
+type NativePrintSource =
+  | { kind: 'working'; documentId: string; revision: number; acknowledged: boolean }
+  | { kind: 'original'; documentId: string }
+  | { kind: 'export'; matterId: string; exportId: string; filename: string };
+
+export async function prepareNativePrint(
+  source: NativePrintSource,
+  options: PrintOptions,
+  signal: AbortSignal,
+) {
+  if (!inTauri() || !/^mac/i.test(navigator.platform) || !(await isRustBackend())) return null;
+  signal.throwIfAborted();
+  const route =
+    source.kind === 'export'
+      ? `/matters/${encodeURIComponent(source.matterId)}/exports/${encodeURIComponent(source.exportId)}/${encodeURIComponent(source.filename)}/print`
+      : `/documents/${encodeURIComponent(source.documentId)}${source.kind === 'original' ? '/original' : ''}/print`;
+  const body =
+    source.kind === 'working'
+      ? {
+          ...options,
+          expected_revision: source.revision,
+          acknowledge_signature_risk: source.acknowledged,
+        }
+      : options;
+  const { rustPrintPreview } = await import('./rustPdf');
+  return rustPrintPreview(route, body, signal);
+}
+
 export async function printableWorkingPdf(
   documentId: string,
   revision: number,
@@ -557,6 +630,10 @@ export async function revealSavedExport(matterId: string, exportId: string): Pro
 
 export async function retainedPdfSource(documentId: string, revision: number, sha256: string) {
   const connection = await getConnection();
+  if (connection.base_url === 'rust-ipc:') {
+    const { rustPdfSource } = await import('./rustPdf');
+    return rustPdfSource(documentId, { kind: 'retained', revision, sha256 });
+  }
   return {
     url: `${connection.base_url}/documents/${encodeURIComponent(documentId)}/revisions/${revision}/pdf?sha256=${encodeURIComponent(sha256)}`,
     httpHeaders: { Authorization: `Bearer ${connection.token}` },
@@ -564,4 +641,15 @@ export async function retainedPdfSource(documentId: string, revision: number, sh
     disableStream: true,
     disableAutoFetch: true,
   };
+}
+
+/** Use the connection's explicit backend selection. */
+export async function isRustBackend(): Promise<boolean> {
+  return (await getConnection()).base_url === 'rust-ipc:';
+}
+
+export async function rustWorkspaceMode(): Promise<'synthetic' | 'protected' | null> {
+  const connection = await getConnection();
+  if (connection.base_url !== 'rust-ipc:') return null;
+  return connection.rust_protected ? 'protected' : 'synthetic';
 }

@@ -98,14 +98,52 @@
     padding: 16px;
   }
 }
-/* 22B: retain the order and map side by side at the reference compact viewport. */
-@media (min-width: 801px) and (max-width: 1100px) {
-  :root .bundle-structure .structure-map-grid {
-    grid-template-columns: 238px minmax(0, 1fr);
-    min-height: 454px;
+/* 21A: keep the recovery controls and cached paper readable at the same time. */
+@media (min-width: 760px) and (max-width: 1100px) {
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector.has-engine-recovery:has(> .viewer-tool-inspector) {
+    grid-template-columns: 48px minmax(0, 1fr) 240px;
   }
-  :root .bundle-structure .structure-map-grid > :is(.structure-map, .structure-order) {
-    height: 454px;
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector.has-engine-recovery:has(> .viewer-tool-inspector):has(
+      > .virtual-thumbnail-rail,
+      > .reader-side-panel
+    ) {
+    grid-template-columns: 160px minmax(0, 1fr) 240px;
+  }
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector.has-engine-recovery
+    > .viewer-tool-inspector {
+    position: static;
+    grid-column: 3;
+    width: 240px;
+    box-shadow: none;
+  }
+  .design-shell
+    .read-workspace:not(.preparation-preview)
+    .viewer-edit-workspace.has-tool-inspector.has-engine-recovery
+    > :is(.virtual-thumbnail-rail, .reader-side-panel) {
+    width: 160px;
+  }
+}
+
+/* 22B: retain the side-by-side arrangement when the compact workspace has room. */
+.bundle-structure {
+  container-type: inline-size;
+  container-name: bundle-structure;
+}
+@media (min-width: 801px) and (max-width: 1100px) {
+  @container bundle-structure (min-width: 800px) {
+    :root .bundle-structure .structure-map-grid {
+      grid-template-columns: 238px minmax(0, 1fr);
+      min-height: 454px;
+    }
+    :root .bundle-structure .structure-map-grid > :is(.structure-map, .structure-order) {
+      height: 454px;
+    }
   }
 }
 /* 22D: the same editable records, with secondary fields available on demand. */

@@ -20,6 +20,7 @@ const props = defineProps<{
   bookmarks: ManualBookmark[];
   profile: string;
   checkCount: number;
+  pilot?: boolean;
 }>();
 const emit = defineEmits<{
   navigate: [view: 'documents' | 'index' | 'validation' | 'build' | 'storage'];
@@ -69,15 +70,17 @@ const activity = computed(() =>
       >
       <div class="new-matter-empty"
         ><span><Files :size="22" /></span><h2>Add the source documents</h2
-        ><p
-          >Import PDFs, JPEGs or PNGs. MatterDraft keeps the imported originals<br />and creates
-          working copies for preparation.</p
+        ><p>{{
+          pilot
+            ? 'Only the exact samples/01_petition.pdf synthetic fixture is eligible on macOS/Linux. Windows import is unavailable. The Rust pilot keeps a separate original and working revision.'
+            : 'Import PDFs, JPEGs or PNGs. MatterDraft keeps the imported originals and creates working copies for preparation.'
+        }}</p
         ><button class="btn primary" @click="emit('import')">Import documents</button
-        ><button class="btn secondary" @click="emit('navigate', 'storage')"
+        ><button v-if="!pilot" class="btn secondary" @click="emit('navigate', 'storage')"
           >Open local storage</button
         ></div
       >
-      <div class="new-matter-pathway"
+      <div v-if="!pilot" class="new-matter-pathway"
         ><h2>Preparation pathway</h2
         ><ol
           ><li
@@ -122,13 +125,13 @@ const activity = computed(() =>
         ><span
           ><strong>{{ documents.reduce((n, d) => n + d.page_count, 0) }}</strong
           >Source pages</span
-        ><span
+        ><span v-if="!pilot"
           ><strong>{{ review }}</strong
           >Need review</span
-        ><span
+        ><span v-if="!pilot"
           ><strong>{{ documents.filter((d) => d.ocr_status === 'needs_ocr').length }}</strong
           >OCR pending</span
-        ><span
+        ><span v-if="!pilot"
           ><strong>{{ unresolved }}</strong
           >Unresolved bookmarks</span
         ></div
@@ -136,30 +139,48 @@ const activity = computed(() =>
       <div class="overview-review"
         ><ClipboardList :size="22" /><div
           ><h2>{{
-            !documents.length
-              ? 'Add your source documents'
-              : review
-                ? `${review} ${review === 1 ? 'document needs' : 'documents need'} review`
-                : 'Continue preparing this matter'
+            pilot
+              ? `${documents.length} imported ${documents.length === 1 ? 'document' : 'documents'}`
+              : !documents.length
+                ? 'Add your source documents'
+                : review
+                  ? `${review} ${review === 1 ? 'document needs' : 'documents need'} review`
+                  : 'Continue preparing this matter'
           }}</h2
-          ><p>Check document dates, classification and OCR before preparing the index.</p></div
+          ><p>{{
+            pilot
+              ? 'The Rust pilot records source bytes and one working revision. Preview and editing remain unavailable.'
+              : 'Check document dates, classification and OCR before preparing the index.'
+          }}</p></div
         ><button
           class="btn primary"
           @click="documents.length ? emit('navigate', 'documents') : emit('import')"
           ><ArrowRight :size="15" />{{
-            documents.length ? 'Continue document review' : 'Import documents'
+            documents.length
+              ? pilot
+                ? 'View documents'
+                : 'Continue document review'
+              : 'Import documents'
           }}</button
         ></div
       >
       <div class="overview-columns"
         ><section class="overview-preparation"
-          ><div class="flow-section-heading"><h2>Preparation</h2><span>Working copies</span></div
+          ><div class="flow-section-heading"
+            ><h2>{{ pilot ? 'Imported files' : 'Preparation' }}</h2
+            ><span>Working copies</span></div
           ><div class="preparation-step"
             ><Files :size="18" /><div
               ><h3>Documents</h3
-              ><p>{{ documents.length }} imported · {{ review }} need review</p></div
-            ><button class="btn quiet" @click="emit('navigate', 'documents')">Review</button></div
-          ><div class="preparation-step"
+              ><p>{{
+                pilot
+                  ? `${documents.length} imported · preview unavailable`
+                  : `${documents.length} imported · ${review} need review`
+              }}</p></div
+            ><button class="btn quiet" @click="emit('navigate', 'documents')">{{
+              pilot ? 'Open' : 'Review'
+            }}</button></div
+          ><div v-if="!pilot" class="preparation-step"
             ><ListTree :size="18" /><div
               ><h3>Index &amp; bookmarks</h3
               ><p>{{
@@ -168,14 +189,14 @@ const activity = computed(() =>
                   : 'Review bundle order and destinations'
               }}</p></div
             ><button class="btn quiet" @click="emit('navigate', 'index')">Open index</button></div
-          ><div class="preparation-step"
+          ><div v-if="!pilot" class="preparation-step"
             ><ListChecks :size="18" /><div
               ><h3>Technical checks</h3
               ><p>{{ checkCount }} current findings · Professional review required</p></div
             ><button class="btn quiet" @click="emit('navigate', 'validation')"
               >Run checks</button
             ></div
-          ><div class="preparation-step"
+          ><div v-if="!pilot" class="preparation-step"
             ><Box :size="18" /><div
               ><h3>Bundle</h3
               ><p>{{

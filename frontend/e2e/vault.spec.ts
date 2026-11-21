@@ -1,5 +1,8 @@
 import { expectValue } from './select';
+import { openWorkspaceNavigation } from './navigation';
 import { expect, test } from '@playwright/test';
+
+const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`;
 
 test.skip(
   process.env.MATTERDRAFT_E2E_REQUIRE_VAULT !== '1',
@@ -14,7 +17,7 @@ test('sets up and unlocks the protected synthetic workspace', async ({ page, req
     ),
   );
   await page.route(
-    'http://127.0.0.1:8768/health',
+    `${base}/health`,
     async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 700));
       await route.continue();
@@ -24,15 +27,15 @@ test('sets up and unlocks the protected synthetic workspace', async ({ page, req
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Starting local engine' })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'dark');
-  await expect(page.locator('.vault-screen')).toHaveCSS('background-color', 'rgb(12, 20, 33)');
-  await expect(page.locator('.vault-card')).toHaveCSS('background-color', 'rgb(23, 35, 52)');
+  await expect(page.locator('.vault-screen')).toHaveCSS('background-color', 'rgb(19, 36, 59)');
+  await expect(page.locator('.vault-card')).toHaveCSS('background-color', 'rgb(23, 39, 55)');
   await expect(page.locator('.vault-heading')).toHaveCSS('user-select', 'none');
   await expect(page.getByRole('heading', { name: 'Protect local matters' })).toBeVisible();
   await expect(page.getByLabel('New password', { exact: true })).toHaveCSS(
     'background-color',
     'rgb(16, 27, 42)',
   );
-  const locked = await request.get('http://127.0.0.1:8768/matters', {
+  const locked = await request.get(`${base}/matters`, {
     headers: { Authorization: 'Bearer e2e-isolated-token' },
   });
   expect(locked.status()).toBe(423);
@@ -70,7 +73,8 @@ test('sets up and unlocks the protected synthetic workspace', async ({ page, req
   const recovery = await page.locator('.vault-recovery code').textContent();
   expect(recovery).toMatch(/^[0-9a-f]{64}$/);
   await page.getByRole('button', { name: 'I saved the recovery key' }).click();
-  await expect(page.getByRole('button', { name: 'New matter' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Matters', exact: true })).toBeVisible();
+  await openWorkspaceNavigation(page);
   await page.getByRole('button', { name: 'Change vault password' }).click();
   await page.getByLabel('New password', { exact: true }).fill('xy9876');
   await page.getByLabel('Confirm password', { exact: true }).fill('xy9876');
@@ -81,7 +85,7 @@ test('sets up and unlocks the protected synthetic workspace', async ({ page, req
   await page.getByRole('button', { name: 'Change password' }).click();
   await expect(page.getByRole('heading', { name: 'Save your recovery key' })).toBeVisible();
   await page.getByRole('button', { name: 'I saved the recovery key' }).click();
-  const status = await request.get('http://127.0.0.1:8768/vault/status', {
+  const status = await request.get(`${base}/vault/status`, {
     headers: { Authorization: 'Bearer e2e-isolated-token' },
   });
   expect((await status.json()).state).toBe('unlocked');

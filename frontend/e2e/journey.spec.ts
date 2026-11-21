@@ -553,8 +553,12 @@ test('document table preserves explicit selection and previews batch ordering be
   await page.getByRole('button', { name: 'Open table' }).click();
   const register = page.getByRole('region', { name: 'Editable document table' });
   await expect(register.getByRole('heading', { name: 'Batch review' })).toBeVisible();
-  const firstRow = register.locator('tr', { hasText: '03_affidavit.pdf' });
-  const lastRow = register.locator('tr', { hasText: '02_impugned_order.pdf' });
+  const firstRow = register.getByRole('row').filter({
+    has: page.getByRole('textbox', { name: 'Title for 03_affidavit.pdf', exact: true }),
+  });
+  const lastRow = register.getByRole('row').filter({
+    has: page.getByRole('textbox', { name: 'Title for 02_impugned_order.pdf', exact: true }),
+  });
   await firstRow.getByRole('checkbox', { name: /Select/ }).check();
   await lastRow.getByRole('checkbox', { name: /Select/ }).check();
   await expect(register.getByText('2 selected', { exact: true })).toBeVisible();
@@ -633,7 +637,14 @@ test('document table preserves explicit selection and previews batch ordering be
 
   await register.locator('.batch-tools-menu>button').click();
   await page.getByRole('button', { name: 'More tools', exact: true }).click();
-  const petitionRow = register.locator('tr', { hasText: '01_petition.pdf' });
+  const columns = register.getByRole('button', { name: 'Columns', exact: true });
+  await columns.press('Enter');
+  const extraFields = page.getByRole('checkbox', { name: 'Show additional fields' });
+  if (await extraFields.isVisible()) await extraFields.check();
+  await columns.press('Escape');
+  const petitionRow = register.getByRole('row').filter({
+    has: page.getByRole('textbox', { name: 'Title for 01_petition.pdf', exact: true }),
+  });
   await fillDate(petitionRow.locator('.app-date-field'), '2026-10-16');
   const dateSaved = page.waitForResponse(
     (response) =>
@@ -702,7 +713,9 @@ test('label proposal preview cancels cleanly and applies one undoable grouped ma
   await openDocumentBrowser(page);
   await page.getByRole('button', { name: 'Open table' }).click();
   const register = page.getByRole('region', { name: 'Editable document table' });
-  const designatedParent = register.locator('tr', { hasText: '02_impugned_order.pdf' });
+  const designatedParent = register.getByRole('row').filter({
+    has: page.getByRole('textbox', { name: 'Title for 02_impugned_order.pdf', exact: true }),
+  });
   await designatedParent.locator('.batch-row-menu>button').click();
   await selectOption(
     page.locator('.app-popover').getByRole('combobox', { name: 'Hierarchy', exact: true }),
@@ -3376,7 +3389,10 @@ test('archived document and matter remain recoverable', async ({ page, request }
     page.getByRole('combobox', { name: 'Filter matters', exact: true }),
     'archived',
   );
-  await page.getByRole('button', { name: 'Restore E2E Archive Matter', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Restore E2E Archive Matter', exact: true })
+    .and(page.getByTitle('E2E Archive Matter', { exact: true }))
+    .click();
   await expect(
     page
       .locator(

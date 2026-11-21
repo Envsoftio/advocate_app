@@ -1,0 +1,12 @@
+{
+  "reference_terminal_success": "completed",
+  "rust_terminal_success": "completed",
+  "queued": "queued",
+  "running": "running",
+  "cancelled": "cancelled",
+  "failed": "failed",
+  "missing_status": 404,
+  "cancel_request_is_terminal": false,
+  "python_queued_shutdown_in_memory": "cancelled",
+  "rust_queued_shutdown_in_memory": "cancelled"
+}

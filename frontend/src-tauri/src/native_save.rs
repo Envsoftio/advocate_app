@@ -43,8 +43,11 @@ fn valid_filename(value: &str) -> bool {
         )
 }
 
-fn working_pdf_path(document_id: &str, expected_revision: u64,
-                    acknowledge_signature_risk: bool) -> Result<String, String> {
+fn working_pdf_path(
+    document_id: &str,
+    expected_revision: u64,
+    acknowledge_signature_risk: bool,
+) -> Result<String, String> {
     if !valid_id(document_id) || expected_revision == 0 {
         return Err("Invalid working PDF selection".into());
     }
@@ -92,7 +95,14 @@ fn temp_file(destination: &Path) -> Result<(PendingFile, std::fs::File), String>
         rand::thread_rng().fill_bytes(&mut random);
         let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
         let path = directory.join(format!(".matterdraft-{suffix}.partial"));
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
             Ok(file) => return Ok((PendingFile(path), file)),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => {
@@ -149,6 +159,9 @@ async fn transfer(
     destination: &Path,
     password: Option<&str>,
 ) -> Result<(), String> {
+    if connection.is_rust() {
+        return Err("Rust artifacts require a native snapshot".into());
+    }
     let url = format!("{}{}", connection.base_url.trim_end_matches('/'), path);
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -195,6 +208,14 @@ async fn transfer(
     if expected.is_some_and(|length| length != received) {
         return Err("Export transfer ended before all bytes arrived".into());
     }
+    finish_transfer(pending, file, destination)
+}
+
+fn finish_transfer(
+    pending: PendingFile,
+    file: std::fs::File,
+    destination: &Path,
+) -> Result<(), String> {
     file.sync_all()
         .map_err(|e| format!("Cannot finish writing export: {e}"))?;
     drop(file);
@@ -210,6 +231,17 @@ async fn transfer(
     Ok(())
 }
 
+fn transfer_snapshot(
+    snapshot: &mut matterdraft_backend::matters::PdfSnapshot,
+    destination: &Path,
+) -> Result<(), String> {
+    let (pending, mut file) = temp_file(destination)?;
+    snapshot
+        .copy_to(&mut file)
+        .map_err(|error| format!("Cannot write working PDF: {error}"))?;
+    finish_transfer(pending, file, destination)
+}
+
 #[tauri::command]
 pub(crate) async fn save_working_pdf(
     app: AppHandle,
@@ -220,6 +252,7 @@ pub(crate) async fn save_working_pdf(
     filename: String,
     acknowledge_signature_risk: bool,
 ) -> Result<bool, String> {
+    let connection = backend.connection()?;
     let path = working_pdf_path(&document_id, expected_revision, acknowledge_signature_risk)?;
     if !valid_filename(&filename) || !filename.ends_with(".pdf") || filename.len() > 160 {
         return Err("Invalid working PDF filename".into());
@@ -238,7 +271,11 @@ pub(crate) async fn save_working_pdf(
     {
         dialog = dialog.set_directory(directory);
     }
-    let Some(chosen) = dialog.blocking_save_file() else {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    dialog.save_file(move |chosen| {
+        let _ = sender.send(chosen);
+    });
+    let Some(chosen) = receiver.await.map_err(|_| "Native Save dialog failed")? else {
         return Ok(false);
     };
     let destination = chosen
@@ -248,15 +285,86 @@ pub(crate) async fn save_working_pdf(
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    check_working_destination(&destination, &app_data)?;
-    // The revision-checked endpoint includes editable PDF marks in the saved
-    // copy while leaving the stored working revision and private notes intact.
-    transfer(&backend.connection, &path, &destination, None).await?;
+    if connection.is_rust() {
+        let runtime = app
+            .try_state::<crate::rust_backend::RustRuntime>()
+            .ok_or("Rust backend is unavailable")?;
+        let local_data = app
+            .path()
+            .app_local_data_dir()
+            .map_err(|error| error.to_string())?;
+        let target = destination.clone();
+        runtime
+            .with_editable_snapshot(
+                document_id,
+                expected_revision,
+                acknowledge_signature_risk,
+                move |mut snapshot| {
+                    check_working_destination(&target, &app_data)?;
+                    check_working_destination(&target, &local_data)?;
+                    transfer_snapshot(&mut snapshot, &target)
+                },
+            )
+            .await?
+            .map_err(|refusal| {
+                refusal.body["detail"]
+                    .as_str()
+                    .unwrap_or("Working PDF is unavailable")
+                    .to_owned()
+            })??;
+    } else {
+        check_working_destination(&destination, &app_data)?;
+        // The reference endpoint flattens any resolved editable marks.
+        transfer(connection, &path, &destination, None).await?;
+    }
     *saves
         .last_directory
         .lock()
         .map_err(|error| error.to_string())? = destination.parent().map(Path::to_path_buf);
     Ok(true)
+}
+
+async fn save_rust_export(
+    app: &AppHandle,
+    destination: &Path,
+    matter: String,
+    id: String,
+    name: String,
+    operation: &str,
+    options: serde_json::Value,
+) -> Result<(), String> {
+    let runtime = app
+        .try_state::<crate::rust_backend::RustRuntime>()
+        .ok_or("Rust backend is unavailable")?;
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    let local_data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())?;
+    let target = destination.to_path_buf();
+    runtime
+        .with_export_snapshot(
+            matter,
+            id,
+            name,
+            operation.to_owned(),
+            options,
+            move |mut snapshot| {
+                check_working_destination(&target, &app_data)?;
+                check_working_destination(&target, &local_data)?;
+                transfer_snapshot(&mut snapshot, &target)
+            },
+        )
+        .await?
+        .map_err(|error| {
+            error.body["detail"]
+                .as_str()
+                .unwrap_or("Export is unavailable")
+                .to_owned()
+        })?
 }
 
 #[tauri::command]
@@ -270,6 +378,7 @@ pub(crate) async fn save_export(
     save_as: bool,
     release: Option<bool>,
 ) -> Result<bool, String> {
+    let connection = backend.connection()?;
     if !valid_id(&matter_id) || !valid_id(&export_id) || !valid_filename(&filename) {
         return Err("Invalid export selection".into());
     }
@@ -313,13 +422,33 @@ pub(crate) async fn save_export(
     if destination.starts_with(&app_data) {
         return Err("Choose a location outside MatterDraft's internal data folder".into());
     }
-    transfer(
-        &backend.connection,
-        &format!("/matters/{matter_id}/exports/{export_id}/{filename}{}", if release.unwrap_or(false) { "?release=true" } else { "" }),
-        &destination,
-        None,
-    )
-    .await?;
+    if connection.is_rust() {
+        save_rust_export(
+            &app,
+            &destination,
+            matter_id,
+            export_id,
+            filename,
+            "file",
+            serde_json::json!({"release":release.unwrap_or(false)}),
+        )
+        .await?;
+    } else {
+        transfer(
+            connection,
+            &format!(
+                "/matters/{matter_id}/exports/{export_id}/{filename}{}",
+                if release.unwrap_or(false) {
+                    "?release=true"
+                } else {
+                    ""
+                }
+            ),
+            &destination,
+            None,
+        )
+        .await?;
+    }
     saves
         .paths
         .lock()
@@ -340,6 +469,7 @@ pub(crate) async fn save_protected_export(
     filename: String,
     password: String,
 ) -> Result<bool, String> {
+    let connection = backend.connection()?;
     if !valid_id(&matter_id)
         || !valid_id(&export_id)
         || !valid_filename(&filename)
@@ -375,13 +505,26 @@ pub(crate) async fn save_protected_export(
     if destination.is_dir() || destination.starts_with(&app_data) {
         return Err("Choose a file outside MatterDraft's internal data folder".into());
     }
-    transfer(
-        &backend.connection,
-        &format!("/matters/{matter_id}/exports/{export_id}/{filename}/protected"),
-        &destination,
-        Some(&password),
-    )
-    .await?;
+    if connection.is_rust() {
+        save_rust_export(
+            &app,
+            &destination,
+            matter_id,
+            export_id,
+            filename,
+            "protected",
+            serde_json::json!({"password":password}),
+        )
+        .await?;
+    } else {
+        transfer(
+            connection,
+            &format!("/matters/{matter_id}/exports/{export_id}/{filename}/protected"),
+            &destination,
+            Some(&password),
+        )
+        .await?;
+    }
     *saves.last_directory.lock().map_err(|e| e.to_string())? =
         destination.parent().map(Path::to_path_buf);
     Ok(true)
@@ -394,6 +537,7 @@ pub(crate) async fn save_matter(
     saves: State<'_, SaveState>,
     matter_id: String,
 ) -> Result<bool, String> {
+    let connection = backend.connection()?;
     if !valid_id(&matter_id) {
         return Err("Invalid matter selection".into());
     }
@@ -411,23 +555,71 @@ pub(crate) async fn save_matter(
     {
         dialog = dialog.set_directory(directory);
     }
-    let Some(path) = dialog.blocking_save_file() else {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    dialog.save_file(move |path| {
+        let _ = sender.send(path);
+    });
+    let Some(path) = receiver.await.map_err(|_| "Native Save dialog failed")? else {
         return Ok(false);
     };
     let destination = path
         .into_path()
         .map_err(|e| format!("Unsupported save location: {e}"))?;
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    if destination.is_dir() || destination.starts_with(&app_data) {
+    if destination.starts_with(&app_data) {
         return Err("Choose a file outside MatterDraft's internal data folder".into());
     }
-    transfer(
-        &backend.connection,
-        &format!("/matters/{matter_id}/portable"),
-        &destination,
-        None,
-    )
-    .await?;
+    if connection.is_rust() {
+        let runtime = app
+            .try_state::<crate::rust_backend::RustRuntime>()
+            .ok_or("Rust backend is unavailable")?;
+        let local_data = app
+            .path()
+            .app_local_data_dir()
+            .map_err(|error| error.to_string())?;
+        let target = destination.clone();
+        let permit = runtime.acquire_pdf_worker().await?;
+        let (pending, file) = tauri::async_runtime::spawn_blocking(move || {
+            let _permit = permit;
+            check_working_destination(&target, &app_data)?;
+            check_working_destination(&target, &local_data)?;
+            temp_file(&target)
+        })
+        .await
+        .map_err(|_| "Unable to prepare the Rust backup destination".to_owned())??;
+        let file = runtime
+            .write_portable_backup(matter_id, file)
+            .await?
+            .map_err(|error| {
+                error.body["detail"]
+                    .as_str()
+                    .unwrap_or("Matter backup is unavailable")
+                    .to_owned()
+            })?;
+        let target = destination.clone();
+        let permit = runtime.acquire_pdf_worker().await?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let _permit = permit;
+            file.sync_all()
+                .map_err(|error| format!("Cannot persist the backup: {error}"))?;
+            drop(file);
+            replace_file(&pending.0, &target)
+                .map_err(|error| format!("Cannot publish the backup: {error}"))
+        })
+        .await
+        .map_err(|_| "Rust backup transfer failed".to_owned())??;
+    } else {
+        if destination.is_dir() {
+            return Err("Choose a file outside MatterDraft's internal data folder".into());
+        }
+        transfer(
+            connection,
+            &format!("/matters/{matter_id}/portable"),
+            &destination,
+            None,
+        )
+        .await?;
+    }
     *saves.last_directory.lock().map_err(|e| e.to_string())? =
         destination.parent().map(Path::to_path_buf);
     Ok(true)
@@ -443,6 +635,7 @@ pub(crate) async fn save_office_export(
     filename: String,
     kind: String,
 ) -> Result<bool, String> {
+    let connection = backend.connection()?;
     if !valid_id(&matter_id) || !valid_id(&export_id) || !valid_filename(&filename) {
         return Err("Invalid completed export selection".into());
     }
@@ -452,22 +645,53 @@ pub(crate) async fn save_office_export(
     {
         return Err("Invalid Office review format".into());
     }
-    let stem = filename.rsplit_once('.').map(|(value, _)| value).unwrap_or(&filename);
+    let stem = filename
+        .rsplit_once('.')
+        .map(|(value, _)| value)
+        .unwrap_or(&filename);
     let output_name = format!("{stem}-review.{kind}");
-    let mut dialog = app.dialog().file()
+    let mut dialog = app
+        .dialog()
+        .file()
         .set_title("Save editable review draft")
         .set_file_name(&output_name)
         .add_filter("Office review draft", &[kind.as_str()]);
-    if let Some(directory) = saves.last_directory.lock().map_err(|e| e.to_string())?.clone() {
+    if let Some(directory) = saves
+        .last_directory
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+    {
         dialog = dialog.set_directory(directory);
     }
-    let Some(path) = dialog.blocking_save_file() else { return Ok(false); };
-    let destination = path.into_path().map_err(|e| format!("Unsupported save location: {e}"))?;
+    let Some(path) = dialog.blocking_save_file() else {
+        return Ok(false);
+    };
+    let destination = path
+        .into_path()
+        .map_err(|e| format!("Unsupported save location: {e}"))?;
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     check_working_destination(&destination, &app_data)?;
-    transfer(&backend.connection,
-        &format!("/matters/{matter_id}/exports/{export_id}/{filename}/office/{kind}"),
-        &destination, None).await?;
+    if connection.is_rust() {
+        save_rust_export(
+            &app,
+            &destination,
+            matter_id,
+            export_id,
+            filename,
+            &kind,
+            serde_json::Value::Null,
+        )
+        .await?;
+    } else {
+        transfer(
+            connection,
+            &format!("/matters/{matter_id}/exports/{export_id}/{filename}/office/{kind}"),
+            &destination,
+            None,
+        )
+        .await?;
+    }
     *saves.last_directory.lock().map_err(|e| e.to_string())? =
         destination.parent().map(Path::to_path_buf);
     Ok(true)
@@ -483,6 +707,7 @@ pub(crate) async fn save_page_output(
     selection: String,
     acknowledge_signature_risk: bool,
 ) -> Result<bool, String> {
+    let connection = backend.connection()?;
     if !valid_id(&document_id)
         || !matches!(operation.as_str(), "extract" | "split")
         || selection.is_empty()
@@ -515,28 +740,65 @@ pub(crate) async fn save_page_output(
     {
         dialog = dialog.set_directory(directory);
     }
-    let Some(path) = dialog.blocking_save_file() else {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    dialog.save_file(move |path| {
+        let _ = sender.send(path);
+    });
+    let Some(path) = receiver.await.map_err(|_| "Native Save dialog failed")? else {
         return Ok(false);
     };
     let destination = path
         .into_path()
         .map_err(|e| format!("Unsupported save location: {e}"))?;
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    if destination.is_dir() || destination.starts_with(&app_data) {
-        return Err("Choose a file outside MatterDraft's internal data folder".into());
-    }
-    let query = if operation == "extract" {
-        "selection"
+    if connection.is_rust() {
+        use matterdraft_backend::matters::PageOutput;
+        let local_data = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+        let runtime = app
+            .try_state::<crate::rust_backend::RustRuntime>()
+            .ok_or("Rust backend is unavailable")?;
+        let output = if operation == "extract" {
+            PageOutput::Extract
+        } else {
+            PageOutput::Split
+        };
+        let target = destination.clone();
+        runtime
+            .measure_page_output(
+                document_id,
+                output,
+                selection,
+                acknowledge_signature_risk,
+                move |data| {
+                    check_working_destination(&target, &app_data)?;
+                    check_working_destination(&target, &local_data)?;
+                    let (pending, mut file) = temp_file(&target)?;
+                    std::io::Write::write_all(&mut file, &data)
+                        .map_err(|error| error.to_string())?;
+                    finish_transfer(pending, file, &target)
+                },
+            )
+            .await?
+            .map_err(|refusal| {
+                refusal.body["detail"]
+                    .as_str()
+                    .unwrap_or("Page export failed")
+                    .to_owned()
+            })??;
     } else {
-        "after"
-    };
-    transfer(
-        &backend.connection,
-        &format!("/documents/{document_id}/pages/{operation}?{query}={selection}&acknowledge_signature_risk={acknowledge_signature_risk}"),
-        &destination,
-        None,
-    )
-    .await?;
+        check_working_destination(&destination, &app_data)?;
+        let query = if operation == "extract" {
+            "selection"
+        } else {
+            "after"
+        };
+        transfer(
+            connection,
+            &format!("/documents/{document_id}/pages/{operation}?{query}={selection}&acknowledge_signature_risk={acknowledge_signature_risk}"),
+            &destination,
+            None,
+        ).await?;
+    }
     *saves.last_directory.lock().map_err(|e| e.to_string())? =
         destination.parent().map(Path::to_path_buf);
     Ok(true)
@@ -547,6 +809,46 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+
+    #[cfg(unix)]
+    #[test]
+    fn rust_snapshot_saves_exact_bytes_and_refuses_stale_revision() {
+        use matterdraft_backend::matters::{Artifact, Store};
+        let root = std::env::temp_dir().join(format!(
+            "matterdraft-save-snapshot-{}",
+            rand::random::<u64>()
+        ));
+        fs::create_dir(&root).unwrap();
+        let mut store = Store::open(&root.join("synthetic")).unwrap();
+        let matter = store.request(
+            "POST",
+            "/matters",
+            serde_json::json!({"name":"Synthetic Save"}),
+        );
+        let fixture = include_bytes!("../../../samples/01_petition.pdf");
+        let imported = store.import_pdf(
+            matter.body["id"].as_str().unwrap(),
+            "fixture.pdf",
+            fixture.to_vec(),
+        );
+        let id = imported.body[0]["id"].as_str().unwrap();
+        let destination = root.join("saved.pdf");
+        fs::write(&destination, b"previous file").unwrap();
+        let stale = store.open_pdf(id, &Artifact::Working { revision: Some(2) });
+        assert_eq!(stale.err().unwrap().status, 409);
+        assert_eq!(fs::read(&destination).unwrap(), b"previous file");
+        let mut pdf = store
+            .open_pdf(id, &Artifact::Working { revision: Some(1) })
+            .unwrap();
+        transfer_snapshot(&mut pdf, &destination).unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), fixture);
+        assert!(fs::read_dir(&root).unwrap().all(|file| !file
+            .unwrap()
+            .path()
+            .to_string_lossy()
+            .ends_with(".partial")));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn rejects_path_like_names() {
@@ -561,7 +863,9 @@ mod tests {
         let id = "0123456789abcdef0123456789abcdef";
         assert_eq!(
             working_pdf_path(id, 7, false).unwrap(),
-            format!("/documents/{id}/pdf?revision=7&editable=true&acknowledge_signature_risk=false")
+            format!(
+                "/documents/{id}/pdf?revision=7&editable=true&acknowledge_signature_risk=false"
+            )
         );
         assert!(working_pdf_path(id, 0, false).is_err());
         assert!(working_pdf_path("../originals", 1, false).is_err());
@@ -641,6 +945,7 @@ mod tests {
             let connection = crate::BackendConnection {
                 base_url: format!("http://{address}"),
                 token: "test-token".into(),
+                rust_protected: false,
             };
             let result =
                 tauri::async_runtime::block_on(transfer(&connection, &path, &destination, None));
@@ -679,6 +984,7 @@ mod tests {
         crate::BackendConnection {
             base_url: format!("http://{address}"),
             token: "test-token".into(),
+            rust_protected: false,
         }
     }
 
@@ -747,6 +1053,7 @@ mod tests {
         let connection = crate::BackendConnection {
             base_url: format!("http://{address}"),
             token: "test-token".into(),
+            rust_protected: false,
         };
         tauri::async_runtime::block_on(transfer(
             &connection,
@@ -782,7 +1089,11 @@ pub(crate) fn reveal_saved_export(
         .clone();
     drop(paths);
     if !path.is_file() {
-        return Err("The saved file was moved or removed. Export it again to choose a location.".into());
+        return Err(
+            "The saved file was moved or removed. Export it again to choose a location.".into(),
+        );
     }
-    app.opener().reveal_item_in_dir(path).map_err(|error| error.to_string())
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|error| error.to_string())
 }

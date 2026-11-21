@@ -1,0 +1,94 @@
+{
+  "certificate.pdf": {
+    "bytes": 18007,
+    "openssl_cms_verify": true,
+    "openssl_message": "CMS Verification successful",
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": 3,
+    "sha256": "15ccb94d91ecc5ab33fa15fb05ff50073f69695b1dafb3ee472071016f6614db"
+  },
+  "encrypted.pdf": {
+    "bytes": 1460,
+    "pymupdf_encrypted": true,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": -1,
+    "sha256": "b5f75bd84033fca5b2eb4b5eaa20704bfea1ab7e0696da69a72e46db30e92a91"
+  },
+  "escaped_name_certificate.pdf": {
+    "bytes": 18009,
+    "openssl_cms_verify": true,
+    "openssl_message": "CMS Verification successful",
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": 3,
+    "sha256": "3ccc1244080c9b134f2ad7fec767528feab96da7808b2f78905448bb9345ca93"
+  },
+  "incremental_certificate.pdf": {
+    "bytes": 18171,
+    "openssl_cms_verify": true,
+    "openssl_message": "CMS Verification successful",
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": 3,
+    "sha256": "6b0a740c3e52d1c268aae845d3f9c0ad03a77ce2b1fd7ce97c5d75e930c216a4"
+  },
+  "malformed.pdf": {
+    "bytes": 395,
+    "pymupdf_error": "FileDataError",
+    "sha256": "dd28a9b7bbb7a19a729a0847401dfe822b780ec461150e20afa532f174a0f998"
+  },
+  "object_stream_certificate.pdf": {
+    "bytes": 18011,
+    "openssl_cms_verify": true,
+    "openssl_message": "CMS Verification successful",
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": 3,
+    "sha256": "3d2275e387f4926d9ca63a83ad59460ed4d35ae6dd13972dea46c3e8140cf6a9"
+  },
+  "object_stream_unsigned.pdf": {
+    "bytes": 787,
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": -1,
+    "sha256": "d884ae50bcbeda0001280448f78198f601fa6ce9d4a42b6d0f1f8d3e7b1abf36"
+  },
+  "perms_certificate.pdf": {
+    "bytes": 18034,
+    "openssl_cms_verify": true,
+    "openssl_message": "CMS Verification successful",
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": 3,
+    "sha256": "1a0787e7079600f33b70b01f6517d35ecf2dbcd50c326da7e83424078b264299"
+  },
+  "unsigned.pdf": {
+    "bytes": 790,
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": -1,
+    "sha256": "50e498257a0b71e6249bc2498f7d772336efa44bd33251a2420edd863eed08cf"
+  },
+  "unsigned_acroform.pdf": {
+    "bytes": 960,
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": -1,
+    "sha256": "f101609843d3487df7d21cbdc85a58d16ad0491bffdf0dc90fb334f020972407"
+  },
+  "unsigned_perms.pdf": {
+    "bytes": 946,
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": -1,
+    "sha256": "59ee9215b772b3d1f89e677c8da4f616087aed26852e8ff04152717da8b867a2"
+  },
+  "visible_mark_only.pdf": {
+    "bytes": 993,
+    "pymupdf_encrypted": false,
+    "pymupdf_pages": 1,
+    "pymupdf_sigflags": -1,
+    "sha256": "b99d2e1bc61dae586b930739d8e4aaf1bf84a3725b3c2ad56a43e73c72094a06"
+  }
+}

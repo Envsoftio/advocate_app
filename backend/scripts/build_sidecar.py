@@ -39,6 +39,14 @@ def locate_tessdata(language: str):
 
 def main():
     triple = detect_triple()
+    # Host-specific Rust worker is embedded, but runtime adoption remains opt-in.
+    manifest = BACKEND / 'pdf-oxide-worker' / 'Cargo.toml'
+    subprocess.check_call(['cargo', 'build', '--locked', '--release', '--target', triple,
+                           '--manifest-path', str(manifest)], cwd=ROOT)
+    worker_name = 'matterdraft-pdf-oxide' + ('.exe' if sys.platform == 'win32' else '')
+    worker = manifest.parent / 'target' / triple / 'release' / worker_name
+    if not worker.is_file():
+        raise SystemExit('Matching Rust PDF worker was not produced')
     try:
         import pypdfium2
         import pypdfium2.raw
@@ -63,6 +71,7 @@ def main():
            '--add-data', f'{BACKEND / "app" / "assets" / "editable-draft-template.pptx"}{addition}app/assets',
            *(item for path in tessdata for item in ('--add-data', f'{path}{addition}tessdata')),
            '--add-binary', f'{Path(cli_source).resolve()}{addition}ocr-tools',
+           '--add-binary', f'{worker}{addition}pdf-tools',
            str(BACKEND / 'launcher.py')]
     print('Building native sidecar for', triple)
     subprocess.check_call(cmd, cwd=ROOT, env=build_env)

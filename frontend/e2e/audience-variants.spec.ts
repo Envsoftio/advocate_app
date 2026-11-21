@@ -250,13 +250,13 @@ test('B04C BU11 reference composition, keyboard and responsive appearance', asyn
     y: Math.round(card.y),
     width: Math.round(card.width),
     height: Math.round(card.height),
-  }).toEqual({ x: 208, y: 238, width: 740, height: 588 });
+  }).toEqual({ x: 264, y: 242, width: 705, height: 588 });
   expect({
     x: Math.round(create.x),
     y: Math.round(create.y),
     width: Math.round(create.width),
     height: Math.round(create.height),
-  }).toEqual({ x: 968, y: 238, width: 448, height: 588 });
+  }).toEqual({ x: 989, y: 242, width: 427, height: 588 });
   await page.screenshot({
     path: resolve(evidence, 'BU11-1440-light-100.png'),
     animations: 'disabled',

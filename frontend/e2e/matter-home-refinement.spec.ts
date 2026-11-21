@@ -5,6 +5,7 @@ const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 876
 const headers = { Authorization: 'Bearer e2e-isolated-token' };
 
 test('Matters layout fits, reflows and retains its controls', async ({ page, request }, info) => {
+  const fixtureIds = new Set<string>();
   for (const name of [
     'Synthetic filing',
     'A deliberately long synthetic matter name for the keyboard and table width check',
@@ -15,7 +16,15 @@ test('Matters layout fits, reflows and retains its controls', async ({ page, req
       data: { name, case_type: 'Synthetic demonstration', court_profile: 'general-demo' },
     });
     expect(result.ok()).toBe(true);
+    fixtureIds.add((await result.json()).id);
   }
+  // Scope the layout to these fixtures when other Playwright tests share the service.
+  await page.route(`${base}/matters`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    const matters: Array<{ id: string }> = await response.json();
+    await route.fulfill({ response, json: matters.filter((matter) => fixtureIds.has(matter.id)) });
+  });
   for (const [width, height] of [
     [1280, 800],
     [1440, 900],

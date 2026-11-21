@@ -4,7 +4,7 @@ import { reactive, ref, onMounted, onUnmounted } from 'vue';
 import { X, Folder, HardDrive } from 'lucide-vue-next';
 import type { CourtProfile, MatterNew } from '../lib/types';
 
-const props = defineProps<{ profiles: CourtProfile[]; working: boolean }>();
+const props = defineProps<{ profiles: CourtProfile[]; working: boolean; initial?: MatterNew }>();
 const emit = defineEmits<{ close: []; create: [value: MatterNew] }>();
 const form = reactive<MatterNew>({
   name: '',
@@ -21,6 +21,11 @@ const form = reactive<MatterNew>({
   max_pages_per_volume: 300,
   keep_groups_intact: true,
 });
+if (props.initial) {
+  for (const key of Object.keys(form) as Array<keyof MatterNew>) {
+    if (key in props.initial) Object.assign(form, { [key]: props.initial[key] });
+  }
+}
 const visited = ref(false);
 const storageInfo = ref(false);
 const dialog = ref<HTMLElement | null>(null);
@@ -68,19 +73,25 @@ onUnmounted(() => opener?.focus());
       class="new-matter-dialog"
       role="dialog"
       aria-modal="true"
-      aria-label="Create matter"
+      :aria-label="initial ? 'Edit matter' : 'Create matter'"
       aria-describedby="new-matter-description"
       @keydown="keydown"
     >
       <header class="new-matter-head">
-        <h2 id="new-matter-title">New matter</h2>
-        <button class="icon-btn" type="button" aria-label="Close new matter" @click="close"
+        <h2 id="new-matter-title">{{ initial ? 'Edit matter' : 'New matter' }}</h2>
+        <button
+          class="icon-btn"
+          type="button"
+          :aria-label="initial ? 'Close edit matter' : 'Close new matter'"
+          @click="close"
           ><X :size="18"
         /></button>
       </header>
-      <p id="new-matter-description"
-        >Create a local workspace for the documents and packages in this matter.</p
-      >
+      <p id="new-matter-description">{{
+        initial
+          ? 'Update the details saved for this matter.'
+          : 'Create a local workspace for the documents and packages in this matter.'
+      }}</p>
       <form class="new-matter-form" @submit.prevent="submit">
         <label class="new-matter-field" for="matter-name"
           >Matter name <span aria-hidden="true">*</span></label
@@ -180,7 +191,13 @@ onUnmounted(() => opener?.focus());
           ><span>* Required</span
           ><button class="btn secondary" type="button" @click="close">Cancel</button
           ><button class="btn primary" type="submit" :disabled="working">{{
-            working ? 'Creating…' : 'Create matter'
+            working
+              ? initial
+                ? 'Saving…'
+                : 'Creating…'
+              : initial
+                ? 'Save changes'
+                : 'Create matter'
           }}</button></footer
         >
       </form>

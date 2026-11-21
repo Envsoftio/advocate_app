@@ -141,8 +141,8 @@ test('B02A new BU01/BU02 design, persisted overrides, real preview and cancel', 
   await workspace.getByRole('button', { name: 'Cover & index', exact: true }).click();
   await expect(workspace.locator('.front-preview-pages img')).toHaveCount(2);
   for (const [selector, x, y, width, height] of [
-    ['.front-settings', 208, 266, 340, 586],
-    ['.generated-front', 564, 266, 852, 586],
+    ['.front-settings', 264, 270, 340, 586],
+    ['.generated-front', 620, 270, 796, 586],
   ] as const) {
     const b = (await page.locator(selector).boundingBox())!;
     expect(Math.round(b.x)).toBe(x);

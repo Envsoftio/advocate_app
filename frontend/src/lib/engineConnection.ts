@@ -9,14 +9,17 @@ export const lastEngineResponse = ref<number | null>(null);
 export const engineReviewReason = ref(
   'Saved inputs changed. Review the latest state before editing.',
 );
+const engineFailure = ref('');
 export const engineReason = computed(() =>
   engineState.value === 'changed'
     ? engineReviewReason.value
     : engineState.value === 'checking'
       ? 'Checking the local engine and saved revisions…'
-      : 'Local engine unavailable. Saves, OCR, page edits and builds are paused.',
+      : engineFailure.value ||
+        'Local engine unavailable. Saves, OCR, page edits and builds are paused.',
 );
-export function disconnectEngine() {
+export function disconnectEngine(detail = '') {
+  engineFailure.value = detail;
   engineState.value = 'disconnected';
   autosaveHeld.value = true;
 }

@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-const base = 'http://127.0.0.1:8768',
+const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`,
   headers = { Authorization: 'Bearer e2e-isolated-token' };
 const evidence = resolve(import.meta.dirname, '../../docs/ui-evidence/b03b');
 const hash = (b: Buffer) => createHash('sha256').update(b).digest('hex');
@@ -106,19 +106,19 @@ test('B03B new 13A and BU06 geometry, responsive matrix and keyboard', async ({
   const w = page.locator('.volume-workspace');
   const left = (await w.locator('.volume-policy').boundingBox())!,
     right = (await w.locator('.volume-results').boundingBox())!;
-  expect(Math.round(left.x)).toBe(208);
-  expect(Math.round(left.y)).toBe(266);
+  expect(Math.round(left.x)).toBe(264);
+  expect(Math.round(left.y)).toBe(270);
   expect(Math.round(left.width)).toBe(300);
-  expect(Math.round(right.x)).toBe(524);
-  expect(Math.round(right.width)).toBe(892);
+  expect(Math.round(right.x)).toBe(580);
+  expect(Math.round(right.width)).toBe(836);
   await w.getByRole('button', { name: 'Size recovery', exact: true }).click();
   const affected = (await w.locator('.affected-document').boundingBox())!,
     paths = (await w.locator('.recovery-paths').boundingBox())!;
-  expect(Math.round(affected.x)).toBe(208);
-  expect(Math.round(affected.y)).toBe(322);
-  expect(Math.round(affected.width)).toBe(396);
-  expect(Math.round(paths.x)).toBe(620);
-  expect(Math.round(paths.width)).toBe(796);
+  expect(Math.round(affected.x)).toBe(264);
+  expect(Math.round(affected.y)).toBe(326);
+  expect(Math.round(affected.width)).toBe(377);
+  expect(Math.round(paths.x)).toBe(657);
+  expect(Math.round(paths.width)).toBe(759);
   for (const size of [
     { width: 1440, height: 900 },
     { width: 1024, height: 768 },

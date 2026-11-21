@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { enterLatestMatter, openWorkspaceNavigation, closeWorkspaceNavigation } from './navigation';
-const base = 'http://127.0.0.1:8768',
+const base = `http://127.0.0.1:${process.env.MATTERDRAFT_E2E_BACKEND_PORT || 8768}`,
   headers = { Authorization: 'Bearer e2e-isolated-token' };
 
 test('Reka calendars keep ISO dates, explicit confirmation, blank values and keyboard dismissal', async ({

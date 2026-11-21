@@ -1,4 +1,4 @@
-/* 13A and BU06: resolved design geometry; 184px shared shell + 24px workspace inset. */
+/* 13A and BU06 retain the 24px workspace inset inside the shared shell. */
 .volume-workspace {
   padding: 20px 24px;
   min-height: 100%;

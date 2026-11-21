@@ -325,6 +325,8 @@ References:
 
 ## 5. PDF editing, conversion and advanced features
 
+- [ ] **OXIDE-01 — Replace the shipped Python PDF workflow with Rust PDF Oxide in one cutover** · P1 · Authorized 17 November 2026; delivery strategy updated 18 November 2026. Build and verify replacements in stages, but change the production default only when the full current PDF workflow and its dependent Rust storage/jobs/exports pass the [single-cutover gate](RUST_PDF_SINGLE_CUTOVER_PLAN.md). The first delivered opt-in slice is PDF-08 DOCX/PPTX text extraction through a pinned Rust worker; it is not production parity. PDF-03/06/07/08 stay open. See [technical migration history](PDF_OXIDE_MIGRATION.md) and [Rust backend execution plan](RUST_BACKEND_PLAN.md). Do not remove existing functionality or change the deterministic page-map authority before exact Rust parity.
+
 - [x] **PDF-01 — Add extract/split/merge/insert/replace/crop tools** · P1 · Depends: DAT-01
   - Support arbitrary page selections and insertion before/after; normalize supported image inputs and later agreed Office inputs.
   - **Acceptance:** Page order, dimensions and counts match fixtures; originals remain intact; undo/history and stale-output tracking work. General splitting remains distinct from no-break bundle allocation.

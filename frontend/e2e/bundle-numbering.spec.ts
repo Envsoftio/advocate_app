@@ -115,12 +115,12 @@ test('B02B BU03 11C 12A layouts, persistence and draft guards', async ({ page, r
   await w.getByRole('button', { name: 'Numbering', exact: true }).click();
   await expect(w.locator('.placement-paper img')).toBeVisible();
   for (const [selector, x, width] of [
-    ['.numbering-settings', 208, 440],
-    ['.number-placement', 668, 748],
+    ['.numbering-settings', 264, 440],
+    ['.number-placement', 724, 692],
   ] as const) {
     const b = (await page.locator(selector).boundingBox())!;
     expect(Math.round(b.x)).toBe(x);
-    expect(Math.round(b.y)).toBe(266);
+    expect(Math.round(b.y)).toBe(270);
     expect(Math.round(b.width)).toBe(width);
     expect(Math.round(b.height)).toBe(586);
   }

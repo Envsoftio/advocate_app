@@ -22,9 +22,12 @@ const props = defineProps<{
   checking: boolean;
   blocked: boolean;
   cancelPending: boolean;
+  rustPilot?: boolean;
+  nativePicker?: boolean;
 }>();
 const emit = defineEmits<{
   add: [files: File[]];
+  pick: [];
   remove: [id: number];
   include: [id: number];
   start: [];
@@ -54,7 +57,12 @@ function add(files: FileList | null) {
 }
 function drop(e: DragEvent) {
   over.value = false;
+  if (props.rustPilot) return;
   if (!props.processing) add(e.dataTransfer?.files || null);
+}
+function choose() {
+  if (props.nativePicker) emit('pick');
+  else input.value?.click();
 }
 function status(e: ImportEntry) {
   return (
@@ -92,7 +100,9 @@ function status(e: ImportEntry) {
       ref="input"
       aria-label="Choose import files"
       type="file"
+      accept=".pdf,.jpg,.jpeg,.png"
       multiple
+      :disabled="nativePicker"
       hidden
       @change="add(($event.target as HTMLInputElement).files)"
     />
@@ -104,9 +114,15 @@ function status(e: ImportEntry) {
       @dragleave="over = false"
       @drop.prevent="drop"
       ><Upload :size="24" /><div
-        ><h2>Drop files here, or choose files</h2
-        ><p>PDF, JPEG and PNG · Multiple files supported · Local processing</p></div
-      ><button class="btn secondary" :disabled="checking || blocked" @click="input?.click()"
+        ><h2>{{
+          rustPilot ? 'Choose a PDF with the native picker' : 'Drop files here, or choose files'
+        }}</h2
+        ><p>{{
+          rustPilot
+            ? 'Exact samples/01_petition.pdf fixture only · Windows import unavailable'
+            : 'PDF, JPEG and PNG · Multiple files supported · Local processing'
+        }}</p></div
+      ><button class="btn secondary" :disabled="checking || blocked" @click="choose"
         ><FolderOpen :size="15" />Choose files</button
       ></div
     >
@@ -175,7 +191,7 @@ function status(e: ImportEntry) {
                 @click="emit('remove', entry.id)"
                 ><X :size="14" /></button
               ><button
-                v-if="entry.status === 'duplicate' && !started"
+                v-if="entry.status === 'duplicate' && !started && !rustPilot"
                 class="icon-btn small include-duplicate"
                 aria-label="Include duplicate"
                 title="Include this duplicate file"
@@ -196,7 +212,7 @@ function status(e: ImportEntry) {
     }}</p>
     <footer class="flow-footer"
       ><template v-if="!started"
-        ><button class="btn secondary" :disabled="checking || blocked" @click="input?.click()"
+        ><button class="btn secondary" :disabled="checking || blocked" @click="choose"
           ><Plus :size="15" />Add more</button
         ><span class="flow-muted">Review the queue, then import.</span
         ><button class="btn secondary push-right" :disabled="checking" @click="emit('back')"
@@ -217,14 +233,21 @@ function status(e: ImportEntry) {
           >{{ cancelPending ? 'Stopping after current file…' : 'Cancel remaining imports' }}</button
         ><template v-else
           ><button
-            v-if="entries.some((e) => ['failed', 'cancelled'].includes(e.status))"
+            v-if="
+              !rustPilot &&
+              entries.some(
+                (e) =>
+                  ['failed', 'cancelled'].includes(e.status) &&
+                  (!e.nativeSelection || e.nativeToken),
+              )
+            "
             class="btn secondary"
             @click="emit('retry')"
             >Retry remaining files</button
           ><button class="btn secondary push-right" @click="emit('back')">Back to overview</button
-          ><button class="btn primary" @click="emit('review')"
-            >Continue to document review</button
-          ></template
+          ><button class="btn primary" @click="emit('review')">{{
+            rustPilot ? 'View imported documents' : 'Continue to document review'
+          }}</button></template
         ></template
       ></footer
     >

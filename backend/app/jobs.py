@@ -111,3 +111,11 @@ class JobManager:
                 if job['status'] in ('queued', 'running'):
                     cancelled.set()
         self._executor.shutdown(wait=True, cancel_futures=True)
+        # cancel_futures prevents queued run() closures from publishing a terminal
+        # state. Close those records explicitly, including the durable copy.
+        with self._lock:
+            for job, _ in self._jobs.values():
+                if job['status'] == 'queued':
+                    job.update(status='cancelled', message='Cancelled')
+                    if self._store:
+                        self._store.save_job(job)

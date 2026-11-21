@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
 import {
   ArrowDown,
   ArrowUp,
@@ -15,8 +16,16 @@ import {
 import * as pdfjs from 'pdfjs-dist';
 import workerSrc from '../lib/pdfWorker?worker&url';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
-import { api, ApiError, pdfDocumentSource, replaceWorkingPagesFromFile } from '../lib/api';
+import {
+  api,
+  ApiError,
+  inTauri,
+  isRustBackend,
+  pdfDocumentSource,
+  replaceWorkingPagesFromFile,
+} from '../lib/api';
 import { friendlyError } from '../lib/format';
+import { pdfAssets } from '../lib/pdfAssets';
 import { signatureRiskDocuments, signatureStatusLabel } from '../lib/signatures';
 import type { MatterDocument } from '../lib/types';
 
@@ -60,7 +69,7 @@ type Confirmation = {
 const confirmation = ref<Confirmation | null>(null);
 const signaturePrompt = ref<Confirmation | null>(null);
 const replaceFileOpen = ref(false);
-const replacementFile = ref<File | null>(null);
+const replacementFile = ref<File | { name: string; token: string } | null>(null);
 const replacementPageCount = ref<number | null>(null);
 const replacementBusy = ref(false);
 const replacementError = ref('');
@@ -192,7 +201,7 @@ async function loadDocument(document: MatterDocument) {
   confirmation.value = null;
   signaturePrompt.value = null;
   replaceFileOpen.value = false;
-  replacementFile.value = null;
+  discardReplacement();
   replacementPageCount.value = null;
   selectionError.value = '';
   rangeText.value = '';
@@ -202,7 +211,12 @@ async function loadDocument(document: MatterDocument) {
   try {
     const source = await pdfDocumentSource(document.id, document.revision);
     if (sequence !== loadSequence || disposed) return;
-    const task = pdfjs.getDocument({ ...source, disableAutoFetch: true, disableStream: true });
+    const task = pdfjs.getDocument({
+      ...source,
+      ...pdfAssets,
+      disableAutoFetch: true,
+      disableStream: true,
+    });
     loadingTask = task;
     const loaded = await task.promise;
     if (sequence !== loadSequence || disposed) {
@@ -276,13 +290,59 @@ function clearSelection() {
   selectionAnchor.value = null;
 }
 async function openReplacementFile() {
-  replacementFile.value = null;
+  discardReplacement();
   replacementPageCount.value = null;
   replacementError.value = '';
   reviewMappingAfterReplacement.value = true;
   replaceFileOpen.value = true;
   await nextTick();
   dialog.value?.querySelector<HTMLButtonElement>('.organizer-file-choice button')?.focus();
+}
+
+function discardReplacement() {
+  const previous = replacementFile.value;
+  replacementFile.value = null;
+  if (previous && 'token' in previous)
+    void invoke('rust_discard_picked_pdf', { token: previous.token }).catch(() => {});
+}
+
+function closeReplacementFile() {
+  replaceFileOpen.value = false;
+  discardReplacement();
+}
+
+async function browseReplacementFile() {
+  if (!inTauri()) {
+    replacementInput.value?.click();
+    return;
+  }
+  replacementBusy.value = true;
+  replacementError.value = '';
+  try {
+    if (!(await isRustBackend())) {
+      replacementInput.value?.click();
+      return;
+    }
+    const result = await invoke<{
+      status: number;
+      body: { cancelled?: boolean; detail?: string; name?: string; pages?: number; token?: string };
+    }>('rust_pick_replacement');
+    const { token, name, pages, cancelled, detail } = result.body;
+    if (cancelled) return;
+    if (disposed || !replaceFileOpen.value) {
+      if (token) await invoke('rust_discard_picked_pdf', { token });
+      return;
+    }
+    if (result.status !== 200 || !token || !name || pages == null)
+      throw new ApiError(result.status, detail || 'Unable to open this replacement file');
+    discardReplacement();
+    replacementFile.value = { name, token };
+    replacementPageCount.value = pages;
+  } catch (cause) {
+    replacementError.value = friendlyError(cause);
+  } finally {
+    replacementBusy.value = false;
+  }
 }
 function openTool(task: 'insert' | 'crop' | 'extract', side?: 'before' | 'after') {
   if (controlsLocked.value || !selected.value.size || orderChanged.value) return;
@@ -376,7 +436,7 @@ async function continueAfterSignature() {
 
 async function chooseReplacementFile(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0];
-  replacementFile.value = null;
+  discardReplacement();
   replacementPageCount.value = null;
   replacementError.value = '';
   if (!file) return;
@@ -387,7 +447,7 @@ async function chooseReplacementFile(event: Event) {
   replacementBusy.value = true;
   try {
     if (/\.pdf$/i.test(file.name)) {
-      const task = pdfjs.getDocument({ data: await file.arrayBuffer() });
+      const task = pdfjs.getDocument({ data: await file.arrayBuffer(), ...pdfAssets });
       try {
         replacementPageCount.value = (await task.promise).numPages;
       } finally {
@@ -421,16 +481,29 @@ async function applyOperation() {
   error.value = '';
   try {
     if (pending.operation === 'replace-file') {
-      if (!replacementFile.value) throw new Error('Choose a replacement file.');
-      const updated = await replaceWorkingPagesFromFile(
-        currentDocument.value.id,
-        replacementFile.value,
-        {
-          target_pages: pending.pages,
-          expected_revision: pending.revision,
-          acknowledge_signature_risk: signatureAcknowledged.value,
-        },
-      );
+      const replacement = replacementFile.value;
+      if (!replacement) throw new Error('Choose a replacement file.');
+      const fields = {
+        target_pages: pending.pages,
+        expected_revision: pending.revision,
+        acknowledge_signature_risk: signatureAcknowledged.value,
+      };
+      const documentId = currentDocument.value.id;
+      let updated: MatterDocument;
+      if ('token' in replacement) {
+        const result = await invoke<{ status: number; body: MatterDocument & { detail?: string } }>(
+          'rust_apply_replacement',
+          { documentId, fields, token: replacement.token },
+        );
+        if (result.status !== 200)
+          throw new ApiError(
+            result.status,
+            result.body.detail || 'Working page replacement failed',
+          );
+        updated = result.body;
+      } else {
+        updated = await replaceWorkingPagesFromFile(documentId, replacement, fields);
+      }
       notice.value = `${pending.pages.length} working ${pending.pages.length === 1 ? 'page' : 'pages'} replaced. Undo restores this action.`;
       await loadDocument(updated);
       emit('modified');
@@ -518,6 +591,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  discardReplacement();
   loadSequence++;
   cancelRenders();
   if (loadingTask) void loadingTask.destroy().catch(() => undefined);
@@ -851,7 +925,7 @@ onBeforeUnmount(() => {
             /><button
               class="btn secondary small"
               :disabled="replacementBusy"
-              @click="replacementInput?.click()"
+              @click="browseReplacementFile"
               >Choose file</button
             ><span v-if="replacementFile"
               >{{ replacementFile.name }} · {{ replacementPageCount }}
@@ -875,7 +949,7 @@ onBeforeUnmount(() => {
             replacement.</p
           >
           <footer
-            ><button class="btn secondary small" @click="replaceFileOpen = false">Cancel</button
+            ><button class="btn secondary small" @click="closeReplacementFile">Cancel</button
             ><button
               class="btn primary small"
               :disabled="

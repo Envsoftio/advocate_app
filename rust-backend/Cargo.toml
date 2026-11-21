@@ -1,0 +1,43 @@
+[package]
+name = "matterdraft-backend"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+pdf_oxide = { version = "=0.3.78", features = ["rendering"] }
+hayro-cmap = "=0.1.1"
+hayro-ccitt = "=0.4.0"
+hayro-jpeg2000 = { version = "=0.4.1", default-features = false }
+hayro-postscript = { version = "=0.2.0", default-features = false }
+icu_properties = "=2.0.1"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+moxcms = { version = "=0.8.1", default-features = false }
+flate2 = "1"
+rusqlite = { version = "0.32", features = ["blob", "bundled-sqlcipher-vendored-openssl"] }
+chrono = "0.4"
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-zoneinfo", "tzdb-concatenated"] }
+jpeg-decoder = { version = "=0.3.2", default-features = false }
+kurbo = "=0.13.1"
+form_urlencoded = "1"
+regex = "1"
+unicode-bidi = "=0.3.18"
+unicode-segmentation = "=1.12.0"
+roxmltree = "0.20"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.11.1"
+base64 = "0.22"
+openssl = "0.10"
+tempfile = "3"
+ttf-parser = "=0.25.1"
+read-fonts = { version = "=0.43.3", default-features = false }
+zeroize = "1"
+zip = { version = "9.6.1", default-features = false, features = ["deflate"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

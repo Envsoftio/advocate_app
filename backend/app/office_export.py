@@ -15,6 +15,7 @@ from xml.etree import ElementTree as ET
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from .file_io import open_pdf
+from .oxide_pdf import configured_worker, extract_pages
 
 P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
 A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
@@ -47,6 +48,12 @@ def _package(parts: dict[str, bytes]) -> bytes:
 
 
 def _pdf_pages(path: Path) -> list[list[str]]:
+    if configured_worker():
+        pages = [[clean for line in text.splitlines() if (clean := _clean(line).strip())]
+                 for text in extract_pages(path)]
+        if not any(pages):
+            raise ValueError('This PDF has no extractable text. Review OCR before making an editable draft')
+        return pages
     pages: list[list[str]] = []
     total_characters = 0
     with open_pdf(path) as pdf:

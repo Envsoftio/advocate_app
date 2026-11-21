@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, Response, JSONResponse, StreamingRes
 from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile as ParsedUploadFile
 import pymupdf
+from .pdf_search import search_pages
 
 from .engine import (load_profiles, preflight, build_bundle, bundle_preview,
                      compare_bundle_plan, front_matter_preview, render_numbering_preview,
@@ -456,9 +457,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
         with store.matter_lock(matter_id):
             for document in store.get_documents(matter_id):
                 try:
-                    with open_pdf(store.working_path(document)) as pdf:
+                    with search_pages(store.working_path(document)) as pdf:
                         for page_index, page in enumerate(pdf):
-                            text = ' '.join(page.get_text('text').split())
+                            text = ' '.join(page.split())
                             position = text.casefold().find(query.casefold())
                             if position < 0:
                                 continue
@@ -488,9 +489,9 @@ def create_app(data_dir: str | Path | None = None, token: str | None = None,
             if revision is not None and revision != document['revision']:
                 raise HTTPException(status_code=409, detail='Working PDF revision changed; search again')
             try:
-                with open_pdf(store.working_path(document)) as pdf:
+                with search_pages(store.working_path(document)) as pdf:
                     for page_index, page in enumerate(pdf):
-                        text = ' '.join(page.get_text('text').split())
+                        text = ' '.join(page.split())
                         position = text.casefold().find(query.casefold())
                         if position < 0:
                             continue

@@ -3,6 +3,7 @@ import AppSelect from './components/ui/AppSelect.vue';
 import AppDateInput from './components/ui/AppDateInput.vue';
 import matterDraftLogo from './assets/matterdraft-logo.svg';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import {
   ChevronDown,
   Clock3,
@@ -82,6 +83,7 @@ import BuildWorkspace from './components/BuildWorkspace.vue';
 import VariantWorkspace from './components/VariantWorkspace.vue';
 import BundleExportDialog from './components/BundleExportDialog.vue';
 import ExportPdfReview from './components/ExportPdfReview.vue';
+import ReadOnlyPdfPane from './components/ReadOnlyPdfPane.vue';
 import MatterForm from './components/MatterForm.vue';
 import MatterHome from './components/MatterHome.vue';
 import MatterOverview from './components/MatterOverview.vue';
@@ -89,11 +91,16 @@ import ImportWorkspace from './components/ImportWorkspace.vue';
 import type { ImportEntry } from './lib/matterFlow';
 import CourtProfileGuide from './components/CourtProfileGuide.vue';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { invoke } from '@tauri-apps/api/core';
 import { VueDraggable } from 'vue-draggable-plus';
 import {
   ApiError,
+  rustWorkspaceMode,
+  readProcessingJob,
   api,
   downloadExport,
+  downloadWorkingPdf,
+  pdfDocumentSource,
   downloadOfficeReview,
   downloadProtectedPdf,
   downloadMatter,
@@ -101,10 +108,13 @@ import {
   printableExport,
   printableOriginalPdf,
   printableWorkingPdf,
+  prepareNativePrint,
   restoreMatter,
   uploadDocument,
 } from './lib/api';
+import { createProcessingJobMonitor, isProcessingJob } from './lib/processingJobMonitor';
 import { bytesLabel, friendlyError, prettyDate } from './lib/format';
+import { rustPilotImportUnavailableOnWindows } from './lib/rustTransport';
 import { applyAppearance, readAppearance, type Theme, type UiScale } from './lib/appearance';
 import {
   confirmSignatureTransformation,
@@ -381,9 +391,11 @@ const selectedDoc = computed(() => docs.value.find((d) => d.id === selectedDocId
 type OcrRun = {
   language: string;
   provider: string;
-  pymupdf_version: string;
-  tesseract_cli_version: string | null;
-  model_sha256: Record<string, string>;
+  pymupdf_version?: string;
+  tesseract_cli_version?: string | null;
+  model_sha256?: Record<string, string>;
+  version?: string;
+  traineddata_sha256?: Record<string, string>;
   pages_ocr_applied: number;
   applied_at: string;
   applied_revision: number;
@@ -583,6 +595,7 @@ function openPageTools(
   pageToolsOpen.value = true;
 }
 const ocrOptionsOpen = ref(false);
+const ocrSubmitting = ref(false);
 const ocrOptionsLanguage = ref<'eng' | 'hin' | 'eng+hin'>('eng');
 const ocrOptionsScope = ref<'all' | 'page'>('all');
 const ocrOptionsPage = ref(0);
@@ -648,6 +661,148 @@ watch([activeView, selectedDocId, documentTableOpen], () => {
 const sidebarCollapsed = ref(false);
 const matterHome = ref<InstanceType<typeof MatterHome> | null>(null);
 const matterDetailsOpen = ref(false);
+const pilotPage = ref(1);
+const pilotSaving = ref(false);
+watch(
+  () => [selectedDoc.value?.id, selectedDoc.value?.revision],
+  () => {
+    pilotPage.value = 1;
+  },
+);
+async function savePilotWorkingPdf() {
+  const doc = selectedDoc.value;
+  if (!doc || pilotSaving.value) return;
+  pilotSaving.value = true;
+  try {
+    if (await downloadWorkingPdf(doc.id, doc.revision, doc.title))
+      notify('Working PDF saved.', 'success');
+  } catch (error) {
+    issue(error);
+  } finally {
+    pilotSaving.value = false;
+  }
+}
+const rustMode = ref<'synthetic' | 'protected' | null>(null);
+const rustPilot = computed(() => rustMode.value === 'synthetic');
+const rustPilotWindows = computed(() => rustPilot.value && rustPilotImportUnavailableOnWindows());
+type RustJobView = {
+  id: string;
+  status: string;
+  progress: number;
+  message: string;
+  completed_pages: number;
+  page_count: number | null;
+  cancel_requested: boolean;
+  error: string | null;
+};
+const rustJob = ref<RustJobView | null>(null);
+const rustJobResult = ref('');
+const rustJobInput = ref('');
+const rustJobError = ref('');
+const rustHealthMs = ref<number | null>(null);
+const rustFrameCount = ref(0);
+const rustMaxFrameGapMs = ref(0);
+let rustJobPoll: ReturnType<typeof setInterval> | null = null;
+let rustFrameId: number | null = null;
+let rustLastFrameAt = 0;
+function rustFrameTick(at: number) {
+  if (rustLastFrameAt)
+    rustMaxFrameGapMs.value = Math.max(rustMaxFrameGapMs.value, Math.round(at - rustLastFrameAt));
+  rustLastFrameAt = at;
+  rustFrameCount.value++;
+  rustFrameId = requestAnimationFrame(rustFrameTick);
+}
+function stopRustFrames() {
+  if (rustFrameId !== null) cancelAnimationFrame(rustFrameId);
+  rustFrameId = null;
+}
+async function rustJobCommand<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  const reply = await invoke<{ status: number; body: T & { detail?: string } }>(command, args);
+  if (reply.status >= 400) throw new Error(reply.body.detail || `Rust job error ${reply.status}`);
+  return reply.body;
+}
+async function pollRustJob() {
+  if (!rustJob.value) return;
+  try {
+    rustJob.value = await rustJobCommand<RustJobView>('rust_job_status', { id: rustJob.value.id });
+    if (!['queued', 'running'].includes(rustJob.value.status) && rustJobPoll) {
+      clearInterval(rustJobPoll);
+      rustJobPoll = null;
+      stopRustFrames();
+    }
+  } catch (err) {
+    rustJobError.value = String(err);
+  }
+}
+async function startRustJob(delayMs = 1200) {
+  rustJobError.value = '';
+  rustJobResult.value = '';
+  rustFrameCount.value = 0;
+  rustMaxFrameGapMs.value = 0;
+  rustLastFrameAt = 0;
+  stopRustFrames();
+  try {
+    rustJob.value = await rustJobCommand<RustJobView>('rust_debug_job_start', { delayMs });
+    rustFrameId = requestAnimationFrame(rustFrameTick);
+    if (rustJobPoll) clearInterval(rustJobPoll);
+    rustJobPoll = setInterval(() => {
+      void pollRustJob();
+    }, 150);
+  } catch (err) {
+    rustJobError.value = String(err);
+  }
+}
+async function checkRustHealth() {
+  rustJobError.value = '';
+  const at = performance.now();
+  try {
+    await rustJobCommand<Record<string, unknown>>('rust_request', {
+      method: 'GET',
+      path: '/health',
+    });
+    rustHealthMs.value = Math.round(performance.now() - at);
+  } catch (err) {
+    rustJobError.value = String(err);
+  }
+}
+async function cancelRustJob() {
+  if (!rustJob.value) return;
+  try {
+    rustJob.value = await rustJobCommand<RustJobView>('rust_job_cancel', { id: rustJob.value.id });
+  } catch (err) {
+    rustJobError.value = String(err);
+  }
+}
+async function getRustJobResult() {
+  if (!rustJob.value) return;
+  try {
+    const result = await rustJobCommand<{ pages: string[] }>('rust_job_result', {
+      id: rustJob.value.id,
+    });
+    rustJobResult.value = result.pages
+      .map((page, index) => `Page ${index + 1}: ${page.slice(0, 120)}`)
+      .join('\n');
+  } catch (err) {
+    rustJobError.value = String(err);
+  }
+}
+const editingMatter = ref<Matter | null>(null);
+async function saveMatterDetails(fields: MatterNew) {
+  const target = editingMatter.value;
+  if (!target) return;
+  creating.value = true;
+  try {
+    await api<Matter>(`/matters/${target.id}`, 'PATCH', fields);
+    await refreshMatters();
+    await refreshHistory();
+    editingMatter.value = null;
+    notify('Matter details saved.', 'success');
+  } catch (err) {
+    issue(err);
+  } finally {
+    creating.value = false;
+  }
+}
 const matterContext = computed(
   () => !!currentMatter.value && !['matters', 'rules', 'about'].includes(activeView.value),
 );
@@ -660,21 +815,25 @@ const stopImport = ref(false);
 let importEntryId = 0;
 async function openImport() {
   await showView('import');
-  if (activeView.value !== 'import') return;
-  if (
-    !importQueues.value[currentMatterId.value!]?.some((e) =>
-      ['ready', 'processing'].includes(e.status),
-    )
-  ) {
-    importQueues.value[currentMatterId.value!] = [];
-    importStarted.value[currentMatterId.value!] = false;
+  const id = currentMatterId.value;
+  if (activeView.value !== 'import' || !id) return;
+  if (!importQueues.value[id]?.some((e) => ['ready', 'processing'].includes(e.status))) {
+    const previous = importQueues.value[id] || [];
+    importQueues.value[id] = [];
+    importStarted.value[id] = false;
+    await releaseImportFiles(previous);
   }
 }
 async function stageImport(files: FileList | File[]) {
   if (!currentMatterId.value || busy.value || importChecking.value) return;
+  if (rustPilot.value) {
+    notify('Choose documents through the native file picker.', 'error');
+    return;
+  }
   const id = currentMatterId.value;
   await showView('import');
-  if (activeView.value !== 'import' || currentMatterId.value !== id) return;
+  if (activeView.value !== 'import' || currentMatterId.value !== id || importChecking.value) return;
+  const previous = importStarted.value[id] ? importQueues.value[id] : undefined;
   if (importStarted.value[id]) {
     importQueues.value[id] = [];
     importStarted.value[id] = false;
@@ -683,13 +842,16 @@ async function stageImport(files: FileList | File[]) {
   const queue = importQueues.value[id];
   importChecking.value = true;
   try {
+    if (previous) await releaseImportFiles(previous);
     const existingDocuments = await api<MatterDocument[]>(`/matters/${id}/documents`);
     const existing = new Set(existingDocuments.map((d) => d.source_sha256));
     for (const file of Array.from(files)) {
       const entry: ImportEntry = { id: ++importEntryId, file, status: 'ready' };
       if (!/\.(pdf|png|jpe?g)$/i.test(file.name)) entry.status = 'unsupported';
-      else if (file.size > 80 * 1024 * 1024) entry.status = 'oversize';
-      else {
+      else if (file.size > 80 * 1024 * 1024) {
+        entry.status = 'oversize';
+        entry.message = 'Over 80 MiB · excluded';
+      } else {
         const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
         entry.hash = Array.from(new Uint8Array(digest), (b) =>
           b.toString(16).padStart(2, '0'),
@@ -705,6 +867,81 @@ async function stageImport(files: FileList | File[]) {
     importChecking.value = false;
     if (fileInput.value) fileInput.value.value = '';
   }
+}
+type NativePickReply = {
+  status: number;
+  body: { token?: string; name?: string; hash?: string; cancelled?: boolean; detail?: string };
+};
+function releaseImportFiles(queue: ImportEntry[]) {
+  return Promise.allSettled(
+    queue.flatMap(({ nativeToken }) =>
+      nativeToken ? [invoke('rust_discard_picked_pdf', { token: nativeToken })] : [],
+    ),
+  );
+}
+
+async function stageNativeImport(dropId?: string) {
+  if (!rustMode.value || !currentMatterId.value || busy.value || importChecking.value) return;
+  const id = currentMatterId.value;
+  importChecking.value = true;
+  try {
+    const results = dropId
+      ? await invoke<NativePickReply[]>('rust_claim_import_drop', { id: dropId })
+      : rustPilot.value
+        ? [await invoke<NativePickReply>('rust_pick_import_pdf')]
+        : await invoke<NativePickReply[]>('rust_pick_import_files');
+    const entries: ImportEntry[] = results
+      .filter(({ body }) => !body.cancelled)
+      .map(({ status, body }) => ({
+        id: ++importEntryId,
+        file: new File([], body.name || 'Selected file'),
+        status:
+          status === 200 && body.token && body.hash
+            ? 'ready'
+            : status === 413
+              ? 'oversize'
+              : 'unsupported',
+        message:
+          status === 200 && body.token && body.hash
+            ? undefined
+            : body.detail || 'Unable to read the selected file',
+        hash: body.hash,
+        nativeSelection: true,
+        nativeToken: body.token,
+      }));
+    if (currentMatterId.value !== id || activeView.value !== 'import') {
+      await releaseImportFiles(entries);
+      return;
+    }
+    const queue = (importQueues.value[id] ||= []);
+    const existing = new Set([
+      ...docs.value.map((doc) => doc.source_sha256),
+      ...queue.map((entry) => entry.hash),
+    ]);
+    for (const entry of entries) {
+      if (entry.status === 'ready') {
+        if (existing.has(entry.hash)) {
+          entry.status = 'duplicate';
+          if (rustPilot.value) {
+            await releaseImportFiles([entry]);
+            entry.nativeToken = undefined;
+          }
+        }
+        existing.add(entry.hash);
+      }
+      queue.push(entry);
+    }
+  } catch (err) {
+    issue(err);
+  } finally {
+    importChecking.value = false;
+  }
+}
+function removeImportEntry(id: number) {
+  const entry = importEntries.value.find((item) => item.id === id);
+  if (entry?.nativeToken)
+    void invoke('rust_discard_picked_pdf', { token: entry.nativeToken }).catch(issue);
+  importQueues.value[currentMatterId.value!] = importEntries.value.filter((item) => item.id !== id);
 }
 async function startImport() {
   if (!currentMatterId.value || busy.value || engineBlocked.value) return;
@@ -724,7 +961,38 @@ async function startImport() {
       }
       entry.status = 'processing';
       try {
-        const imported = await importOneFile(id, entry.file);
+        let imported: MatterDocument | null;
+        if (entry.nativeSelection) {
+          if (!entry.nativeToken)
+            throw new ApiError(409, 'Selected file expired. Choose it again.');
+          const token = entry.nativeToken;
+          entry.nativeToken = undefined;
+          try {
+            imported = await importOneFile(
+              id,
+              entry.file,
+              async (password, acknowledgeSignatureRisk) => {
+                const result = await invoke<{
+                  status: number;
+                  body: MatterDocument[] | { detail: string };
+                }>('rust_import_picked_pdf', {
+                  matterId: id,
+                  token,
+                  password,
+                  acknowledgeSignatureRisk,
+                });
+                if (result.status !== 201)
+                  throw new ApiError(
+                    result.status,
+                    (result.body as { detail: string }).detail || 'Import refused',
+                  );
+                return result.body as MatterDocument[];
+              },
+            );
+          } finally {
+            await invoke('rust_discard_picked_pdf', { token }).catch(() => {});
+          }
+        } else imported = await importOneFile(id, entry.file);
         entry.status = imported ? 'complete' : 'cancelled';
         entry.pages = imported?.page_count;
       } catch (err) {
@@ -747,6 +1015,7 @@ async function cancelImportView() {
     )
   )
     return;
+  await releaseImportFiles(importEntries.value);
   importQueues.value[currentMatterId.value!] = [];
   importStarted.value[currentMatterId.value!] = false;
   await showView('overview');
@@ -796,7 +1065,7 @@ const vaultRecoveryMode = ref(false);
 const vaultRecoveryKey = ref('');
 const vaultBusy = ref(false);
 const vaultError = ref('');
-const protectedRestoreFile = ref<File | null>(null);
+const protectedRestoreFile = ref<File | string | null>(null);
 const protectedRestoreCredential = ref('');
 const protectedRestoreRecovery = ref(false);
 const protectedRestoreError = ref('');
@@ -838,8 +1107,11 @@ const printPages = ref('all');
 const printOrientation = ref<'source' | 'portrait' | 'landscape'>('source');
 const printScale = ref<'fit' | 'actual'>('fit');
 const printBusy = ref(false);
+const printOpening = ref(false);
 const printError = ref('');
 const printPreviewUrl = ref('');
+let preparedNativePrint: Awaited<ReturnType<typeof prepareNativePrint>> = null;
+let printPreparation: AbortController | null = null;
 const printFrame = ref<HTMLIFrameElement | null>(null);
 const reviewingPdf = ref<{ exportId: string; filename: string; originalId?: string } | null>(null);
 const artifactOptions = computed(() => [
@@ -1102,16 +1374,26 @@ async function structureModified() {
   resetDrafts();
   await loadMatterResources();
 }
-let jobTimer: ReturnType<typeof setInterval> | null = null;
-let jobPollSequence = 0;
-watch(currentMatterId, () => {
-  jobPollSequence++;
-  if (jobTimer) clearInterval(jobTimer);
-  jobTimer = null;
-  activeJob.value = null;
-  cancelPending.value = false;
-  exportDialogArtifact.value = null;
+const jobMonitor = createProcessingJobMonitor({
+  read: readProcessingJob,
+  update: publishJobStatus,
+  failed: (error) => {
+    cancelPending.value = false;
+    issue(error);
+  },
+  mayRetryRead: (error) => error instanceof ApiError && error.status === 503,
 });
+watch(
+  currentMatterId,
+  () => {
+    jobMonitor.stop();
+    activeJob.value = null;
+    recentJobs.value = [];
+    cancelPending.value = false;
+    exportDialogArtifact.value = null;
+  },
+  { flush: 'sync' },
+);
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let healthTimer: ReturnType<typeof setInterval> | null = null;
 let connecting = false;
@@ -1147,11 +1429,7 @@ async function changeReferenceProfile(id: string) {
   referenceProfileId.value = id;
 }
 
-const isJobActive = computed(
-  () =>
-    !!activeJob.value &&
-    (activeJob.value.status === 'running' || activeJob.value.status === 'queued'),
-);
+const isJobActive = computed(() => isProcessingJob(activeJob.value));
 const activeExport = computed(() => exportsList.value[0] || null);
 const comparisonExportId = ref('');
 const comparisonExport = computed(
@@ -1621,11 +1899,17 @@ watch([activeView, currentMatterId], () => {
 });
 watch(matterDetailsOpen, async (open) => {
   await nextTick();
+  if (editingMatter.value) return;
   document
     .querySelector<HTMLElement>(
       open ? '.matter-details-dialog button' : '.matter-overview .flow-heading button',
     )
     ?.focus();
+});
+watch(editingMatter, async (matter) => {
+  if (matter) return;
+  await nextTick();
+  document.querySelector<HTMLElement>('.matter-overview .flow-heading button')?.focus();
 });
 watch(workspaceMenuOpen, async (open) => {
   await nextTick();
@@ -1683,6 +1967,13 @@ watch(pageToolsOpen, async (open) => {
   if (!open) pageToolsInitial.value = null;
 });
 async function showView(view: View) {
+  if (
+    rustPilot.value &&
+    !['matters', 'overview', 'documents', 'import', 'rules', 'about'].includes(view)
+  ) {
+    issue('This workspace is not available in the Rust PDF import pilot.');
+    return;
+  }
   if (!(await leaveMembership())) return;
   workspaceMenuOpen.value = false;
   if (activeView.value === view) {
@@ -1989,23 +2280,27 @@ async function init() {
   connecting = true;
   apiStatus.value = 'connecting';
   try {
-    let connected = false;
-    const deadline = Date.now() + (inTauri() ? 60_000 : 12_000);
-    while (Date.now() < deadline) {
-      try {
-        await api('/health', 'GET', undefined, 1_500);
-        connected = true;
-        break;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 400));
+    rustMode.value = await rustWorkspaceMode();
+    if (!rustMode.value) {
+      let connected = false;
+      const deadline = Date.now() + (inTauri() ? 60_000 : 12_000);
+      while (Date.now() < deadline) {
+        try {
+          await api('/health', 'GET', undefined, 1_500);
+          connected = true;
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
       }
+      if (!connected)
+        throw new Error(
+          inTauri()
+            ? 'Local engine did not start. Quit and reopen MatterDraft. If this continues, check the packaged sidecar and local port.'
+            : 'Local engine did not start. Run backend/dev.sh and retry.',
+        );
+      healthTimer ??= setInterval(() => void checkHealth(), 5_000);
     }
-    if (!connected)
-      throw new Error(
-        inTauri()
-          ? 'Local engine did not start. Quit and reopen MatterDraft. If this continues, check the packaged sidecar and local port.'
-          : 'Local engine did not start. Run backend/dev.sh and retry.',
-      );
     const vault = await api<{
       state: 'setup' | 'locked' | 'unlocked';
       enabled: boolean;
@@ -2025,7 +2320,7 @@ async function init() {
     if (recoveringStartup) await resumeAutosaveWhenClean();
   } catch (err) {
     apiStatus.value = 'offline';
-    disconnectEngine();
+    disconnectEngine(friendlyError(err));
     issue(err);
   } finally {
     connecting = false;
@@ -2104,7 +2399,7 @@ async function finishVaultSetup() {
   await init();
 }
 async function checkHealth() {
-  if (connecting || apiStatus.value === 'offline') return;
+  if (rustMode.value || connecting || apiStatus.value === 'offline') return;
   try {
     await api('/health', 'GET', undefined, 1_500);
   } catch {
@@ -2160,6 +2455,8 @@ watch(
   engineState,
   (state, previous) => {
     if (state === 'disconnected') {
+      jobMonitor.stop();
+      cancelPending.value = false;
       if (previous === 'ready') {
         recoverySnapshot = savedContext();
         recoveryInputSnapshot = checks.value.find((check) => check.input_snapshot)?.input_snapshot;
@@ -2186,11 +2483,12 @@ async function retryEngine() {
   engineState.value = 'checking';
   const id = currentMatterId.value;
   try {
-    await api('/health', 'GET', undefined, 1500);
-    const [matters, documents, findings] = await Promise.all([
+    if (!rustMode.value) await api('/health', 'GET', undefined, 1500);
+    const [matters, documents, findings, jobs] = await Promise.all([
       api<Matter[]>('/matters'),
       api<MatterDocument[]>(`/matters/${id}/documents`),
       api<PreflightCheck[]>(`/matters/${id}/validate`),
+      api<Job[]>(`/matters/${id}/jobs`),
     ]);
     if (id !== currentMatterId.value)
       throw new Error('Workspace changed during recovery. Retry for this workspace.');
@@ -2214,6 +2512,7 @@ async function retryEngine() {
     checksError.value = '';
     engineState.value = 'ready';
     apiStatus.value = 'online';
+    reconcileJobs(jobs);
     previewRefreshKey.value++;
     await nextTick();
     (
@@ -2242,7 +2541,7 @@ async function reviewRecoveredState() {
     return;
   engineState.value = 'checking';
   try {
-    await api('/health', 'GET', undefined, 1500);
+    if (!rustMode.value) await api('/health', 'GET', undefined, 1500);
     // Stay blocked until all required current resources have been read successfully.
     const id = currentMatterId.value;
     const [matters, documents] = await Promise.all([
@@ -2288,6 +2587,27 @@ async function loadMatterResources() {
   checksError.value = '';
   checks.value = [];
   try {
+    if (rustPilot.value) {
+      const [d, h, usage, archived] = await Promise.all([
+        api<MatterDocument[]>(`/matters/${id}/documents`),
+        api<typeof history.value>(`/matters/${id}/history`),
+        api<typeof storageUsage.value>(`/matters/${id}/storage`),
+        api<MatterDocument[]>(`/matters/${id}/archived-documents`),
+      ]);
+      if (currentMatterId.value !== id || call !== resourceSequence) return;
+      history.value = h;
+      docs.value = d;
+      if (!selectedDocId.value || !d.some((doc) => doc.id === selectedDocId.value))
+        selectedDocId.value = d[0]?.id || null;
+      storageUsage.value = usage;
+      exportsList.value = [];
+      recentJobs.value = [];
+      archivedDocs.value = archived;
+      manualBookmarks.value = [];
+      checksError.value =
+        'The Rust pilot can read and save the pinned PDF. Full page editing, checks and bundle generation are pending.';
+      return;
+    }
     const [d, c, e, j, h, archived, usage, bookmarks] = await Promise.all([
       api<MatterDocument[]>(`/matters/${id}/documents`),
       api<PreflightCheck[]>(`/matters/${id}/validate`),
@@ -2302,19 +2622,13 @@ async function loadMatterResources() {
     docs.value = d;
     if (validationCall === validationSequence) checks.value = c;
     exportsList.value = e;
-    recentJobs.value = j;
+    reconcileJobs(j);
     history.value = h;
     manualBookmarks.value = bookmarks;
     previewRefreshKey.value += 1;
     if (pageQuery.value.trim().length >= 2) void searchPages();
     archivedDocs.value = archived;
     storageUsage.value = usage;
-    const ongoing = j.find((job) => job.status === 'queued' || job.status === 'running');
-    if (ongoing && (!activeJob.value || activeJob.value.id !== ongoing.id)) watchJob(ongoing);
-    if (!ongoing) {
-      activeJob.value = j.find((item) => item.id === activeJob.value?.id) || j[0] || null;
-      cancelPending.value = false;
-    }
     if (!selectedDocId.value || !d.some((doc) => doc.id === selectedDocId.value))
       selectedDocId.value = d[0]?.id || null;
   } catch (err) {
@@ -2357,7 +2671,14 @@ async function createMatter(fields: MatterNew) {
     await refreshMatters();
     await openMatterTab(value.id, 'overview');
     modalOpen.value = false;
-    notify('Matter created. Import your first document to begin.', 'success');
+    notify(
+      rustPilot.value
+        ? rustPilotWindows.value
+          ? 'Matter created in the synthetic Rust store. PDF import is unavailable on Windows.'
+          : 'Matter created in the synthetic Rust store. PDF import is available as a narrow pilot.'
+        : 'Matter created. Import your first document to begin.',
+      'success',
+    );
   } catch (err) {
     issue(err);
   } finally {
@@ -2421,21 +2742,79 @@ async function importMatterPackage(files: FileList | null) {
     if (matterFileInput.value) matterFileInput.value.value = '';
   }
 }
+async function restoreNativePackage(token: string, credential?: string, recovery = false) {
+  const result = await invoke<{ status: number; body: Matter & { detail?: string } }>(
+    'rust_restore_picked_backup',
+    { token, credential, recovery },
+  );
+  if (result.status !== 201)
+    throw new ApiError(
+      result.status,
+      result.body.detail || 'Unable to restore the selected backup',
+    );
+  return result.body;
+}
+async function chooseMatterPackage() {
+  if (!rustMode.value) {
+    matterFileInput.value?.click();
+    return;
+  }
+  if (busy.value || !confirmDiscardDrafts()) return;
+  busy.value = true;
+  let token: string | undefined;
+  try {
+    const result = await invoke<NativePickReply>('rust_pick_portable_backup');
+    if (result.body.cancelled) return;
+    token = result.body.token;
+    if (result.status !== 200 || !token)
+      throw new ApiError(result.status, result.body.detail || 'Unable to open the selected backup');
+    const restored = await restoreNativePackage(token);
+    await useRestoredMatter(restored);
+  } catch (err) {
+    if (
+      token &&
+      err instanceof ApiError &&
+      err.status === 422 &&
+      err.message.includes('backup needs')
+    ) {
+      protectedRestoreFile.value = token;
+      protectedRestoreError.value = '';
+      token = undefined;
+    } else issue(err);
+  } finally {
+    if (token) await invoke('rust_discard_picked_pdf', { token }).catch(() => {});
+    busy.value = false;
+  }
+}
+
+function cancelProtectedRestore() {
+  const selected = protectedRestoreFile.value;
+  if (typeof selected === 'string')
+    void invoke('rust_discard_picked_pdf', { token: selected }).catch(issue);
+  protectedRestoreFile.value = null;
+  protectedRestoreCredential.value = '';
+  protectedRestoreError.value = '';
+}
 async function useRestoredMatter(restored: Matter) {
   await refreshMatters();
   await openMatterTab(restored.id, 'documents');
   notify('Matter restored with originals and working revisions.', 'success');
 }
 async function submitProtectedRestore() {
-  if (!protectedRestoreFile.value || busy.value) return;
+  const selected = protectedRestoreFile.value;
+  if (!selected || busy.value) return;
   busy.value = true;
   protectedRestoreError.value = '';
   try {
-    const restored = await restoreMatter(
-      protectedRestoreFile.value,
-      protectedRestoreCredential.value,
-      protectedRestoreRecovery.value,
-    );
+    const restore =
+      typeof selected === 'string'
+        ? restoreNativePackage(
+            selected,
+            protectedRestoreCredential.value,
+            protectedRestoreRecovery.value,
+          )
+        : restoreMatter(selected, protectedRestoreCredential.value, protectedRestoreRecovery.value);
+    const restored = await restore;
     protectedRestoreFile.value = null;
     protectedRestoreCredential.value = '';
     await useRestoredMatter(restored);
@@ -2445,12 +2824,17 @@ async function submitProtectedRestore() {
     busy.value = false;
   }
 }
-async function importOneFile(matterId: string, file: File): Promise<MatterDocument | null> {
+async function importOneFile(
+  matterId: string,
+  file: File,
+  upload = (password?: string, acknowledged = false) =>
+    uploadDocument(matterId, file, password, acknowledged),
+): Promise<MatterDocument | null> {
   let password: string | undefined;
   let acknowledged = false;
   while (true) {
     try {
-      const imported = await uploadDocument(matterId, file, password, acknowledged);
+      const imported = await upload(password, acknowledged);
       return imported[0] || null;
     } catch (err) {
       if (
@@ -2505,6 +2889,51 @@ function onDropUpload(e: DragEvent) {
   hoverUpload.value = false;
   if (e.dataTransfer?.files) void stageImport(e.dataTransfer.files);
 }
+async function browseDocumentFiles() {
+  if (rustMode.value) {
+    await openImport();
+    if (activeView.value === 'import') await stageNativeImport();
+  } else fileInput.value?.click();
+}
+
+watch(rustMode, (mode, _, cleanup) => {
+  if (mode !== 'protected') return;
+  const listening = getCurrentWebview().listen<{ id: string; x: number; y: number }>(
+    'matterdraft-document-drop',
+    ({ payload }) => {
+      const target = document.elementFromPoint(
+        payload.x / window.devicePixelRatio,
+        payload.y / window.devicePixelRatio,
+      );
+      if (activeView.value === 'import' && target?.closest('.import-drop')) {
+        void stageNativeImport(payload.id);
+      } else if (activeView.value === 'documents' && target?.closest('.upload-zone')) {
+        void openImport().then(() => {
+          if (activeView.value === 'import') return stageNativeImport(payload.id);
+        });
+      }
+    },
+  );
+  void listening.catch(issue);
+  cleanup(() => void listening.then((unlisten) => unlisten()).catch(() => {}));
+});
+
+watch(rustMode, (mode, _, cleanup) => {
+  if (mode !== 'protected') return;
+  let listening = true;
+  const subscription = Promise.resolve().then(() =>
+    getCurrentWebview().listen<{ id: string }>('matterdraft-job-updated', ({ payload }) => {
+      if (listening) jobMonitor.changed(payload.id);
+    }),
+  );
+  // The bounded status poll also works if native event delivery is unavailable.
+  void subscription.catch(() => {});
+  cleanup(() => {
+    listening = false;
+    void subscription.then((unlisten) => unlisten()).catch(() => {});
+  });
+});
+
 async function generateCover() {
   if (!currentMatterId.value) return;
   busy.value = true;
@@ -2700,7 +3129,7 @@ async function refreshGuide() {
   await resumeAutosaveWhenClean();
 }
 function openOcrOptions(language: 'eng' | 'hin' | 'eng+hin', pageIndex: number) {
-  if (!selectedDoc.value || isJobActive.value || engineBlocked.value) return;
+  if (!selectedDoc.value || isJobActive.value || ocrSubmitting.value || engineBlocked.value) return;
   ocrOptionsLanguage.value = language;
   ocrOptionsScope.value = 'all';
   ocrOptionsPage.value = pageIndex;
@@ -2726,52 +3155,72 @@ async function startOcrOptions() {
     closeOcrOptions();
     return;
   }
-  if (
-    await startOcr(
-      ocrOptionsLanguage.value,
-      ocrOptionsScope.value === 'page' ? ocrOptionsPage.value : undefined,
-    )
-  )
-    closeOcrOptions();
+  const submitted = await startOcr(
+    ocrOptionsLanguage.value,
+    ocrOptionsScope.value === 'page' ? ocrOptionsPage.value : undefined,
+  );
+  if (submitted && ocrOptionsDocument.value === bound) closeOcrOptions();
 }
-async function startOcr(language: 'eng' | 'hin' | 'eng+hin', pageIndex?: number): Promise<boolean> {
-  if (!selectedDoc.value || isJobActive.value) return false;
-  if (!(await guardArtifactTransition('OCR for the working copy'))) return false;
-  const signature = confirmSignatureTransformation([selectedDoc.value], 'OCR');
-  if (!signature.proceed) return false;
+async function startOcr(
+  language: 'eng' | 'hin' | 'eng+hin',
+  pageIndex?: number,
+  rerun = false,
+): Promise<boolean> {
+  const target = selectedDoc.value;
+  const matter = currentMatterId.value;
+  if (!target || !matter || isJobActive.value || ocrSubmitting.value || engineBlocked.value)
+    return false;
+  ocrSubmitting.value = true;
   try {
-    const job = await api<Job>(`/documents/${selectedDoc.value.id}/ocr`, 'POST', {
-      acknowledge_signature_risk: signature.acknowledged,
-      expected_revision: selectedDoc.value.revision,
+    if (
+      !(await guardArtifactTransition(
+        rerun ? 'OCR rerun for the working copy' : 'OCR for the working copy',
+      ))
+    )
+      return false;
+    if (
+      currentMatterId.value !== matter ||
+      selectedDoc.value?.id !== target.id ||
+      selectedDoc.value.revision !== target.revision
+    ) {
+      issue('The working PDF changed. Select the page again before starting OCR.');
+      return false;
+    }
+    if (isJobActive.value) return false;
+    const signature = confirmSignatureTransformation(
+      [target],
+      rerun ? 'Rerun OCR on this page' : 'OCR',
+    );
+    if (!signature.proceed) return false;
+    const job = await api<Job>(`/documents/${target.id}/${rerun ? 'ocr-rerun' : 'ocr'}`, 'POST', {
+      expected_revision: target.revision,
       language,
+      acknowledge_signature_risk: signature.acknowledged,
       ...(pageIndex === undefined ? {} : { page_index: pageIndex }),
     });
-    watchJob(job);
-    notify('OCR started on scanned and mixed-content pages. Review recognized text.', 'info');
+    if (job.matter_id !== matter || job.target_id !== target.id)
+      throw new Error(
+        'The engine returned a different OCR job. Check the matter before submitting again.',
+      );
+    if (currentMatterId.value === matter) {
+      watchJob(job);
+      notify(
+        rerun
+          ? 'Rerunning OCR on the selected page. Review the new result.'
+          : 'OCR started on scanned and mixed-content pages. Review recognized text.',
+        'info',
+      );
+    }
     return true;
   } catch (err) {
     issue(err);
     return false;
+  } finally {
+    ocrSubmitting.value = false;
   }
 }
 async function rerunOcrPage(pageIndex: number, language: 'eng' | 'hin' | 'eng+hin') {
-  const document = selectedDoc.value;
-  if (!document || isJobActive.value) return;
-  if (!(await guardArtifactTransition('OCR rerun for the working copy'))) return;
-  const signature = confirmSignatureTransformation([document], 'Rerun OCR on this page');
-  if (!signature.proceed) return;
-  try {
-    const job = await api<Job>(`/documents/${document.id}/ocr-rerun`, 'POST', {
-      expected_revision: document.revision,
-      page_index: pageIndex,
-      language,
-      acknowledge_signature_risk: signature.acknowledged,
-    });
-    watchJob(job);
-    notify('Rerunning OCR on the selected page. Review the new result.', 'info');
-  } catch (error) {
-    issue(error);
-  }
+  await startOcr(language, pageIndex, true);
 }
 async function startPreflightScreen() {
   if (
@@ -2965,57 +3414,55 @@ async function startVariantBuild(planId: string): Promise<boolean> {
     buildSubmitting.value = false;
   }
 }
+function reconcileJobs(jobs: Job[]) {
+  const observed = activeJob.value;
+  if (observed && jobMonitor.observes(observed.id)) {
+    recentJobs.value = jobs.map((job) => (job.id === observed.id ? observed : job));
+    return;
+  }
+  recentJobs.value = jobs;
+  const ongoing = jobs.find((job) => job.status === 'running') || jobs.find(isProcessingJob);
+  if (ongoing) watchJob(ongoing);
+  else {
+    activeJob.value = jobs.find((job) => job.id === observed?.id) || jobs[0] || null;
+    cancelPending.value = false;
+  }
+}
 function watchJob(job: Job) {
+  if (job.matter_id !== currentMatterId.value || engineBlocked.value) return;
+  if (jobMonitor.observes(job.id)) return;
   activeJob.value = job;
   cancelPending.value = false;
-  const matterId = currentMatterId.value;
-  const pollSequence = ++jobPollSequence;
-  if (jobTimer) clearInterval(jobTimer);
-  let fetching = false;
-  jobTimer = setInterval(async () => {
-    if (fetching) return;
-    fetching = true;
-    try {
-      const next = await api<Job>(`/jobs/${job.id}`);
-      if (
-        pollSequence !== jobPollSequence ||
-        currentMatterId.value !== matterId ||
-        activeJob.value?.id !== job.id
-      )
-        return;
-      activeJob.value = next;
-      if (['completed', 'failed', 'cancelled', 'interrupted'].includes(next.status)) {
-        if (jobTimer) clearInterval(jobTimer);
-        jobTimer = null;
-        cancelPending.value = false;
-        if (next.status === 'failed') notify(next.error || 'Job failed', 'error');
-        if (next.status === 'completed')
-          notify(
-            next.kind === 'preflight-screen'
-              ? 'Page screening finished. Review candidates in Preflight.'
-              : next.kind === 'ocr'
-                ? 'OCR processing finished.'
-                : next.kind === 'compress'
-                  ? 'PDF compression finished. Review the size and quality.'
-                  : next.kind === 'supplement-build'
-                    ? 'Supplemental artifact generated successfully.'
-                    : next.kind === 'variant-build'
-                      ? 'Audience variant artifact generated successfully.'
-                      : 'Filing bundle generated successfully.',
-            'success',
-          );
-        if (next.status === 'cancelled') notify('Processing cancelled.', 'info');
-        await loadMatterResources();
-      }
-    } catch (err) {
-      if (pollSequence !== jobPollSequence) return;
-      if (jobTimer) clearInterval(jobTimer);
-      jobTimer = null;
-      issue(err);
-    } finally {
-      fetching = false;
-    }
-  }, 650);
+  const interval = rustMode.value ? 2_500 : 650;
+  jobMonitor.start(job, interval, rustMode.value ? 0 : interval);
+}
+function publishJobStatus(job: Job) {
+  if (job.matter_id !== currentMatterId.value || activeJob.value?.id !== job.id) return;
+  activeJob.value = job;
+  recentJobs.value = recentJobs.value.some((item) => item.id === job.id)
+    ? recentJobs.value.map((item) => (item.id === job.id ? job : item))
+    : [job, ...recentJobs.value];
+  if (isProcessingJob(job)) return;
+  cancelPending.value = false;
+  if (job.status === 'failed') notify(job.error || 'Job failed', 'error');
+  if (job.status === 'completed')
+    notify(
+      job.kind === 'preflight-screen'
+        ? 'Page screening finished. Review candidates in Preflight.'
+        : job.kind === 'ocr'
+          ? 'OCR processing finished.'
+          : job.kind === 'compress'
+            ? 'PDF compression finished. Review the size and quality.'
+            : job.kind === 'supplement-build'
+              ? 'Supplemental artifact generated successfully.'
+              : job.kind === 'variant-build'
+                ? 'Audience variant artifact generated successfully.'
+                : 'Filing bundle generated successfully.',
+      'success',
+    );
+  if (job.status === 'cancelled') notify('Processing cancelled.', 'info');
+  if (job.status === 'interrupted') notify(job.message || 'Processing was interrupted.', 'info');
+  void loadMatterResources();
 }
 async function cancelJob() {
   if (!activeJob.value || cancelPending.value) return;
@@ -3023,6 +3470,7 @@ async function cancelJob() {
   cancelPending.value = true;
   try {
     await api(`/jobs/${id}/cancel`, 'POST');
+    jobMonitor.changed(id);
   } catch (err) {
     if (activeJob.value?.id === id) cancelPending.value = false;
     issue(err);
@@ -3073,7 +3521,7 @@ async function retryInterrupted(job: Job) {
   if (!submittedMatterId || submittedMatterId !== job.matter_id) return;
   if (job.kind === 'preflight-screen') {
     await validate();
-    await startPreflightScreen();
+    if (currentMatterId.value === submittedMatterId) await startPreflightScreen();
     return;
   }
   try {
@@ -3151,6 +3599,9 @@ async function saveOfficeReview(
 function clearPrintPreview() {
   if (printPreviewUrl.value) URL.revokeObjectURL(printPreviewUrl.value);
   printPreviewUrl.value = '';
+  printPreparation?.abort();
+  preparedNativePrint?.dispose();
+  preparedNativePrint = null;
 }
 watch([printPages, printOrientation, printScale], clearPrintPreview);
 function beginPrint(exportId: string, filename: string) {
@@ -3198,6 +3649,8 @@ async function preparePrint() {
   clearPrintPreview();
   printBusy.value = true;
   printError.value = '';
+  const preparation = new AbortController();
+  printPreparation = preparation;
   try {
     const options = {
       pages: printPages.value,
@@ -3205,8 +3658,28 @@ async function preparePrint() {
       scale: printScale.value,
     };
     const request = printRequest.value;
+    const matterId = currentMatterId.value;
+    if (request.kind === 'export' && !matterId) return;
+    const stillCurrent = () =>
+      !preparation.signal.aborted &&
+      printRequest.value === request &&
+      printPages.value === options.pages &&
+      printOrientation.value === options.orientation &&
+      printScale.value === options.scale &&
+      (request.kind !== 'export' || matterId === currentMatterId.value);
+    const native = await prepareNativePrint(
+      request.kind === 'export' ? { ...request, matterId: matterId! } : request,
+      options,
+      preparation.signal,
+    );
+    if (!stillCurrent()) {
+      native?.dispose();
+      return;
+    }
+    preparedNativePrint = native;
     const file =
-      request.kind === 'working'
+      native?.file ??
+      (request.kind === 'working'
         ? await printableWorkingPdf(
             request.documentId,
             request.revision,
@@ -3215,26 +3688,33 @@ async function preparePrint() {
           )
         : request.kind === 'original'
           ? await printableOriginalPdf(request.documentId, options)
-          : await printableExport(
-              currentMatterId.value!,
-              request.exportId,
-              request.filename,
-              options,
-            );
-    printPreviewUrl.value = URL.createObjectURL(file);
+          : await printableExport(matterId!, request.exportId, request.filename, options));
+    if (stillCurrent()) printPreviewUrl.value = URL.createObjectURL(file);
   } catch (err) {
-    printError.value = friendlyError(err);
+    if (!preparation.signal.aborted) {
+      clearPrintPreview();
+      printError.value = friendlyError(err);
+    }
   } finally {
+    printPreparation = null;
     printBusy.value = false;
   }
 }
-function openPrintDialog() {
+async function openPrintDialog() {
+  if (!printPreviewUrl.value || printOpening.value) return;
+  printOpening.value = true;
+  printError.value = '';
   try {
+    if (preparedNativePrint) {
+      await preparedNativePrint.print();
+      return;
+    }
     printFrame.value?.contentWindow?.focus();
     printFrame.value?.contentWindow?.print();
-  } catch {
-    printError.value =
-      'The system print dialog could not open. Save the PDF and print it in your desktop PDF viewer.';
+  } catch (error) {
+    printError.value = friendlyError(error);
+  } finally {
+    printOpening.value = false;
   }
 }
 function beginProtectedExport(exportId: string, filename: string) {
@@ -3344,7 +3824,9 @@ async function removeMatter() {
     return;
   try {
     await api(`/matters/${currentMatter.value.id}`, 'DELETE');
+    matterDetailsOpen.value = false;
     currentMatterId.value = null;
+    activeView.value = 'matters';
     docs.value = [];
     await refreshMatters();
     notify('Matter archived.', 'info');
@@ -3357,7 +3839,7 @@ async function restoreArchivedMatter(id: string) {
   try {
     await api(`/matters/${id}/restore`, 'POST');
     await refreshMatters();
-    selectMatter(id);
+    selectMatter(id, rustPilot.value ? 'overview' : 'documents');
     notify('Archived matter restored.', 'success');
   } catch (err) {
     issue(err);
@@ -3400,7 +3882,6 @@ onMounted(() => {
     /* Storage may be unavailable. */
   }
   void init();
-  healthTimer = setInterval(() => void checkHealth(), 5_000);
   window.addEventListener('beforeunload', beforeUnload);
   window.addEventListener('keydown', onKeydown);
   window.addEventListener('resize', onResize);
@@ -3408,10 +3889,12 @@ onMounted(() => {
   document.addEventListener('focusin', closeWorkspaceTabsOutside);
 });
 onUnmounted(() => {
+  stopRustFrames();
+  if (rustJobPoll) clearInterval(rustJobPoll);
   clearPrintPreview();
   if (documentAutosaveTimer) clearTimeout(documentAutosaveTimer);
   if (settingsAutosaveTimer) clearTimeout(settingsAutosaveTimer);
-  if (jobTimer) clearInterval(jobTimer);
+  jobMonitor.stop();
   if (toastTimer) clearTimeout(toastTimer);
   if (healthTimer) clearInterval(healthTimer);
   window.removeEventListener('beforeunload', beforeUnload);
@@ -3745,7 +4228,7 @@ watch(sidebarCollapsed, (collapsed) => {
             workspaceMenuOpen = false;
           "
           ><Plus :size="16" />New matter</button
-        ><button class="btn secondary" :disabled="busy" @click="matterFileInput?.click()"
+        ><button class="btn secondary" :disabled="busy" @click="chooseMatterPackage"
           ><FolderOpen :size="16" />Restore matter</button
         ><button class="btn secondary" @click="showView('rules')"
           ><BookOpen :size="16" />Court rules</button
@@ -4182,7 +4665,7 @@ watch(sidebarCollapsed, (collapsed) => {
           @open="(id) => selectMatter(id, 'overview')"
           @create="modalOpen = true"
           @sample="createSampleMatter"
-          @restore-file="matterFileInput?.click()"
+          @restore-file="chooseMatterPackage"
         />
 
         <main
@@ -4230,12 +4713,17 @@ watch(sidebarCollapsed, (collapsed) => {
               :bookmarks="manualBookmarks"
               :profile="selectedProfile?.name || ''"
               :check-count="warningChecks.length + errorChecks.length"
-              @navigate="(view) => (view === 'documents' ? showPreparation() : showView(view))"
+              :pilot="rustPilot"
+              @navigate="
+                (view) => (view === 'documents' && !rustPilot ? showPreparation() : showView(view))
+              "
               @import="openImport"
               @details="matterDetailsOpen = true"
             />
             <ImportWorkspace
               v-else-if="activeView === 'import'"
+              :rust-pilot="rustPilot"
+              :native-picker="!!rustMode"
               :matter-name="currentMatter.name"
               :entries="importEntries"
               :processing="importingMatterId === currentMatterId"
@@ -4244,9 +4732,8 @@ watch(sidebarCollapsed, (collapsed) => {
               :blocked="engineBlocked || busy"
               :cancel-pending="stopImport"
               @add="stageImport"
-              @remove="
-                (id) => (importQueues[currentMatterId!] = importEntries.filter((e) => e.id !== id))
-              "
+              @pick="stageNativeImport"
+              @remove="removeImportEntry"
               @include="
                 (id) => {
                   const entry = importEntries.find((e) => e.id === id);
@@ -4256,7 +4743,10 @@ watch(sidebarCollapsed, (collapsed) => {
               @retry="
                 () => {
                   for (const entry of importEntries)
-                    if (['failed', 'cancelled'].includes(entry.status)) {
+                    if (
+                      ['failed', 'cancelled'].includes(entry.status) &&
+                      (!entry.nativeSelection || entry.nativeToken)
+                    ) {
                       entry.status = 'ready';
                       entry.message = undefined;
                     }
@@ -4265,9 +4755,123 @@ watch(sidebarCollapsed, (collapsed) => {
               "
               @start="startImport"
               @cancel="stopImport = true"
-              @review="showPreparation"
+              @review="rustPilot ? showView('documents') : showPreparation()"
               @back="cancelImportView"
             />
+            <div
+              v-else-if="activeView === 'documents' && rustPilot"
+              class="documents-workspace pilot-documents"
+            >
+              <section class="panel docs-panel documents-list">
+                <div class="panel-header"
+                  ><div><h2>Documents</h2><span>Rust PDF import pilot</span></div>
+                  <button class="btn secondary small" @click="openImport">Import PDF</button></div
+                >
+                <p class="hint"
+                  >Only the exact samples/01_petition.pdf synthetic fixture is eligible on
+                  macOS/Linux; Windows import is unavailable. Other PDFs are refused while signature
+                  and interruption safeguards are qualified. Source and first working revision are
+                  stored separately.</p
+                >
+                <div v-if="!docs.length" class="no-documents"
+                  ><FileStack :size="30" /><strong>No documents added</strong
+                  ><small>Import a synthetic PDF to begin.</small></div
+                >
+                <button
+                  v-for="doc in docs"
+                  :key="doc.id"
+                  class="doc-item"
+                  :class="{ selected: selectedDocId === doc.id }"
+                  :aria-label="`Select ${doc.title}`"
+                  @click="selectedDocId = doc.id"
+                >
+                  <FileText :size="18" /><span class="doc-info"
+                    ><strong>{{ doc.title }}</strong
+                    ><span>Part {{ doc.part }} · {{ doc.page_count }} pages</span></span
+                  >
+                </button>
+                <div v-if="archivedDocs.length" class="docs-help">
+                  <Archive :size="14" /> Archived documents
+                </div>
+                <div v-for="doc in archivedDocs" :key="doc.id" class="export-file">
+                  <FileText :size="16" />
+                  <div
+                    ><strong>{{ doc.title }}</strong
+                    ><small>{{ doc.original_name }}</small></div
+                  >
+                  <button
+                    class="text-tool"
+                    :disabled="busy"
+                    @click="restoreArchivedDocument(doc.id)"
+                    >Restore</button
+                  >
+                </div>
+              </section>
+              <section class="panel preview-panel" aria-label="Working PDF preview"
+                ><div class="panel-header"
+                  ><h2>{{ selectedDoc?.title || 'Preview' }}</h2>
+                  <div class="panel-header-actions">
+                    <button
+                      class="icon-btn small"
+                      aria-label="Undo last matter change"
+                      :title="undoDescription"
+                      :disabled="busy || !history.can_undo"
+                      @click="traverseHistory('undo')"
+                      ><Undo2 :size="16"
+                    /></button>
+                    <button
+                      class="icon-btn small"
+                      aria-label="Redo last matter change"
+                      :title="redoDescription"
+                      :disabled="busy || !history.can_redo"
+                      @click="traverseHistory('redo')"
+                      ><Redo2 :size="16"
+                    /></button>
+                    <button
+                      v-if="selectedDoc"
+                      class="btn secondary small"
+                      :disabled="busy"
+                      @click="deleteDocument"
+                      ><Archive :size="15" />Archive document</button
+                    >
+                  </div></div
+                >
+                <template v-if="selectedDoc">
+                  <div class="pilot-pdf-actions">
+                    <button
+                      class="btn secondary small"
+                      :disabled="pilotPage === 1"
+                      @click="pilotPage--"
+                    >
+                      Previous page
+                    </button>
+                    <span>Page {{ pilotPage }} of {{ selectedDoc.page_count }}</span>
+                    <button
+                      class="btn secondary small"
+                      :disabled="pilotPage === selectedDoc.page_count"
+                      @click="pilotPage++"
+                    >
+                      Next page
+                    </button>
+                    <button
+                      class="btn secondary small"
+                      :disabled="pilotSaving"
+                      @click="savePilotWorkingPdf"
+                    >
+                      Save copy
+                    </button>
+                  </div>
+                  <ReadOnlyPdfPane
+                    :identity="`${selectedDoc.id}:${selectedDoc.revision}`"
+                    :source="() => pdfDocumentSource(selectedDoc!.id, selectedDoc!.revision)"
+                    :page="pilotPage"
+                    :title="`Working revision ${selectedDoc.revision}`"
+                  />
+                  <p class="hint">Source SHA-256: {{ selectedDoc.source_sha256 }}</p>
+                </template>
+                <p v-else class="hint">Select a document to preview its working PDF.</p>
+              </section>
+            </div>
             <DocumentTable
               ref="documentTablePanel"
               v-else-if="activeView === 'documents' && documentTableOpen"
@@ -4482,7 +5086,11 @@ watch(sidebarCollapsed, (collapsed) => {
                     @change="(e) => stageImport((e.target as HTMLInputElement).files || [])"
                   /><UploadCloud :size="25" /><strong>Drop files here</strong
                   ><span>PDF, JPG, PNG · up to 80 MB/file</span
-                  ><button class="btn secondary small" :disabled="busy" @click="fileInput?.click()">
+                  ><button
+                    class="btn secondary small"
+                    :disabled="busy"
+                    @click="browseDocumentFiles"
+                  >
                     {{ busy ? 'Importing…' : 'Browse files' }}
                   </button>
                 </div>
@@ -4627,13 +5235,16 @@ watch(sidebarCollapsed, (collapsed) => {
                           Revision {{ run.applied_revision }}:
                           {{ run.language.split('+').join(' + ') }} ·
                           {{ run.pages_ocr_applied }}
-                          {{ run.pages_ocr_applied === 1 ? 'page' : 'pages' }} · PyMuPDF
-                          {{ run.pymupdf_version
-                          }}<template v-if="run.tesseract_cli_version">
+                          {{ run.pages_ocr_applied === 1 ? 'page' : 'pages' }} ·
+                          <template v-if="run.provider === 'PyMuPDF+Tesseract'">
+                            PyMuPDF {{ run.pymupdf_version }}
+                          </template>
+                          <template v-else>{{ run.provider }} {{ run.version }}</template>
+                          <template v-if="run.tesseract_cli_version">
                             · {{ run.tesseract_cli_version }} (CLI)</template
                           ><br />
                           <span
-                            v-for="(hash, language) in run.model_sha256"
+                            v-for="(hash, language) in run.model_sha256 ?? run.traineddata_sha256"
                             :key="language"
                             :title="hash"
                             >{{ language }} model SHA-256: {{ hash }}</span
@@ -5379,6 +5990,52 @@ watch(sidebarCollapsed, (collapsed) => {
           ><dt>Court profile</dt><dd>{{ selectedProfile?.name }}</dd></dl
         ><section aria-label="Desktop file tools" class="workspace-actions"
           ><button
+            v-if="rustPilot"
+            class="btn secondary"
+            @click="
+              editingMatter = currentMatter;
+              matterDetailsOpen = false;
+            "
+            >Edit matter</button
+          ><div v-if="rustPilot" aria-label="Synthetic Rust job verification">
+            <button class="btn secondary" @click="startRustJob(0)"
+              >Extract synthetic PDF text</button
+            >
+            <button class="btn secondary" @click="startRustJob(1200)"
+              >Run slow synthetic extraction</button
+            >
+            <button
+              class="btn secondary"
+              :disabled="!rustJob || !['queued', 'running'].includes(rustJob.status)"
+              @click="cancelRustJob"
+              >Cancel extraction</button
+            >
+            <button
+              class="btn secondary"
+              :disabled="rustJob?.status !== 'completed'"
+              @click="getRustJobResult"
+              >Read result</button
+            >
+            <button class="btn secondary" @click="checkRustHealth">Check engine latency</button>
+            <p v-if="rustJob" role="status"
+              >{{ rustJob.status }} · {{ rustJob.progress }}% · {{ rustJob.completed_pages }}/{{
+                rustJob.page_count ?? '?'
+              }}
+              pages · {{ rustJob.message }}</p
+            >
+            <p v-if="rustJob"
+              >Paint heartbeat: {{ rustFrameCount }} frames, longest gap
+              {{ rustMaxFrameGapMs }} ms</p
+            >
+            <p v-if="rustHealthMs !== null">Engine health: {{ rustHealthMs }} ms</p>
+            <p v-if="rustJobError" role="alert">{{ rustJobError }}</p>
+            <pre v-if="rustJobResult">{{ rustJobResult }}</pre>
+            <label
+              >Responsiveness check
+              <input v-model="rustJobInput" aria-label="Rust job responsiveness input"
+            /></label> </div
+          ><button
+            v-if="!rustPilot"
             class="btn secondary"
             @click="
               matterDetailsOpen = false;
@@ -5386,6 +6043,7 @@ watch(sidebarCollapsed, (collapsed) => {
             "
             >PDF tools &amp; print</button
           ><button
+            v-if="!rustPilot"
             class="btn secondary"
             @click="
               matterDetailsOpen = false;
@@ -5393,13 +6051,18 @@ watch(sidebarCollapsed, (collapsed) => {
             "
             >Local storage</button
           ><button
+            v-if="!rustPilot"
             class="btn secondary"
             @click="
               matterDetailsOpen = false;
               openExports();
             "
             >Office exports</button
-          ><button class="btn secondary" :disabled="busy" @click="backupCurrentMatter"
+          ><button
+            v-if="!rustPilot"
+            class="btn secondary"
+            :disabled="busy"
+            @click="backupCurrentMatter"
             >Back up matter</button
           ><button
             class="btn secondary"
@@ -5420,7 +6083,7 @@ watch(sidebarCollapsed, (collapsed) => {
     >
     <footer class="application-status"
       ><button
-        v-if="matterContext && !membershipOpen"
+        v-if="matterContext && !membershipOpen && !rustPilot"
         class="membership-status-entry"
         @click="openMembership"
         :title="variantContext || supplementContext || inclusionSummary"
@@ -5434,17 +6097,19 @@ watch(sidebarCollapsed, (collapsed) => {
       ><span v-if="variantContext">{{ variantContext }}</span
       ><span v-if="supplementContext">{{ supplementContext }}</span
       ><span v-if="matterContext" class="membership-status-step">{{
-        activeView === 'import' || (activeView === 'overview' && !docs.length)
-          ? '01 / 06 · Add documents'
-          : activeView === 'overview' || activeView === 'documents'
-            ? '02 / 06 · Review documents'
-            : activeView === 'index' || activeView === 'variants'
-              ? '03 / 06 · Prepare index'
-              : activeView === 'validation'
-                ? '04 / 06 · Technical checks'
-                : activeView === 'build'
-                  ? '05 / 06 · Build and review'
-                  : '06 / 06 · Saved packages'
+        rustPilot
+          ? 'Rust PDF import pilot'
+          : activeView === 'import' || (activeView === 'overview' && !docs.length)
+            ? '01 / 06 · Add documents'
+            : activeView === 'overview' || activeView === 'documents'
+              ? '02 / 06 · Review documents'
+              : activeView === 'index' || activeView === 'variants'
+                ? '03 / 06 · Prepare index'
+                : activeView === 'validation'
+                  ? '04 / 06 · Technical checks'
+                  : activeView === 'build'
+                    ? '05 / 06 · Build and review'
+                    : '06 / 06 · Saved packages'
       }}</span
       ><span
         ><HardDrive :size="13" />
@@ -5473,14 +6138,18 @@ watch(sidebarCollapsed, (collapsed) => {
             ? leaveMembership()
             : preflightContext && activeView === 'documents'
               ? returnToPreflight()
-              : showPreparation()
+              : rustPilot
+                ? showView('overview')
+                : showPreparation()
         "
         >{{
           membershipOpen
             ? 'Return to caller'
             : preflightContext && activeView === 'documents'
               ? 'Return to Preflight'
-              : 'Back to preparation'
+              : rustPilot
+                ? 'Back to overview'
+                : 'Back to preparation'
         }}</button
       ></footer
     >
@@ -5529,7 +6198,7 @@ watch(sidebarCollapsed, (collapsed) => {
           ><button class="btn secondary" @click="closeOcrOptions">Cancel</button
           ><button
             class="btn primary"
-            :disabled="engineBlocked || isJobActive"
+            :disabled="engineBlocked || isJobActive || ocrSubmitting"
             @click="startOcrOptions"
             >Start OCR</button
           ></footer
@@ -5678,7 +6347,7 @@ watch(sidebarCollapsed, (collapsed) => {
         <div class="print-actions">
           <button
             class="btn primary"
-            :disabled="!printPreviewUrl || printBusy"
+            :disabled="!printPreviewUrl || printBusy || printOpening"
             @click="openPrintDialog"
           >
             Open print dialog</button
@@ -5785,11 +6454,8 @@ watch(sidebarCollapsed, (collapsed) => {
           <button
             class="btn secondary"
             type="button"
-            @click="
-              protectedRestoreFile = null;
-              protectedRestoreCredential = '';
-              protectedRestoreError = '';
-            "
+            :disabled="busy"
+            @click="cancelProtectedRestore"
           >
             Cancel
           </button>
@@ -5811,6 +6477,15 @@ watch(sidebarCollapsed, (collapsed) => {
         :working="creating"
         @close="modalOpen = false"
         @create="createMatter"
+    /></Transition>
+    <Transition name="modal"
+      ><MatterForm
+        v-if="editingMatter"
+        :profiles="profileList"
+        :working="creating"
+        :initial="editingMatter"
+        @close="editingMatter = null"
+        @create="saveMatterDetails"
     /></Transition>
     <Transition name="toast"
       ><div

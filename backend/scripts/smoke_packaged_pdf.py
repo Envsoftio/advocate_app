@@ -21,12 +21,18 @@ import pymupdf
 def main():
     executable = str(Path(sys.argv[1]).resolve())
     protected = '--protected' in sys.argv[2:]
+    oxide = '--oxide' in sys.argv[2:]
     with tempfile.TemporaryDirectory(prefix='matterdraft-packaged-qa-') as temporary:
         root = Path(temporary)
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             port = listener.getsockname()[1]
         environment = dict(os.environ, MATTERDRAFT_API_TOKEN=secrets.token_hex(24), PATH='/usr/bin:/bin')
+        for key in ('MATTERDRAFT_PDF_OXIDE_WORKER', 'MATTERDRAFT_PDF_OXIDE_BUNDLED',
+                    'MATTERDRAFT_PDF_OXIDE_SEARCH'):
+            environment.pop(key, None)
+        if oxide:
+            environment.update(MATTERDRAFT_PDF_OXIDE_BUNDLED='1', MATTERDRAFT_PDF_OXIDE_SEARCH='1')
         if protected:
             environment['MATTERDRAFT_REQUIRE_VAULT'] = '1'
         environment.pop('TESSDATA_PREFIX', None)
@@ -126,12 +132,25 @@ def main():
                         json={'preset': 'small', 'expected_revision': overlay.json()['revision']}))
                     finish(client.post(f'/documents/{doc["id"]}/ocr'))
                     current = client.get(base + '/documents').json()[0]
+                    if oxide:
+                        for url in (base + '/search', f'/documents/{doc["id"]}/search'):
+                            searched = client.get(url, params={'q': 'PACKAGED SCANNED EVIDENCE'})
+                            searched.raise_for_status()
+                            assert searched.json()['matches'][0]['page'] == 1
+                            assert searched.json()['matches'][0]['revision'] == current['revision']
                     client.put(base + '/bookmarks', json={'entries': [{
                         'id': 'a' * 32, 'title': 'Reviewed synthetic target', 'document_id': doc['id'],
                         'page_index': 0, 'target_revision': current['revision'], 'parent_id': None}]}).raise_for_status()
                     built = finish(client.post(base + '/build'))
                     response = client.get(base + f'/exports/{built["id"]}/combined.pdf')
                     response.raise_for_status()
+                    if oxide:
+                        from io import BytesIO
+                        from zipfile import ZipFile
+                        draft = client.get(base + f'/exports/{built["id"]}/combined.pdf/office/docx')
+                        draft.raise_for_status()
+                        with ZipFile(BytesIO(draft.content)) as archive:
+                            assert b'PACKAGED SCANNED EVIDENCE' in archive.read('word/document.xml')
                     with pymupdf.open(stream=response.content, filetype='pdf') as pdf:
                         assert pdf.page_count == 2
                         assert 'PACKAGED SCANNED EVIDENCE' in pdf[1].get_text()
@@ -186,6 +205,7 @@ def main():
                         assert pdf[0].rect == pymupdf.Rect(0, 0, 595, 842)
                     print(json.dumps({'startup_seconds': round(startup, 2), 'bundled_ocr': 'passed',
                                       'bundled_hindi_ocr': 'passed',
+                                      'bundled_oxide_search_and_docx': 'passed' if oxide else 'not run',
                                       'compression': compressed['result'], 'bookmarked_export': 'passed',
                                       'original_integrity': 'passed',
                                       'protected_backup_restore_rotation': 'passed' if protected else 'not run'},

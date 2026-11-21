@@ -10,10 +10,17 @@ build = "build.rs"
 name = "matterdraft_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+rust-qualification = []
+
 [build-dependencies]
+serde_json = "1"
+sha2 = "0.10"
 tauri-build = { version = "=2.5.2", features = [] }
 
 [dependencies]
+tokio = { version = "1", features = ["sync", "rt", "time"] }
+matterdraft-backend = { path = "../../rust-backend" }
 tauri = { version = "=2.9.3", features = [] }
 tauri-plugin-opener = "=2.5.3"
 tauri-plugin-shell = "=2.3.3"
@@ -22,6 +29,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"
 reqwest = { version = "=0.12.28", default-features = false, features = ["json"] }
+sha2 = "0.10"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSPrintInfo", "NSPrintOperation", "NSResponder", "NSWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

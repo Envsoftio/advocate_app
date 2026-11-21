@@ -4982,6 +4982,18 @@ body > .hiddenCanvasElement {
   opacity: 0;
   transform: translateY(-5px);
 }
+/* WKWebView can retain an empty composited workspace layer after these
+   enter/leave animations. Native macOS uses immediate view replacement;
+   dialogs, reader controls and browser transitions keep their own behavior. */
+:root[data-native-webview='mac']
+  :is(.view-enter-active, .view-leave-active, .section-enter-active, .section-leave-active) {
+  transition: none;
+}
+:root[data-native-webview='mac']
+  :is(.view-enter-from, .view-leave-to, .section-enter-from, .section-leave-to) {
+  opacity: 1;
+  transform: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .view-enter-active,
   .view-leave-active,
@@ -6142,6 +6154,34 @@ body > .hiddenCanvasElement {
 }
 
 /* Compact source previews and a persistent full-screen page rail. */
+/* Bounded Rust pilot uses the supplied Documents split without opening the PDF editor. */
+.workspace-page .documents-workspace.pilot-documents {
+  grid-template-columns: minmax(250px, 330px) minmax(0, 1fr);
+  min-height: 0;
+  height: calc(100dvh - 170px);
+}
+.pilot-documents .documents-list .hint,
+.pilot-documents .preview-panel .hint {
+  display: block;
+  margin: 16px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.pilot-documents .documents-list .doc-item {
+  width: calc(100% - 24px);
+  margin: 0 12px 8px;
+  padding: 10px;
+  text-align: left;
+}
+@media (max-width: 700px) {
+  .workspace-page .documents-workspace.pilot-documents {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .pilot-documents .preview-panel {
+    min-height: 180px;
+  }
+}
 @media (min-width: 1121px) {
   .workspace-page .documents-workspace {
     grid-template-columns: 210px minmax(0, 1fr);
@@ -8046,6 +8086,14 @@ body > .hiddenCanvasElement {
 }
 :root[data-effective-theme] .toast.success {
   background: var(--cb-successBg);
+  color: var(--cb-status-success-text);
+}
+:root[data-effective-theme] .design-shell[data-batch='true'] > .toast.success {
+  background: var(--cb-successBg);
+  color: var(--cb-status-success-text);
+}
+:root[data-effective-theme] .design-shell[data-batch='true'] > .toast.success > svg,
+:root[data-effective-theme] .design-shell[data-batch='true'] > .toast.success .icon-btn {
   color: var(--cb-status-success-text);
 }
 :root[data-effective-theme] .toast.info {

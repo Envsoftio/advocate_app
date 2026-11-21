@@ -30,4 +30,6 @@ export interface ImportEntry {
   message?: string;
   pages?: number;
   hash?: string;
+  nativeSelection?: true;
+  nativeToken?: string;
 }

@@ -99,6 +99,7 @@
   font-size: 28px;
   line-height: 36px;
   font-weight: 600;
+  margin-bottom: 4px;
   overflow-wrap: anywhere;
 }
 :root .matter-overview .flow-heading p {

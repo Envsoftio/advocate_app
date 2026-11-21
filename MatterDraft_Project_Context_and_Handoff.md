@@ -16,6 +16,10 @@
 
 ---
 
+## Current Rust migration requirement — 17 November 2026
+
+The owner selected a Rust desktop backend with PDF Oxide, preserving the original feature requirements and current safeguards. Earlier Python/PyMuPDF architecture descriptions below describe the existing implementation, not the destination. The [execution plan](docs/RUST_BACKEND_PLAN.md) and [requirements matrix](docs/RUST_REQUIREMENTS_MATRIX.md) govern incremental migration. Existing functionality parity and completion of unfinished original requirements are separate gates; no feature is dropped to fit a library. Recorded signing/sharing/legacy conversion deferrals remain explicit. The separate customer/admin portal PRD retains its specified web stack.
+
 ## 1. Why this document exists
 
 The client initially shared a broad desktop application brief proposing Electron + React + TypeScript for the user interface, Python FastAPI as a separate backend process, PyMuPDF for PDF processing, and Tesseract OCR. After discussion, we established that the product is for **Indian advocates preparing court filing documents**, not a generic PDF editor. The technology selection was subsequently changed to **Tauri 2 + Vue 3 + TypeScript + Python FastAPI**. On 13 October 2026, the product owner confirmed client approval of Tauri/Vue and Tauri packaging in place of Electron/React and Electron Builder; see DEC-01 in `docs/IMPLEMENTATION_TASKS.md` for the approved platform matrix. Native platform delivery remains unverified.

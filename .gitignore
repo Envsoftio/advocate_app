@@ -10,6 +10,10 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/.env.local
 frontend/src-tauri/target/
+frontend/src-tauri/ocr-runtime/
+frontend/src-tauri/ocr-runtime-targets/
+frontend/src-tauri/pdf-runtime/
+backend/pdf-oxide-worker/target/
 frontend/src-tauri/gen/
 frontend/src-tauri/binaries/*
 !frontend/src-tauri/binaries/.gitkeep
@@ -25,3 +29,5 @@ docs/ui-evidence
 CourtBundle_JSON_For_Codex
 CourtBundle_Complete_Workflow (2).pen
 CourtBundle_Complete_Workflow.json
+
+rust-backend/target/

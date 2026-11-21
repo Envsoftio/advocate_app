@@ -154,7 +154,7 @@ body:has(.matter-home) {
 
 /* The Matters list has its own type scale; processing workspaces keep theirs. */
 :root .design-shell .matter-home.flow-page {
-  padding: 32px;
+  padding: 24px 32px 32px;
   overflow: visible;
 }
 :root .matter-home .flow-heading {

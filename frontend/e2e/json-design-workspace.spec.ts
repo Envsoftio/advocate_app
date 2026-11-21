@@ -59,9 +59,9 @@ test('JSON preparation matches 05A and preserves document context in the editor'
   await nav.locator('.navigator-document-select').filter({ hasText: 'Affidavit' }).click();
   await expect(page.locator('.reader-document strong')).toHaveText('Affidavit of Rajesh Sharma');
   for (const [selector, x, y, width] of [
-    ['.document-navigator', 64, 116, 280],
-    ['.preview-panel', 344, 116, 824],
-    ['.inspector-panel', 1168, 116, 272],
+    ['.document-navigator', 64, 120, 280],
+    ['.preview-panel', 344, 120, 824],
+    ['.inspector-panel', 1168, 120, 272],
   ] as const) {
     await expect
       .poll(async () => Math.round((await page.locator(selector).boundingBox())!.x))

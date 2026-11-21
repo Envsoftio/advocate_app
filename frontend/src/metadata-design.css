@@ -794,6 +794,7 @@
 }
 .batch-toolbar-shell {
   position: relative;
+  container: batch-toolbar / inline-size;
   flex-shrink: 0;
   margin-top: -1px;
   margin-bottom: 16px;
@@ -1012,7 +1013,7 @@
   box-shadow: 0 12px 32px var(--cb-overlay-scrim);
   border-radius: 10px;
 }
-@media (max-width: 1300px) {
+@container batch-toolbar (max-width: 1220px) {
   .design-shell[data-batch='true'] .batch-review-toolbar {
     display: flex;
     height: auto;

@@ -1,0 +1,197 @@
+{
+  "rotate": {
+    "exit": 0,
+    "diagnostic": "",
+    "pages": 3,
+    "texts": [
+      "SECRET0 KEEP0",
+      "SECRET1 KEEP1",
+      "SECRET2 KEEP2"
+    ],
+    "toc": [
+      [
+        1,
+        "First",
+        1
+      ],
+      [
+        1,
+        "Third",
+        3
+      ]
+    ],
+    "labels": [
+      "B-1",
+      "B-2",
+      "B-3"
+    ],
+    "goto": [
+      [
+        2
+      ],
+      [],
+      []
+    ],
+    "rotations": [
+      90,
+      0,
+      0
+    ],
+    "checks": {
+      "rotation": true,
+      "text": true,
+      "outline": true,
+      "link": true,
+      "labels": true
+    },
+    "original_unchanged": true
+  },
+  "reverse": {
+    "exit": 0,
+    "diagnostic": "",
+    "pages": 3,
+    "texts": [
+      "SECRET2 KEEP2",
+      "SECRET1 KEEP1",
+      "SECRET0 KEEP0"
+    ],
+    "toc": [
+      [
+        1,
+        "First",
+        3
+      ],
+      [
+        1,
+        "Third",
+        1
+      ]
+    ],
+    "labels": [
+      "B-1",
+      "B-2",
+      "B-3"
+    ],
+    "goto": [
+      [],
+      [],
+      [
+        0
+      ]
+    ],
+    "rotations": [
+      0,
+      0,
+      0
+    ],
+    "checks": {
+      "order": true,
+      "outline_remap": true,
+      "link_remap": true
+    },
+    "original_unchanged": true
+  },
+  "merge": {
+    "exit": 0,
+    "diagnostic": "",
+    "pages": 6,
+    "texts": [
+      "SECRET0 KEEP0",
+      "SECRET1 KEEP1",
+      "SECRET2 KEEP2",
+      "SECRET0 KEEP0",
+      "SECRET1 KEEP1",
+      "SECRET2 KEEP2"
+    ],
+    "toc": [
+      [
+        1,
+        "First",
+        1
+      ],
+      [
+        1,
+        "Third",
+        3
+      ]
+    ],
+    "labels": [
+      "B-1",
+      "B-2",
+      "B-3",
+      "B-4",
+      "B-5",
+      "B-6"
+    ],
+    "goto": [
+      [
+        2
+      ],
+      [],
+      [],
+      [
+        0
+      ],
+      [],
+      []
+    ],
+    "rotations": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "checks": {
+      "count": true,
+      "text": true,
+      "appended_link": false
+    },
+    "original_unchanged": true
+  },
+  "redact": {
+    "exit": 0,
+    "diagnostic": "RedactionReport { regions: 1, glyphs_removed: 13, images_modified: 0, images_removed: 0, paths_pruned: 0, xobjects_specialized: 0, annotations_removed: 0, fonts_scrubbed: 0, bytes_removed: 13 }",
+    "pages": 3,
+    "texts": [
+      "",
+      "SECRET1 KEEP1",
+      "SECRET2 KEEP2"
+    ],
+    "toc": [
+      [
+        1,
+        "First",
+        1
+      ],
+      [
+        1,
+        "Third",
+        3
+      ]
+    ],
+    "labels": [
+      "B-1",
+      "B-2",
+      "B-3"
+    ],
+    "goto": [
+      [],
+      [],
+      []
+    ],
+    "rotations": [
+      0,
+      0,
+      0
+    ],
+    "checks": {
+      "removed_text": true,
+      "other_page_preserved": true,
+      "removed_stream": true,
+      "black_pixels": true
+    },
+    "original_unchanged": true
+  }
+}

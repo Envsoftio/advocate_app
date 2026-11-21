@@ -253,6 +253,43 @@
   max-height: none;
   min-height: 0;
 }
+.design-shell[data-documents='true'] .documents-workspace.pilot-documents {
+  display: grid;
+  grid-template-columns: minmax(250px, 360px) minmax(0, 1fr);
+  height: 100%;
+}
+.design-shell[data-documents='true'] .documents-workspace.pilot-documents > .docs-panel {
+  position: static;
+  width: auto;
+  box-shadow: none;
+}
+.design-shell[data-documents='true'] .documents-workspace.pilot-documents > .preview-panel {
+  grid-column: 2;
+}
+.pilot-documents .pilot-pdf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.pilot-documents .pilot-pdf-actions > :last-child {
+  margin-inline-start: auto;
+}
+.pilot-documents .retained-pdf-pane {
+  flex: 1 1 0;
+  min-height: 240px;
+}
+@media (max-width: 700px) {
+  .design-shell[data-documents='true'] .documents-workspace.pilot-documents {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(260px, auto) minmax(180px, auto);
+    overflow: auto;
+  }
+  .design-shell[data-documents='true'] .documents-workspace.pilot-documents > .preview-panel {
+    grid-column: 1;
+  }
+}
 .design-shell .docs-panel .panel-header {
   position: relative;
   padding-right: 42px;

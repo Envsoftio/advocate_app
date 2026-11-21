@@ -7,19 +7,34 @@ test('FLOW 01 empty matters, creation and no-documents overview', async ({
   page,
   request,
 }, info) => {
+  const existingResponse = await request.get(`${base}/matters`, { headers });
+  expect(existingResponse.ok()).toBe(true);
+  const existing: Array<{ id: string }> = await existingResponse.json();
+  const existingIds = new Set(existing.map((matter) => matter.id));
+  // The full suite shares a backend. Keep matter creation and later reads real.
+  await page.route(`${base}/matters`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    const matters: Array<{ id: string }> = await response.json();
+    await route.fulfill({
+      response,
+      json: matters.filter((matter) => !existingIds.has(matter.id)),
+    });
+  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
   await expect(page.getByText('No matters yet')).toBeVisible();
   const homeHeading = await page.locator('.matter-home .flow-heading h1').boundingBox();
-  expect(homeHeading).toMatchObject({ x: 212 });
+  expect(homeHeading).toMatchObject({ x: 272 });
   const homeViewport = await page.locator('.matter-home').boundingBox();
   const newMatterButton = await page.locator('.matter-home .flow-heading button').boundingBox();
   expect(homeHeading!.y).toBeGreaterThanOrEqual(homeViewport!.y);
   expect(newMatterButton!.y).toBeGreaterThanOrEqual(homeViewport!.y);
   await page.screenshot({ path: info.outputPath('01B-empty-matters.png') });
-  const chooser = page.waitForEvent('filechooser');
-  await page.getByRole('button', { name: 'Open existing matter' }).click();
-  await chooser;
+  await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.getByRole('button', { name: 'Open existing matter' }).click(),
+  ]);
   await page.getByRole('button', { name: 'New matter' }).last().click();
   const dialog = page.getByRole('dialog', { name: 'Create matter' });
   await expect(dialog).toBeVisible();
@@ -61,7 +76,7 @@ test('FLOW 01 empty matters, creation and no-documents overview', async ({
     page.getByRole('button', { name: 'Import documents', exact: true }),
   ).toBeInViewport();
   const matters = await (await request.get(`${base}/matters`, { headers })).json();
-  expect(matters[0]).toMatchObject({
+  expect(matters.find((matter: { id: string }) => !existingIds.has(matter.id))).toMatchObject({
     name: 'Synthetic creation flow',
     court_forum: 'Synthetic forum',
     case_number: 'DEMO 01/2026',

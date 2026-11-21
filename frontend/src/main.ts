@@ -15,8 +15,10 @@ import './structure-design.css';
 
 import './supplement-design.css';
 
-if ('__TAURI_INTERNALS__' in window && /Macintosh/.test(navigator.userAgent))
+if ('__TAURI_INTERNALS__' in window && /Macintosh/.test(navigator.userAgent)) {
+  document.documentElement.dataset.nativeWebview = 'mac';
   installNativeFrameFallback(window);
+}
 createApp(App).use(createPinia()).directive('dismiss-outside', dismissOutside).mount('#app');
 
 import './metadata-design.css';
